@@ -12,6 +12,7 @@ export const palette = {
   crimsonSoft: "#FBEDEE",
   crimsonText: "#8C2331",
   crimsonBorder: "#E8C7CC",
+  amberSoft: "#FFF8E1",
   soldBg: "#EFEAE0",
   soldBtn: "#E6E0D0",
   mutedGreige: "#998F7A",

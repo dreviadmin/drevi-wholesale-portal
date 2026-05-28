@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 // Public paths — no auth required. Everything else is gated.
-const PUBLIC_PATHS = ["/", "/login", "/forgot-password"];
+const PUBLIC_PATHS = ["/", "/login", "/forgot-password", "/wholesale"];
 const PUBLIC_PREFIXES = ["/api/cron", "/api/dev"];
 
 function isPublic(pathname: string): boolean {

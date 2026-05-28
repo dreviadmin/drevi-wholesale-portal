@@ -1,60 +1,87 @@
 /**
- * Apply every SQL file in supabase/migrations (sorted) to the database named by
- * SUPABASE_DB_URL. Idempotent migrations make this safe to re-run.
+ * Apply every SQL file in supabase/migrations (sorted). Two credential modes,
+ * either works — set ONE in .env.local (both are ops-only, never committed):
+ *
+ *   SUPABASE_ACCESS_TOKEN=sbp_...   Personal Access Token (Management API)
+ *     Create at https://supabase.com/dashboard/account/tokens
+ *
+ *   SUPABASE_DB_URL=postgresql://... Direct/session-pooler connection string
+ *     Dashboard → Connect → Session pooler
  *
  *   npm run db:migrate
  *
- * SUPABASE_DB_URL is the direct connection string from
- *   Supabase dashboard → Project Settings → Database → Connection string → URI
- * (port 5432, with the DB password substituted). It is server/ops-only and must
- * never be committed.
+ * Migrations are idempotent, so this is safe to re-run.
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import pg from "pg";
 import dotenv from "dotenv";
 
 dotenv.config({ path: ".env.local" });
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(__dirname, "..", "supabase", "migrations");
-
-const url = process.env.SUPABASE_DB_URL;
-if (!url) {
-  console.error(
-    "\nMissing SUPABASE_DB_URL.\n" +
-      "Add the Supabase direct connection string to .env.local:\n" +
-      "  SUPABASE_DB_URL=postgresql://postgres:[PASSWORD]@db.<ref>.supabase.co:5432/postgres\n" +
-      "(Dashboard → Project Settings → Database → Connection string → URI.)\n",
-  );
-  process.exit(1);
-}
-
-const files = readdirSync(migrationsDir)
-  .filter((f) => f.endsWith(".sql"))
-  .sort();
-
+const files = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
 if (files.length === 0) {
   console.error("No .sql files found in supabase/migrations.");
   process.exit(1);
 }
 
-const client = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
+const token = process.env.SUPABASE_ACCESS_TOKEN;
+const dbUrl = process.env.SUPABASE_DB_URL;
 
-try {
-  await client.connect();
-  console.log(`Connected. Applying ${files.length} migration file(s)…`);
+async function viaManagementApi() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  const ref = supabaseUrl.match(/https:\/\/([a-z0-9]+)\.supabase\.co/)?.[1];
+  if (!ref) throw new Error("Could not derive project ref from NEXT_PUBLIC_SUPABASE_URL.");
+  const endpoint = `https://api.supabase.com/v1/projects/${ref}/database/query`;
+  console.log(`Applying ${files.length} migration(s) via Management API (project ${ref})…`);
   for (const file of files) {
-    const sql = readFileSync(join(migrationsDir, file), "utf8");
+    const query = readFileSync(join(migrationsDir, file), "utf8");
     process.stdout.write(`  • ${file} … `);
-    await client.query(sql);
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`${res.status} ${text.slice(0, 300)}`);
+    }
     console.log("ok");
   }
   console.log("All migrations applied.");
+}
+
+async function viaConnectionString() {
+  const pg = (await import("pg")).default;
+  const client = new pg.Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
+  await client.connect();
+  console.log(`Connected. Applying ${files.length} migration(s)…`);
+  try {
+    for (const file of files) {
+      process.stdout.write(`  • ${file} … `);
+      await client.query(readFileSync(join(migrationsDir, file), "utf8"));
+      console.log("ok");
+    }
+    console.log("All migrations applied.");
+  } finally {
+    await client.end();
+  }
+}
+
+try {
+  if (token) await viaManagementApi();
+  else if (dbUrl) await viaConnectionString();
+  else {
+    console.error(
+      "\nNo DB credential found. Add ONE of these to .env.local:\n" +
+        "  SUPABASE_ACCESS_TOKEN=sbp_...   (Personal Access Token — easiest)\n" +
+        "  SUPABASE_DB_URL=postgresql://... (Session pooler connection string)\n",
+    );
+    process.exit(1);
+  }
 } catch (err) {
   console.error("\nMigration failed:\n", err.message);
-  process.exitCode = 1;
-} finally {
-  await client.end();
+  process.exit(1);
 }
