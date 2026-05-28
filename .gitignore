@@ -28,6 +28,12 @@ yarn-error.log*
 # local env files
 .env*.local
 
+# service-account credentials (never commit)
+*sa*.json
+*service-account*.json
+*-credentials.json
+drevi-pipeline-sa.json
+
 # vercel
 .vercel
 
