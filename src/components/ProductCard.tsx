@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Plus } from "lucide-react";
 import { StockPill } from "@/components/StockPill";
 import { ProductImage } from "@/components/ProductImage";
@@ -14,29 +15,44 @@ export function ProductCard({
   showPrices = true,
   large = false,
   onAdd,
+  detailHref,
 }: {
   product: WholesaleProduct;
   showPrices?: boolean;
   large?: boolean;
   onAdd?: (product: WholesaleProduct) => void;
+  detailHref?: string;
 }) {
   const canAdd = getStockState(product) !== "sold_out";
 
-  return (
-    <div className="flex flex-col" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.06)" }}>
+  const titleBlock = (
+    <>
       <ProductImage product={product} large={large} />
-
-      <div className={large ? "px-4 pt-4 pb-4" : "px-3 pt-3 pb-3"}>
+      <div className={large ? "px-4 pt-4" : "px-3 pt-3"}>
         <div
           className="font-display"
           style={{ color: palette.black, fontSize: large ? 15 : 13, lineHeight: 1.25, fontWeight: 500, minHeight: large ? 38 : 32 }}
         >
           {product.title ?? product.sku}
         </div>
-
         <div className="font-body mt-0.5" style={{ color: palette.mutedGreige, fontSize: 9, letterSpacing: "0.1em" }}>
           {product.sku}
         </div>
+      </div>
+    </>
+  );
+
+  return (
+    <div className="flex flex-col" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.06)" }}>
+      {detailHref ? (
+        <Link href={detailHref} className="block">
+          {titleBlock}
+        </Link>
+      ) : (
+        titleBlock
+      )}
+
+      <div className={large ? "px-4 pb-4" : "px-3 pb-3"}>
 
         <div className="mt-2.5">
           <StockPill product={product} compact={!large} />

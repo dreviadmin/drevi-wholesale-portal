@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { DreviHeader } from "@/components/DreviHeader";
 import { FilterChips } from "@/components/FilterChips";
 import { ProductCard } from "@/components/ProductCard";
+import { addToCart } from "@/app/cart/actions";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
 
@@ -13,19 +15,24 @@ const PREFERRED = ["Sarees", "Lehengas", "Indo-Western", "Co-ords", "Drape Skirt
 function buildCategories(products: WholesaleProduct[]): string[] {
   const present = new Set(products.map((p) => p.category).filter((c): c is string => !!c));
   const ordered = PREFERRED.filter((c) => present.has(c));
-  const extras = [...present].filter((c) => !PREFERRED.includes(c)).sort();
+  const extras = Array.from(present).filter((c) => !PREFERRED.includes(c)).sort();
   return ["All", ...ordered, ...extras];
 }
 
 export function CatalogView({
   businessName,
   products,
+  initialCartCount,
 }: {
   businessName: string;
   products: WholesaleProduct[];
+  initialCartCount: number;
 }) {
+  const router = useRouter();
   const [category, setCategory] = useState("All");
   const [toast, setToast] = useState<string | null>(null);
+  const [count, setCount] = useState(initialCartCount);
+  const [isPending, startTransition] = useTransition();
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const categories = useMemo(() => buildCategories(products), [products]);
@@ -34,15 +41,27 @@ export function CatalogView({
     [category, products],
   );
 
-  function handleAdd() {
-    setToast("Cart coming in Phase 2");
+  function showToast(msg: string) {
+    setToast(msg);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 2500);
   }
 
+  function handleAdd(product: WholesaleProduct) {
+    startTransition(async () => {
+      const res = await addToCart(product.sku, product.min_order_qty ?? 1);
+      if (res.ok) {
+        setCount(res.count);
+        showToast("Added to cart");
+      } else {
+        showToast(res.message ?? "Could not add to cart");
+      }
+    });
+  }
+
   return (
     <div className="min-h-screen flex flex-col" style={{ background: palette.ivory }}>
-      <DreviHeader businessName={businessName} cartCount={0} onCart={() => handleAdd()} />
+      <DreviHeader businessName={businessName} cartCount={count} onCart={() => router.push("/cart")} />
       <FilterChips categories={categories} active={category} onSelect={setCategory} />
 
       <div className="flex-1 px-4 py-4">
@@ -57,9 +76,9 @@ export function CatalogView({
             Nothing in {category} right now.
           </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 ${isPending ? "opacity-90" : ""}`}>
             {filtered.map((p) => (
-              <ProductCard key={p.sku} product={p} onAdd={handleAdd} />
+              <ProductCard key={p.sku} product={p} onAdd={handleAdd} detailHref={`/product/${encodeURIComponent(p.sku)}`} />
             ))}
           </div>
         )}

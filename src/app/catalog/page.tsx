@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { getDetailedCart } from "@/lib/cart";
 import { CatalogView } from "./CatalogView";
 import type { WholesaleProduct } from "@/lib/types";
 
@@ -16,7 +17,7 @@ export default async function CatalogPage() {
   if (!user) redirect("/login");
 
   const [{ data: buyer }, { data: products }] = await Promise.all([
-    supabase.from("buyers").select("business_name").eq("email", user.email ?? "").maybeSingle(),
+    supabase.from("buyers").select("id, business_name").eq("email", user.email ?? "").maybeSingle(),
     supabase
       .from("wholesale_products")
       .select("*")
@@ -25,10 +26,13 @@ export default async function CatalogPage() {
       .order("title", { nullsFirst: false }),
   ]);
 
+  const cart = buyer ? await getDetailedCart(buyer.id) : null;
+
   return (
     <CatalogView
       businessName={buyer?.business_name ?? "Wholesale"}
       products={(products ?? []) as WholesaleProduct[]}
+      initialCartCount={cart?.count ?? 0}
     />
   );
 }
