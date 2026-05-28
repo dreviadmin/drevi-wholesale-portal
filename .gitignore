@@ -37,6 +37,15 @@ drevi-pipeline-sa.json
 # vercel
 .vercel
 
+# next-pwa generated service worker (rebuilt on each build)
+public/sw.js
+public/sw.js.map
+public/swe-worker-*.js
+public/workbox-*.js
+public/workbox-*.js.map
+public/worker-*.js
+public/fallback-*.js
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

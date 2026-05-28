@@ -1,0 +1,13 @@
+{
+  "name": "Drevi Wholesale Portal",
+  "short_name": "Drevi Wholesale",
+  "description": "Login-gated wholesale catalog and exhibition ordering for Drevi Fashion.",
+  "start_url": "/login",
+  "display": "standalone",
+  "background_color": "#F5F1E8",
+  "theme_color": "#1A1A1A",
+  "orientation": "any",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

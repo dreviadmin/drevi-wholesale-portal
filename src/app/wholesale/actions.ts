@@ -1,6 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendInquiryAlert } from "@/lib/interakt";
 
 export interface InquiryState {
   ok?: boolean;
@@ -41,5 +42,6 @@ export async function createInquiry(_prev: InquiryState, formData: FormData): Pr
     }
     return { error: "Something went wrong. Please try again." };
   }
+  await sendInquiryAlert(business_name, city); // best-effort (no-op without API key)
   return { ok: true };
 }

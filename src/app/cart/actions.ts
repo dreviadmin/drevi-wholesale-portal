@@ -6,6 +6,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getRawCart, getDetailedCart, type RawCartItem } from "@/lib/cart";
 import { getStockState, qtyCap } from "@/lib/stock";
+import { finalizeOrder } from "@/lib/order-finalize";
 import type { WholesaleProduct, OrderItem } from "@/lib/types";
 
 async function resolveActiveBuyer(): Promise<{ id: string }> {
@@ -148,6 +149,7 @@ export async function submitOrder(_prev: SubmitState, formData: FormData): Promi
   }
   if (!orderId) return { error: "Could not generate an order number. Please try again." };
 
+  await finalizeOrder(orderId); // PDF + Interakt (best-effort)
   await saveCart(buyer.id, []);
   redirect(`/order/${orderId}`);
 }

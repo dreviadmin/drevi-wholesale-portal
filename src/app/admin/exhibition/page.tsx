@@ -1,12 +1,16 @@
-import { palette } from "@/lib/palette";
+import { requireStaff } from "@/lib/staff";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { ExhibitionHome } from "./ExhibitionHome";
 
-export default function ExhibitionStub() {
-  return (
-    <div className="px-4 md:px-8 py-6">
-      <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>Exhibitions</h1>
-      <p className="font-body mt-3" style={{ fontSize: 12.5, color: palette.softBlack, lineHeight: 1.7, maxWidth: 520 }}>
-        Exhibition mode (tablet sessions, on-the-spot capture, PDF delivery) arrives in Phase 4.
-      </p>
-    </div>
-  );
+export const dynamic = "force-dynamic";
+
+export default async function ExhibitionPage() {
+  await requireStaff();
+  const admin = createAdminClient();
+  const { data: sessions } = await admin
+    .from("exhibition_sessions")
+    .select("id, event_name, started_at, ended_at, orders_count")
+    .order("started_at", { ascending: false })
+    .limit(10);
+  return <ExhibitionHome sessions={sessions ?? []} />;
 }

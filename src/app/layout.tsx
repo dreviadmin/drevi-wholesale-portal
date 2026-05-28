@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Playfair_Display, Cormorant_Garamond, Montserrat } from "next/font/google";
 import "./globals.css";
 
@@ -28,6 +28,12 @@ export const metadata: Metadata = {
   title: "Drevi Wholesale Portal",
   description: "Login-gated wholesale catalog for approved Drevi Fashion buyers.",
   robots: { index: false, follow: false },
+  manifest: "/manifest.json",
+  appleWebApp: { capable: true, title: "Drevi Wholesale", statusBarStyle: "black-translucent" },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#1A1A1A",
 };
 
 export default function RootLayout({
