@@ -98,8 +98,8 @@ export function CartView({
               const atCap = l.cap != null && l.qty >= l.cap;
               return (
                 <div key={l.sku} className="flex gap-3 p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
-                  <Link href={`/product/${encodeURIComponent(l.sku)}`} className="relative flex-shrink-0" style={{ width: 72, height: 90, background: palette.ivoryDeep }}>
-                    {l.image && <Image src={l.image} alt={l.title} fill sizes="72px" className="object-cover" />}
+                  <Link href={`/product/${encodeURIComponent(l.sku)}`} className="relative flex-shrink-0" style={{ width: 96, height: 120, background: palette.ivoryDeep }}>
+                    {l.image && <Image src={l.image} alt={l.title} fill sizes="96px" className="object-cover" />}
                   </Link>
 
                   <div className="flex-1 min-w-0">

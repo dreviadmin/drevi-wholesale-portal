@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, ChevronLeft, Minus, Plus, UserPlus, Search } from "lucide-react";
+import Image from "next/image";
+import { Eye, EyeOff, ChevronLeft, Minus, Plus, UserPlus, Search, ShoppingBag } from "lucide-react";
 import { ProductCard } from "@/components/ProductCard";
 import { OfflineSync } from "@/components/OfflineSync";
 import { captureBuyer, submitExhibitionOrder, endSession } from "../actions";
@@ -35,8 +36,12 @@ export function ExhibitionWizard({
   const [showPrices, setShowPrices] = useState(true);
   const [category, setCategory] = useState("All");
   const [query, setQuery] = useState("");
+  const [catalogQuery, setCatalogQuery] = useState("");
   const [newBuyer, setNewBuyer] = useState(false);
-  const [nb, setNb] = useState({ business_name: "", owner_name: "", email: "", phone: "+91", city: "", gstin: "" });
+  const [nb, setNb] = useState({
+    business_name: "", owner_name: "", email: "", phone: "+91", city: "", gstin: "",
+    address: "", transport_details: "", broker_details: "", other_details: "",
+  });
   const [staffNote, setStaffNote] = useState("");
   const [buyerNote, setBuyerNote] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +60,11 @@ export function ExhibitionWizard({
     return ["All", ...PREFERRED.filter((c) => present.has(c)), ...Array.from(present).filter((c) => !PREFERRED.includes(c)).sort()];
   }, [products]);
   const filtered = useMemo(() => (category === "All" ? products : products.filter((p) => p.category === category)), [category, products]);
+  const catalogFiltered = useMemo(() => {
+    const q = catalogQuery.trim().toLowerCase();
+    if (!q) return filtered;
+    return filtered.filter((p) => (p.title?.toLowerCase().includes(q) ?? false) || p.sku.toLowerCase().includes(q));
+  }, [filtered, catalogQuery]);
   const cartLines = Object.entries(cart).map(([sku, qty]) => ({ p: bySku.get(sku)!, qty })).filter((l) => l.p);
   const cartCount = cartLines.length;
   const subtotal = cartLines.reduce((s, l) => s + l.qty * l.p.wholesale_price, 0);
@@ -66,14 +76,6 @@ export function ExhibitionWizard({
     return buyers.filter((b) => [b.business_name, b.owner_name, b.phone].some((v) => v?.toLowerCase().includes(q))).slice(0, 12);
   }, [buyers, query]);
 
-  function addToCart(p: WholesaleProduct) {
-    const cap = qtyCap(p);
-    const startQty = p.min_order_qty ?? 1;
-    setCart((c) => {
-      const next = (c[p.sku] ?? 0) + startQty;
-      return { ...c, [p.sku]: cap != null ? Math.min(next, cap) : next };
-    });
-  }
   function setQty(sku: string, qty: number) {
     const p = bySku.get(sku);
     const cap = p ? qtyCap(p) : null;
@@ -82,6 +84,7 @@ export function ExhibitionWizard({
       return { ...c, [sku]: cap != null ? Math.min(qty, cap) : qty };
     });
   }
+  function changeCartQty(p: WholesaleProduct, qty: number) { setQty(p.sku, qty); }
 
   function captureNew() {
     setError(null);
@@ -129,7 +132,12 @@ export function ExhibitionWizard({
   }
 
   function nextBuyer() {
-    setBuyer(null); setBuyerClientRef(null); setCart({}); setStaffNote(""); setBuyerNote(""); setConfirmInfo(null); setQuery(""); setStep("buyer");
+    setBuyer(null); setBuyerClientRef(null); setCart({}); setStaffNote(""); setBuyerNote(""); setConfirmInfo(null); setQuery(""); setCatalogQuery(""); setStep("buyer");
+  }
+
+  function endSessionConfirmed() {
+    if (!window.confirm("Are you sure you want to exit and end this session?")) return;
+    endSession(session.id, session.event_name).then(() => router.push("/admin/exhibition"));
   }
 
   // ---------- Top bar ----------
@@ -146,9 +154,25 @@ export function ExhibitionWizard({
           </button>
         )}
         {(step === "catalog" || step === "cart") && (
-          <button type="button" onClick={() => setStep("cart")} className="font-body uppercase" style={{ color: palette.ivory, fontSize: 10, letterSpacing: "0.15em" }}>Cart ({cartCount})</button>
+          <button
+            type="button"
+            onClick={() => setStep("cart")}
+            aria-label={`Cart (${cartCount})`}
+            className="flex items-center gap-2 font-body uppercase"
+            style={{
+              background: cartCount > 0 ? palette.gold : "transparent",
+              color: cartCount > 0 ? palette.black : palette.gold,
+              border: `1px solid ${palette.gold}`,
+              padding: "6px 14px",
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.15em",
+            }}
+          >
+            <ShoppingBag size={15} strokeWidth={2} /> Cart · {cartCount}
+          </button>
         )}
-        <button type="button" onClick={() => endSession(session.id, session.event_name).then(() => router.push("/admin/exhibition"))} className="font-body uppercase" style={{ border: "1px solid rgba(255,255,255,0.3)", padding: "5px 12px", fontSize: 9, letterSpacing: "0.18em" }}>End Session</button>
+        <button type="button" onClick={endSessionConfirmed} className="font-body uppercase" style={{ border: "1px solid rgba(255,255,255,0.3)", padding: "5px 12px", fontSize: 9, letterSpacing: "0.18em" }}>End Session</button>
       </div>
     </div>
   );
@@ -183,10 +207,25 @@ export function ExhibitionWizard({
             </>
           ) : (
             <div className="mt-4 flex flex-col gap-3">
-              {(["business_name", "owner_name", "email", "phone", "city", "gstin"] as const).map((k) => (
-                <label key={k} className="flex flex-col gap-1">
-                  <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.softBlack }}>{k.replace("_", " ")}{k !== "gstin" ? " *" : ""}</span>
-                  <input value={nb[k]} onChange={(e) => setNb({ ...nb, [k]: e.target.value })} className="font-body bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "6px 2px", fontSize: 13 }} />
+              {([
+                { k: "business_name", label: "business name" },
+                { k: "owner_name", label: "owner name", req: true },
+                { k: "email", label: "email" },
+                { k: "phone", label: "phone", req: true },
+                { k: "city", label: "city" },
+                { k: "gstin", label: "GSTIN" },
+                { k: "address", label: "address", area: true },
+                { k: "transport_details", label: "transport", area: true },
+                { k: "broker_details", label: "broker", area: true },
+                { k: "other_details", label: "other", area: true },
+              ] as const).map((f) => (
+                <label key={f.k} className="flex flex-col gap-1">
+                  <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.softBlack }}>{f.label}{("req" in f && f.req) ? " *" : ""}</span>
+                  {("area" in f && f.area) ? (
+                    <textarea rows={2} value={nb[f.k]} onChange={(e) => setNb({ ...nb, [f.k]: e.target.value })} className="font-body bg-transparent outline-none resize-none" style={{ border: "1px solid rgba(26,26,26,0.18)", padding: "7px 9px", fontSize: 13 }} />
+                  ) : (
+                    <input value={nb[f.k]} onChange={(e) => setNb({ ...nb, [f.k]: e.target.value })} className="font-body bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "6px 2px", fontSize: 13 }} />
+                  )}
                 </label>
               ))}
               <div className="flex gap-2 mt-1">
@@ -210,8 +249,14 @@ export function ExhibitionWizard({
             </div>
             <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige, letterSpacing: "0.04em" }}>Stock as of {stockAsOf}</span>
           </div>
+          <div className="mt-3 flex items-center gap-2 max-w-md" style={{ border: "1px solid rgba(26,26,26,0.18)", padding: "7px 10px" }}>
+            <Search size={15} color={palette.mutedGreige} strokeWidth={1.7} />
+            <input value={catalogQuery} onChange={(e) => setCatalogQuery(e.target.value)} placeholder="Search title or SKU" className="font-body bg-transparent outline-none w-full" style={{ fontSize: 12.5, color: palette.black }} />
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mt-4">
-            {filtered.map((p) => <ProductCard key={p.sku} product={p} showPrices={showPrices} onAdd={addToCart} />)}
+            {catalogFiltered.map((p) => (
+              <ProductCard key={p.sku} product={p} showPrices={showPrices} cartQty={cart[p.sku] ?? 0} onChangeQty={changeCartQty} />
+            ))}
           </div>
         </div>
       )}
@@ -229,15 +274,19 @@ export function ExhibitionWizard({
                 const cap = qtyCap(l.p);
                 const belowMoq = l.p.min_order_qty != null && l.qty < l.p.min_order_qty;
                 const state = getStockState(l.p);
+                const img = l.p.image_urls?.[0];
                 return (
-                  <div key={l.p.sku} className="flex items-center justify-between gap-3 p-3" style={{ border: "1px solid rgba(26,26,26,0.08)" }}>
-                    <div className="min-w-0">
+                  <div key={l.p.sku} className="flex items-center gap-3 p-3" style={{ border: "1px solid rgba(26,26,26,0.08)" }}>
+                    <div className="relative flex-shrink-0" style={{ width: 88, height: 110, background: palette.ivoryDeep }}>
+                      {img && <Image src={img} alt={l.p.title ?? l.p.sku} fill sizes="88px" className="object-cover" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
                       <div className="font-display" style={{ fontSize: 13, fontWeight: 500 }}>{l.p.title}</div>
                       <div className="font-body" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.1em" }}>{l.p.sku}</div>
-                      {state === "made_to_order" && <div className="font-body" style={{ fontSize: 10, color: palette.goldDeep }}>Made to Order · {l.p.restock_days}d</div>}
-                      {belowMoq && <div className="font-body" style={{ fontSize: 10, color: palette.crimsonText }}>Minimum {l.p.min_order_qty} pieces</div>}
+                      {state === "made_to_order" && <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep }}>Made to Order · {l.p.restock_days}d</div>}
+                      {belowMoq && <div className="font-body mt-1" style={{ fontSize: 10, color: palette.crimsonText }}>Minimum {l.p.min_order_qty} pieces</div>}
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-col items-end gap-2 flex-shrink-0">
                       <div className="flex items-center" style={{ border: "1px solid rgba(26,26,26,0.2)" }}>
                         <button type="button" onClick={() => setQty(l.p.sku, l.qty - 1)} className="px-2 py-1"><Minus size={12} /></button>
                         <span className="font-body" style={{ minWidth: 24, textAlign: "center", fontSize: 13 }}>{l.qty}</span>
@@ -275,7 +324,7 @@ export function ExhibitionWizard({
           )}
           <div className="flex gap-2 justify-center mt-8">
             <button type="button" onClick={nextBuyer} className="font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.18em", padding: "11px 18px" }}>Next Buyer</button>
-            <button type="button" onClick={() => endSession(session.id, session.event_name).then(() => router.push("/admin/exhibition"))} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, fontSize: 10, letterSpacing: "0.18em", padding: "11px 18px" }}>End Session</button>
+            <button type="button" onClick={endSessionConfirmed} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, fontSize: 10, letterSpacing: "0.18em", padding: "11px 18px" }}>End Session</button>
           </div>
         </div>
       )}

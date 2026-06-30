@@ -38,12 +38,16 @@ export default function WholesaleInquiryPage() {
             </p>
           ) : (
             <form action={action} className="flex flex-col gap-4">
-              {field("Business name", "business_name", true)}
-              {field("Owner name", "owner_name", true)}
+              {field("Business name", "business_name")}
+              {field("Owner name", "owner_name")}
               {field("Email", "email", true, "email")}
-              {field("Phone", "phone", true)}
-              {field("City", "city", true)}
+              {field("Phone", "phone")}
+              {field("City", "city")}
               {field("GSTIN", "gstin")}
+              <label className="flex flex-col gap-1.5">
+                <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>Address</span>
+                <textarea name="address" rows={2} className="font-body bg-transparent outline-none resize-none" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "8px 10px", fontSize: 12.5 }} />
+              </label>
               <label className="flex flex-col gap-1.5">
                 <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>Message</span>
                 <textarea name="message" rows={2} className="font-body bg-transparent outline-none resize-none" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "8px 10px", fontSize: 12.5 }} />

@@ -74,7 +74,8 @@ export async function setCredentials(
   const { data: buyer } = await admin.from("buyers").select("id, email").eq("id", buyerId).maybeSingle();
   if (!buyer) return { ok: false, error: "Buyer not found." };
 
-  const email = (emailInput || buyer.email).trim().toLowerCase();
+  const email = (emailInput || buyer.email || "").trim().toLowerCase();
+  if (!email) return { ok: false, error: "An email is required to activate the login." };
   try {
     await setAuthPassword(admin, email, password);
   } catch (e) {
@@ -218,15 +219,21 @@ export async function setBuyerStatus(buyerId: string, status: BuyerStatus, reaso
   return { ok: true };
 }
 
-// Case B — create a buyer manually (pending/manual_admin). Returns the new id so
-// the UI can open the credential modal immediately.
+// Case B — create a buyer manually (pending/manual_admin). business/email/city
+// are optional (a captured buyer may not have all of them yet); email becomes
+// required at credential activation. Returns the new id so the UI can open the
+// credential modal immediately.
 export async function addBuyer(form: {
-  business_name: string;
-  owner_name: string;
-  email: string;
-  phone: string;
-  city: string;
+  business_name?: string;
+  owner_name?: string;
+  email?: string;
+  phone?: string;
+  city?: string;
   gstin?: string;
+  address?: string;
+  transport_details?: string;
+  broker_details?: string;
+  other_details?: string;
   notes?: string;
 }): Promise<{ ok: boolean; id?: string; error?: string }> {
   let staff;
@@ -235,20 +242,25 @@ export async function addBuyer(form: {
   } catch {
     return { ok: false, error: "Not authorized." };
   }
-  const email = form.email.trim().toLowerCase();
-  if (!email || !form.business_name || !form.owner_name || !form.phone || !form.city) {
-    return { ok: false, error: "Business, owner, email, phone, and city are required." };
+  const email = form.email?.trim().toLowerCase() || null;
+  // Require at least one identifier so the buyer is recognisable.
+  if (!form.owner_name?.trim() && !form.business_name?.trim() && !form.phone?.trim()) {
+    return { ok: false, error: "Add at least one of owner name, business name, or phone." };
   }
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("buyers")
     .insert({
       email,
-      business_name: form.business_name.trim(),
-      owner_name: form.owner_name.trim(),
-      phone: form.phone.trim(),
-      city: form.city.trim(),
+      business_name: form.business_name?.trim() || null,
+      owner_name: form.owner_name?.trim() || null,
+      phone: form.phone?.trim() || null,
+      city: form.city?.trim() || null,
       gstin: form.gstin?.trim() || null,
+      address: form.address?.trim() || null,
+      transport_details: form.transport_details?.trim() || null,
+      broker_details: form.broker_details?.trim() || null,
+      other_details: form.other_details?.trim() || null,
       notes: form.notes?.trim() || null,
       status: "pending",
       source: "manual_admin",

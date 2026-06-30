@@ -43,12 +43,16 @@ export interface WholesaleProduct {
 
 export interface Buyer {
   id: string;
-  email: string;
+  email: string | null;
   business_name: string | null;
   owner_name: string | null;
   phone: string | null;
   city: string | null;
   gstin: string | null;
+  address: string | null;
+  transport_details: string | null;
+  broker_details: string | null;
+  other_details: string | null;
   status: BuyerStatus;
   source: BuyerSource;
   encrypted_password: string | null;

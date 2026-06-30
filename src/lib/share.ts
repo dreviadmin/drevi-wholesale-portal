@@ -25,7 +25,7 @@ export interface VCardInput {
   ownerName: string | null;
   businessName: string | null;
   phone: string | null;
-  email: string;
+  email: string | null;
   city: string | null;
   status: string;
   onboarded: string | null; // ISO
@@ -44,7 +44,7 @@ export function buildVCard(b: VCardInput): string {
     b.businessName ? `ORG:${b.businessName}` : "",
     "TITLE:Owner",
     tel ? `TEL;TYPE=CELL:${tel}` : "",
-    `EMAIL:${b.email}`,
+    b.email ? `EMAIL:${b.email}` : "",
     b.city ? `ADR;TYPE=WORK:;;${b.city};;;India` : "",
     `NOTE:Drevi Wholesale · ${b.status}${onboarded ? ` · Onboarded ${onboarded}` : ""}`,
     "END:VCARD",

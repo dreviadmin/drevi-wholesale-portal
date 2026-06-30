@@ -33,12 +33,25 @@ export function DreviHeader({
           <button type="button" onClick={onSearch} aria-label="Search">
             <Search size={19} color={palette.black} strokeWidth={1.5} />
           </button>
-          <button type="button" onClick={onCart} aria-label="Cart" className="relative">
-            <ShoppingBag size={19} color={palette.black} strokeWidth={1.5} />
+          <button
+            type="button"
+            onClick={onCart}
+            aria-label={`Cart (${cartCount})`}
+            className="relative flex items-center justify-center"
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 999,
+              background: cartCount > 0 ? palette.gold : palette.ivoryDeep,
+              border: `1px solid ${cartCount > 0 ? palette.goldDeep : "rgba(26,26,26,0.18)"}`,
+              transition: "background 120ms",
+            }}
+          >
+            <ShoppingBag size={20} color={palette.black} strokeWidth={1.8} />
             {cartCount > 0 && (
               <span
-                className="absolute -top-1.5 -right-1.5 flex items-center justify-center font-body"
-                style={{ background: palette.gold, color: palette.black, fontSize: 9, fontWeight: 700, width: 16, height: 16, borderRadius: 8 }}
+                className="absolute -top-1 -right-1 flex items-center justify-center font-body"
+                style={{ background: palette.black, color: palette.ivory, fontSize: 9, fontWeight: 700, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 9 }}
               >
                 {cartCount}
               </span>

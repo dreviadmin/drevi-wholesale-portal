@@ -1,29 +1,36 @@
 "use client";
 
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { Plus, Minus } from "lucide-react";
 import { StockPill } from "@/components/StockPill";
 import { ProductImage } from "@/components/ProductImage";
-import { getStockState } from "@/lib/stock";
+import { getStockState, qtyCap } from "@/lib/stock";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
 
-// Reusable across buyer, exhibition, and admin. Ported from the prototype.
+// Reusable across buyer, exhibition, and admin. When `cartQty` > 0 the card
+// renders a − / + stepper instead of the Add button.
 export function ProductCard({
   product,
   showPrices = true,
   large = false,
-  onAdd,
+  cartQty = 0,
+  onChangeQty,
   detailHref,
 }: {
   product: WholesaleProduct;
   showPrices?: boolean;
   large?: boolean;
-  onAdd?: (product: WholesaleProduct) => void;
+  cartQty?: number;
+  onChangeQty?: (product: WholesaleProduct, qty: number) => void;
   detailHref?: string;
 }) {
-  const canAdd = getStockState(product) !== "sold_out";
+  const state = getStockState(product);
+  const canAdd = state !== "sold_out";
+  const cap = qtyCap(product);
+  const atCap = cap != null && cartQty >= cap;
+  const initialQty = product.min_order_qty ?? 1;
 
   const titleBlock = (
     <>
@@ -42,18 +49,17 @@ export function ProductCard({
     </>
   );
 
+  const padY = large ? "10px 0" : "9px 0";
+
   return (
     <div className="flex flex-col" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.06)" }}>
       {detailHref ? (
-        <Link href={detailHref} className="block">
-          {titleBlock}
-        </Link>
+        <Link href={detailHref} className="block">{titleBlock}</Link>
       ) : (
         titleBlock
       )}
 
       <div className={large ? "px-4 pb-4" : "px-3 pb-3"}>
-
         <div className="mt-2.5">
           <StockPill product={product} compact={!large} />
         </div>
@@ -64,9 +70,7 @@ export function ProductCard({
               {formatINR(product.wholesale_price)}
             </div>
           ) : (
-            <div className="font-body" style={{ color: palette.mutedGreige, fontSize: 11, letterSpacing: "0.1em" }}>
-              ——
-            </div>
+            <div className="font-body" style={{ color: palette.mutedGreige, fontSize: 11, letterSpacing: "0.1em" }}>——</div>
           )}
         </div>
 
@@ -76,28 +80,62 @@ export function ProductCard({
           </div>
         ) : null}
 
-        <button
-          type="button"
-          disabled={!canAdd}
-          onClick={() => canAdd && onAdd?.(product)}
-          className="mt-3 w-full flex items-center justify-center gap-1.5 font-body uppercase transition-colors"
-          style={{
-            color: canAdd ? palette.ivory : "#AAA",
-            background: canAdd ? palette.black : palette.soldBtn,
-            fontSize: 10,
-            letterSpacing: "0.2em",
-            padding: large ? "10px 0" : "9px 0",
-            cursor: canAdd ? "pointer" : "not-allowed",
-          }}
-        >
-          {canAdd ? (
-            <>
-              <Plus size={11} strokeWidth={2.5} /> Add to Cart
-            </>
-          ) : (
-            "Unavailable"
-          )}
-        </button>
+        {/* Add button OR stepper */}
+        {cartQty > 0 && canAdd ? (
+          <div
+            className="mt-3 w-full grid items-center"
+            style={{
+              gridTemplateColumns: "1fr auto 1fr",
+              background: palette.black,
+              color: palette.ivory,
+              fontFamily: "var(--font-montserrat), system-ui, sans-serif",
+            }}
+          >
+            <button
+              type="button"
+              aria-label="Decrease"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onChangeQty?.(product, cartQty - 1); }}
+              className="flex items-center justify-center"
+              style={{ padding: padY, color: palette.gold }}
+            >
+              <Minus size={14} strokeWidth={2.5} />
+            </button>
+            <span
+              className="font-body"
+              style={{ minWidth: 28, textAlign: "center", fontSize: 12, fontWeight: 600, letterSpacing: "0.08em" }}
+              aria-label={`In cart: ${cartQty}`}
+            >
+              {cartQty}
+            </span>
+            <button
+              type="button"
+              aria-label="Increase"
+              disabled={atCap}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (!atCap) onChangeQty?.(product, cartQty + 1); }}
+              className="flex items-center justify-center disabled:opacity-40"
+              style={{ padding: padY, color: palette.gold }}
+            >
+              <Plus size={14} strokeWidth={2.5} />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={!canAdd}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (canAdd) onChangeQty?.(product, initialQty); }}
+            className="mt-3 w-full flex items-center justify-center gap-1.5 font-body uppercase transition-colors"
+            style={{
+              color: canAdd ? palette.ivory : "#AAA",
+              background: canAdd ? palette.black : palette.soldBtn,
+              fontSize: 10,
+              letterSpacing: "0.2em",
+              padding: padY,
+              cursor: canAdd ? "pointer" : "not-allowed",
+            }}
+          >
+            {canAdd ? (<><Plus size={11} strokeWidth={2.5} /> Add to Cart</>) : "Unavailable"}
+          </button>
+        )}
       </div>
     </div>
   );

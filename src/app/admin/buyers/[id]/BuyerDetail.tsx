@@ -21,12 +21,16 @@ import type { BuyerStatus, BuyerSource, OrderStatus, AuditEventType } from "@/li
 
 interface BuyerDTO {
   id: string;
-  email: string;
+  email: string | null;
   business_name: string | null;
   owner_name: string | null;
   phone: string | null;
   city: string | null;
   gstin: string | null;
+  address: string | null;
+  transport_details: string | null;
+  broker_details: string | null;
+  other_details: string | null;
   status: BuyerStatus;
   source: BuyerSource;
   notes: string | null;
@@ -73,11 +77,12 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
 
   function reveal() { start(async () => { const r = await revealPassword(buyer.id); if (r.ok) setRevealed(r.password!); else flash(r.error ?? "Failed"); }); }
   function share(channel: "Copy" | "WhatsApp") {
+    if (!buyer.email) { flash("Add an email before sharing"); return; }
     start(async () => {
       const r = await shareCredentials(buyer.id, channel);
       if (!r.ok) { flash(r.error ?? "Failed"); return; }
       if (channel === "Copy") { await navigator.clipboard?.writeText(`${buyer.email}\n${r.password}`); flash("Copied"); }
-      else await shareWhatsApp(buildWhatsAppMessage(buyer.email, r.password!), buyer.phone);
+      else await shareWhatsApp(buildWhatsAppMessage(buyer.email!, r.password!), buyer.phone);
     });
   }
   function regenerate() {
@@ -111,7 +116,7 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
             {[buyer.owner_name, buyer.phone, buyer.city].filter(Boolean).join(" · ")}
           </div>
           <div className="font-body mt-0.5" style={{ fontSize: 12, color: palette.mutedGreige }}>
-            {buyer.email}{buyer.gstin ? ` · GSTIN ${buyer.gstin}` : ""}
+            {buyer.email ?? "—"}{buyer.gstin ? ` · GSTIN ${buyer.gstin}` : ""}
           </div>
           <div className="font-body mt-1.5" style={{ fontSize: 10.5, color: palette.mutedGreige, letterSpacing: "0.04em" }}>
             Source: {SOURCE_LABEL[buyer.source]}{buyer.approved_at ? ` · Approved ${fmt(buyer.approved_at)}${buyer.approvedByName ? ` by ${buyer.approvedByName}` : ""}` : ""}
@@ -171,6 +176,39 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
               <button type="button" onClick={submitChange} disabled={isPending || newPw.length < 6} className="font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 12px" }}>Save</button>
             </div>
           )}
+        </section>
+      )}
+
+      {/* Details (operational) */}
+      {(buyer.address || buyer.transport_details || buyer.broker_details || buyer.other_details) && (
+        <section className="mt-8">
+          <h2 className="font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.2em", color: palette.gold }}>Details</h2>
+          <dl className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+            {buyer.address && (
+              <div>
+                <dt className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>Address</dt>
+                <dd className="font-body mt-0.5" style={{ fontSize: 12.5, color: palette.softBlack, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{buyer.address}</dd>
+              </div>
+            )}
+            {buyer.transport_details && (
+              <div>
+                <dt className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>Transport</dt>
+                <dd className="font-body mt-0.5" style={{ fontSize: 12.5, color: palette.softBlack, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{buyer.transport_details}</dd>
+              </div>
+            )}
+            {buyer.broker_details && (
+              <div>
+                <dt className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>Broker</dt>
+                <dd className="font-body mt-0.5" style={{ fontSize: 12.5, color: palette.softBlack, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{buyer.broker_details}</dd>
+              </div>
+            )}
+            {buyer.other_details && (
+              <div>
+                <dt className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>Other</dt>
+                <dd className="font-body mt-0.5" style={{ fontSize: 12.5, color: palette.softBlack, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{buyer.other_details}</dd>
+              </div>
+            )}
+          </dl>
         </section>
       )}
 

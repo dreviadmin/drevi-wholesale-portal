@@ -18,10 +18,10 @@ export function CredentialModal({
   onClose,
 }: {
   buyerId: string;
-  buyer: { email: string; owner_name: string | null; business_name: string | null; phone: string | null };
+  buyer: { email: string | null; owner_name: string | null; business_name: string | null; phone: string | null };
   onClose: (activated: boolean) => void;
 }) {
-  const [email, setEmail] = useState(buyer.email);
+  const [email, setEmail] = useState(buyer.email ?? "");
   const [mode, setMode] = useState<"auto" | "custom">("auto");
   const [generated, setGenerated] = useState(memorable());
   const [custom, setCustom] = useState("");

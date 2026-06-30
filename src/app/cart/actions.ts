@@ -62,9 +62,10 @@ export async function addToCart(sku: string, qtyToAdd = 1): Promise<{ ok: boolea
   return { ok: true, count: items.length };
 }
 
-export async function setQty(sku: string, qty: number): Promise<void> {
+export async function setQty(sku: string, qty: number): Promise<{ qty: number }> {
   const buyer = await resolveActiveBuyer();
   let items = await getRawCart(buyer.id);
+  let storedQty = 0;
   if (qty <= 0) {
     items = items.filter((i) => i.sku !== sku);
   } else {
@@ -75,11 +76,14 @@ export async function setQty(sku: string, qty: number): Promise<void> {
       items = items.filter((i) => i.sku !== sku);
     } else if (line) {
       line.qty = clamped;
+      storedQty = clamped;
     } else {
       items.push({ sku, qty: clamped });
+      storedQty = clamped;
     }
   }
   await saveCart(buyer.id, items);
+  return { qty: storedQty };
 }
 
 export async function removeFromCart(sku: string): Promise<void> {

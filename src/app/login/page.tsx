@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 import Link from "next/link";
+import { Eye, EyeOff } from "lucide-react";
 import { login, type LoginState } from "./actions";
 import { palette } from "@/lib/palette";
 
@@ -21,6 +23,7 @@ function SubmitButton() {
 
 export default function LoginPage() {
   const [state, formAction] = useFormState<LoginState, FormData>(login, {});
+  const [showPw, setShowPw] = useState(false);
 
   return (
     <main className="min-h-screen flex items-center justify-center px-6" style={{ background: palette.pageBg }}>
@@ -53,14 +56,25 @@ export default function LoginPage() {
             <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>
               Password
             </span>
-            <input
-              type="password"
-              name="password"
-              autoComplete="current-password"
-              required
-              className="font-body bg-transparent outline-none"
-              style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "8px 2px", fontSize: 14, color: palette.black }}
-            />
+            <div className="flex items-center gap-2" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)" }}>
+              <input
+                type={showPw ? "text" : "password"}
+                name="password"
+                autoComplete="current-password"
+                required
+                className="font-body bg-transparent outline-none flex-1"
+                style={{ padding: "8px 2px", fontSize: 14, color: palette.black }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPw((v) => !v)}
+                aria-label={showPw ? "Hide password" : "Show password"}
+                className="pr-1"
+                style={{ color: palette.mutedGreige }}
+              >
+                {showPw ? <EyeOff size={16} strokeWidth={1.7} /> : <Eye size={16} strokeWidth={1.7} />}
+              </button>
+            </div>
           </label>
 
           {state?.error && (

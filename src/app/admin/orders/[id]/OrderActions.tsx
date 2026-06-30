@@ -1,18 +1,34 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { setOrderStatus } from "@/app/admin/orders/actions";
+import { setOrderStatus, sendInvoice } from "@/app/admin/orders/actions";
 import { palette } from "@/lib/palette";
 import type { OrderStatus } from "@/lib/types";
 
 export function OrderActions({ orderId, status }: { orderId: string; status: OrderStatus }) {
   const router = useRouter();
   const [isPending, start] = useTransition();
+  const [toast, setToast] = useState<string | null>(null);
 
-  function act(next: OrderStatus, confirmMsg?: string) {
-    if (confirmMsg && !window.confirm(confirmMsg)) return;
-    start(async () => { await setOrderStatus(orderId, next); router.refresh(); });
+  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 3500); }
+
+  function act(next: OrderStatus, opts?: { sendInvoice?: boolean; confirmMsg?: string }) {
+    if (opts?.confirmMsg && !window.confirm(opts.confirmMsg)) return;
+    start(async () => {
+      const res = await setOrderStatus(orderId, next, { sendInvoice: opts?.sendInvoice });
+      router.refresh();
+      if (!res.ok) flash(res.error ?? "Failed");
+      else if (opts?.sendInvoice) flash(res.invoiceSent ? "Invoice sent" : "PDF generated · Interakt not configured");
+    });
+  }
+  function fireInvoice() {
+    start(async () => {
+      const res = await sendInvoice(orderId);
+      router.refresh();
+      if (!res.ok) flash(res.error ?? "Failed");
+      else flash(res.sent ? "Invoice sent" : "PDF refreshed · Interakt not configured");
+    });
   }
 
   const btn = (label: string, onClick: () => void, primary = false) => (
@@ -20,10 +36,19 @@ export function OrderActions({ orderId, status }: { orderId: string; status: Ord
   );
 
   return (
-    <div className="flex gap-2 flex-wrap">
-      {status === "submitted" && btn("Confirm", () => act("confirmed"), true)}
-      {status === "confirmed" && btn("Mark Fulfilled", () => act("fulfilled"), true)}
-      {status !== "cancelled" && status !== "fulfilled" && btn("Cancel", () => act("cancelled", "Cancel this order?"))}
+    <div className="flex flex-col items-end gap-2">
+      <div className="flex gap-2 flex-wrap justify-end">
+        {status === "submitted" && (
+          <>
+            {btn("Confirm", () => act("confirmed"), true)}
+            {btn("Confirm & Send Invoice", () => act("confirmed", { sendInvoice: true }))}
+          </>
+        )}
+        {status === "confirmed" && btn("Mark Fulfilled", () => act("fulfilled"), true)}
+        {(status === "submitted" || status === "confirmed") && btn("Send Invoice", fireInvoice)}
+        {status !== "cancelled" && status !== "fulfilled" && btn("Cancel", () => act("cancelled", { confirmMsg: "Cancel this order?" }))}
+      </div>
+      {toast && <span className="font-body" style={{ fontSize: 10, color: palette.goldDeep, letterSpacing: "0.04em" }}>{toast}</span>}
     </div>
   );
 }

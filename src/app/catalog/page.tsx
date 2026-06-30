@@ -27,12 +27,14 @@ export default async function CatalogPage() {
   ]);
 
   const cart = buyer ? await getDetailedCart(buyer.id) : null;
+  const initialCartBySku: Record<string, number> = {};
+  for (const l of cart?.lines ?? []) initialCartBySku[l.product.sku] = l.qty;
 
   return (
     <CatalogView
       businessName={buyer?.business_name ?? "Wholesale"}
       products={(products ?? []) as WholesaleProduct[]}
-      initialCartCount={cart?.count ?? 0}
+      initialCartBySku={initialCartBySku}
     />
   );
 }

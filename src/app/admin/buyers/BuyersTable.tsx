@@ -13,7 +13,7 @@ export interface BuyerRowDTO {
   owner_name: string | null;
   phone: string | null;
   city: string | null;
-  email: string;
+  email: string | null;
   status: BuyerStatus;
   source: BuyerSource;
   created_at: string;

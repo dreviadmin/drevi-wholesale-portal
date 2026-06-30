@@ -23,31 +23,40 @@ export async function startSession(eventName: string): Promise<{ ok: boolean; id
   return { ok: true, id: data.id };
 }
 
-// E3 — capture a new buyer at the booth (pending/exhibition).
+// E3 — capture a new buyer at the booth (pending/exhibition). Most fields are
+// optional — capture as much as possible at the booth, complete details later.
 export async function captureBuyer(form: {
-  business_name: string;
-  owner_name: string;
-  email: string;
-  phone: string;
-  city: string;
+  business_name?: string;
+  owner_name?: string;
+  email?: string;
+  phone?: string;
+  city?: string;
   gstin?: string;
+  address?: string;
+  transport_details?: string;
+  broker_details?: string;
+  other_details?: string;
 }): Promise<{ ok: boolean; id?: string; error?: string }> {
   let staff;
   try { staff = await requireStaff(); } catch { return { ok: false, error: "Not authorized." }; }
-  const email = form.email.trim().toLowerCase();
-  if (!email || !form.business_name || !form.owner_name || !form.phone || !form.city) {
-    return { ok: false, error: "Business, owner, email, phone, and city are required." };
+  const email = form.email?.trim().toLowerCase() || null;
+  if (!form.owner_name?.trim() && !form.business_name?.trim() && !form.phone?.trim()) {
+    return { ok: false, error: "Add at least one of owner name, business name, or phone." };
   }
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("buyers")
     .insert({
       email,
-      business_name: form.business_name.trim(),
-      owner_name: form.owner_name.trim(),
-      phone: form.phone.trim(),
-      city: form.city.trim(),
+      business_name: form.business_name?.trim() || null,
+      owner_name: form.owner_name?.trim() || null,
+      phone: form.phone?.trim() || null,
+      city: form.city?.trim() || null,
       gstin: form.gstin?.trim() || null,
+      address: form.address?.trim() || null,
+      transport_details: form.transport_details?.trim() || null,
+      broker_details: form.broker_details?.trim() || null,
+      other_details: form.other_details?.trim() || null,
       status: "pending",
       source: "exhibition",
       captured_by: staff.id,

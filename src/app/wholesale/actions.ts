@@ -18,18 +18,25 @@ export async function createInquiry(_prev: InquiryState, formData: FormData): Pr
   const phone = get("phone");
   const city = get("city");
 
-  if (!email || !business_name || !owner_name || !phone || !city) {
-    return { error: "Please fill in business, owner, email, phone, and city." };
+  // Email is the one mandatory field on self-serve inquiry — Rakesh needs a way
+  // to reply, and it later becomes the login username.
+  if (!email) return { error: "Email is required so we can reply." };
+  if (!owner_name && !business_name) {
+    return { error: "Tell us either your name or your business name." };
   }
 
   const admin = createAdminClient();
   const { error } = await admin.from("buyers").insert({
     email,
-    business_name,
-    owner_name,
-    phone,
-    city,
+    business_name: business_name || null,
+    owner_name: owner_name || null,
+    phone: phone || null,
+    city: city || null,
     gstin: get("gstin") || null,
+    address: get("address") || null,
+    transport_details: get("transport_details") || null,
+    broker_details: get("broker_details") || null,
+    other_details: get("other_details") || null,
     notes: get("message") || null,
     status: "pending",
     source: "inquiry_form",

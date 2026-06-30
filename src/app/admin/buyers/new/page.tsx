@@ -8,16 +8,21 @@ import { addBuyer } from "@/app/admin/buyers/actions";
 import { CredentialModal } from "@/components/admin/CredentialModal";
 import { palette } from "@/lib/palette";
 
-// Case B — manual add. On save the buyer is created (pending/manual_admin) and
-// the credential modal opens immediately (spec §6.2 / §7.5).
+const EMPTY = {
+  business_name: "", owner_name: "", email: "", phone: "+91", city: "", gstin: "",
+  address: "", transport_details: "", broker_details: "", other_details: "", notes: "",
+};
+
+// Case B — manual add. Most fields are optional; the credential modal opens
+// immediately so Rakesh can activate on the spot when ready.
 export default function AddBuyerPage() {
   const router = useRouter();
   const [isPending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<{ id: string; email: string; owner_name: string; business_name: string; phone: string } | null>(null);
-  const [f, setF] = useState({ business_name: "", owner_name: "", email: "", phone: "+91", city: "", gstin: "", notes: "" });
+  const [f, setF] = useState(EMPTY);
 
-  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
+  const set = (k: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
 
   function save() {
     setError(null);
@@ -28,10 +33,20 @@ export default function AddBuyerPage() {
     });
   }
 
-  const field = (label: string, key: keyof typeof f, required = false, type = "text") => (
+  const labelCls = "font-body uppercase";
+  const labelStyle = { fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack };
+  const inputStyle = { borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "7px 2px", fontSize: 13 };
+
+  const field = (label: string, key: keyof typeof EMPTY, required = false, type = "text") => (
     <label className="flex flex-col gap-1.5">
-      <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>{label}{required ? " *" : ""}</span>
-      <input type={type} value={f[key]} onChange={set(key)} className="font-body bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "7px 2px", fontSize: 13 }} />
+      <span className={labelCls} style={labelStyle}>{label}{required ? " *" : ""}</span>
+      <input type={type} value={f[key]} onChange={set(key)} className="font-body bg-transparent outline-none" style={inputStyle} />
+    </label>
+  );
+  const area = (label: string, key: keyof typeof EMPTY) => (
+    <label className="flex flex-col gap-1.5">
+      <span className={labelCls} style={labelStyle}>{label}</span>
+      <textarea rows={2} value={f[key]} onChange={set(key)} className="font-body bg-transparent outline-none resize-none" style={{ border: "1px solid rgba(26,26,26,0.18)", padding: "8px 10px", fontSize: 13 }} />
     </label>
   );
 
@@ -41,15 +56,20 @@ export default function AddBuyerPage() {
         <ChevronLeft size={14} /> Buyers
       </Link>
       <h1 className="font-display mt-3" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>Add Buyer</h1>
+      <p className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige }}>Fill what you have. Email becomes required at credential activation.</p>
 
       <div className="mt-5 flex flex-col gap-4">
-        {field("Business name", "business_name", true)}
+        {field("Business name", "business_name")}
         {field("Owner name", "owner_name", true)}
-        {field("Email", "email", true, "email")}
+        {field("Email", "email", false, "email")}
         {field("Phone", "phone", true)}
-        {field("City", "city", true)}
+        {field("City", "city")}
         {field("GSTIN", "gstin")}
-        {field("Notes", "notes")}
+        {area("Address", "address")}
+        {area("Transport details", "transport_details")}
+        {area("Broker details", "broker_details")}
+        {area("Other details", "other_details")}
+        {area("Notes", "notes")}
         {error && <p className="font-body" style={{ fontSize: 11, color: palette.crimsonText }}>{error}</p>}
         <button type="button" onClick={save} disabled={isPending} className="font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.18em", padding: "12px 0" }}>
           {isPending ? "Saving…" : "Save & Set Credentials"}

@@ -99,12 +99,18 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
             Thank you. Rakesh will confirm availability and pricing, and arrange billing offline. A confirmation
             summary will follow shortly.
           </p>
-          <p className="font-body mt-2" style={{ fontSize: 10, color: palette.mutedGreige, letterSpacing: "0.04em" }}>
-            PDF confirmation &amp; WhatsApp delivery arrive in Phase 4.
-          </p>
         </div>
 
-        <div className="flex gap-3 mt-8 justify-center">
+        <div className="flex gap-3 mt-8 justify-center flex-wrap">
+          <a
+            href={`/api/orders/${o.id}/pdf`}
+            target="_blank"
+            rel="noreferrer"
+            className="font-body uppercase"
+            style={{ background: palette.gold, color: palette.black, fontSize: 10, letterSpacing: "0.2em", padding: "11px 18px" }}
+          >
+            Download PDF
+          </a>
           <Link href="/catalog" className="font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.2em", padding: "11px 18px" }}>
             Continue Browsing
           </Link>
