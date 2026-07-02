@@ -49,3 +49,6 @@ public/fallback-*.js
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# portal.sh runtime (logs + pids)
+.local/
