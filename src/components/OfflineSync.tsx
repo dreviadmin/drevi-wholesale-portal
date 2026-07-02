@@ -43,7 +43,13 @@ export function OfflineSync() {
         const o = item.payload as OrderPayload;
         const buyerId = o.buyerId ?? (o.buyerClientRef ? refMap[o.buyerClientRef] : undefined);
         if (!buyerId) { await updateQueued({ ...item, attempts: item.attempts + 1, lastError: "buyer not synced yet" }); continue; }
-        const res = await submitExhibitionOrder({ sessionId: o.sessionId, eventName: o.eventName, buyerId, items: o.items, staffNote: o.staffNote, buyerNote: o.buyerNote });
+        const res = await submitExhibitionOrder({
+          sessionId: o.sessionId, eventName: o.eventName, buyerId, items: o.items,
+          staffNote: o.staffNote, buyerNote: o.buyerNote,
+          taxMode: o.taxMode, taxRate: o.taxRate,
+          discountType: o.discountType, discountValue: o.discountValue,
+          advanceAmount: o.advanceAmount, paymentMethod: o.paymentMethod, paymentNotes: o.paymentNotes,
+        });
         if (res.ok) await removeQueued(item.id!);
         else await updateQueued({ ...item, attempts: item.attempts + 1, lastError: res.error });
       }

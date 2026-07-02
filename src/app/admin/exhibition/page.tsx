@@ -9,7 +9,7 @@ export default async function ExhibitionPage() {
   const admin = createAdminClient();
   const { data: sessions } = await admin
     .from("exhibition_sessions")
-    .select("id, event_name, started_at, ended_at, orders_count")
+    .select("id, event_name, started_at, ended_at, orders_count, session_type")
     .order("started_at", { ascending: false })
     .limit(10);
   return <ExhibitionHome sessions={sessions ?? []} />;

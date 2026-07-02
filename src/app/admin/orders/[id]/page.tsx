@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { ChevronLeft } from "lucide-react";
 import { requireAdminOrRedirect, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -9,6 +10,8 @@ import { OrderActions } from "./OrderActions";
 import type { Order, Buyer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+const SOURCE_LABEL: Record<string, string> = { portal_self_service: "Portal", exhibition: "Exhibition", in_store: "In-store" };
 
 function fmt(iso: string) { return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }); }
 
@@ -33,18 +36,23 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
             {[buyer?.business_name, buyer?.owner_name, buyer?.phone].filter(Boolean).join(" · ")}
           </div>
           <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige, letterSpacing: "0.04em" }}>
-            {fmt(o.submitted_at)} · Source: {o.source === "exhibition" ? "Exhibition" : "Portal"} · Status: {o.status}
+            {fmt(o.submitted_at)} · Source: {SOURCE_LABEL[o.source] ?? o.source} · Status: {o.status}
           </div>
         </div>
-        {isAdminRole(staff.role) && <OrderActions orderId={o.id} status={o.status} />}
+        {isAdminRole(staff.role) && <OrderActions orderId={o.id} status={o.status} pdfUrl={o.pdf_url} orderNumber={o.order_number} total={o.total_amount} />}
       </div>
 
       <div className="mt-6" style={{ borderTop: "1px solid rgba(26,26,26,0.1)" }}>
         {(o.items ?? []).map((it, i) => (
-          <div key={`${it.sku}-${i}`} className="flex items-start justify-between py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
-            <div>
+          <div key={`${it.sku}-${i}`} className="flex items-start gap-3 py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
+            <div className="relative flex-shrink-0" style={{ width: 56, height: 70, background: palette.ivoryDeep }}>
+              {it.image_url && <Image src={it.image_url} alt={it.title} fill sizes="56px" className="object-cover" />}
+            </div>
+            <div className="min-w-0 flex-1">
               <div className="font-display" style={{ fontSize: 14, color: palette.black, fontWeight: 500 }}>{it.title}</div>
-              <div className="font-body mt-0.5" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.1em" }}>{it.sku} · {it.stock_state}{it.restock_days ? ` · ${it.restock_days}d` : ""}</div>
+              <div className="font-body mt-0.5" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.1em" }}>
+                {it.sku} · {it.stock_state}{it.restock_days ? ` · ${it.restock_days}d` : ""}{it.special_request ? " · SPECIAL QTY REQUEST" : ""}
+              </div>
             </div>
             <div className="text-right">
               <div className="font-body" style={{ fontSize: 12, color: palette.softBlack }}>{it.qty} × {formatINR(it.unit_price)}</div>
@@ -54,10 +62,34 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
         ))}
       </div>
 
-      <div className="flex items-baseline justify-between mt-4">
+      {(o.discount_amount ?? 0) > 0 && (
+        <div className="flex items-baseline justify-between mt-4 font-body" style={{ fontSize: 12, color: palette.goldDeep }}>
+          <span>Discount{o.discount_type === "percent" ? ` (${o.discount_value}%)` : ""}</span><span>− {formatINR(o.discount_amount)}</span>
+        </div>
+      )}
+      {o.tax_mode === "exclusive" && (
+        <div className="flex items-baseline justify-between mt-2 font-body" style={{ fontSize: 12, color: palette.softBlack }}>
+          <span>GST @ {o.tax_rate}% (added)</span><span>{formatINR(o.tax_amount)}</span>
+        </div>
+      )}
+      <div className="flex items-baseline justify-between mt-2">
         <span className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.18em", color: palette.softBlack }}>Total</span>
         <span className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>{formatINR(o.total_amount)}</span>
       </div>
+      {o.tax_mode === "inclusive" && (
+        <div className="font-body text-right mt-1" style={{ fontSize: 10, color: palette.mutedGreige }}>includes GST @ {o.tax_rate}% = {formatINR(o.tax_amount)}</div>
+      )}
+      {(o.advance_amount ?? 0) > 0 && (
+        <div className="mt-3 p-3" style={{ background: palette.ivoryDeep }}>
+          <div className="flex justify-between font-body" style={{ fontSize: 12, color: palette.softBlack }}>
+            <span>Advance received{o.payment_method ? ` (${o.payment_method})` : ""}</span><span>{formatINR(o.advance_amount)}</span>
+          </div>
+          <div className="flex justify-between font-body mt-1" style={{ fontSize: 13, color: palette.goldDeep, fontWeight: 600 }}>
+            <span>Balance due</span><span>{formatINR(Math.max(0, o.total_amount - o.advance_amount))}</span>
+          </div>
+          {o.payment_notes && <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige }}>{o.payment_notes}</div>}
+        </div>
+      )}
 
       {o.notes && (
         <div className="mt-5 p-3" style={{ background: palette.ivoryDeep }}>

@@ -61,10 +61,26 @@ export interface PdfBuyer {
   city: string | null;
 }
 
+const SOURCE_LABEL: Record<string, string> = {
+  portal_self_service: "Portal order",
+  exhibition: "Exhibition order",
+  in_store: "In-store order",
+};
+
 function OrderDoc({ order, buyer }: { order: Order; buyer: PdfBuyer }) {
   const items = order.items ?? [];
   const maxLead = items.filter((i) => i.stock_state === "made_to_order").reduce((m, i) => Math.max(m, i.restock_days ?? 0), 0);
   const date = new Date(order.submitted_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
+
+  // Staff-assisted orders produce an INVOICE (tax + payment recorded on the
+  // spot); client self-service stays an ORDER REQUEST pending confirmation.
+  const isInvoice = order.source !== "portal_self_service";
+  const subtotal = items.reduce((sum, i) => sum + i.qty * i.unit_price, 0);
+  const taxed = order.tax_mode === "inclusive" || order.tax_mode === "exclusive";
+  const discount = order.discount_amount ?? 0;
+  const advance = order.advance_amount ?? 0;
+  const balance = Math.max(0, (order.total_amount ?? 0) - advance);
+  const showBreakdown = discount > 0 || (taxed && order.tax_mode === "exclusive");
 
   return (
     <Document>
@@ -72,12 +88,12 @@ function OrderDoc({ order, buyer }: { order: Order; buyer: PdfBuyer }) {
         <View style={s.headerRow}>
           <View>
             <Text style={s.wordmark}>DREVI</Text>
-            <Text style={s.tagline}>WHOLESALE</Text>
+            <Text style={s.tagline}>{isInvoice ? "WHOLESALE - INVOICE" : "WHOLESALE"}</Text>
           </View>
           <View style={{ alignItems: "flex-end" }}>
             <Text style={s.orderNo}>{order.order_number}</Text>
             <Text style={s.meta}>{date}</Text>
-            <Text style={s.meta}>{order.source === "exhibition" ? "Exhibition order" : "Portal order"}</Text>
+            <Text style={s.meta}>{SOURCE_LABEL[order.source] ?? "Order"}</Text>
           </View>
         </View>
 
@@ -98,18 +114,64 @@ function OrderDoc({ order, buyer }: { order: Order; buyer: PdfBuyer }) {
           <View style={s.row} key={`${it.sku}-${i}`}>
             <View style={s.cItem}>
               <Text style={s.itemTitle}>{it.title}</Text>
-              <Text style={s.sku}>{it.sku}</Text>
+              <Text style={s.sku}>{it.sku}{it.special_request ? "  ·  SPECIAL QTY REQUEST" : ""}</Text>
             </View>
             <Text style={[s.state, s.cState]}>{stateLabel(it)}</Text>
-            <Text style={[s.cQty, { fontSize: 9 }]}>{it.qty} x {inr(it.unit_price)}</Text>
+            <Text style={[s.cQty, { fontSize: 9 }]}>
+              {it.qty} x {inr(it.unit_price)}{it.original_price != null ? ` (was ${inr(it.original_price)})` : ""}
+            </Text>
             <Text style={[s.cAmt, { fontSize: 10, fontFamily: "Times-Bold" }]}>{inr(it.qty * it.unit_price)}</Text>
           </View>
         ))}
+
+        {/* Discount + tax breakdown (staff-recorded) */}
+        {showBreakdown && (
+          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 10 }}>
+            <Text style={{ fontSize: 9, color: C.greige }}>Subtotal</Text>
+            <Text style={{ fontSize: 9 }}>{inr(subtotal)}</Text>
+          </View>
+        )}
+        {discount > 0 && (
+          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 3 }}>
+            <Text style={{ fontSize: 9, color: C.greige }}>
+              Discount{order.discount_type === "percent" ? ` (${order.discount_value}%)` : ""}
+            </Text>
+            <Text style={{ fontSize: 9 }}>- {inr(discount)}</Text>
+          </View>
+        )}
+        {taxed && order.tax_mode === "exclusive" && (
+          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 3 }}>
+            <Text style={{ fontSize: 9, color: C.greige }}>GST @ {order.tax_rate}%</Text>
+            <Text style={{ fontSize: 9 }}>{inr(order.tax_amount)}</Text>
+          </View>
+        )}
 
         <View style={s.totalRow}>
           <Text style={s.totalLabel}>Total</Text>
           <Text style={s.totalAmt}>{inr(order.total_amount)}</Text>
         </View>
+        {taxed && order.tax_mode === "inclusive" && (
+          <Text style={{ fontSize: 8, color: C.greige, textAlign: "right", marginTop: 2 }}>
+            Includes GST @ {order.tax_rate}% = {inr(order.tax_amount)}
+          </Text>
+        )}
+
+        {/* Payment */}
+        {advance > 0 && (
+          <View style={{ marginTop: 8 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ fontSize: 9, color: C.greige }}>
+                Advance received{order.payment_method ? ` (${order.payment_method})` : ""}
+              </Text>
+              <Text style={{ fontSize: 9 }}>{inr(advance)}</Text>
+            </View>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 3 }}>
+              <Text style={{ fontSize: 10, fontFamily: "Times-Bold" }}>Balance due</Text>
+              <Text style={{ fontSize: 11, fontFamily: "Times-Bold", color: C.goldDeep }}>{inr(balance)}</Text>
+            </View>
+          </View>
+        )}
+
         {maxLead > 0 && <Text style={s.lead}>Estimated availability: {maxLead} days</Text>}
 
         {order.notes && (
@@ -120,7 +182,9 @@ function OrderDoc({ order, buyer }: { order: Order; buyer: PdfBuyer }) {
         )}
 
         <Text style={s.footer}>
-          This is an order request, not an invoice. Rakesh will confirm availability and billing.{"\n"}
+          {isInvoice
+            ? "Thank you for your business."
+            : "This is an order request, not an invoice. Rakesh will confirm availability and billing."}{"\n"}
           Drevi Fashion - Dadar West, Mumbai - +91 88280 43555 - Dream Forward. Root Deep.
         </Text>
       </Page>

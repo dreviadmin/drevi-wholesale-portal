@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireAdminOrRedirect, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { signedCardUrl } from "@/lib/storage";
 import { BuyerDetail } from "./BuyerDetail";
 import type { Buyer, Order } from "@/lib/types";
 
@@ -21,6 +22,7 @@ export default async function BuyerDetailPage({ params }: { params: { id: string
   ]);
 
   const staffName = new Map<string, string>((staffRows ?? []).map((s) => [s.id, s.name ?? "Staff"]));
+  const cardUrl = b.card_image_path ? await signedCardUrl(b.card_image_path) : null;
 
   return (
     <BuyerDetail
@@ -44,6 +46,7 @@ export default async function BuyerDetailPage({ params }: { params: { id: string
         approved_at: b.approved_at,
         approvedByName: b.approved_by ? staffName.get(b.approved_by) ?? null : null,
         hasPassword: !!b.encrypted_password,
+        cardUrl,
       }}
       orders={((orders ?? []) as Pick<Order, "id" | "order_number" | "total_amount" | "status" | "submitted_at">[])}
       activity={(audit ?? []).map((a) => ({

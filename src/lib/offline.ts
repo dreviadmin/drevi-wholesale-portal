@@ -13,9 +13,16 @@ export interface OrderPayload {
   eventName: string;
   buyerId?: string; // existing buyer
   buyerClientRef?: string; // links to a queued capture made offline
-  items: { sku: string; qty: number }[];
+  items: { sku: string; qty: number; unitPrice?: number }[];
   staffNote?: string;
   buyerNote?: string;
+  taxMode?: "none" | "inclusive" | "exclusive";
+  taxRate?: number;
+  discountType?: "percent" | "absolute";
+  discountValue?: number;
+  advanceAmount?: number;
+  paymentMethod?: string;
+  paymentNotes?: string;
 }
 export interface CapturePayload {
   clientRef: string;

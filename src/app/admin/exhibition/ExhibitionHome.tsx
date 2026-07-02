@@ -6,22 +6,31 @@ import Link from "next/link";
 import { Store, Plus, ChevronRight } from "lucide-react";
 import { startSession } from "./actions";
 import { palette } from "@/lib/palette";
+import type { SessionType } from "@/lib/types";
 
-interface SessionDTO { id: string; event_name: string; started_at: string; ended_at: string | null; orders_count: number; }
+interface SessionDTO { id: string; event_name: string; started_at: string; ended_at: string | null; orders_count: number; session_type?: string; }
 
 function fmt(iso: string) { return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }); }
 
 export function ExhibitionHome({ sessions }: { sessions: SessionDTO[] }) {
   const router = useRouter();
   const [event, setEvent] = useState("");
+  const [sessionType, setSessionType] = useState<SessionType>("exhibition");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, start] = useTransition();
 
+  function pickType(t: SessionType) {
+    setSessionType(t);
+    // Sensible default name for in-store; exhibitions get a real event name.
+    if (t === "in_store" && !event.trim()) setEvent("In-store");
+    if (t === "exhibition" && event.trim() === "In-store") setEvent("");
+  }
+
   function begin() {
     setError(null);
     start(async () => {
-      const res = await startSession(event);
+      const res = await startSession(event, sessionType);
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
       router.push(`/admin/exhibition/${res.id}`);
     });
@@ -40,9 +49,32 @@ export function ExhibitionHome({ sessions }: { sessions: SessionDTO[] }) {
         </button>
       ) : (
         <div className="mt-5 flex flex-col gap-3 max-w-sm">
+          <div className="flex gap-2">
+            {(["exhibition", "in_store"] as const).map((t) => {
+              const active = sessionType === t;
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => pickType(t)}
+                  className="font-body uppercase"
+                  style={{
+                    color: active ? palette.ivory : palette.softBlack,
+                    background: active ? palette.black : "transparent",
+                    border: active ? "none" : "1px solid rgba(26,26,26,0.25)",
+                    padding: "9px 16px",
+                    fontSize: 10,
+                    letterSpacing: "0.16em",
+                  }}
+                >
+                  {t === "exhibition" ? "Exhibition" : "In-store"}
+                </button>
+              );
+            })}
+          </div>
           <label className="flex flex-col gap-1.5">
-            <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>Event name</span>
-            <input autoFocus value={event} onChange={(e) => setEvent(e.target.value)} placeholder="e.g. Bridal Asia 2026" className="font-body bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "7px 2px", fontSize: 14 }} />
+            <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>{sessionType === "in_store" ? "Session name" : "Event name"}</span>
+            <input autoFocus value={event} onChange={(e) => setEvent(e.target.value)} placeholder={sessionType === "in_store" ? "In-store" : "e.g. Bridal Asia 2026"} className="font-body bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "7px 2px", fontSize: 14 }} />
           </label>
           {error && <p className="font-body" style={{ fontSize: 11, color: palette.crimsonText }}>{error}</p>}
           <div className="flex gap-2">
@@ -60,7 +92,7 @@ export function ExhibitionHome({ sessions }: { sessions: SessionDTO[] }) {
           <Link key={s.id} href={`/admin/exhibition/${s.id}`} className="flex items-center justify-between py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
             <div>
               <div className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>{s.event_name}</div>
-              <div className="font-body mt-0.5" style={{ fontSize: 10, color: palette.mutedGreige }}>{fmt(s.started_at)} · {s.orders_count} order{s.orders_count === 1 ? "" : "s"} · {s.ended_at ? "Ended" : "Active"}</div>
+              <div className="font-body mt-0.5" style={{ fontSize: 10, color: palette.mutedGreige }}>{s.session_type === "in_store" ? "In-store" : "Exhibition"} · {fmt(s.started_at)} · {s.orders_count} order{s.orders_count === 1 ? "" : "s"} · {s.ended_at ? "Ended" : "Active"}</div>
             </div>
             <ChevronRight size={16} color={palette.mutedGreige} />
           </Link>

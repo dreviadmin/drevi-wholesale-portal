@@ -7,6 +7,9 @@ import type { WholesaleProduct, StockState } from "@/lib/types";
 export interface RawCartItem {
   sku: string;
   qty: number;
+  // Client-raised "special quantity request": bypasses MOQ/cap blocks, flagged
+  // through to the order + PDF for Rakesh's confirmation.
+  special?: boolean;
 }
 
 export interface CartLine {
@@ -15,6 +18,7 @@ export interface CartLine {
   stockState: StockState;
   cap: number | null; // upper bound (Limited), else null
   belowMoq: boolean;
+  special: boolean;
   lineTotal: number;
 }
 
@@ -34,7 +38,7 @@ export async function getRawCart(buyerId: string): Promise<RawCartItem[]> {
   if (!Array.isArray(items)) return [];
   return items
     .filter((i): i is RawCartItem => i && typeof i.sku === "string" && Number.isFinite(i.qty))
-    .map((i) => ({ sku: i.sku, qty: Math.max(1, Math.floor(i.qty)) }));
+    .map((i) => ({ sku: i.sku, qty: Math.max(1, Math.floor(i.qty)), special: i.special === true }));
 }
 
 export async function getDetailedCart(buyerId: string): Promise<DetailedCart> {
@@ -57,14 +61,17 @@ export async function getDetailedCart(buyerId: string): Promise<DetailedCart> {
     const stockState = getStockState(product);
     if (stockState === "sold_out") continue; // sold out can't be ordered
     const cap = qtyCap(product);
-    const qty = cap != null ? Math.min(it.qty, cap) : it.qty;
+    const special = it.special === true;
+    // Special requests carry the exact asked-for qty (no clamp) — flagged for
+    // Rakesh rather than blocked.
+    const qty = !special && cap != null ? Math.min(it.qty, cap) : it.qty;
     const belowMoq = product.min_order_qty != null && qty < product.min_order_qty;
-    lines.push({ product, qty, stockState, cap, belowMoq, lineTotal: qty * product.wholesale_price });
+    lines.push({ product, qty, stockState, cap, belowMoq, special, lineTotal: qty * product.wholesale_price });
   }
 
   const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0);
   const totalQty = lines.reduce((s, l) => s + l.qty, 0);
-  const hasBlock = lines.some((l) => l.belowMoq);
+  const hasBlock = lines.some((l) => l.belowMoq && !l.special);
   const maxLeadDays = lines
     .filter((l) => l.stockState === "made_to_order")
     .reduce((m, l) => Math.max(m, l.product.restock_days ?? 0), 0);

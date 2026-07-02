@@ -58,11 +58,27 @@ warm_ping() {
     "$SUPABASE_URL/rest/v1/" || true
 }
 
+daily_backup() {
+  # One data backup per calendar day (gzipped JSON, newest 14 kept).
+  local today marker
+  today=$(date +%Y-%m-%d)
+  marker="$LOG_DIR/last-backup"
+  if [ ! -f "$marker" ] || [ "$(cat "$marker" 2>/dev/null)" != "$today" ]; then
+    echo "$(date +%H:%M:%S) running daily backup…"
+    if (cd "$PORTAL_DIR" && node scripts/backup.mjs); then
+      echo "$today" > "$marker"
+    else
+      echo "$(date +%H:%M:%S) backup failed — will retry next cycle"
+    fi
+  fi
+}
+
 _keepalive_loop() {
-  # Runs forever, restoring on pause + a warm ping on interval.
+  # Runs forever: restore on pause, warm ping, once-a-day backup.
   while true; do
     restore_if_paused
     warm_ping
+    daily_backup
     sleep "$KEEP_INTERVAL"
   done
 }

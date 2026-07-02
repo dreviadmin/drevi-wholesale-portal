@@ -38,6 +38,7 @@ interface BuyerDTO {
   approved_at: string | null;
   approvedByName: string | null;
   hasPassword: boolean;
+  cardUrl?: string | null;
 }
 interface OrderDTO { id: string; order_number: string; total_amount: number; status: OrderStatus; submitted_at: string; }
 interface ActivityDTO { event_type: AuditEventType; event_at: string; notes: string | null; staffName: string | null; }
@@ -176,6 +177,17 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
               <button type="button" onClick={submitChange} disabled={isPending || newPw.length < 6} className="font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 12px" }}>Save</button>
             </div>
           )}
+        </section>
+      )}
+
+      {/* Visiting card / photo */}
+      {buyer.cardUrl && (
+        <section className="mt-7">
+          <h2 className="font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.2em", color: palette.gold }}>Visiting Card / Photo</h2>
+          <a href={buyer.cardUrl} target="_blank" rel="noreferrer" className="inline-block mt-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={buyer.cardUrl} alt="Visiting card" style={{ maxWidth: 260, maxHeight: 170, objectFit: "cover", border: "1px solid rgba(26,26,26,0.15)" }} />
+          </a>
         </section>
       )}
 

@@ -28,6 +28,7 @@ export default async function CartPage() {
         stockState: l.stockState,
         restockDays: l.product.restock_days,
         belowMoq: l.belowMoq,
+        special: l.special,
         lineTotal: l.lineTotal,
       }))}
       subtotal={cart?.subtotal ?? 0}

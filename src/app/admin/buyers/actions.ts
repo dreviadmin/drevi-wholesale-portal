@@ -4,10 +4,11 @@ import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireAdmin } from "@/lib/staff";
+import { requireAdmin, requireStaff } from "@/lib/staff";
 import { writeAuditEvent } from "@/lib/audit";
 import { encryptPassword, decryptPassword } from "@/lib/crypto";
 import { generateMemorablePassword } from "@/lib/password";
+import { uploadBuyerCardImage } from "@/lib/storage";
 import type { BuyerStatus } from "@/lib/types";
 
 function reqMeta() {
@@ -274,6 +275,27 @@ export async function addBuyer(form: {
   }
   revalidatePath("/admin/buyers");
   return { ok: true, id: data.id };
+}
+
+// Visiting card / photo upload. Staff-level (exhibition capture uses it too).
+export async function uploadBuyerCard(buyerId: string, formData: FormData): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await requireStaff();
+  } catch {
+    return { ok: false, error: "Not authorized." };
+  }
+  const file = formData.get("card");
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "No image supplied." };
+  if (file.size > 5 * 1024 * 1024) return { ok: false, error: "Image must be under 5 MB." };
+  try {
+    const path = await uploadBuyerCardImage(buyerId, file);
+    const admin = createAdminClient();
+    await admin.from("buyers").update({ card_image_path: path }).eq("id", buyerId);
+    revalidate(buyerId);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
 }
 
 export async function addNote(buyerId: string, note: string): Promise<void> {

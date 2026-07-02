@@ -6,7 +6,9 @@ export type BuyerStatus = "pending" | "active" | "suspended" | "rejected";
 export type BuyerSource = "inquiry_form" | "exhibition" | "manual_admin";
 export type StaffRole = "super_admin" | "admin" | "staff";
 export type OrderStatus = "submitted" | "confirmed" | "fulfilled" | "cancelled";
-export type OrderSource = "portal_self_service" | "exhibition";
+export type OrderSource = "portal_self_service" | "exhibition" | "in_store";
+export type TaxMode = "none" | "inclusive" | "exclusive";
+export type SessionType = "exhibition" | "in_store";
 
 export type AuditEventType =
   | "credential_created"
@@ -53,6 +55,7 @@ export interface Buyer {
   transport_details: string | null;
   broker_details: string | null;
   other_details: string | null;
+  card_image_path: string | null;
   status: BuyerStatus;
   source: BuyerSource;
   encrypted_password: string | null;
@@ -83,7 +86,13 @@ export interface OrderItem {
   qty: number;
   stock_state: StockState;
   restock_days: number | null;
+  image_url?: string | null;
+  special_request?: boolean;
+  // Set when staff overrode the wholesale price at billing time.
+  original_price?: number;
 }
+
+export type DiscountType = "percent" | "absolute";
 
 export interface Order {
   id: string;
@@ -95,6 +104,15 @@ export interface Order {
   exhibition_event: string | null;
   items: OrderItem[];
   total_amount: number;
+  discount_type: DiscountType | null;
+  discount_value: number | null;
+  discount_amount: number;
+  tax_mode: TaxMode;
+  tax_rate: number | null;
+  tax_amount: number;
+  advance_amount: number;
+  payment_method: string | null;
+  payment_notes: string | null;
   notes: string | null;
   pdf_url: string | null;
   pdf_sent_via: string | null;

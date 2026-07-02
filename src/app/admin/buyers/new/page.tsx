@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { addBuyer } from "@/app/admin/buyers/actions";
+import { addBuyer, uploadBuyerCard } from "@/app/admin/buyers/actions";
 import { CredentialModal } from "@/components/admin/CredentialModal";
 import { palette } from "@/lib/palette";
 
@@ -21,6 +21,7 @@ export default function AddBuyerPage() {
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<{ id: string; email: string; owner_name: string; business_name: string; phone: string } | null>(null);
   const [f, setF] = useState(EMPTY);
+  const [cardFile, setCardFile] = useState<File | null>(null);
 
   const set = (k: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
 
@@ -29,6 +30,11 @@ export default function AddBuyerPage() {
     start(async () => {
       const res = await addBuyer(f);
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
+      if (cardFile) {
+        const fd = new FormData();
+        fd.append("card", cardFile);
+        await uploadBuyerCard(res.id!, fd); // best-effort; buyer exists either way
+      }
       setCreated({ id: res.id!, email: f.email.trim().toLowerCase(), owner_name: f.owner_name, business_name: f.business_name, phone: f.phone });
     });
   }
@@ -70,6 +76,18 @@ export default function AddBuyerPage() {
         {area("Broker details", "broker_details")}
         {area("Other details", "other_details")}
         {area("Notes", "notes")}
+        <label className="flex flex-col gap-1.5">
+          <span className={labelCls} style={labelStyle}>Visiting card / photo</span>
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={(e) => setCardFile(e.target.files?.[0] ?? null)}
+            className="font-body"
+            style={{ fontSize: 12 }}
+          />
+          {cardFile && <span className="font-body" style={{ fontSize: 10, color: palette.goldDeep }}>{cardFile.name} ({Math.round(cardFile.size / 1024)} KB)</span>}
+        </label>
         {error && <p className="font-body" style={{ fontSize: 11, color: palette.crimsonText }}>{error}</p>}
         <button type="button" onClick={save} disabled={isPending} className="font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.18em", padding: "12px 0" }}>
           {isPending ? "Saving…" : "Save & Set Credentials"}

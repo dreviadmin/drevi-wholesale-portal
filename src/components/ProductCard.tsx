@@ -10,7 +10,8 @@ import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
 
 // Reusable across buyer, exhibition, and admin. When `cartQty` > 0 the card
-// renders a − / + stepper instead of the Add button.
+// renders a − / + stepper instead of the Add button. Staff flows pass
+// enforceCaps={false}: stock caps become advisory and the stepper never locks.
 export function ProductCard({
   product,
   showPrices = true,
@@ -18,6 +19,9 @@ export function ProductCard({
   cartQty = 0,
   onChangeQty,
   detailHref,
+  enforceCaps = true,
+  onGoToCart,
+  variantBar,
 }: {
   product: WholesaleProduct;
   showPrices?: boolean;
@@ -25,11 +29,14 @@ export function ProductCard({
   cartQty?: number;
   onChangeQty?: (product: WholesaleProduct, qty: number) => void;
   detailHref?: string;
+  enforceCaps?: boolean;
+  onGoToCart?: () => void;
+  variantBar?: React.ReactNode;
 }) {
   const state = getStockState(product);
   const canAdd = state !== "sold_out";
   const cap = qtyCap(product);
-  const atCap = cap != null && cartQty >= cap;
+  const atCap = enforceCaps && cap != null && cartQty >= cap;
   const initialQty = product.min_order_qty ?? 1;
 
   const titleBlock = (
@@ -64,6 +71,8 @@ export function ProductCard({
           <StockPill product={product} compact={!large} />
         </div>
 
+        {variantBar}
+
         <div className="mt-3 flex items-baseline justify-between gap-2">
           {showPrices ? (
             <div className="font-display" style={{ color: palette.black, fontSize: large ? 18 : 16, fontWeight: 600, letterSpacing: "0.01em" }}>
@@ -82,6 +91,7 @@ export function ProductCard({
 
         {/* Add button OR stepper */}
         {cartQty > 0 && canAdd ? (
+          <>
           <div
             className="mt-3 w-full grid items-center"
             style={{
@@ -118,6 +128,17 @@ export function ProductCard({
               <Plus size={14} strokeWidth={2.5} />
             </button>
           </div>
+          {onGoToCart && (
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onGoToCart(); }}
+              className="mt-1.5 w-full text-center font-body uppercase"
+              style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.goldDeep, padding: "4px 0" }}
+            >
+              Go to cart →
+            </button>
+          )}
+          </>
         ) : (
           <button
             type="button"

@@ -1,6 +1,8 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { Order, OrderItem } from "@/lib/types";
@@ -41,6 +43,18 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
     .filter((i) => i.stock_state === "made_to_order")
     .reduce((m, i) => Math.max(m, i.restock_days ?? 0), 0);
 
+  // Older orders predate image snapshots — backfill thumbs by SKU.
+  const missingImg = items.filter((i) => !i.image_url).map((i) => i.sku);
+  const imgBySku = new Map<string, string>();
+  if (missingImg.length > 0) {
+    const admin = createAdminClient();
+    const { data: prods } = await admin.from("wholesale_products").select("sku, image_urls").in("sku", missingImg);
+    for (const p of prods ?? []) {
+      const first = Array.isArray(p.image_urls) ? (p.image_urls as string[])[0] : undefined;
+      if (first) imgBySku.set(p.sku, first);
+    }
+  }
+
   return (
     <div className="min-h-screen" style={{ background: palette.ivory }}>
       <div className="px-4 py-3.5 sticky top-0 z-10 flex items-center justify-center" style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
@@ -61,19 +75,27 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
         </div>
 
         <div className="mt-8" style={{ borderTop: "1px solid rgba(26,26,26,0.1)" }}>
-          {items.map((it, idx) => (
-            <div key={`${it.sku}-${idx}`} className="flex items-start justify-between py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
-              <div className="min-w-0 pr-3">
-                <div className="font-display" style={{ fontSize: 14, color: palette.black, fontWeight: 500 }}>{it.title}</div>
-                <div className="font-body mt-0.5" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.1em" }}>{it.sku}</div>
-                <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep, letterSpacing: "0.04em" }}>{itemStateLabel(it)}</div>
+          {items.map((it, idx) => {
+            const img = it.image_url ?? imgBySku.get(it.sku) ?? null;
+            return (
+              <div key={`${it.sku}-${idx}`} className="flex items-start gap-3 py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
+                <div className="relative flex-shrink-0" style={{ width: 56, height: 70, background: palette.ivoryDeep }}>
+                  {img && <Image src={img} alt={it.title} fill sizes="56px" className="object-cover" />}
+                </div>
+                <div className="min-w-0 flex-1 pr-3">
+                  <div className="font-display" style={{ fontSize: 14, color: palette.black, fontWeight: 500 }}>{it.title}</div>
+                  <div className="font-body mt-0.5" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.1em" }}>{it.sku}</div>
+                  <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep, letterSpacing: "0.04em" }}>
+                    {itemStateLabel(it)}{it.special_request ? " · Special qty request" : ""}
+                  </div>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <div className="font-body" style={{ fontSize: 12, color: palette.softBlack }}>{it.qty} × {formatINR(it.unit_price)}</div>
+                  <div className="font-display mt-0.5" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>{formatINR(it.qty * it.unit_price)}</div>
+                </div>
               </div>
-              <div className="text-right flex-shrink-0">
-                <div className="font-body" style={{ fontSize: 12, color: palette.softBlack }}>{it.qty} × {formatINR(it.unit_price)}</div>
-                <div className="font-display mt-0.5" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>{formatINR(it.qty * it.unit_price)}</div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="flex items-baseline justify-between mt-4">

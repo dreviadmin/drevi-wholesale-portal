@@ -76,6 +76,7 @@ export async function setQty(sku: string, qty: number): Promise<{ qty: number }>
       items = items.filter((i) => i.sku !== sku);
     } else if (line) {
       line.qty = clamped;
+      line.special = false; // normal adjustment clears any special request
       storedQty = clamped;
     } else {
       items.push({ sku, qty: clamped });
@@ -84,6 +85,30 @@ export async function setQty(sku: string, qty: number): Promise<{ qty: number }>
   }
   await saveCart(buyer.id, items);
   return { qty: storedQty };
+}
+
+/**
+ * Client "special quantity request" — stores the exact asked-for qty without
+ * MOQ/cap clamping and flags the line. It doesn't reserve stock; Rakesh
+ * confirms feasibility when processing the order.
+ */
+export async function setSpecialQty(sku: string, qty: number): Promise<{ qty: number }> {
+  const buyer = await resolveActiveBuyer();
+  const items = await getRawCart(buyer.id);
+  const product = await loadProduct(sku);
+  if (!product || !product.wholesale_visible || getStockState(product) === "sold_out") {
+    return { qty: 0 };
+  }
+  const wanted = Math.max(1, Math.floor(qty));
+  const line = items.find((i) => i.sku === sku);
+  if (line) {
+    line.qty = wanted;
+    line.special = true;
+  } else {
+    items.push({ sku, qty: wanted, special: true });
+  }
+  await saveCart(buyer.id, items);
+  return { qty: wanted };
 }
 
 export async function removeFromCart(sku: string): Promise<void> {
@@ -113,7 +138,7 @@ export async function submitOrder(_prev: SubmitState, formData: FormData): Promi
 
   const cart = await getDetailedCart(buyer.id);
   if (cart.lines.length === 0) return { error: "Your cart is empty." };
-  if (cart.hasBlock) return { error: "Some items are below their minimum order quantity. Adjust them before submitting." };
+  if (cart.hasBlock) return { error: "Some items are below their minimum order quantity. Adjust them (or request a special quantity) before submitting." };
 
   const items: OrderItem[] = cart.lines.map((l) => ({
     sku: l.product.sku,
@@ -122,18 +147,22 @@ export async function submitOrder(_prev: SubmitState, formData: FormData): Promi
     qty: l.qty,
     stock_state: l.stockState,
     restock_days: l.stockState === "made_to_order" ? l.product.restock_days : null,
+    image_url: l.product.image_urls?.[0] ?? null,
+    special_request: l.special || undefined,
   }));
 
   const admin = createAdminClient();
-  // Daily sequence for DW-YYYYMMDD-###; retry on the rare unique collision.
+  // Daily sequence for DW-YYYYMMDD-###. The unique index is the real guard
+  // (Postgres is ACID); we re-count on each attempt so simultaneous submits
+  // converge after a collision instead of re-clashing.
   const ymdPrefix = orderNumberFor(0).slice(0, 12); // "DW-YYYYMMDD-"
-  const { count: todayCount } = await admin
-    .from("orders")
-    .select("*", { count: "exact", head: true })
-    .like("order_number", `${ymdPrefix}%`);
 
   let orderId: string | null = null;
-  for (let attempt = 1; attempt <= 5 && !orderId; attempt++) {
+  for (let attempt = 1; attempt <= 8 && !orderId; attempt++) {
+    const { count: todayCount } = await admin
+      .from("orders")
+      .select("*", { count: "exact", head: true })
+      .like("order_number", `${ymdPrefix}%`);
     const order_number = orderNumberFor((todayCount ?? 0) + attempt);
     const { data, error } = await admin
       .from("orders")

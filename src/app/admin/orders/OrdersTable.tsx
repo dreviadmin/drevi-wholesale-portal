@@ -17,8 +17,8 @@ export interface OrderRowDTO {
 }
 
 const STATUSES: OrderStatus[] = ["submitted", "confirmed", "fulfilled", "cancelled"];
-const SOURCES: OrderSource[] = ["portal_self_service", "exhibition"];
-const SOURCE_LABEL: Record<OrderSource, string> = { portal_self_service: "Portal", exhibition: "Exhibition" };
+const SOURCES: OrderSource[] = ["portal_self_service", "exhibition", "in_store"];
+const SOURCE_LABEL: Record<OrderSource, string> = { portal_self_service: "Portal", exhibition: "Exhibition", in_store: "In-store" };
 
 function fmt(iso: string) { return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }); }
 

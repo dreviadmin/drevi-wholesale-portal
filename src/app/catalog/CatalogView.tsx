@@ -2,12 +2,14 @@
 
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Search } from "lucide-react";
+import { Search, QrCode } from "lucide-react";
 import { DreviHeader } from "@/components/DreviHeader";
 import { FilterChips } from "@/components/FilterChips";
-import { ProductCard } from "@/components/ProductCard";
+import { GroupedProductCard } from "@/components/GroupedProductCard";
+import { QrScanner } from "@/components/QrScanner";
 import { setQty as setCartQty } from "@/app/cart/actions";
 import { qtyCap } from "@/lib/stock";
+import { groupByBase } from "@/lib/variants";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
 
@@ -34,9 +36,13 @@ export function CatalogView({
   const [category, setCategory] = useState("All");
   const [query, setQuery] = useState("");
   const [cart, setCart] = useState<Record<string, number>>(initialCartBySku);
+  const [scanning, setScanning] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Scanner callbacks outlive renders — read the live cart via a ref.
+  const cartRef = useRef(cart);
+  cartRef.current = cart;
 
   const categories = useMemo(() => buildCategories(products), [products]);
   const filtered = useMemo(() => {
@@ -47,6 +53,7 @@ export function CatalogView({
       return (p.title?.toLowerCase().includes(q) ?? false) || p.sku.toLowerCase().includes(q);
     });
   }, [category, query, products]);
+  const groups = useMemo(() => groupByBase(filtered), [filtered]);
 
   const cartCount = useMemo(() => Object.values(cart).filter((q) => q > 0).length, [cart]);
 
@@ -54,6 +61,17 @@ export function CatalogView({
     setToast(msg);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 2200);
+  }
+
+  // QR decode → add to cart (continuous: scanner stays open, returns feedback).
+  function handleScan(text: string): { ok: boolean; message: string } {
+    const sku = text.trim().toUpperCase();
+    const product = products.find((p) => p.sku.toUpperCase() === sku);
+    if (!product) return { ok: false, message: `SKU not found: ${text.trim()}` };
+    const current = cartRef.current[product.sku] ?? 0;
+    const next = current === 0 ? (product.min_order_qty ?? 1) : current + 1;
+    changeQty(product, next);
+    return { ok: true, message: `${product.title ?? product.sku} — ${next} in cart` };
   }
 
   function changeQty(product: WholesaleProduct, qty: number) {
@@ -86,7 +104,7 @@ export function CatalogView({
       <DreviHeader businessName={businessName} cartCount={cartCount} onCart={() => router.push("/cart")} />
       <FilterChips categories={categories} active={category} onSelect={setCategory} />
 
-      {/* Search */}
+      {/* Search + scan */}
       <div className="px-4 py-3" style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.05)" }}>
         <div className="flex items-center gap-2 max-w-md" style={{ border: "1px solid rgba(26,26,26,0.18)", padding: "8px 10px" }}>
           <Search size={15} color={palette.mutedGreige} strokeWidth={1.7} />
@@ -97,6 +115,15 @@ export function CatalogView({
             className="font-body bg-transparent outline-none w-full"
             style={{ fontSize: 12.5, color: palette.black }}
           />
+          <button
+            type="button"
+            onClick={() => setScanning(true)}
+            aria-label="Scan QR"
+            className="flex items-center gap-1.5 font-body uppercase flex-shrink-0"
+            style={{ color: palette.goldDeep, fontSize: 9, letterSpacing: "0.14em" }}
+          >
+            <QrCode size={17} strokeWidth={1.8} /> Scan
+          </button>
         </div>
       </div>
 
@@ -113,13 +140,14 @@ export function CatalogView({
           </div>
         ) : (
           <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 ${isPending ? "opacity-95" : ""}`}>
-            {filtered.map((p) => (
-              <ProductCard
-                key={p.sku}
-                product={p}
-                cartQty={cart[p.sku] ?? 0}
+            {groups.map((g) => (
+              <GroupedProductCard
+                key={g.base}
+                variants={g.variants}
+                cartBySku={cart}
                 onChangeQty={changeQty}
-                detailHref={`/product/${encodeURIComponent(p.sku)}`}
+                detailHrefFor={(sku) => `/product/${encodeURIComponent(sku)}`}
+                onGoToCart={() => router.push("/cart")}
               />
             ))}
           </div>
@@ -133,10 +161,18 @@ export function CatalogView({
       {toast && (
         <div
           className="fixed left-1/2 -translate-x-1/2 bottom-6 font-body uppercase"
-          style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.18em", padding: "11px 20px", boxShadow: "0 8px 30px rgba(26,26,26,0.3)" }}
+          style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.18em", padding: "11px 20px", boxShadow: "0 8px 30px rgba(26,26,26,0.3)", zIndex: 60 }}
         >
           {toast}
         </div>
+      )}
+
+      {scanning && (
+        <QrScanner
+          onScan={handleScan}
+          onClose={() => setScanning(false)}
+          onGoToCart={() => { setScanning(false); router.push("/cart"); }}
+        />
       )}
     </div>
   );

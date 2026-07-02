@@ -3,10 +3,23 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setOrderStatus, sendInvoice } from "@/app/admin/orders/actions";
+import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { OrderStatus } from "@/lib/types";
 
-export function OrderActions({ orderId, status }: { orderId: string; status: OrderStatus }) {
+export function OrderActions({
+  orderId,
+  status,
+  pdfUrl,
+  orderNumber,
+  total,
+}: {
+  orderId: string;
+  status: OrderStatus;
+  pdfUrl?: string | null;
+  orderNumber?: string;
+  total?: number;
+}) {
   const router = useRouter();
   const [isPending, start] = useTransition();
   const [toast, setToast] = useState<string | null>(null);
@@ -31,6 +44,15 @@ export function OrderActions({ orderId, status }: { orderId: string; status: Ord
     });
   }
 
+  async function shareInvoice() {
+    if (!pdfUrl) { flash("Generate the invoice first (Send Invoice)"); return; }
+    const text = `Drevi order ${orderNumber ?? ""} — total ${total != null ? formatINR(total) : ""}. Invoice PDF: ${pdfUrl}`;
+    if (navigator.share) {
+      try { await navigator.share({ title: `Drevi ${orderNumber ?? "invoice"}`, text }); return; } catch { /* cancelled */ }
+    }
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
+  }
+
   const btn = (label: string, onClick: () => void, primary = false) => (
     <button type="button" onClick={onClick} disabled={isPending} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.15em", padding: "7px 12px", background: primary ? palette.black : "transparent", color: primary ? palette.ivory : palette.black, border: primary ? "none" : `1px solid ${palette.black}` }}>{label}</button>
   );
@@ -46,6 +68,7 @@ export function OrderActions({ orderId, status }: { orderId: string; status: Ord
         )}
         {status === "confirmed" && btn("Mark Fulfilled", () => act("fulfilled"), true)}
         {(status === "submitted" || status === "confirmed") && btn("Send Invoice", fireInvoice)}
+        {pdfUrl && btn("Share", shareInvoice)}
         {status !== "cancelled" && status !== "fulfilled" && btn("Cancel", () => act("cancelled", { confirmMsg: "Cancel this order?" }))}
       </div>
       {toast && <span className="font-body" style={{ fontSize: 10, color: palette.goldDeep, letterSpacing: "0.04em" }}>{toast}</span>}
