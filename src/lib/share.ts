@@ -9,14 +9,14 @@ export function buildWhatsAppMessage(email: string, password: string): string {
   return [
     "Welcome to Drevi Wholesale Portal",
     "",
-    `🔗 ${PORTAL_URL}`,
-    `✉️ ${email}`,
-    `🔑 ${password}`,
+    `Link: ${PORTAL_URL}`,
+    `Email: ${email}`,
+    `Password: ${password}`,
     "",
     "Save this message. Tap the link anytime to",
     "browse our full catalog with wholesale pricing.",
     "",
-    "— Rakesh",
+    "- Rakesh",
     RAKESH_PHONE,
   ].join("\n");
 }
