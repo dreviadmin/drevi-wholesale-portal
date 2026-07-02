@@ -1,0 +1,32 @@
+# Daily off-site backup: pulls the full-database export from the portal and
+# stores it as a GitHub artifact (90-day retention, private repo). This is the
+# free-tier safety net — Supabase Free has no managed backups.
+#
+# Repo secrets required: PORTAL_URL, CRON_SECRET (same as sync-cron.yml).
+name: daily-backup
+
+on:
+  schedule:
+    - cron: "30 22 * * *" # 04:00 IST
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download backup
+        run: |
+          set -e
+          code=$(curl -s -o backup.json.gz -w "%{http_code}" --max-time 120 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.PORTAL_URL }}/api/cron/backup")
+          echo "HTTP $code"
+          [ "$code" = "200" ]
+          gunzip -t backup.json.gz
+          ls -la backup.json.gz
+      - name: Store artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: drevi-backup-${{ github.run_number }}
+          path: backup.json.gz
+          retention-days: 90

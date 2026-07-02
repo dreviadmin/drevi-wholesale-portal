@@ -1,6 +1,14 @@
 # Drevi Wholesale Portal — Stack Explainer & Go-Live Guide
 
-Target setup (decided 2 Jul 2026): **Vercel Hobby + Supabase Pro** (~₹2,200/mo).
+Target setup (decided 2 Jul 2026): **Vercel Hobby + Supabase Free — ₹0/month**.
+
+Supabase Free's two weaknesses are neutralised by the deployment itself:
+auto-pause never triggers because the 10-minute sync keeps the project active
+around the clock, and a daily GitHub Actions job pulls a full-database export
+off Supabase (90-day retention). **Upgrade to Supabase Pro (~₹2,200/mo) later
+only if** you want point-in-time recovery / managed backups, approach the free
+limits (500 MB database / 1 GB storage — years away; images live on Shopify's
+CDN), or want an SLA once serious revenue flows through the portal.
 
 ---
 
@@ -45,7 +53,7 @@ Target setup (decided 2 Jul 2026): **Vercel Hobby + Supabase Pro** (~₹2,200/mo
 |---|---|---|
 | **Next.js app** (this repo) | Every screen and every server action — buyer catalog/cart/orders, admin (buyers, orders, staff, audit), exhibition/in-store billing, PDF generation, QR scanning, offline queue | — |
 | **Vercel** | Builds + hosts the app; every page/action runs as a serverless function; HTTPS + domain | Hobby ₹0 |
-| **Supabase** | The database (PostgreSQL — fully ACID), login system (Auth), file storage (PDFs, visiting cards), and row-level security | Pro ~₹2,200/mo |
+| **Supabase** | The database (PostgreSQL — fully ACID), login system (Auth), file storage (PDFs, visiting cards), and row-level security | Free ₹0 (Pro ~₹2,200/mo later if needed) |
 | **Google Sheet** | Where garments actually live (the Product Master the AI pipeline also uses). The portal never writes to it | ₹0 |
 | **Shopify** | Product **images only**, fetched during sync via the Client Credentials Grant app | existing plan |
 | **Interakt** | WhatsApp + email templates (order confirmations, alerts to Rakesh) | existing plan |
@@ -140,9 +148,9 @@ qty 0+restockable → Made to Order (Nd) · qty 0+not → Sold Out.
 
 ## 5. Go-live, step by step
 
-### A · Accounts (~30 min)
-1. **Supabase → Pro**: dashboard → Organization → Billing → upgrade the
-   `Drevi Wholesale` project ($25/mo). Kills auto-pause, adds real daily backups.
+### A · Accounts (~20 min)
+1. **Supabase stays Free** — no billing action. The 10-min sync (step 7) keeps
+   the project awake; the daily backup workflow (step 7) is the safety net.
 2. **GitHub**: create a **private** repo (e.g. `dreviadmin/drevi-wholesale-portal`), then
    ```bash
    cd ~/Documents/drevi/wholesale-portal
@@ -157,10 +165,13 @@ qty 0+restockable → Made to Order (Nd) · qty 0+not → Sold Out.
    For `GOOGLE_SERVICE_ACCOUNT_JSON`, open the local `drevi-pipeline-sa.json`
    and paste its entire content as the value.
 6. Deploy → smoke-test the `*.vercel.app` URL (login, catalog).
-7. **Sync cadence**: in the GitHub repo → Settings → Secrets → Actions, add
-   `PORTAL_URL` (your prod URL) and `CRON_SECRET` (same as Vercel). The included
-   workflow (`.github/workflows/sync-cron.yml`) then syncs every 10 min;
-   `vercel.json` keeps a daily backstop.
+7. **Sync + backup cadence**: in the GitHub repo → Settings → Secrets → Actions,
+   add `PORTAL_URL` (your prod URL) and `CRON_SECRET` (same as Vercel). The two
+   included workflows then run automatically: `sync-cron.yml` syncs products
+   every 10 min (also keeps Supabase Free from ever pausing) and `backup.yml`
+   stores a full-database export daily as a GitHub artifact (90-day retention).
+   `vercel.json` keeps a once-daily sync backstop. Verify both under the repo's
+   **Actions** tab (each can be run manually via "Run workflow").
 
 ### C · Domain (~15 min + DNS wait)
 8. Vercel → Project → Settings → Domains → add `wholesale.drevifashion.com`.
@@ -190,5 +201,10 @@ qty 0+restockable → Made to Order (Nd) · qty 0+not → Sold Out.
 - `portal.sh` is no longer needed for uptime (Vercel is always-on); keep it for local dev.
 - Future schema changes: add a migration file, run `npm run db:migrate` locally.
 - Revoke the `SUPABASE_ACCESS_TOKEN` once you don't need migrations, or keep it for me.
-- Running cost: Supabase Pro ~₹2,200/mo; Vercel Hobby ₹0 (upgrade to Pro ~₹1,700/mo
-  if traffic grows or for commercial-use compliance).
+- Running cost: **₹0/mo** (Vercel Hobby + Supabase Free + GitHub free).
+  Upgrade paths when needed: Supabase Pro ~₹2,200/mo (managed backups + PITR,
+  bigger limits, no-pause guarantee); Vercel Pro ~₹1,700/mo (commercial-use
+  compliance, more compute) — both are one-click, zero code change.
+- To restore from a backup artifact: download it from GitHub → Actions → the
+  daily-backup run → `gunzip` → the JSON contains every table's rows; re-insert
+  with the service role (ask Claude to script it if ever needed).
