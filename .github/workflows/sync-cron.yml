@@ -1,0 +1,26 @@
+# Product sync every 10 minutes. Vercel Hobby only allows daily crons, so the
+# frequent cadence runs here (free) and vercel.json keeps a once-daily backstop.
+#
+# Repo secrets required (Settings → Secrets and variables → Actions):
+#   PORTAL_URL   e.g. https://wholesale.drevifashion.com
+#   CRON_SECRET  same value as the Vercel env var
+name: sync-products
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call sync endpoint
+        run: |
+          set -e
+          code=$(curl -s -o /tmp/out.json -w "%{http_code}" --max-time 120 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.PORTAL_URL }}/api/cron/sync-products")
+          echo "HTTP $code"
+          cat /tmp/out.json
+          [ "$code" = "200" ]
