@@ -18,8 +18,17 @@ export function PhoneInput({
   label?: string;
   required?: boolean;
 }) {
-  // strip country code + non-digits → the local 10 digits
-  const local = value.replace(/\D/g, "").replace(/^91(?=\d{10}$)/, "").slice(0, 10);
+  // Canonical value is "+91" + local digits (that's what handle() writes), so
+  // strip that prefix UNCONDITIONALLY — even mid-typing with fewer than 10
+  // digits. Only fall back to heuristics for legacy stored formats.
+  const allDigits = value.replace(/\D/g, "");
+  const local = (
+    value.trim().startsWith("+91")
+      ? value.trim().slice(3).replace(/\D/g, "")
+      : allDigits.length === 12 && allDigits.startsWith("91")
+        ? allDigits.slice(2) // legacy "91XXXXXXXXXX" without the +
+        : allDigits
+  ).slice(0, 10);
   const display = local.length > 5 ? `${local.slice(0, 5)} ${local.slice(5)}` : local;
 
   function handle(raw: string) {
