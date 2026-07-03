@@ -71,6 +71,7 @@ export async function captureBuyer(form: {
     if (error.code === "23505") return { ok: false, error: "A buyer with that email already exists." };
     return { ok: false, error: error.message };
   }
+  revalidatePath("/admin/buyers");
   return { ok: true, id: data.id };
 }
 

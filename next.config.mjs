@@ -2,6 +2,10 @@ import withPWAInit from "@ducanh2912/next-pwa";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Local `npm run build` writes to .next-build so it can never corrupt the
+  // .next directory a running dev server is serving from. Vercel/`next dev`
+  // use the default.
+  distDir: process.env.NEXT_BUILD_DIR || ".next",
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "cdn.shopify.com" },

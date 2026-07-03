@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
@@ -23,6 +23,24 @@ export default function AddBuyerPage() {
   const [f, setF] = useState(EMPTY);
   const [cardFile, setCardFile] = useState<File | null>(null);
 
+  // Draft autosave — a half-filled form survives closing the app / navigating
+  // away. Cleared on successful create. (The photo can't be drafted.)
+  const DRAFT_KEY = "drevi:draft:add-buyer";
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (raw) setF({ ...EMPTY, ...JSON.parse(raw) });
+    } catch { /* corrupt draft — ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    const hasContent = Object.entries(f).some(([k, v]) => v.trim() !== "" && !(k === "phone" && v === "+91"));
+    try {
+      if (hasContent) localStorage.setItem(DRAFT_KEY, JSON.stringify(f));
+      else localStorage.removeItem(DRAFT_KEY);
+    } catch { /* storage full/blocked — non-fatal */ }
+  }, [f]);
+
   const set = (k: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
 
   function save() {
@@ -35,6 +53,7 @@ export default function AddBuyerPage() {
         fd.append("card", cardFile);
         await uploadBuyerCard(res.id!, fd); // best-effort; buyer exists either way
       }
+      try { localStorage.removeItem(DRAFT_KEY); } catch { /* non-fatal */ }
       setCreated({ id: res.id!, email: f.email.trim().toLowerCase(), owner_name: f.owner_name, business_name: f.business_name, phone: f.phone });
     });
   }

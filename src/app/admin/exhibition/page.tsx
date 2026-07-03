@@ -1,4 +1,5 @@
 import { requireStaff } from "@/lib/staff";
+import { AutoRefresh } from "@/components/AutoRefresh";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ExhibitionHome } from "./ExhibitionHome";
 
@@ -12,5 +13,5 @@ export default async function ExhibitionPage() {
     .select("id, event_name, started_at, ended_at, orders_count, session_type")
     .order("started_at", { ascending: false })
     .limit(10);
-  return <ExhibitionHome sessions={sessions ?? []} />;
+  return (<><AutoRefresh /><ExhibitionHome sessions={sessions ?? []} /></>);
 }

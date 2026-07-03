@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, LogOut } from "lucide-react";
+import { logout } from "@/app/actions";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -41,7 +42,11 @@ export default async function OrderHistoryPage() {
           <ChevronLeft size={22} strokeWidth={1.5} />
         </Link>
         <div className="font-body uppercase" style={{ fontSize: 12, letterSpacing: "0.3em", color: palette.black }}>My Orders</div>
-        <span style={{ width: 22 }} />
+        <form action={logout}>
+          <button type="submit" aria-label="Sign out" style={{ color: palette.mutedGreige }}>
+            <LogOut size={18} strokeWidth={1.6} />
+          </button>
+        </form>
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-5">

@@ -30,7 +30,18 @@ export async function middleware(request: NextRequest) {
     },
   );
 
-  // Refreshes the session cookie (and validates the JWT) on every request.
+  // Refreshes the session on every request. CRITICAL: any response we return —
+  // including redirects — must carry the refreshed cookies, or the browser
+  // keeps a rotated (revoked) token and the session dies at random.
+  const redirectTo = (pathname: string) => {
+    const url = request.nextUrl.clone();
+    url.pathname = pathname;
+    url.search = "";
+    const redirect = NextResponse.redirect(url);
+    response.cookies.getAll().forEach((c) => redirect.cookies.set(c));
+    return redirect;
+  };
+
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -38,35 +49,44 @@ export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
   if (isPublic(path)) return response;
 
-  const loginUrl = request.nextUrl.clone();
-  loginUrl.pathname = "/login";
+  // Non-public API routes authenticate themselves (session + RLS) and are used
+  // by every role (e.g. /api/orders/[id]/pdf from both buyer and staff UIs) —
+  // don't page-redirect them here.
+  if (path.startsWith("/api/")) return response;
 
-  if (!user) return NextResponse.redirect(loginUrl);
+  if (!user) return redirectTo("/login");
 
   const email = user.email ?? "";
   const isAdminRoute = path.startsWith("/admin");
 
   // RLS lets a user read only their own staff/buyer row (or staff read all).
-  const [{ data: staff }, { data: buyer }] = await Promise.all([
+  const [staffRes, buyerRes] = await Promise.all([
     supabase.from("staff_users").select("active").eq("email", email).maybeSingle(),
     supabase.from("buyers").select("status").eq("email", email).maybeSingle(),
   ]);
 
-  if (isAdminRoute) {
-    if (staff?.active) return response;
-    const url = request.nextUrl.clone();
-    url.pathname = buyer?.status === "active" ? "/catalog" : "/login";
-    return NextResponse.redirect(url);
+  // Transient DB failure (network blip, cold start) must NOT bounce a valid
+  // session to /login. Fail open — every page re-checks authorization in its
+  // own server code (requireStaff / requireAdminOrRedirect / RLS reads).
+  if (staffRes.error || buyerRes.error) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[middleware] role lookup failed — failing open:", staffRes.error?.message ?? buyerRes.error?.message);
+    }
+    return response;
   }
 
-  // Buyer routes (/catalog, /cart, /account)
-  if (buyer?.status === "active") return response;
-  if (staff?.active) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/admin";
-    return NextResponse.redirect(url);
+  const staffActive = staffRes.data?.active === true;
+  const buyerActive = buyerRes.data?.status === "active";
+
+  if (isAdminRoute) {
+    if (staffActive) return response;
+    return redirectTo(buyerActive ? "/catalog" : "/login");
   }
-  return NextResponse.redirect(loginUrl);
+
+  // Buyer routes (/catalog, /cart, /account, /product, /order)
+  if (buyerActive) return response;
+  if (staffActive) return redirectTo("/admin");
+  return redirectTo("/login");
 }
 
 export const config = {

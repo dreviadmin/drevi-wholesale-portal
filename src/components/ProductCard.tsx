@@ -22,6 +22,7 @@ export function ProductCard({
   enforceCaps = true,
   onGoToCart,
   variantBar,
+  onOpenDetail,
 }: {
   product: WholesaleProduct;
   showPrices?: boolean;
@@ -32,6 +33,8 @@ export function ProductCard({
   enforceCaps?: boolean;
   onGoToCart?: () => void;
   variantBar?: React.ReactNode;
+  // Opens a detail view where page navigation isn't available (exhibition).
+  onOpenDetail?: (product: WholesaleProduct) => void;
 }) {
   const state = getStockState(product);
   const canAdd = state !== "sold_out";
@@ -62,6 +65,10 @@ export function ProductCard({
     <div className="flex flex-col" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.06)" }}>
       {detailHref ? (
         <Link href={detailHref} className="block">{titleBlock}</Link>
+      ) : onOpenDetail ? (
+        <button type="button" onClick={() => onOpenDetail(product)} className="block w-full text-left" style={{ cursor: "pointer" }}>
+          {titleBlock}
+        </button>
       ) : (
         titleBlock
       )}

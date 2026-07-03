@@ -1,4 +1,5 @@
 import { requireAdminOrRedirect } from "@/lib/staff";
+import { AutoRefresh } from "@/components/AutoRefresh";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { OrdersTable, type OrderRowDTO } from "./OrdersTable";
 import type { Order, Buyer } from "@/lib/types";
@@ -30,5 +31,5 @@ export default async function OrdersPage() {
     submitted_at: o.submitted_at,
   }));
 
-  return <OrdersTable rows={rows} />;
+  return (<><AutoRefresh /><OrdersTable rows={rows} /></>);
 }

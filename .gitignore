@@ -52,3 +52,7 @@ next-env.d.ts
 
 # portal.sh runtime (logs + pids)
 .local/
+
+# isolated local production builds (see next.config.mjs)
+.next-build/
+.next-preview/

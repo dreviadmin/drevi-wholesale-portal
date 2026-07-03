@@ -1,6 +1,8 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import { LogOut } from "lucide-react";
+import { logout } from "@/app/actions";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatINR } from "@/lib/format";
@@ -57,8 +59,14 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
 
   return (
     <div className="min-h-screen" style={{ background: palette.ivory }}>
-      <div className="px-4 py-3.5 sticky top-0 z-10 flex items-center justify-center" style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
+      <div className="px-4 py-3.5 sticky top-0 z-10 flex items-center justify-between" style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
+        <span style={{ width: 18 }} />
         <div className="font-display" style={{ fontSize: 16, letterSpacing: "0.35em", color: palette.black, fontWeight: 600 }}>DREVI</div>
+        <form action={logout}>
+          <button type="submit" aria-label="Sign out" style={{ color: palette.mutedGreige }}>
+            <LogOut size={18} strokeWidth={1.6} />
+          </button>
+        </form>
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-8">

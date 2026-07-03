@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Eye, EyeOff, ChevronLeft, Minus, Plus, UserPlus, Search, ShoppingBag, QrCode } from "lucide-react";
 import { GroupedProductCard } from "@/components/GroupedProductCard";
+import { ProductQuickView } from "@/components/ProductQuickView";
 import { QrScanner } from "@/components/QrScanner";
 import { groupByBase } from "@/lib/variants";
 import { OfflineSync } from "@/components/OfflineSync";
@@ -45,15 +46,35 @@ export function ExhibitionWizard({
   const [catalogQuery, setCatalogQuery] = useState("");
   const [scanning, setScanning] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [detailProduct, setDetailProduct] = useState<WholesaleProduct | null>(null);
   // Scanner callbacks outlive renders — read the live cart via a ref.
   const cartScanRef = useRef(cart);
   cartScanRef.current = cart;
   const [newBuyer, setNewBuyer] = useState(false);
-  const [nb, setNb] = useState({
+  const NB_EMPTY = {
     business_name: "", owner_name: "", email: "", phone: "+91", city: "", gstin: "",
     address: "", transport_details: "", broker_details: "", other_details: "",
-  });
+  };
+  const [nb, setNb] = useState(NB_EMPTY);
   const [cardFile, setCardFile] = useState<File | null>(null);
+
+  // Draft autosave — a half-captured buyer survives closing the tablet app
+  // mid-conversation. Cleared once the capture succeeds.
+  const NB_DRAFT_KEY = "drevi:draft:exh-buyer";
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(NB_DRAFT_KEY);
+      if (raw) setNb({ ...NB_EMPTY, ...JSON.parse(raw) });
+    } catch { /* corrupt draft — ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    const hasContent = Object.entries(nb).some(([k, v]) => v.trim() !== "" && !(k === "phone" && v === "+91"));
+    try {
+      if (hasContent) localStorage.setItem(NB_DRAFT_KEY, JSON.stringify(nb));
+      else localStorage.removeItem(NB_DRAFT_KEY);
+    } catch { /* storage full/blocked — non-fatal */ }
+  }, [nb]);
   const [staffNote, setStaffNote] = useState("");
   const [buyerNote, setBuyerNote] = useState("");
   // Tax + payment (recorded at finalise)
@@ -163,6 +184,8 @@ export function ExhibitionWizard({
         setBuyerClientRef(ref);
         setBuyer({ id: "", business_name: nb.business_name, owner_name: nb.owner_name, phone: nb.phone, city: nb.city });
         setNewBuyer(false);
+        try { localStorage.removeItem(NB_DRAFT_KEY); } catch { /* non-fatal */ }
+        setNb(NB_EMPTY);
         setStep("catalog");
         return;
       }
@@ -177,6 +200,8 @@ export function ExhibitionWizard({
       setBuyer({ id: res.id!, business_name: nb.business_name, owner_name: nb.owner_name, phone: nb.phone, city: nb.city });
       setNewBuyer(false);
       setCardFile(null);
+      try { localStorage.removeItem(NB_DRAFT_KEY); } catch { /* non-fatal */ }
+      setNb(NB_EMPTY);
       setStep("catalog");
     });
   }
@@ -305,8 +330,9 @@ export function ExhibitionWizard({
               <div className="mt-2">
                 {buyerMatches.map((b) => (
                   <button key={b.id} type="button" onClick={() => { setBuyer(b); setStep("catalog"); }} className="w-full text-left py-2.5" style={{ borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
-                    <div className="font-display" style={{ fontSize: 13, fontWeight: 600 }}>{b.business_name}</div>
-                    <div className="font-body" style={{ fontSize: 11, color: palette.mutedGreige }}>{[b.owner_name, b.city].filter(Boolean).join(" · ")}</div>
+                    <div className="font-display" style={{ fontSize: 13, fontWeight: 600 }}>{b.business_name ?? b.owner_name ?? "—"}</div>
+                    {/* phone included so same-name businesses stay distinguishable */}
+                    <div className="font-body" style={{ fontSize: 11, color: palette.mutedGreige }}>{[b.owner_name, b.phone, b.city].filter(Boolean).join(" · ")}</div>
                   </button>
                 ))}
               </div>
@@ -380,6 +406,7 @@ export function ExhibitionWizard({
                 enforceCaps={false}
                 showPrices={showPrices}
                 onGoToCart={() => setStep("cart")}
+                onOpenDetail={setDetailProduct}
               />
             ))}
           </div>
@@ -587,6 +614,17 @@ export function ExhibitionWizard({
           onScan={handleScan}
           onClose={() => setScanning(false)}
           onGoToCart={() => { setScanning(false); setStep("cart"); }}
+        />
+      )}
+
+      {detailProduct && (
+        <ProductQuickView
+          product={detailProduct}
+          cartQty={cart[detailProduct.sku] ?? 0}
+          onChangeQty={changeCartQty}
+          onClose={() => setDetailProduct(null)}
+          showPrices={showPrices}
+          enforceCaps={false}
         />
       )}
 

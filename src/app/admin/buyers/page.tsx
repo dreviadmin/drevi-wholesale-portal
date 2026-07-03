@@ -1,4 +1,5 @@
 import { requireAdminOrRedirect } from "@/lib/staff";
+import { AutoRefresh } from "@/components/AutoRefresh";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { BuyersTable, type BuyerRowDTO } from "./BuyersTable";
 import type { Buyer } from "@/lib/types";
@@ -36,5 +37,5 @@ export default async function BuyersPage() {
     lastOrder: stats.get(b.id)?.last ?? null,
   }));
 
-  return <BuyersTable rows={rows} />;
+  return (<><AutoRefresh /><BuyersTable rows={rows} /></>);
 }

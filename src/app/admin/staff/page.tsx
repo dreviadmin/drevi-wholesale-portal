@@ -1,4 +1,5 @@
 import { requireAdminOrRedirect } from "@/lib/staff";
+import { AutoRefresh } from "@/components/AutoRefresh";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { StaffManager } from "./StaffManager";
 import type { StaffUser } from "@/lib/types";
@@ -13,6 +14,7 @@ export default async function StaffPage() {
   const { data } = await admin.from("staff_users").select("*").order("created_at");
 
   return (
+    <><AutoRefresh />
     <StaffManager
       actor={{ id: actor.id, role: actor.role }}
       rows={((data ?? []) as StaffUser[]).map((s) => ({
@@ -23,5 +25,6 @@ export default async function StaffPage() {
         active: s.active,
       }))}
     />
+    </>
   );
 }
