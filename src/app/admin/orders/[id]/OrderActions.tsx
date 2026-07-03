@@ -44,13 +44,23 @@ export function OrderActions({
     });
   }
 
+  function shareText() {
+    return `Drevi order ${orderNumber ?? ""} — total ${total != null ? formatINR(total) : ""}. Invoice PDF: ${pdfUrl}`;
+  }
+
+  // Generic share sheet; falls back to copying the link.
   async function shareInvoice() {
     if (!pdfUrl) { flash("Generate the invoice first (Send Invoice)"); return; }
-    const text = `Drevi order ${orderNumber ?? ""} — total ${total != null ? formatINR(total) : ""}. Invoice PDF: ${pdfUrl}`;
     if (navigator.share) {
-      try { await navigator.share({ title: `Drevi ${orderNumber ?? "invoice"}`, text }); return; } catch { /* cancelled */ }
+      try { await navigator.share({ title: `Drevi ${orderNumber ?? "invoice"}`, text: shareText() }); return; } catch { /* cancelled */ }
     }
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
+    await navigator.clipboard?.writeText(shareText());
+    flash("Invoice link copied");
+  }
+
+  function shareWhatsApp() {
+    if (!pdfUrl) { flash("Generate the invoice first (Send Invoice)"); return; }
+    window.open(`https://wa.me/?text=${encodeURIComponent(shareText())}`, "_blank", "noopener");
   }
 
   const btn = (label: string, onClick: () => void, primary = false) => (
@@ -69,6 +79,7 @@ export function OrderActions({
         {status === "confirmed" && btn("Mark Fulfilled", () => act("fulfilled"), true)}
         {(status === "submitted" || status === "confirmed") && btn("Send Invoice", fireInvoice)}
         {pdfUrl && btn("Share", shareInvoice)}
+        {pdfUrl && btn("WhatsApp", shareWhatsApp)}
         {status !== "cancelled" && status !== "fulfilled" && btn("Cancel", () => act("cancelled", { confirmMsg: "Cancel this order?" }))}
       </div>
       {toast && <span className="font-body" style={{ fontSize: 10, color: palette.goldDeep, letterSpacing: "0.04em" }}>{toast}</span>}

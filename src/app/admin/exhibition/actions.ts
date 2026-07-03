@@ -27,8 +27,10 @@ export async function startSession(
   return { ok: true, id: data.id };
 }
 
-// E3 — capture a new buyer at the booth (pending/exhibition). Most fields are
-// optional — capture as much as possible at the booth, complete details later.
+// E3 — capture a new buyer at the booth. Exhibition captures go straight to
+// ACTIVE (Ansh, 4 Jul 2026): the staff member vouches on the spot, so no
+// separate approval step. (Login still requires credentials to be set later.)
+// Most fields are optional — capture what you can, complete details later.
 export async function captureBuyer(form: {
   business_name?: string;
   owner_name?: string;
@@ -61,16 +63,15 @@ export async function captureBuyer(form: {
       transport_details: form.transport_details?.trim() || null,
       broker_details: form.broker_details?.trim() || null,
       other_details: form.other_details?.trim() || null,
-      status: "pending",
+      status: "active",
       source: "exhibition",
       captured_by: staff.id,
+      approved_by: staff.id,
+      approved_at: new Date().toISOString(),
     })
     .select("id")
     .single();
-  if (error) {
-    if (error.code === "23505") return { ok: false, error: "A buyer with that email already exists." };
-    return { ok: false, error: error.message };
-  }
+  if (error) return { ok: false, error: error.message };
   revalidatePath("/admin/buyers");
   return { ok: true, id: data.id };
 }

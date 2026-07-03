@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { renderOrderPdf } from "@/lib/order-pdf";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { Order } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -11,7 +12,17 @@ export async function GET() {
     return NextResponse.json({ error: "Not available in production" }, { status: 404 });
   }
   // Exercises the full invoice: four stock states, a price override, a special
-  // request, a percent discount, exclusive GST, and an advance payment.
+  // request, a percent discount, exclusive GST, an advance payment — and real
+  // outfit photos pulled from the synced catalog.
+  const admin = createAdminClient();
+  const { data: prods } = await admin
+    .from("wholesale_products")
+    .select("image_urls")
+    .eq("wholesale_visible", true)
+    .not("image_urls", "eq", "[]")
+    .limit(4);
+  const imgs = (prods ?? []).map((p) => (Array.isArray(p.image_urls) ? (p.image_urls as string[])[0] : null));
+
   const subtotal = 4000 * 2 + 2500 + 5400 + 9800; // one line overridden 4200→4000
   const discount = Math.round(subtotal * 0.1 * 100) / 100;
   const net = subtotal - discount;
@@ -25,10 +36,10 @@ export async function GET() {
     assisted_by: null,
     exhibition_event: "In-store",
     items: [
-      { sku: "DD-LEH-001", title: "Sage Heirloom Lehenga", unit_price: 4000, original_price: 4200, qty: 2, stock_state: "ready", restock_days: null },
-      { sku: "DD-IWS-002", title: "Maroon Velvet Co-ord", unit_price: 2500, qty: 1, stock_state: "limited", restock_days: null, special_request: true },
-      { sku: "DD-SAR-003", title: "Noir Sequined Saree Gown", unit_price: 5400, qty: 1, stock_state: "made_to_order", restock_days: 14 },
-      { sku: "DD-LEH-004", title: "Charcoal Velvet Lehenga", unit_price: 9800, qty: 1, stock_state: "sold_out", restock_days: null },
+      { sku: "DD-LEH-001", title: "Sage Heirloom Lehenga", unit_price: 4000, original_price: 4200, qty: 2, stock_state: "ready", restock_days: null, image_url: imgs[0] ?? null },
+      { sku: "DD-IWS-002", title: "Maroon Velvet Co-ord", unit_price: 2500, qty: 1, stock_state: "limited", restock_days: null, special_request: true, image_url: imgs[1] ?? null },
+      { sku: "DD-SAR-003", title: "Noir Sequined Saree Gown", unit_price: 5400, qty: 1, stock_state: "made_to_order", restock_days: 14, image_url: imgs[2] ?? null },
+      { sku: "DD-LEH-004", title: "Charcoal Velvet Lehenga", unit_price: 9800, qty: 1, stock_state: "sold_out", restock_days: null, image_url: imgs[3] ?? null },
     ],
     total_amount: net + tax,
     discount_type: "percent",

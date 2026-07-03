@@ -15,7 +15,9 @@ export default async function ExhibitionSessionPage({ params }: { params: { id: 
 
   const [{ data: products }, { data: buyers }] = await Promise.all([
     admin.from("wholesale_products").select("*").eq("wholesale_visible", true).order("category", { nullsFirst: false }).order("title", { nullsFirst: false }),
-    admin.from("buyers").select("id, business_name, owner_name, phone, city, status").eq("status", "active").order("business_name"),
+    // Active + pending are both orderable at the booth (only suspended/rejected
+    // are excluded) — pending rows predate the capture-goes-active change.
+    admin.from("buyers").select("id, business_name, owner_name, phone, city, status").in("status", ["active", "pending"]).order("business_name", { nullsFirst: false }),
   ]);
 
   return (

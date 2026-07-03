@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { Eye, EyeOff, ChevronLeft, Minus, Plus, UserPlus, Search, ShoppingBag, QrCode } from "lucide-react";
+import { Eye, EyeOff, ChevronLeft, Minus, Plus, UserPlus, Search, ShoppingBag, QrCode, Share2, MessageCircle } from "lucide-react";
 import { GroupedProductCard } from "@/components/GroupedProductCard";
+import { PhoneInput } from "@/components/PhoneInput";
 import { ProductQuickView } from "@/components/ProductQuickView";
 import { QrScanner } from "@/components/QrScanner";
 import { groupByBase } from "@/lib/variants";
@@ -18,7 +19,7 @@ import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct, SessionType, TaxMode, DiscountType } from "@/lib/types";
 
-type Buyer = { id: string; business_name: string | null; owner_name: string | null; phone: string | null; city: string | null };
+type Buyer = { id: string; business_name: string | null; owner_name: string | null; phone: string | null; city: string | null; status?: string };
 type Step = "buyer" | "catalog" | "cart" | "confirm";
 
 const PREFERRED = ["Sarees", "Lehengas", "Indo-Western", "Co-ords", "Drape Skirts", "Jackets"];
@@ -52,7 +53,7 @@ export function ExhibitionWizard({
   cartScanRef.current = cart;
   const [newBuyer, setNewBuyer] = useState(false);
   const NB_EMPTY = {
-    business_name: "", owner_name: "", email: "", phone: "+91", city: "", gstin: "",
+    business_name: "", owner_name: "", email: "", phone: "", city: "", gstin: "",
     address: "", transport_details: "", broker_details: "", other_details: "",
   };
   const [nb, setNb] = useState(NB_EMPTY);
@@ -69,7 +70,7 @@ export function ExhibitionWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    const hasContent = Object.entries(nb).some(([k, v]) => v.trim() !== "" && !(k === "phone" && v === "+91"));
+    const hasContent = Object.values(nb).some((v) => v.trim() !== "");
     try {
       if (hasContent) localStorage.setItem(NB_DRAFT_KEY, JSON.stringify(nb));
       else localStorage.removeItem(NB_DRAFT_KEY);
@@ -145,8 +146,8 @@ export function ExhibitionWizard({
 
   const buyerMatches = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return buyers.slice(0, 8);
-    return buyers.filter((b) => [b.business_name, b.owner_name, b.phone].some((v) => v?.toLowerCase().includes(q))).slice(0, 12);
+    if (!q) return buyers; // full list, scrollable — staff must see everyone
+    return buyers.filter((b) => [b.business_name, b.owner_name, b.phone, b.city].some((v) => v?.toLowerCase().includes(q)));
   }, [buyers, query]);
 
   // No clamping here — the order taker can exceed stock caps and go below MOQ
@@ -256,13 +257,27 @@ export function ExhibitionWizard({
     flash("Contact downloaded — import it on this device");
   }
 
+  function invoiceShareText() {
+    return `Drevi order ${confirmInfo?.orderNumber} — total ${formatINR(grandTotal)}. Invoice PDF: ${confirmInfo?.pdfUrl}`;
+  }
+
+  // Generic share sheet (AirDrop, mail, any app); falls back to copying.
   async function shareInvoice() {
     if (!confirmInfo?.pdfUrl) return;
-    const text = `Drevi ${session.type === "in_store" ? "in-store" : "exhibition"} order ${confirmInfo.orderNumber} — total ${formatINR(grandTotal)}. Invoice PDF: ${confirmInfo.pdfUrl}`;
+    const text = invoiceShareText();
     if (navigator.share) {
       try { await navigator.share({ title: `Drevi ${confirmInfo.orderNumber}`, text }); return; } catch { /* cancelled */ }
     }
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
+    await navigator.clipboard?.writeText(text);
+    flash("Invoice link copied");
+  }
+
+  // Straight to WhatsApp.
+  function shareInvoiceWhatsApp() {
+    if (!confirmInfo?.pdfUrl) return;
+    const phone = (buyer?.phone ?? "").replace(/\D/g, "");
+    const base = phone ? `https://wa.me/${phone}` : "https://wa.me/";
+    window.open(`${base}?text=${encodeURIComponent(invoiceShareText())}`, "_blank", "noopener");
   }
 
   function nextBuyer() {
@@ -327,10 +342,18 @@ export function ExhibitionWizard({
                 <Search size={15} color={palette.mutedGreige} />
                 <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search existing buyers" className="font-body bg-transparent outline-none w-full" style={{ fontSize: 13 }} />
               </div>
-              <div className="mt-2">
+              <div className="mt-2 overflow-y-auto" style={{ maxHeight: "50vh" }}>
+                {buyerMatches.length === 0 && (
+                  <p className="font-body py-3" style={{ fontSize: 11, color: palette.mutedGreige }}>No matching buyers — capture them as new below.</p>
+                )}
                 {buyerMatches.map((b) => (
                   <button key={b.id} type="button" onClick={() => { setBuyer(b); setStep("catalog"); }} className="w-full text-left py-2.5" style={{ borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
-                    <div className="font-display" style={{ fontSize: 13, fontWeight: 600 }}>{b.business_name ?? b.owner_name ?? "—"}</div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-display" style={{ fontSize: 13, fontWeight: 600 }}>{b.business_name ?? b.owner_name ?? "—"}</span>
+                      {b.status === "pending" && (
+                        <span className="font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.1em", color: palette.goldDeep, border: `1px solid ${palette.champagne}`, padding: "1px 5px" }}>Pending</span>
+                      )}
+                    </div>
                     {/* phone included so same-name businesses stay distinguishable */}
                     <div className="font-body" style={{ fontSize: 11, color: palette.mutedGreige }}>{[b.owner_name, b.phone, b.city].filter(Boolean).join(" · ")}</div>
                   </button>
@@ -346,7 +369,14 @@ export function ExhibitionWizard({
                 { k: "business_name", label: "business name" },
                 { k: "owner_name", label: "owner name", req: true },
                 { k: "email", label: "email" },
-                { k: "phone", label: "phone", req: true },
+              ] as const).map((f) => (
+                <label key={f.k} className="flex flex-col gap-1">
+                  <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.softBlack }}>{f.label}{("req" in f && f.req) ? " *" : ""}</span>
+                  <input value={nb[f.k]} onChange={(e) => setNb({ ...nb, [f.k]: e.target.value })} className="font-body bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "6px 2px", fontSize: 13 }} />
+                </label>
+              ))}
+              <PhoneInput value={nb.phone} onChange={(v) => setNb({ ...nb, phone: v })} required />
+              {([
                 { k: "city", label: "city" },
                 { k: "gstin", label: "GSTIN" },
                 { k: "address", label: "address", area: true },
@@ -595,7 +625,14 @@ export function ExhibitionWizard({
             <div className="flex gap-2 justify-center mt-4 flex-wrap">
               <a href={`/api/orders/${confirmInfo.orderId}/pdf`} target="_blank" rel="noreferrer" className="inline-block font-body uppercase" style={{ border: `1px solid ${palette.black}`, fontSize: 10, letterSpacing: "0.18em", padding: "10px 18px", color: palette.black }}>Download PDF</a>
               {confirmInfo.pdfUrl && (
-                <button type="button" onClick={shareInvoice} className="font-body uppercase" style={{ background: palette.gold, color: palette.black, fontSize: 10, letterSpacing: "0.18em", padding: "10px 18px" }}>Share Invoice</button>
+                <>
+                  <button type="button" onClick={shareInvoice} className="flex items-center gap-1.5 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 10, letterSpacing: "0.18em", padding: "10px 16px" }}>
+                    <Share2 size={13} strokeWidth={1.8} /> Share
+                  </button>
+                  <button type="button" onClick={shareInvoiceWhatsApp} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.gold, color: palette.black, fontSize: 10, letterSpacing: "0.18em", padding: "10px 16px" }}>
+                    <MessageCircle size={13} strokeWidth={1.8} /> WhatsApp
+                  </button>
+                </>
               )}
               {buyer && (
                 <button type="button" onClick={saveBuyerContact} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 10, letterSpacing: "0.18em", padding: "10px 18px" }}>Save Contact</button>

@@ -77,6 +77,20 @@ export async function setCredentials(
 
   const email = (emailInput || buyer.email || "").trim().toLowerCase();
   if (!email) return { ok: false, error: "An email is required to activate the login." };
+
+  // Duplicate emails are allowed on buyer ROWS, but a login identity must be
+  // unique — refuse activation if another credentialed buyer already uses it.
+  const { data: clash } = await admin
+    .from("buyers")
+    .select("id, business_name")
+    .eq("email", email)
+    .neq("id", buyerId)
+    .not("encrypted_password", "is", null)
+    .limit(1);
+  if (clash && clash.length > 0) {
+    return { ok: false, error: `${email} already logs in for ${clash[0].business_name ?? "another buyer"} — use a different email.` };
+  }
+
   try {
     await setAuthPassword(admin, email, password);
   } catch (e) {
@@ -269,10 +283,7 @@ export async function addBuyer(form: {
     })
     .select("id")
     .single();
-  if (error) {
-    if (error.code === "23505") return { ok: false, error: "A buyer with that email already exists." };
-    return { ok: false, error: error.message };
-  }
+  if (error) return { ok: false, error: error.message };
   revalidatePath("/admin/buyers");
   return { ok: true, id: data.id };
 }

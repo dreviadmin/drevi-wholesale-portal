@@ -6,10 +6,11 @@ import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { addBuyer, uploadBuyerCard } from "@/app/admin/buyers/actions";
 import { CredentialModal } from "@/components/admin/CredentialModal";
+import { PhoneInput } from "@/components/PhoneInput";
 import { palette } from "@/lib/palette";
 
 const EMPTY = {
-  business_name: "", owner_name: "", email: "", phone: "+91", city: "", gstin: "",
+  business_name: "", owner_name: "", email: "", phone: "", city: "", gstin: "",
   address: "", transport_details: "", broker_details: "", other_details: "", notes: "",
 };
 
@@ -34,7 +35,7 @@ export default function AddBuyerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    const hasContent = Object.entries(f).some(([k, v]) => v.trim() !== "" && !(k === "phone" && v === "+91"));
+    const hasContent = Object.values(f).some((v) => v.trim() !== "");
     try {
       if (hasContent) localStorage.setItem(DRAFT_KEY, JSON.stringify(f));
       else localStorage.removeItem(DRAFT_KEY);
@@ -87,7 +88,7 @@ export default function AddBuyerPage() {
         {field("Business name", "business_name")}
         {field("Owner name", "owner_name", true)}
         {field("Email", "email", false, "email")}
-        {field("Phone", "phone", true)}
+        <PhoneInput value={f.phone} onChange={(v) => setF({ ...f, phone: v })} required />
         {field("City", "city")}
         {field("GSTIN", "gstin")}
         {area("Address", "address")}

@@ -1,7 +1,39 @@
 import "server-only";
 
-import { Document, Page, Text, View, StyleSheet, renderToBuffer } from "@react-pdf/renderer";
+import { Document, Page, Text, View, Image, StyleSheet, renderToBuffer } from "@react-pdf/renderer";
 import type { Order, OrderItem } from "@/lib/types";
+
+// Pre-fetched outfit thumbnails, keyed by SKU. Fetched OUTSIDE the renderer
+// (with timeouts + format sniffing) so a slow/broken CDN URL can never hang or
+// crash PDF generation — a missing image just renders as an empty slot.
+type ImgMap = Map<string, { data: Buffer; format: "jpg" | "png" }>;
+
+function sniffFormat(buf: Buffer): "jpg" | "png" | null {
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8) return "jpg";
+  if (buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "png";
+  return null; // webp/avif/etc — react-pdf can't embed these; skip
+}
+
+async function fetchItemImages(items: OrderItem[]): Promise<ImgMap> {
+  const map: ImgMap = new Map();
+  await Promise.all(
+    items.slice(0, 20).map(async (it) => {
+      if (!it.image_url) return;
+      try {
+        // Shopify CDN resizes via query param — keep the embed small.
+        const url = it.image_url + (it.image_url.includes("?") ? "&" : "?") + "width=200";
+        const res = await fetch(url, { signal: AbortSignal.timeout(6000), cache: "no-store" });
+        if (!res.ok) return;
+        const buf = Buffer.from(await res.arrayBuffer());
+        const format = sniffFormat(buf);
+        if (format && buf.length < 2_000_000) map.set(it.sku, { data: buf, format });
+      } catch {
+        // unreachable/slow image — render without it
+      }
+    }),
+  );
+  return map;
+}
 
 // Royal Noir order PDF (spec §9). Uses built-in PDF fonts (Times for the
 // editorial headings, Helvetica for body) to keep rendering offline-safe — the
@@ -28,11 +60,12 @@ const s = StyleSheet.create({
   buyerName: { fontFamily: "Times-Bold", fontSize: 12 },
   tableHead: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: C.black, paddingBottom: 5, marginBottom: 4 },
   th: { fontSize: 7, letterSpacing: 1, color: C.greige, textTransform: "uppercase" },
-  row: { flexDirection: "row", paddingVertical: 6, borderBottomWidth: 0.5, borderBottomColor: C.ivoryDeep },
-  cItem: { width: "48%" },
-  cState: { width: "22%" },
-  cQty: { width: "14%", textAlign: "right" },
-  cAmt: { width: "16%", textAlign: "right" },
+  row: { flexDirection: "row", alignItems: "center", paddingVertical: 6, borderBottomWidth: 0.5, borderBottomColor: C.ivoryDeep },
+  cImg: { width: 34, height: 42, marginRight: 8, backgroundColor: C.ivoryDeep },
+  cItem: { flex: 1, paddingRight: 6 },
+  cState: { width: "20%" },
+  cQty: { width: "17%", textAlign: "right" },
+  cAmt: { width: "15%", textAlign: "right" },
   itemTitle: { fontFamily: "Times-Roman", fontSize: 11 },
   sku: { fontSize: 7, color: C.greige, marginTop: 2 },
   state: { fontSize: 8, color: C.goldDeep },
@@ -67,7 +100,7 @@ const SOURCE_LABEL: Record<string, string> = {
   in_store: "In-store order",
 };
 
-function OrderDoc({ order, buyer }: { order: Order; buyer: PdfBuyer }) {
+function OrderDoc({ order, buyer, images }: { order: Order; buyer: PdfBuyer; images: ImgMap }) {
   const items = order.items ?? [];
   const maxLead = items.filter((i) => i.stock_state === "made_to_order").reduce((m, i) => Math.max(m, i.restock_days ?? 0), 0);
   const date = new Date(order.submitted_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
@@ -105,24 +138,33 @@ function OrderDoc({ order, buyer }: { order: Order; buyer: PdfBuyer }) {
 
         <Text style={s.sectionLabel}>Items</Text>
         <View style={s.tableHead}>
+          <Text style={[s.th, { width: 42 }]}> </Text>
           <Text style={[s.th, s.cItem]}>Item</Text>
           <Text style={[s.th, s.cState]}>Availability</Text>
           <Text style={[s.th, s.cQty]}>Qty x Price</Text>
           <Text style={[s.th, s.cAmt]}>Amount</Text>
         </View>
-        {items.map((it, i) => (
-          <View style={s.row} key={`${it.sku}-${i}`}>
-            <View style={s.cItem}>
-              <Text style={s.itemTitle}>{it.title}</Text>
-              <Text style={s.sku}>{it.sku}{it.special_request ? "  ·  SPECIAL QTY REQUEST" : ""}</Text>
+        {items.map((it, i) => {
+          const img = images.get(it.sku);
+          return (
+            <View style={s.row} key={`${it.sku}-${i}`} wrap={false}>
+              {img ? (
+                <Image style={s.cImg} src={{ data: img.data, format: img.format }} />
+              ) : (
+                <View style={s.cImg} />
+              )}
+              <View style={s.cItem}>
+                <Text style={s.itemTitle}>{it.title}</Text>
+                <Text style={s.sku}>{it.sku}{it.special_request ? "  ·  SPECIAL QTY REQUEST" : ""}</Text>
+              </View>
+              <Text style={[s.state, s.cState]}>{stateLabel(it)}</Text>
+              <Text style={[s.cQty, { fontSize: 9 }]}>
+                {it.qty} x {inr(it.unit_price)}{it.original_price != null ? ` (was ${inr(it.original_price)})` : ""}
+              </Text>
+              <Text style={[s.cAmt, { fontSize: 10, fontFamily: "Times-Bold" }]}>{inr(it.qty * it.unit_price)}</Text>
             </View>
-            <Text style={[s.state, s.cState]}>{stateLabel(it)}</Text>
-            <Text style={[s.cQty, { fontSize: 9 }]}>
-              {it.qty} x {inr(it.unit_price)}{it.original_price != null ? ` (was ${inr(it.original_price)})` : ""}
-            </Text>
-            <Text style={[s.cAmt, { fontSize: 10, fontFamily: "Times-Bold" }]}>{inr(it.qty * it.unit_price)}</Text>
-          </View>
-        ))}
+          );
+        })}
 
         {/* Discount + tax breakdown (staff-recorded) */}
         {showBreakdown && (
@@ -193,5 +235,6 @@ function OrderDoc({ order, buyer }: { order: Order; buyer: PdfBuyer }) {
 }
 
 export async function renderOrderPdf(order: Order, buyer: PdfBuyer): Promise<Buffer> {
-  return renderToBuffer(<OrderDoc order={order} buyer={buyer} />);
+  const images = await fetchItemImages(order.items ?? []);
+  return renderToBuffer(<OrderDoc order={order} buyer={buyer} images={images} />);
 }

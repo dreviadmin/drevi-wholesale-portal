@@ -147,10 +147,10 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
         )}
       </div>
 
-      {/* Pending → approve */}
-      {isAdmin && buyer.status === "pending" && (
+      {/* No credentials yet → set them (approves too when still pending) */}
+      {isAdmin && !buyer.hasPassword && buyer.status !== "rejected" && (
         <button type="button" onClick={() => setShowModal(true)} className="mt-5 flex items-center gap-2 font-body uppercase" style={{ background: palette.gold, color: palette.black, fontSize: 11, letterSpacing: "0.18em", padding: "11px 18px" }}>
-          <UserPlus size={14} /> Approve &amp; Set Credentials
+          <UserPlus size={14} /> {buyer.status === "pending" ? "Approve & Set Credentials" : "Set Credentials"}
         </button>
       )}
 
