@@ -159,7 +159,9 @@ function OrderDoc({ order, buyer, images }: { order: Order; buyer: PdfBuyer; ima
               </View>
               <Text style={[s.state, s.cState]}>{stateLabel(it)}</Text>
               <Text style={[s.cQty, { fontSize: 9 }]}>
-                {it.qty} x {inr(it.unit_price)}{it.original_price != null ? ` (was ${inr(it.original_price)})` : ""}
+                {/* "(was …)" marks a genuine discount — never printed for GST
+                    bill-splits (actual_qty set), which must look like plain lines */}
+                {it.qty} x {inr(it.unit_price)}{it.original_price != null && it.actual_qty == null ? ` (was ${inr(it.original_price)})` : ""}
               </Text>
               <Text style={[s.cAmt, { fontSize: 10, fontFamily: "Times-Bold" }]}>{inr(it.qty * it.unit_price)}</Text>
             </View>

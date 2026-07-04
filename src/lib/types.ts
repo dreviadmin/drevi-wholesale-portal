@@ -90,6 +90,10 @@ export interface OrderItem {
   special_request?: boolean;
   // Set when staff overrode the wholesale price at billing time.
   original_price?: number;
+  // GST bill-split: when a piece is billed as N cheaper units (to stay under a
+  // tax slab), qty/unit_price hold the BILLED figures and actual_qty keeps the
+  // real piece count. Real per-piece price = qty*unit_price / actual_qty.
+  actual_qty?: number;
 }
 
 export type DiscountType = "percent" | "absolute";

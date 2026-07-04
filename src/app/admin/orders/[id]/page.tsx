@@ -53,6 +53,11 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
               <div className="font-body mt-0.5" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.1em" }}>
                 {it.sku} · {it.stock_state}{it.restock_days ? ` · ${it.restock_days}d` : ""}{it.special_request ? " · SPECIAL QTY REQUEST" : ""}
               </div>
+              {it.actual_qty != null && (
+                <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep, fontWeight: 600 }}>
+                  GST split — actual: {it.actual_qty} pc @ {formatINR((it.qty * it.unit_price) / it.actual_qty)} (billed as {it.qty} × {formatINR(it.unit_price)})
+                </div>
+              )}
             </div>
             <div className="text-right">
               <div className="font-body" style={{ fontSize: 12, color: palette.softBlack }}>{it.qty} × {formatINR(it.unit_price)}</div>

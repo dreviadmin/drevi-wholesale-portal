@@ -13,7 +13,7 @@ export interface OrderPayload {
   eventName: string;
   buyerId?: string; // existing buyer
   buyerClientRef?: string; // links to a queued capture made offline
-  items: { sku: string; qty: number; unitPrice?: number }[];
+  items: { sku: string; qty: number; unitPrice?: number; actualQty?: number }[];
   staffNote?: string;
   buyerNote?: string;
   taxMode?: "none" | "inclusive" | "exclusive";

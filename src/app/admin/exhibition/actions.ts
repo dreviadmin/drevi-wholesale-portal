@@ -81,7 +81,9 @@ export async function submitExhibitionOrder(input: {
   sessionId: string;
   eventName: string;
   buyerId: string;
-  items: { sku: string; qty: number; unitPrice?: number }[];
+  // qty/unitPrice are the BILLED figures; actualQty (GST bill-split) keeps the
+  // real piece count on record.
+  items: { sku: string; qty: number; unitPrice?: number; actualQty?: number }[];
   staffNote?: string;
   buyerNote?: string;
   taxMode?: TaxMode;
@@ -125,6 +127,10 @@ export async function submitExhibitionOrder(input: {
     const qty = Math.max(1, Math.floor(it.qty));
     const override = it.unitPrice != null && Number.isFinite(it.unitPrice) && it.unitPrice >= 0 ? Math.round(it.unitPrice * 100) / 100 : null;
     const unitPrice = override ?? p.wholesale_price;
+    const actualQty =
+      it.actualQty != null && Number.isFinite(it.actualQty) && it.actualQty >= 1 && Math.floor(it.actualQty) !== qty
+        ? Math.floor(it.actualQty)
+        : null;
     items.push({
       sku: p.sku,
       title: p.title ?? p.sku,
@@ -134,6 +140,7 @@ export async function submitExhibitionOrder(input: {
       restock_days: state === "made_to_order" ? p.restock_days : null,
       image_url: p.image_urls?.[0] ?? null,
       ...(override != null && override !== p.wholesale_price ? { original_price: p.wholesale_price } : {}),
+      ...(actualQty != null ? { actual_qty: actualQty } : {}),
     });
     subtotal += qty * unitPrice;
   }

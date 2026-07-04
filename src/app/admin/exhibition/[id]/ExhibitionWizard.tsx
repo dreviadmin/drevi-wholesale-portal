@@ -89,6 +89,9 @@ export function ExhibitionWizard({
   const [priceOverrides, setPriceOverrides] = useState<Record<string, string>>({});
   const [discountType, setDiscountType] = useState<DiscountType | "none">("none");
   const [discountValue, setDiscountValue] = useState<string>("");
+  // GST bill-split: bill one piece as N cheaper units (sku → factor, 1 = off).
+  // The invoice shows qty×N at price/N; actual_qty keeps the truth on record.
+  const [splitFactors, setSplitFactors] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [confirmInfo, setConfirmInfo] = useState<{ orderId: string; orderNumber: string; pdfUrl?: string } | null>(null);
   const [buyerClientRef, setBuyerClientRef] = useState<string | null>(null);
@@ -121,9 +124,21 @@ export function ExhibitionWizard({
     return p.wholesale_price;
   };
 
+  // Billed figures under a GST split: N× the qty at 1/N the price. Line value
+  // is unchanged (± a paisa of rounding); the SERVER recomputes from these
+  // billed lines so the invoice always sums exactly.
+  const splitOf = (sku: string) => Math.max(1, Math.floor(splitFactors[sku] ?? 1));
+  const billedPriceOf = (p: WholesaleProduct) => {
+    const f = splitOf(p.sku);
+    const eff = unitPriceOf(p);
+    return f === 1 ? eff : Math.round((eff / f) * 100) / 100;
+  };
+  // Smallest factor that brings the billed unit price to ≤ ₹2,500 (the slab).
+  const suggestSplit = (price: number) => (price > 2500 ? Math.ceil(price / 2500) : 1);
+
   const cartLines = Object.entries(cart).map(([sku, qty]) => ({ p: bySku.get(sku)!, qty })).filter((l) => l.p);
   const cartCount = cartLines.length;
-  const subtotal = cartLines.reduce((s, l) => s + l.qty * unitPriceOf(l.p), 0);
+  const subtotal = cartLines.reduce((s, l) => s + l.qty * splitOf(l.p.sku) * billedPriceOf(l.p), 0);
   // Staff-assisted: MOQ/stock limits are advisory warnings, never blocks.
   const warningCount = cartLines.filter((l) => {
     const cap = qtyCap(l.p);
@@ -211,8 +226,15 @@ export function ExhibitionWizard({
     if (!buyer) return;
     setError(null);
     const items = cartLines.map((l) => {
-      const price = unitPriceOf(l.p);
-      return { sku: l.p.sku, qty: l.qty, ...(price !== l.p.wholesale_price ? { unitPrice: price } : {}) };
+      const f = splitOf(l.p.sku);
+      const billedPrice = billedPriceOf(l.p);
+      const billedQty = l.qty * f;
+      return {
+        sku: l.p.sku,
+        qty: billedQty,
+        ...(billedPrice !== l.p.wholesale_price ? { unitPrice: billedPrice } : {}),
+        ...(f > 1 ? { actualQty: l.qty } : {}),
+      };
     });
     const taxPay = {
       taxMode, taxRate: effRate,
@@ -281,7 +303,9 @@ export function ExhibitionWizard({
   }
 
   function nextBuyer() {
-    setBuyer(null); setBuyerClientRef(null); setCart({}); setStaffNote(""); setBuyerNote(""); setConfirmInfo(null); setQuery(""); setCatalogQuery(""); setStep("buyer");
+    setBuyer(null); setBuyerClientRef(null); setCart({}); setStaffNote(""); setBuyerNote(""); setConfirmInfo(null); setQuery(""); setCatalogQuery("");
+    setPriceOverrides({}); setSplitFactors({}); setDiscountType("none"); setDiscountValue(""); setAdvance(""); setPayNote("");
+    setStep("buyer");
   }
 
   function endSessionConfirmed() {
@@ -458,6 +482,10 @@ export function ExhibitionWizard({
                 const overCap = cap != null && l.qty > cap;
                 const state = getStockState(l.p);
                 const img = l.p.image_urls?.[0];
+                const eff = unitPriceOf(l.p);
+                const factor = splitOf(l.p.sku);
+                const billedPrice = billedPriceOf(l.p);
+                const suggested = suggestSplit(eff);
                 return (
                   <div key={l.p.sku} className="flex items-center gap-3 p-3" style={{ border: "1px solid rgba(26,26,26,0.08)" }}>
                     <div className="relative flex-shrink-0" style={{ width: 88, height: 110, background: palette.ivoryDeep }}>
@@ -469,6 +497,20 @@ export function ExhibitionWizard({
                       {state === "made_to_order" && <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep }}>Made to Order · {l.p.restock_days}d</div>}
                       {belowMoq && <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep }}>Below minimum of {l.p.min_order_qty} — you can override</div>}
                       {overCap && <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep }}>Exceeds stock on hand ({cap} available, not restockable) — you can override</div>}
+                      {factor > 1 ? (
+                        <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep, fontWeight: 600 }}>
+                          Bill shows {l.qty * factor} × {formatINR(billedPrice)} · {l.qty} pc kept on record
+                        </div>
+                      ) : suggested > 1 ? (
+                        <button
+                          type="button"
+                          onClick={() => setSplitFactors((s) => ({ ...s, [l.p.sku]: suggested }))}
+                          className="font-body mt-1 text-left"
+                          style={{ fontSize: 10, color: palette.goldDeep, borderBottom: `1px solid ${palette.gold}` }}
+                        >
+                          Over ₹2,500 — split ×{suggested} to bill @ {formatINR(eff / suggested)}
+                        </button>
+                      ) : null}
                     </div>
                     <div className="flex flex-col items-end gap-2 flex-shrink-0">
                       <div className="flex items-center" style={{ border: "1px solid rgba(26,26,26,0.2)" }}>
@@ -486,10 +528,22 @@ export function ExhibitionWizard({
                           style={{ width: 70, border: "1px solid rgba(26,26,26,0.2)", padding: "4px 6px", fontSize: 12, color: unitPriceOf(l.p) !== l.p.wholesale_price ? palette.goldDeep : palette.black }}
                         />
                       </label>
-                      {unitPriceOf(l.p) !== l.p.wholesale_price && (
+                      {eff !== l.p.wholesale_price && (
                         <span className="font-body" style={{ fontSize: 9, color: palette.mutedGreige, textDecoration: "line-through" }}>{formatINR(l.p.wholesale_price)}</span>
                       )}
-                      <span className="font-display" style={{ fontSize: 13, fontWeight: 600, minWidth: 64, textAlign: "right" }}>{formatINR(l.qty * unitPriceOf(l.p))}</span>
+                      <label className="flex items-center gap-1 font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+                        Split
+                        <select
+                          value={factor}
+                          onChange={(e) => setSplitFactors((s) => ({ ...s, [l.p.sku]: Number(e.target.value) }))}
+                          className="font-body"
+                          style={{ fontSize: 11, padding: "3px 4px", border: "1px solid rgba(26,26,26,0.2)", background: palette.ivory, color: factor > 1 ? palette.goldDeep : palette.black }}
+                        >
+                          <option value={1}>Off</option>
+                          {[2, 3, 4, 5, 6, 8, 10].map((n) => <option key={n} value={n}>×{n}</option>)}
+                        </select>
+                      </label>
+                      <span className="font-display" style={{ fontSize: 13, fontWeight: 600, minWidth: 64, textAlign: "right" }}>{formatINR(l.qty * factor * billedPrice)}</span>
                     </div>
                   </div>
                 );
