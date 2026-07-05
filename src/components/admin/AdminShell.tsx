@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users, ShoppingBag, Store, ScrollText, Shield, LogOut } from "lucide-react";
+import { Users, ShoppingBag, Store, ScrollText, Shield, LogOut, ScanLine } from "lucide-react";
 import { logout } from "@/app/actions";
 import { palette } from "@/lib/palette";
 import type { StaffRole } from "@/lib/types";
 
-const ICONS = { Users, ShoppingBag, Store, ScrollText, Shield } as const;
+const ICONS = { Users, ShoppingBag, Store, ScrollText, Shield, ScanLine } as const;
 
 interface NavItem {
   href: string;
@@ -18,6 +18,8 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
+  // First for every role: the shop-floor price lookup (tags carry no price).
+  { href: "/admin/price-check", label: "Price Check", icon: "ScanLine" },
   { href: "/admin/buyers", label: "Buyers", icon: "Users", adminOnly: true },
   { href: "/admin/orders", label: "Orders", icon: "ShoppingBag", adminOnly: true },
   { href: "/admin/exhibition", label: "Exhibitions", icon: "Store" },
