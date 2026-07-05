@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/staff";
 import { finalizeOrder } from "@/lib/order-finalize";
-import type { OrderStatus } from "@/lib/types";
+import { getStockState } from "@/lib/stock";
+import type { Order, OrderItem, OrderStatus, WholesaleProduct } from "@/lib/types";
 
 export async function setOrderStatus(
   orderId: string,
@@ -30,6 +31,133 @@ export async function setOrderStatus(
   revalidatePath("/admin/orders");
   revalidatePath(`/admin/orders/${orderId}`);
   return { ok: true, invoiceSent };
+}
+
+// One line of an order amendment: "keep" edits an existing line (matched by
+// its position in the stored items array; omitted lines are removed), "add"
+// pulls a fresh product in. qty/unitPrice are BILLED figures; actualQty keeps
+// the real piece count for GST bill-splits.
+export type OrderEditLine =
+  | { kind: "keep"; index: number; qty: number; unitPrice: number; actualQty?: number | null }
+  | { kind: "add"; sku: string; qty: number; unitPrice?: number | null; actualQty?: number | null };
+
+export async function updateOrderItems(
+  orderId: string,
+  lines: OrderEditLine[],
+): Promise<{ ok: boolean; error?: string; total?: number }> {
+  try {
+    await requireAdmin();
+  } catch {
+    return { ok: false, error: "Not authorized." };
+  }
+  const admin = createAdminClient();
+
+  const { data: orderRow } = await admin.from("orders").select("*").eq("id", orderId).maybeSingle();
+  if (!orderRow) return { ok: false, error: "Order not found." };
+  const order = orderRow as Order;
+  if (order.status !== "submitted" && order.status !== "confirmed") {
+    return { ok: false, error: `A ${order.status} order can no longer be modified.` };
+  }
+  if (lines.length === 0) return { ok: false, error: "An order needs at least one item — use Cancel instead." };
+
+  // Catalog lookup for added lines + refreshing the original-price marker.
+  const skus = [
+    ...lines.filter((l): l is Extract<OrderEditLine, { kind: "add" }> => l.kind === "add").map((l) => l.sku),
+    ...lines
+      .filter((l): l is Extract<OrderEditLine, { kind: "keep" }> => l.kind === "keep")
+      .map((l) => order.items[l.index]?.sku)
+      .filter(Boolean),
+  ];
+  const { data: prods } = await admin.from("wholesale_products").select("*").in("sku", skus);
+  const bySku = new Map<string, WholesaleProduct>((prods ?? []).map((p) => [p.sku, p as WholesaleProduct]));
+
+  const norm = {
+    qty: (n: number) => Math.max(1, Math.floor(Number(n) || 1)),
+    price: (n: number) => Math.max(0, Math.round((Number(n) || 0) * 100) / 100),
+    actual: (n: number | null | undefined, qty: number) =>
+      n != null && Number.isFinite(n) && n >= 1 && Math.floor(n) !== qty ? Math.floor(n) : null,
+  };
+
+  const items: OrderItem[] = [];
+  let subtotal = 0;
+  for (const line of lines) {
+    if (line.kind === "keep") {
+      const prev = order.items[line.index];
+      if (!prev) return { ok: false, error: "Order changed in another session — reload and retry." };
+      const qty = norm.qty(line.qty);
+      const unitPrice = norm.price(line.unitPrice);
+      const actualQty = norm.actual(line.actualQty, qty);
+      const catalog = bySku.get(prev.sku);
+      const originalPrice =
+        catalog != null
+          ? catalog.wholesale_price !== unitPrice
+            ? catalog.wholesale_price
+            : undefined
+          : prev.original_price;
+      items.push({
+        ...prev,
+        qty,
+        unit_price: unitPrice,
+        original_price: originalPrice,
+        actual_qty: actualQty ?? undefined,
+      });
+      subtotal += qty * unitPrice;
+    } else {
+      const p = bySku.get(line.sku);
+      if (!p || !p.wholesale_visible) return { ok: false, error: `${line.sku} is not orderable.` };
+      const state = getStockState(p);
+      if (state === "sold_out") return { ok: false, error: `${line.sku} is sold out.` };
+      const qty = norm.qty(line.qty);
+      const unitPrice = line.unitPrice != null ? norm.price(line.unitPrice) : p.wholesale_price;
+      const actualQty = norm.actual(line.actualQty, qty);
+      items.push({
+        sku: p.sku,
+        title: p.title ?? p.sku,
+        unit_price: unitPrice,
+        qty,
+        stock_state: state,
+        restock_days: state === "made_to_order" ? p.restock_days : null,
+        image_url: p.image_urls?.[0] ?? null,
+        ...(unitPrice !== p.wholesale_price ? { original_price: p.wholesale_price } : {}),
+        ...(actualQty != null ? { actual_qty: actualQty } : {}),
+      });
+      subtotal += qty * unitPrice;
+    }
+  }
+
+  // Recompute money server-side with the order's existing discount/tax terms —
+  // same math as order submission; never trust client totals.
+  let discountAmount = 0;
+  if (order.discount_type) {
+    const value = Math.max(0, Number(order.discount_value) || 0);
+    discountAmount =
+      order.discount_type === "percent"
+        ? Math.round(subtotal * (Math.min(100, value) / 100) * 100) / 100
+        : Math.min(subtotal, Math.round(value * 100) / 100);
+  }
+  const netSubtotal = subtotal - discountAmount;
+  let taxAmount = 0;
+  let total = netSubtotal;
+  if (order.tax_mode === "exclusive" || order.tax_mode === "inclusive") {
+    const rate = Number(order.tax_rate) || 0;
+    if (order.tax_mode === "exclusive") {
+      taxAmount = Math.round(netSubtotal * (rate / 100) * 100) / 100;
+      total = netSubtotal + taxAmount;
+    } else {
+      taxAmount = Math.round(netSubtotal * (rate / (100 + rate)) * 100) / 100;
+    }
+  }
+
+  const { error } = await admin
+    .from("orders")
+    .update({ items, total_amount: total, discount_amount: discountAmount, tax_amount: taxAmount })
+    .eq("id", orderId);
+  if (error) return { ok: false, error: error.message };
+
+  await finalizeOrder(orderId); // regenerate the stored invoice PDF with the new figures
+  revalidatePath("/admin/orders");
+  revalidatePath(`/admin/orders/${orderId}`);
+  return { ok: true, total };
 }
 
 // Re-fire the PDF generation + Interakt confirmation send. Used by the

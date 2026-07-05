@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { OrderActions } from "./OrderActions";
+import { OrderEditor, type PickerProduct } from "./OrderEditor";
 import type { Order, Buyer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,22 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   if (!order) notFound();
   const o = order as Order;
   const { data: buyer } = await admin.from("buyers").select("business_name, owner_name, phone").eq("id", o.buyer_id).maybeSingle<Pick<Buyer, "business_name" | "owner_name" | "phone">>();
+
+  // Catalog for the "add item" picker in the order editor (admins only).
+  let pickerProducts: PickerProduct[] = [];
+  if (isAdminRole(staff.role) && (o.status === "submitted" || o.status === "confirmed")) {
+    const { data: prods } = await admin
+      .from("wholesale_products")
+      .select("sku, title, wholesale_price, image_urls")
+      .eq("wholesale_visible", true)
+      .order("title", { nullsFirst: false });
+    pickerProducts = (prods ?? []).map((p) => ({
+      sku: p.sku,
+      title: p.title,
+      wholesale_price: p.wholesale_price,
+      image_url: (p.image_urls as string[] | null)?.[0] ?? null,
+    }));
+  }
 
   return (
     <div className="px-4 md:px-8 py-6 max-w-2xl">
@@ -39,7 +56,21 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
             {fmt(o.submitted_at)} · Source: {SOURCE_LABEL[o.source] ?? o.source} · Status: {o.status}
           </div>
         </div>
-        {isAdminRole(staff.role) && <OrderActions orderId={o.id} status={o.status} pdfUrl={o.pdf_url} orderNumber={o.order_number} total={o.total_amount} />}
+        {isAdminRole(staff.role) && (
+          <div className="flex flex-col items-end gap-2">
+            <OrderActions orderId={o.id} status={o.status} pdfUrl={o.pdf_url} orderNumber={o.order_number} total={o.total_amount} />
+            <OrderEditor
+              orderId={o.id}
+              status={o.status}
+              items={o.items ?? []}
+              products={pickerProducts}
+              discountType={o.discount_type}
+              discountValue={o.discount_value}
+              taxMode={o.tax_mode}
+              taxRate={o.tax_rate}
+            />
+          </div>
+        )}
       </div>
 
       <div className="mt-6" style={{ borderTop: "1px solid rgba(26,26,26,0.1)" }}>
