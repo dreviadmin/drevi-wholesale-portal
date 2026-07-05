@@ -161,7 +161,7 @@ export function PriceCheckClient({ products }: { products: WholesaleProduct[] })
         </div>
       )}
 
-      {scanning && <QrScanner title="Scan tag for price" onScan={handleScan} onClose={() => setScanning(false)} />}
+      {scanning && <QrScanner title="Scan tag for price" onScan={handleScan} onClose={() => setScanning(false)} holdFeedback />}
     </div>
   );
 }

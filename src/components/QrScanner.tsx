@@ -39,11 +39,15 @@ export function QrScanner({
   onClose,
   onGoToCart,
   title = "Scan outfit QRs",
+  holdFeedback = false,
 }: {
   onScan: (text: string) => ScanFeedback;
   onClose: () => void;
   onGoToCart?: () => void;
   title?: string;
+  // Keep the last result on screen until the next scan replaces it (price
+  // check) instead of auto-clearing after a beat (cart flows).
+  holdFeedback?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const stopRef = useRef<(() => void) | null>(null);
@@ -88,7 +92,7 @@ export function QrScanner({
     if (result.ok) setAdded((n) => n + 1);
     setFeedback(result);
     if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
-    feedbackTimer.current = setTimeout(() => setFeedback(null), 1800);
+    if (!holdFeedback) feedbackTimer.current = setTimeout(() => setFeedback(null), 1800);
   }
 
   useEffect(() => {
