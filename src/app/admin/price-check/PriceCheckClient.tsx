@@ -39,7 +39,8 @@ export function PriceCheckClient({ products }: { products: WholesaleProduct[] })
     const p = bySku.get(text.trim().toUpperCase());
     if (!p) return { ok: false, message: `${text.trim()} — not in the catalog` };
     show(p);
-    return { ok: true, message: `${p.title ?? p.sku} — ${formatINR(p.wholesale_price)}` };
+    // Price first: on narrow screens the tail of the message crops.
+    return { ok: true, message: `${formatINR(p.wholesale_price)} — ${p.title ?? p.sku}` };
   }
 
   const matches = useMemo(() => {

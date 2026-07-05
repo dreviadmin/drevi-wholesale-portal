@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { X, Plus, Search } from "lucide-react";
+import { X, Plus, Search, ScanLine } from "lucide-react";
+import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { updateOrderItems, type OrderEditLine } from "@/app/admin/orders/actions";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -53,7 +54,18 @@ export function OrderEditor({
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
   const [isPending, start] = useTransition();
+
+  // The scanner's camera loop captures the first render's onScan, so state
+  // must be read through this ref (its identity is stable across renders).
+  const linesRef = useRef<DraftLine[]>(lines);
+  linesRef.current = lines;
+
+  const productBySku = useMemo(
+    () => new Map(products.map((p) => [p.sku.trim().toUpperCase(), p])),
+    [products],
+  );
 
   function openEditor() {
     setLines(
@@ -104,6 +116,25 @@ export function OrderEditor({
       .filter((p) => p.sku.toLowerCase().includes(q) || (p.title ?? "").toLowerCase().includes(q))
       .slice(0, 6);
   }, [query, products]);
+
+  // QR scan → add the product, or bump the qty of a line that already has it.
+  function handleAddScan(text: string): ScanFeedback {
+    const key = text.trim().toUpperCase();
+    const p = productBySku.get(key);
+    if (!p) return { ok: false, message: `${text.trim()} — not in the catalog` };
+    const existing = linesRef.current.find((l) => l.sku.trim().toUpperCase() === key);
+    if (existing) {
+      const newQty = Math.max(0, Math.floor(Number(existing.qty) || 0)) + 1;
+      setLines((ls) =>
+        ls.map((l) =>
+          l.key === existing.key ? { ...l, qty: String(Math.max(0, Math.floor(Number(l.qty) || 0)) + 1) } : l,
+        ),
+      );
+      return { ok: true, message: `${formatINR(p.wholesale_price)} — ${p.sku} · qty ${newQty}` };
+    }
+    addProduct(p);
+    return { ok: true, message: `${formatINR(p.wholesale_price)} — ${p.sku} added` };
+  }
 
   // Live preview with the order's existing discount/tax terms — the server
   // recomputes authoritatively on save.
@@ -217,6 +248,15 @@ export function OrderEditor({
                   className="font-body flex-1 bg-transparent outline-none"
                   style={{ fontSize: 12.5, color: palette.black }}
                 />
+                <button
+                  type="button"
+                  onClick={() => setScanning(true)}
+                  aria-label="Scan QR to add"
+                  className="flex items-center gap-1.5 font-body uppercase flex-shrink-0"
+                  style={{ fontSize: 9, letterSpacing: "0.12em", padding: "5px 9px", background: palette.black, color: palette.ivory }}
+                >
+                  <ScanLine size={13} strokeWidth={1.7} /> Scan
+                </button>
               </div>
               {matches.length > 0 && (
                 <div style={{ border: "1px solid rgba(26,26,26,0.1)", borderTop: "none" }}>
@@ -285,6 +325,8 @@ export function OrderEditor({
           </div>
         </div>
       )}
+
+      {scanning && <QrScanner title="Scan to add items" onScan={handleAddScan} onClose={() => setScanning(false)} />}
     </>
   );
 }
