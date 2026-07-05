@@ -4,12 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "NEXT_BUILD_DIR=.next-build next build",
+    "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "db:migrate": "node scripts/apply-migration.mjs",
     "db:seed-auth": "node scripts/seed-auth.mjs",
-    "db:backup": "node scripts/backup.mjs"
+    "db:backup": "node scripts/backup.mjs",
+    "build:local": "NEXT_BUILD_DIR=.next-build next build"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",
