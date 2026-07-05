@@ -25,7 +25,7 @@ jobs:
           gunzip -t backup.json.gz
           ls -la backup.json.gz
       - name: Store artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: drevi-backup-${{ github.run_number }}
           path: backup.json.gz
