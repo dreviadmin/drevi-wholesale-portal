@@ -1,0 +1,54 @@
+# Self-healing uptime watchdog. Every 10 minutes:
+#   1. Hits /api/health (which touches the DB — also counts as keepalive).
+#   2. If unhealthy, checks the Supabase project via the Management API and
+#      fires a restore when it is INACTIVE (paused), then re-verifies.
+# The workflow FAILS when the portal stays unhealthy, so GitHub emails the
+# repo owner — that's the alert channel even without extra monitoring.
+#
+# Repo secrets required:
+#   PORTAL_URL             e.g. https://wholesale.drevifashion.com
+#   SUPABASE_PROJECT_REF   cofarxgywnrdjbizxbxw
+#   SUPABASE_ACCESS_TOKEN  sbp_… (management API; used only for status/restore)
+name: watchdog
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health check (with auto-restore)
+        run: |
+          set -e
+          check() { curl -s -o /tmp/h.json -w "%{http_code}" --max-time 30 "${{ secrets.PORTAL_URL }}/api/health"; }
+
+          code=$(check || echo 000)
+          echo "health: HTTP $code $(cat /tmp/h.json 2>/dev/null)"
+          [ "$code" = "200" ] && exit 0
+
+          echo "Unhealthy — checking Supabase project status…"
+          status=$(curl -s --max-time 15 \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ACCESS_TOKEN }}" \
+            "https://api.supabase.com/v1/projects/${{ secrets.SUPABASE_PROJECT_REF }}" \
+            | grep -o '"status":"[^"]*"' | head -1)
+          echo "supabase: $status"
+
+          if echo "$status" | grep -q "INACTIVE"; then
+            echo "Paused — restoring…"
+            curl -s -X POST --max-time 30 \
+              -H "Authorization: Bearer ${{ secrets.SUPABASE_ACCESS_TOKEN }}" \
+              "https://api.supabase.com/v1/projects/${{ secrets.SUPABASE_PROJECT_REF }}/restore" >/dev/null
+            # restores take ~2-3 min; poll up to 5
+            for i in $(seq 1 10); do
+              sleep 30
+              code=$(check || echo 000)
+              echo "retry $i: HTTP $code"
+              [ "$code" = "200" ] && { echo "Recovered."; exit 0; }
+            done
+          fi
+
+          echo "Portal still unhealthy — failing so GitHub emails an alert."
+          exit 1

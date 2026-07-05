@@ -161,17 +161,39 @@ qty 0+restockable → Made to Order (Nd) · qty 0+not → Sold Out.
 
 ### B · Deploy (~30 min)
 4. Vercel → **Add New Project** → import the repo. Framework auto-detects Next.js.
-5. Before the first deploy, add **all env vars from §3** (Production scope).
-   For `GOOGLE_SERVICE_ACCOUNT_JSON`, open the local `drevi-pipeline-sa.json`
-   and paste its entire content as the value.
+5. Before the first deploy, add **all env vars from §3** (paste the whole of
+   `.local/vercel-env.txt` into the first Key field — Vercel splits it).
 6. Deploy → smoke-test the `*.vercel.app` URL (login, catalog).
-7. **Sync + backup cadence**: in the GitHub repo → Settings → Secrets → Actions,
-   add `PORTAL_URL` (your prod URL) and `CRON_SECRET` (same as Vercel). The two
-   included workflows then run automatically: `sync-cron.yml` syncs products
-   every 10 min (also keeps Supabase Free from ever pausing) and `backup.yml`
-   stores a full-database export daily as a GitHub artifact (90-day retention).
-   `vercel.json` keeps a once-daily sync backstop. Verify both under the repo's
-   **Actions** tab (each can be run manually via "Run workflow").
+6b. **Speed check (region)**: functions must run in **Singapore (sin1)** — the
+   same region as the Supabase database — or every page pays ~0.5 s of
+   US↔Singapore round-trips. `vercel.json` pins this already; confirm under
+   Project → Settings → Functions → Region shows `Singapore (sin1)`, and that
+   `curl <url>/api/health` answers in well under a second.
+7. **Automation secrets**: in the GitHub repo → Settings → Secrets and
+   variables → Actions, add FOUR secrets:
+   - `PORTAL_URL` — your prod URL (no trailing slash)
+   - `CRON_SECRET` — same value as the Vercel env var
+   - `SUPABASE_PROJECT_REF` — `cofarxgywnrdjbizxbxw`
+   - `SUPABASE_ACCESS_TOKEN` — the `sbp_…` token (from .env.local)
+
+   Three workflows then run themselves (verify each once via Actions → "Run
+   workflow"):
+   - `sync-cron.yml` — product sync every 10 min (also Supabase keepalive #1)
+   - `watchdog.yml` — health check every 10 min; **auto-restores Supabase if it
+     ever pauses** and fails loudly (GitHub emails you) if the portal stays
+     unhealthy
+   - `backup.yml` — daily full-database export as a GitHub artifact (90 days)
+
+   `vercel.json` keeps a once-daily sync backstop.
+   ⚠️ GitHub disables schedules in repos with no commits for 60 days — any
+   push re-arms them, and GitHub emails a warning first. The UptimeRobot
+   monitor (step 7b) is independent of GitHub and covers that gap.
+
+7b. **External uptime monitor (5 min)**: create a free https://uptimerobot.com
+   account → Add Monitor → HTTP(s) → URL `<PORTAL_URL>/api/health`, interval
+   5 minutes, alert contact = your email (add WhatsApp/SMS if you like). This
+   endpoint touches the database, so every ping is BOTH a health probe and
+   Supabase keepalive #2 — fully independent of GitHub.
 
 ### C · Domain (~15 min + DNS wait)
 8. Vercel → Project → Settings → Domains → add `wholesale.drevifashion.com`.
