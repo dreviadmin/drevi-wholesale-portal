@@ -82,8 +82,9 @@ export async function submitExhibitionOrder(input: {
   eventName: string;
   buyerId: string;
   // qty/unitPrice are the BILLED figures; actualQty (GST bill-split) keeps the
-  // real piece count on record.
-  items: { sku: string; qty: number; unitPrice?: number; actualQty?: number }[];
+  // real piece count on record. customTitle marks a free-typed piece that is
+  // not on the portal — never validated against wholesale_products.
+  items: { sku: string; qty: number; unitPrice?: number; actualQty?: number; customTitle?: string }[];
   staffNote?: string;
   buyerNote?: string;
   taxMode?: TaxMode;
@@ -120,6 +121,28 @@ export async function submitExhibitionOrder(input: {
   const items: OrderItem[] = [];
   let subtotal = 0;
   for (const it of input.items) {
+    if (it.customTitle?.trim()) {
+      const qty = Math.max(1, Math.floor(it.qty));
+      const unitPrice =
+        it.unitPrice != null && Number.isFinite(it.unitPrice) && it.unitPrice >= 0 ? Math.round(it.unitPrice * 100) / 100 : 0;
+      const actualQty =
+        it.actualQty != null && Number.isFinite(it.actualQty) && it.actualQty >= 1 && Math.floor(it.actualQty) !== qty
+          ? Math.floor(it.actualQty)
+          : null;
+      items.push({
+        sku: "CUSTOM",
+        title: it.customTitle.trim(),
+        unit_price: unitPrice,
+        qty,
+        stock_state: "ready",
+        restock_days: null,
+        image_url: null,
+        custom: true,
+        ...(actualQty != null ? { actual_qty: actualQty } : {}),
+      });
+      subtotal += qty * unitPrice;
+      continue;
+    }
     const p = bySku.get(it.sku);
     if (!p || !p.wholesale_visible) continue;
     const state = getStockState(p);

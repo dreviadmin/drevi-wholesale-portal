@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { Eye, EyeOff, ChevronLeft, Minus, Plus, UserPlus, Search, ShoppingBag, QrCode, Share2, MessageCircle } from "lucide-react";
+import { Eye, EyeOff, ChevronLeft, Minus, Plus, UserPlus, Search, ShoppingBag, QrCode, Share2, MessageCircle, X } from "lucide-react";
 import { GroupedProductCard } from "@/components/GroupedProductCard";
 import { PhoneInput } from "@/components/PhoneInput";
 import { ProductQuickView } from "@/components/ProductQuickView";
@@ -92,6 +92,10 @@ export function ExhibitionWizard({
   // GST bill-split: bill one piece as N cheaper units (sku → factor, 1 = off).
   // The invoice shows qty×N at price/N; actual_qty keeps the truth on record.
   const [splitFactors, setSplitFactors] = useState<Record<string, number>>({});
+  // Pieces not (yet) on the portal, keyed by a synthetic CUSTOM-n sku. Qty,
+  // price overrides and GST splits reuse the normal per-sku machinery.
+  const [customItems, setCustomItems] = useState<Record<string, { title: string; price: number }>>({});
+  const [customForm, setCustomForm] = useState<{ open: boolean; name: string; price: string }>({ open: false, name: "", price: "" });
   const [error, setError] = useState<string | null>(null);
   const [confirmInfo, setConfirmInfo] = useState<{ orderId: string; orderNumber: string; pdfUrl?: string } | null>(null);
   const [buyerClientRef, setBuyerClientRef] = useState<string | null>(null);
@@ -102,7 +106,39 @@ export function ExhibitionWizard({
     cacheProducts(products).catch(() => {});
   }, [products]);
 
-  const bySku = useMemo(() => new Map(products.map((p) => [p.sku, p])), [products]);
+  // Custom items become pseudo-products so every cart feature (price edit,
+  // split, steppers, totals) works on them unchanged. Not part of the catalog.
+  const customProducts = useMemo(
+    () =>
+      Object.entries(customItems).map(
+        ([sku, c]) =>
+          ({
+            sku,
+            title: c.title,
+            description: null,
+            category: "Custom",
+            sub_category: null,
+            color: null,
+            primary_fabric: null,
+            wholesale_price: c.price,
+            wholesale_visible: true,
+            min_order_qty: null,
+            restockable: true,
+            restock_days: null,
+            current_qty: 1,
+            image_urls: null,
+            shopify_product_id: null,
+            shopify_live_url: null,
+            synced_at: null,
+            images_fetched_at: null,
+          }) as WholesaleProduct,
+      ),
+    [customItems],
+  );
+  const bySku = useMemo(
+    () => new Map([...products, ...customProducts].map((p) => [p.sku, p])),
+    [products, customProducts],
+  );
   const categories = useMemo(() => {
     const present = new Set(products.map((p) => p.category).filter((c): c is string => !!c));
     return ["All", ...PREFERRED.filter((c) => present.has(c)), ...Array.from(present).filter((c) => !PREFERRED.includes(c)).sort()];
@@ -180,6 +216,67 @@ export function ExhibitionWizard({
     setTimeout(() => setToast(null), 2200);
   }
 
+  function addCustomItem() {
+    const name = customForm.name.trim();
+    if (!name) return;
+    const price = Math.max(0, Number(customForm.price) || 0);
+    const sku = `CUSTOM-${Object.keys(customItems).length + 1}`;
+    setCustomItems((m) => ({ ...m, [sku]: { title: name, price } }));
+    setQty(sku, 1);
+    setCustomForm({ open: false, name: "", price: "" });
+    flash(`${name} added to cart`);
+  }
+
+  const customItemForm = !customForm.open ? (
+    <button
+      type="button"
+      onClick={() => setCustomForm({ open: true, name: "", price: "" })}
+      className="flex items-center gap-1.5 font-body mt-3"
+      style={{ fontSize: 10.5, color: palette.goldDeep, letterSpacing: "0.06em" }}
+    >
+      <Plus size={12} /> Add a custom item (not on the portal)
+    </button>
+  ) : (
+    <div className="mt-3 p-3" style={{ border: "1px dashed rgba(26,26,26,0.3)" }}>
+      <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}>Custom item</div>
+      <div className="flex gap-2 mt-2 flex-wrap items-center">
+        <input
+          value={customForm.name}
+          onChange={(e) => setCustomForm((f) => ({ ...f, name: e.target.value }))}
+          placeholder="Item name"
+          autoFocus
+          className="font-body bg-transparent outline-none flex-1"
+          style={{ minWidth: 150, border: "1px solid rgba(26,26,26,0.2)", padding: "7px 9px", fontSize: 12 }}
+        />
+        <input
+          value={customForm.price}
+          onChange={(e) => setCustomForm((f) => ({ ...f, price: e.target.value }))}
+          inputMode="decimal"
+          placeholder="₹ / pc"
+          className="font-body bg-transparent outline-none text-right"
+          style={{ width: 84, border: "1px solid rgba(26,26,26,0.2)", padding: "7px 9px", fontSize: 12 }}
+        />
+        <button
+          type="button"
+          onClick={addCustomItem}
+          disabled={!customForm.name.trim()}
+          className="font-body uppercase disabled:opacity-40"
+          style={{ fontSize: 9, letterSpacing: "0.12em", padding: "8px 14px", background: palette.black, color: palette.ivory }}
+        >
+          Add
+        </button>
+        <button
+          type="button"
+          onClick={() => setCustomForm({ open: false, name: "", price: "" })}
+          aria-label="Close custom item form"
+          className="p-1"
+        >
+          <X size={14} color={palette.mutedGreige} />
+        </button>
+      </div>
+    </div>
+  );
+
   // QR decode → add to cart (continuous: scanner stays open, returns feedback).
   function handleScan(text: string): { ok: boolean; message: string } {
     const sku = text.trim().toUpperCase();
@@ -229,10 +326,17 @@ export function ExhibitionWizard({
       const f = splitOf(l.p.sku);
       const billedPrice = billedPriceOf(l.p);
       const billedQty = l.qty * f;
+      const cust = customItems[l.p.sku];
       return {
         sku: l.p.sku,
         qty: billedQty,
-        ...(billedPrice !== l.p.wholesale_price ? { unitPrice: billedPrice } : {}),
+        // custom lines always carry an explicit price — the server has no
+        // catalog row to fall back on
+        ...(cust
+          ? { unitPrice: billedPrice, customTitle: cust.title }
+          : billedPrice !== l.p.wholesale_price
+            ? { unitPrice: billedPrice }
+            : {}),
         ...(f > 1 ? { actualQty: l.qty } : {}),
       };
     });
@@ -473,7 +577,10 @@ export function ExhibitionWizard({
           <button type="button" onClick={() => setStep("catalog")} className="flex items-center gap-1 font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.15em", color: palette.mutedGreige }}><ChevronLeft size={14} /> Catalog</button>
           <h2 className="font-display mt-2" style={{ fontSize: 18, fontWeight: 600 }}>Cart · {buyer?.business_name}</h2>
           {cartLines.length === 0 ? (
-            <p className="font-body mt-4" style={{ fontSize: 12, color: palette.mutedGreige }}>No items yet.</p>
+            <>
+              <p className="font-body mt-4" style={{ fontSize: 12, color: palette.mutedGreige }}>No items yet.</p>
+              {customItemForm}
+            </>
           ) : (
             <div className="mt-4 flex flex-col gap-3">
               {cartLines.map((l) => {
@@ -493,7 +600,9 @@ export function ExhibitionWizard({
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="font-display" style={{ fontSize: 13, fontWeight: 500 }}>{l.p.title}</div>
-                      <div className="font-body" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.1em" }}>{l.p.sku}</div>
+                      <div className="font-body" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.1em" }}>
+                        {customItems[l.p.sku] ? "CUSTOM ITEM · NOT ON PORTAL" : l.p.sku}
+                      </div>
                       {state === "made_to_order" && <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep }}>Made to Order · {l.p.restock_days}d</div>}
                       {belowMoq && <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep }}>Below minimum of {l.p.min_order_qty} — you can override</div>}
                       {overCap && <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep }}>Exceeds stock on hand ({cap} available, not restockable) — you can override</div>}
@@ -548,6 +657,8 @@ export function ExhibitionWizard({
                   </div>
                 );
               })}
+
+              {customItemForm}
 
               {/* Discount */}
               <div className="mt-3 p-3" style={{ background: palette.ivoryDeep }}>
