@@ -19,7 +19,7 @@ export interface PickerProduct {
 
 interface DraftLine {
   key: string;
-  kind: "keep" | "add";
+  kind: "keep" | "add" | "custom";
   index?: number; // position in the stored items array (keep lines)
   sku: string;
   title: string;
@@ -87,8 +87,27 @@ export function OrderEditor({
     setOpen(true);
   }
 
-  function patch(key: string, field: "qty" | "unitPrice" | "actualQty", value: string) {
+  function patch(key: string, field: "qty" | "unitPrice" | "actualQty" | "title", value: string) {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, [field]: value } : l)));
+  }
+
+  // A piece that isn't on the portal (yet): free-typed name + price.
+  function addCustom(name: string) {
+    setLines((ls) => [
+      ...ls,
+      {
+        key: `custom-${ls.length}`,
+        kind: "custom",
+        sku: "CUSTOM",
+        title: name,
+        image_url: null,
+        qty: "1",
+        unitPrice: "",
+        actualQty: "",
+        catalogPrice: null,
+      },
+    ]);
+    setQuery("");
   }
 
   function addProduct(p: PickerProduct) {
@@ -154,11 +173,18 @@ export function OrderEditor({
 
   function save() {
     setError(null);
-    const payload: OrderEditLine[] = lines.map((l) =>
-      l.kind === "keep"
-        ? { kind: "keep", index: l.index!, qty: Number(l.qty) || 1, unitPrice: Number(l.unitPrice) || 0, actualQty: l.actualQty.trim() === "" ? null : Number(l.actualQty) }
-        : { kind: "add", sku: l.sku, qty: Number(l.qty) || 1, unitPrice: Number(l.unitPrice) || 0, actualQty: l.actualQty.trim() === "" ? null : Number(l.actualQty) },
-    );
+    if (lines.some((l) => l.kind === "custom" && !l.title.trim())) {
+      setError("Give every custom item a name.");
+      return;
+    }
+    const payload: OrderEditLine[] = lines.map((l) => {
+      const qty = Number(l.qty) || 1;
+      const unitPrice = Number(l.unitPrice) || 0;
+      const actualQty = l.actualQty.trim() === "" ? null : Number(l.actualQty);
+      if (l.kind === "keep") return { kind: "keep", index: l.index!, qty, unitPrice, actualQty };
+      if (l.kind === "custom") return { kind: "custom", title: l.title.trim(), qty, unitPrice, actualQty };
+      return { kind: "add", sku: l.sku, qty, unitPrice, actualQty };
+    });
     start(async () => {
       const res = await updateOrderItems(orderId, payload);
       if (!res.ok) { setError(res.error ?? "Failed to save"); return; }
@@ -216,8 +242,21 @@ export function OrderEditor({
                       {l.image_url && <Image src={l.image_url} alt={l.title} fill sizes="40px" className="object-cover" />}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="font-display truncate" style={{ fontSize: 13, color: palette.black, fontWeight: 500 }}>{l.title}</div>
-                      <div className="font-body" style={{ fontSize: 8.5, color: palette.mutedGreige, letterSpacing: "0.1em" }}>{l.sku}{l.kind === "add" ? " · NEW" : ""}</div>
+                      {l.kind === "custom" ? (
+                        <input
+                          value={l.title}
+                          onChange={(e) => patch(l.key, "title", e.target.value)}
+                          placeholder="Item name"
+                          autoFocus={!l.title}
+                          className="font-display w-full bg-transparent outline-none"
+                          style={{ fontSize: 13, color: palette.black, fontWeight: 500, borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "1px 2px" }}
+                        />
+                      ) : (
+                        <div className="font-display truncate" style={{ fontSize: 13, color: palette.black, fontWeight: 500 }}>{l.title}</div>
+                      )}
+                      <div className="font-body" style={{ fontSize: 8.5, color: palette.mutedGreige, letterSpacing: "0.1em" }}>
+                        {l.kind === "custom" ? "CUSTOM ITEM · NOT ON PORTAL" : `${l.sku}${l.kind === "add" ? " · NEW" : ""}`}
+                      </div>
                     </div>
                     <button type="button" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} aria-label={`Remove ${l.sku}`} className="p-1">
                       <X size={14} color={palette.mutedGreige} />
@@ -280,6 +319,17 @@ export function OrderEditor({
                   ))}
                 </div>
               )}
+              <button
+                type="button"
+                onClick={() => addCustom(matches.length === 0 ? query.trim() : "")}
+                className="flex items-center gap-1.5 font-body mt-2"
+                style={{ fontSize: 10.5, color: palette.goldDeep, letterSpacing: "0.06em" }}
+              >
+                <Plus size={12} />
+                {query.trim() && matches.length === 0
+                  ? `Add “${query.trim()}” as a custom item`
+                  : "Add a custom item (not on the portal)"}
+              </button>
             </div>
 
             <div className="mt-5 font-body" style={{ fontSize: 12, color: palette.softBlack }}>

@@ -35,11 +35,13 @@ export async function setOrderStatus(
 
 // One line of an order amendment: "keep" edits an existing line (matched by
 // its position in the stored items array; omitted lines are removed), "add"
-// pulls a fresh product in. qty/unitPrice are BILLED figures; actualQty keeps
-// the real piece count for GST bill-splits.
+// pulls a fresh product in, "custom" is a free-typed piece that isn't on the
+// portal. qty/unitPrice are BILLED figures; actualQty keeps the real piece
+// count for GST bill-splits.
 export type OrderEditLine =
   | { kind: "keep"; index: number; qty: number; unitPrice: number; actualQty?: number | null }
-  | { kind: "add"; sku: string; qty: number; unitPrice?: number | null; actualQty?: number | null };
+  | { kind: "add"; sku: string; qty: number; unitPrice?: number | null; actualQty?: number | null }
+  | { kind: "custom"; title: string; sku?: string; qty: number; unitPrice: number; actualQty?: number | null };
 
 export async function updateOrderItems(
   orderId: string,
@@ -100,6 +102,24 @@ export async function updateOrderItems(
         unit_price: unitPrice,
         original_price: originalPrice,
         actual_qty: actualQty ?? undefined,
+      });
+      subtotal += qty * unitPrice;
+    } else if (line.kind === "custom") {
+      const title = (line.title ?? "").trim();
+      if (!title) return { ok: false, error: "A custom item needs a name." };
+      const qty = norm.qty(line.qty);
+      const unitPrice = norm.price(line.unitPrice);
+      const actualQty = norm.actual(line.actualQty, qty);
+      items.push({
+        sku: (line.sku ?? "").trim().toUpperCase() || "CUSTOM",
+        title,
+        unit_price: unitPrice,
+        qty,
+        stock_state: "ready",
+        restock_days: null,
+        image_url: null,
+        custom: true,
+        ...(actualQty != null ? { actual_qty: actualQty } : {}),
       });
       subtotal += qty * unitPrice;
     } else {

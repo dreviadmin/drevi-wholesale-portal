@@ -94,6 +94,9 @@ export interface OrderItem {
   // tax slab), qty/unit_price hold the BILLED figures and actual_qty keeps the
   // real piece count. Real per-piece price = qty*unit_price / actual_qty.
   actual_qty?: number;
+  // Free-typed line for a piece not (yet) in the portal catalog — never
+  // validated against wholesale_products.
+  custom?: boolean;
 }
 
 export type DiscountType = "percent" | "absolute";
