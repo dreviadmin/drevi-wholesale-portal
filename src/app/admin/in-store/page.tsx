@@ -5,15 +5,14 @@ import { SessionHome } from "@/components/admin/SessionHome";
 
 export const dynamic = "force-dynamic";
 
-export default async function ExhibitionPage() {
+export default async function InStorePage() {
   await requireStaff();
   const admin = createAdminClient();
-  // null session_type = rows that predate the in-store split — all exhibitions.
   const { data: sessions } = await admin
     .from("exhibition_sessions")
     .select("id, event_name, started_at, ended_at, orders_count, session_type")
-    .or("session_type.eq.exhibition,session_type.is.null")
+    .eq("session_type", "in_store")
     .order("started_at", { ascending: false })
     .limit(10);
-  return (<><AutoRefresh /><SessionHome type="exhibition" basePath="/admin/exhibition" sessions={sessions ?? []} /></>);
+  return (<><AutoRefresh /><SessionHome type="in_store" basePath="/admin/in-store" sessions={sessions ?? []} /></>);
 }

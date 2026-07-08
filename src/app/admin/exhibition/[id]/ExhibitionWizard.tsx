@@ -414,7 +414,7 @@ export function ExhibitionWizard({
 
   function endSessionConfirmed() {
     if (!window.confirm("Are you sure you want to exit and end this session?")) return;
-    endSession(session.id, session.event_name).then(() => router.push("/admin/exhibition"));
+    endSession(session.id, session.event_name).then(() => router.push(session.type === "in_store" ? "/admin/in-store" : "/admin/exhibition"));
   }
 
   // ---------- Top bar ----------

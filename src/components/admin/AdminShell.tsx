@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users, ShoppingBag, Store, ScrollText, Shield, LogOut, ScanLine } from "lucide-react";
+import { Users, ShoppingBag, Store, Tent, ScrollText, Shield, LogOut, ScanLine } from "lucide-react";
 import { logout } from "@/app/actions";
 import { palette } from "@/lib/palette";
 import type { StaffRole } from "@/lib/types";
 
-const ICONS = { Users, ShoppingBag, Store, ScrollText, Shield, ScanLine } as const;
+const ICONS = { Users, ShoppingBag, Store, Tent, ScrollText, Shield, ScanLine } as const;
 
 interface NavItem {
   href: string;
@@ -17,12 +17,14 @@ interface NavItem {
   adminOnly?: boolean; // admin / super_admin (spec §5)
 }
 
+// Menu order is deliberate: the three shop-floor tools first (price check,
+// in-store billing, exhibitions), back-office after.
 const NAV: NavItem[] = [
-  // First for every role: the shop-floor price lookup (tags carry no price).
   { href: "/admin/price-check", label: "Price Check", icon: "ScanLine" },
+  { href: "/admin/in-store", label: "In-store", icon: "Store" },
+  { href: "/admin/exhibition", label: "Exhibitions", icon: "Tent" },
   { href: "/admin/buyers", label: "Buyers", icon: "Users", adminOnly: true },
   { href: "/admin/orders", label: "Orders", icon: "ShoppingBag", adminOnly: true },
-  { href: "/admin/exhibition", label: "Exhibitions", icon: "Store" },
   { href: "/admin/audit", label: "Audit Log", icon: "ScrollText", adminOnly: true },
   { href: "/admin/staff", label: "Staff", icon: "Shield", adminOnly: true },
 ];

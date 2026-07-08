@@ -51,10 +51,10 @@ export function isAdminRole(role: StaffRole): boolean {
 }
 
 // Page-level gate: admin/super_admin only (spec §5 — Buyers/Orders/Audit tabs).
-// Non-admin staff are sent to their only admin-area surface (Exhibitions).
+// Non-admin staff are sent to the staff home (price check).
 export async function requireAdminOrRedirect(): Promise<StaffCtx> {
   const staff = await getStaff();
   if (!staff) redirect("/login");
-  if (!isAdminRole(staff.role)) redirect("/admin/exhibition");
+  if (!isAdminRole(staff.role)) redirect("/admin/price-check");
   return staff;
 }

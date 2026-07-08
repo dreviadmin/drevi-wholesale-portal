@@ -3,78 +3,70 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Store, Plus, ChevronRight } from "lucide-react";
-import { startSession } from "./actions";
+import { Store, Tent, Plus, ChevronRight } from "lucide-react";
+import { startSession } from "@/app/admin/exhibition/actions";
 import { palette } from "@/lib/palette";
 import type { SessionType } from "@/lib/types";
 
 interface SessionDTO { id: string; event_name: string; started_at: string; ended_at: string | null; orders_count: number; session_type?: string; }
 
+// In-store and Exhibition share the same wizard but are separate sections in
+// the menu — each home lists and starts only its own session type.
+const COPY: Record<SessionType, { title: string; blurb: string; startLabel: string; nameLabel: string; namePlaceholder: string; defaultName: string }> = {
+  exhibition: {
+    title: "Exhibitions",
+    blurb: "Tablet-first. Start a session, capture buyers, and build orders on the spot.",
+    startLabel: "Start Exhibition Session",
+    nameLabel: "Event name",
+    namePlaceholder: "e.g. Bridal Asia 2026",
+    defaultName: "",
+  },
+  in_store: {
+    title: "In-store",
+    blurb: "Walk-in billing at the store — same flow, its own session.",
+    startLabel: "Start In-store Session",
+    nameLabel: "Session name",
+    namePlaceholder: "In-store",
+    defaultName: "In-store",
+  },
+};
+
 function fmt(iso: string) { return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }); }
 
-export function ExhibitionHome({ sessions }: { sessions: SessionDTO[] }) {
+export function SessionHome({ type, basePath, sessions }: { type: SessionType; basePath: string; sessions: SessionDTO[] }) {
   const router = useRouter();
-  const [event, setEvent] = useState("");
-  const [sessionType, setSessionType] = useState<SessionType>("exhibition");
+  const copy = COPY[type];
+  const [event, setEvent] = useState(copy.defaultName);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, start] = useTransition();
-
-  function pickType(t: SessionType) {
-    setSessionType(t);
-    // Sensible default name for in-store; exhibitions get a real event name.
-    if (t === "in_store" && !event.trim()) setEvent("In-store");
-    if (t === "exhibition" && event.trim() === "In-store") setEvent("");
-  }
+  const Icon = type === "in_store" ? Store : Tent;
 
   function begin() {
     setError(null);
     start(async () => {
-      const res = await startSession(event, sessionType);
+      const res = await startSession(event, type);
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
-      router.push(`/admin/exhibition/${res.id}`);
+      router.push(`${basePath}/${res.id}`);
     });
   }
 
   return (
     <div className="px-4 md:px-8 py-6 max-w-2xl">
       <h1 className="font-display flex items-center gap-2" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>
-        <Store size={20} strokeWidth={1.6} /> Exhibitions
+        <Icon size={20} strokeWidth={1.6} /> {copy.title}
       </h1>
-      <p className="font-body mt-1" style={{ fontSize: 12, color: palette.mutedGreige }}>Tablet-first. Start a session, capture buyers, and build orders on the spot.</p>
+      <p className="font-body mt-1" style={{ fontSize: 12, color: palette.mutedGreige }}>{copy.blurb}</p>
 
       {!starting ? (
         <button type="button" onClick={() => setStarting(true)} className="mt-5 flex items-center gap-2 font-body uppercase" style={{ background: palette.gold, color: palette.black, fontSize: 11, letterSpacing: "0.18em", padding: "12px 18px" }}>
-          <Plus size={14} /> Start Exhibition Session
+          <Plus size={14} /> {copy.startLabel}
         </button>
       ) : (
         <div className="mt-5 flex flex-col gap-3 max-w-sm">
-          <div className="flex gap-2">
-            {(["exhibition", "in_store"] as const).map((t) => {
-              const active = sessionType === t;
-              return (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => pickType(t)}
-                  className="font-body uppercase"
-                  style={{
-                    color: active ? palette.ivory : palette.softBlack,
-                    background: active ? palette.black : "transparent",
-                    border: active ? "none" : "1px solid rgba(26,26,26,0.25)",
-                    padding: "9px 16px",
-                    fontSize: 10,
-                    letterSpacing: "0.16em",
-                  }}
-                >
-                  {t === "exhibition" ? "Exhibition" : "In-store"}
-                </button>
-              );
-            })}
-          </div>
           <label className="flex flex-col gap-1.5">
-            <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>{sessionType === "in_store" ? "Session name" : "Event name"}</span>
-            <input autoFocus value={event} onChange={(e) => setEvent(e.target.value)} placeholder={sessionType === "in_store" ? "In-store" : "e.g. Bridal Asia 2026"} className="font-body bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "7px 2px", fontSize: 14 }} />
+            <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>{copy.nameLabel}</span>
+            <input autoFocus value={event} onChange={(e) => setEvent(e.target.value)} placeholder={copy.namePlaceholder} className="font-body bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "7px 2px", fontSize: 14 }} />
           </label>
           {error && <p className="font-body" style={{ fontSize: 11, color: palette.crimsonText }}>{error}</p>}
           <div className="flex gap-2">
@@ -89,10 +81,10 @@ export function ExhibitionHome({ sessions }: { sessions: SessionDTO[] }) {
         {sessions.length === 0 ? (
           <p className="font-body" style={{ fontSize: 12, color: palette.mutedGreige }}>No sessions yet.</p>
         ) : sessions.map((s) => (
-          <Link key={s.id} href={`/admin/exhibition/${s.id}`} className="flex items-center justify-between py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
+          <Link key={s.id} href={`${basePath}/${s.id}`} className="flex items-center justify-between py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
             <div>
               <div className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>{s.event_name}</div>
-              <div className="font-body mt-0.5" style={{ fontSize: 10, color: palette.mutedGreige }}>{s.session_type === "in_store" ? "In-store" : "Exhibition"} · {fmt(s.started_at)} · {s.orders_count} order{s.orders_count === 1 ? "" : "s"} · {s.ended_at ? "Ended" : "Active"}</div>
+              <div className="font-body mt-0.5" style={{ fontSize: 10, color: palette.mutedGreige }}>{fmt(s.started_at)} · {s.orders_count} order{s.orders_count === 1 ? "" : "s"} · {s.ended_at ? "Ended" : "Active"}</div>
             </div>
             <ChevronRight size={16} color={palette.mutedGreige} />
           </Link>
