@@ -59,6 +59,9 @@ export function OrderEditor({
 
   // The scanner's camera loop captures the first render's onScan, so state
   // must be read through this ref (its identity is stable across renders).
+  // Monotonic id source for added/custom draft lines — a length-based key can
+  // collide with a surviving line after a removal and edit both at once.
+  const seqRef = useRef(0);
   const linesRef = useRef<DraftLine[]>(lines);
   linesRef.current = lines;
 
@@ -96,7 +99,7 @@ export function OrderEditor({
     setLines((ls) => [
       ...ls,
       {
-        key: `custom-${ls.length}`,
+        key: `custom-${++seqRef.current}`,
         kind: "custom",
         sku: "CUSTOM",
         title: name,
@@ -114,7 +117,7 @@ export function OrderEditor({
     setLines((ls) => [
       ...ls,
       {
-        key: `add-${p.sku}-${ls.length}`,
+        key: `add-${p.sku}-${++seqRef.current}`,
         kind: "add",
         sku: p.sku,
         title: p.title ?? p.sku,
@@ -188,6 +191,10 @@ export function OrderEditor({
     start(async () => {
       const res = await updateOrderItems(orderId, payload);
       if (!res.ok) { setError(res.error ?? "Failed to save"); return; }
+      if (res.overpaidBy && res.overpaidBy > 0) {
+        // Non-blocking: the edit saved, but staff need to know a refund is owed.
+        alert(`Saved. Note: the buyer has now overpaid by ${formatINR(res.overpaidBy)} (advance exceeds the new total) — record a refund.`);
+      }
       setOpen(false);
       router.refresh();
     });

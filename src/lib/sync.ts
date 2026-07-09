@@ -239,14 +239,33 @@ export async function syncProducts(): Promise<SyncResult> {
   }
 
   // Hide SKUs previously visible but no longer qualifying (preserve order history).
+  //
+  // Guardrail: a transiently bad sheet (formula errors, a cleared column, a
+  // half-saved edit) can yield zero or very few qualifying rows. Without this
+  // check the hide pass would blank the entire storefront until the next good
+  // sync — and orders placed in that window silently drop items. So we refuse
+  // to hide when nothing qualified, or when a single run would hide more than
+  // half of what's currently visible; the run still upserts the good rows and
+  // records a loud warning instead.
   let hidden = 0;
   const { data: visibleRows } = await supabase
     .from("wholesale_products")
     .select("sku")
     .eq("wholesale_visible", true);
+  const visibleCount = (visibleRows ?? []).length;
   const qualifying = new Set(skus);
   const toHide = (visibleRows ?? []).map((r) => r.sku).filter((s) => !qualifying.has(s));
-  if (toHide.length > 0) {
+
+  const wouldHideAll = qualifying.size === 0 && toHide.length > 0;
+  const wouldHideMost = visibleCount > 0 && toHide.length > Math.max(5, Math.floor(visibleCount * 0.5));
+
+  if (wouldHideAll || wouldHideMost) {
+    warnings.push(
+      `Hide pass SKIPPED — would have hidden ${toHide.length} of ${visibleCount} visible products ` +
+        `(only ${qualifying.size} qualified). Suspected bad sheet; storefront left intact. ` +
+        `Check the Master tab's Wholesale Visible / Live URL / Final Wholesale columns.`,
+    );
+  } else if (toHide.length > 0) {
     const { error } = await supabase
       .from("wholesale_products")
       .update({ wholesale_visible: false, synced_at: nowIso })

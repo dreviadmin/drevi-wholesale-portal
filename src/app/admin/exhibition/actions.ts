@@ -104,9 +104,11 @@ export async function submitExhibitionOrder(input: {
   // Session drives the source + order prefix (exhibition → DX, in-store → IS).
   const { data: sess } = await admin
     .from("exhibition_sessions")
-    .select("session_type, event_name, orders_count")
+    .select("session_type, event_name, orders_count, ended_at")
     .eq("id", input.sessionId)
     .maybeSingle();
+  if (!sess) return { ok: false, error: "Session not found." };
+  if (sess.ended_at) return { ok: false, error: "This session has ended — start a new one to take orders." };
   const sessionType: SessionType = sess?.session_type === "in_store" ? "in_store" : "exhibition";
   const prefix = sessionType === "in_store" ? "IS" : "DX";
   const eventName = sess?.event_name ?? input.eventName;
@@ -207,14 +209,15 @@ export async function submitExhibitionOrder(input: {
   const now = new Date();
   const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
 
-  // Concurrency-safe numbering: the unique index on order_number is the real
-  // guard (Postgres/Supabase is fully ACID); on a collision we RE-COUNT so
-  // several staff finalising simultaneously converge instead of re-clashing.
+  // Gapless, race-safe numbering: next_order_number() reserves each number
+  // atomically (see migration 0008). A 23505 can now only mean a genuine
+  // duplicate from a retry, so we re-reserve and try again a couple of times.
   let orderId: string | null = null;
   let orderNumber: string | null = null;
-  for (let attempt = 1; attempt <= 8 && !orderId; attempt++) {
-    const { count } = await admin.from("orders").select("*", { count: "exact", head: true }).like("order_number", `${prefix}-${ymd}-%`);
-    const order_number = `${prefix}-${ymd}-${String((count ?? 0) + attempt).padStart(3, "0")}`;
+  for (let attempt = 1; attempt <= 3 && !orderId; attempt++) {
+    const { data: numData, error: numErr } = await admin.rpc("next_order_number", { p_prefix: prefix, p_day: ymd });
+    if (numErr || !numData) return { ok: false, error: numErr?.message ?? "Could not generate an order number." };
+    const order_number = numData as string;
     const { data, error } = await admin
       .from("orders")
       .insert({

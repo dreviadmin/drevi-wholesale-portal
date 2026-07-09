@@ -34,9 +34,11 @@ export function DreviHeader({
           DREVI
         </div>
         <div className="flex items-center gap-3">
-          <button type="button" onClick={onSearch} aria-label="Search">
-            <Search size={19} color={palette.black} strokeWidth={1.5} />
-          </button>
+          {onSearch && (
+            <button type="button" onClick={onSearch} aria-label="Search">
+              <Search size={19} color={palette.black} strokeWidth={1.5} />
+            </button>
+          )}
           <button
             type="button"
             onClick={onCart}

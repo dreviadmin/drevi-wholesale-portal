@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Wifi, WifiOff, RefreshCw } from "lucide-react";
 import { getQueue, removeQueued, updateQueued, getMeta, setMeta, type CapturePayload, type OrderPayload } from "@/lib/offline";
 import { captureBuyer, submitExhibitionOrder } from "@/app/admin/exhibition/actions";
@@ -16,6 +16,11 @@ export function OfflineSync() {
   const [count, setCount] = useState(0);
   const [draining, setDraining] = useState(false);
   const [failed, setFailed] = useState(0);
+  // Re-entrancy lock: the mount drain, the `online` event, the 5s poll, and the
+  // manual button can all fire drain() at once. Without this, overlapping runs
+  // each snapshot the same queue and submit the same order twice (there is no
+  // server-side idempotency key yet). A ref, not state, so it's synchronous.
+  const drainingRef = useRef(false);
 
   const refresh = useCallback(async () => {
     const q = await getQueue();
@@ -25,6 +30,8 @@ export function OfflineSync() {
 
   const drain = useCallback(async () => {
     if (typeof navigator !== "undefined" && !navigator.onLine) return;
+    if (drainingRef.current) return; // never run two drains concurrently
+    drainingRef.current = true;
     setDraining(true);
     try {
       const q = await getQueue();
@@ -54,6 +61,7 @@ export function OfflineSync() {
         else await updateQueued({ ...item, attempts: item.attempts + 1, lastError: res.error });
       }
     } finally {
+      drainingRef.current = false;
       setDraining(false);
       await refresh();
     }

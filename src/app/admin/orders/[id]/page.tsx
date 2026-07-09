@@ -4,7 +4,7 @@ import Image from "next/image";
 import { ChevronLeft } from "lucide-react";
 import { requireAdminOrRedirect, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { formatINR } from "@/lib/format";
+import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { OrderActions } from "./OrderActions";
 import { OrderEditor, type PickerProduct } from "./OrderEditor";
@@ -86,12 +86,12 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
               </div>
               {it.actual_qty != null && (
                 <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep, fontWeight: 600 }}>
-                  GST split — actual: {it.actual_qty} pc @ {formatINR((it.qty * it.unit_price) / it.actual_qty)} (billed as {it.qty} × {formatINR(it.unit_price)})
+                  GST split — actual: {it.actual_qty} pc @ {formatINR((it.qty * it.unit_price) / it.actual_qty)} (billed as {it.qty} × {formatUnitINR(it.unit_price)})
                 </div>
               )}
             </div>
             <div className="text-right">
-              <div className="font-body" style={{ fontSize: 12, color: palette.softBlack }}>{it.qty} × {formatINR(it.unit_price)}</div>
+              <div className="font-body" style={{ fontSize: 12, color: palette.softBlack }}>{it.qty} × {formatUnitINR(it.unit_price)}</div>
               <div className="font-display mt-0.5" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>{formatINR(it.qty * it.unit_price)}</div>
             </div>
           </div>

@@ -73,7 +73,11 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
       if (r === null) return;
       reason = r;
     } else if (!window.confirm(`Change status to ${next}?`)) return;
-    start(async () => { await setBuyerStatus(buyer.id, next, reason); router.refresh(); flash(`Status set to ${next}`); });
+    start(async () => {
+      const res = await setBuyerStatus(buyer.id, next, reason);
+      router.refresh();
+      flash(res.ok ? `Status set to ${next}` : res.error ?? "Failed to update status");
+    });
   }
 
   function reveal() { start(async () => { const r = await revealPassword(buyer.id); if (r.ok) setRevealed(r.password!); else flash(r.error ?? "Failed"); }); }

@@ -7,10 +7,16 @@ import { sendOrderConfirmation, sendOrderAlert } from "@/lib/interakt";
 import { formatINR } from "@/lib/format";
 import type { Order } from "@/lib/types";
 
-// Best-effort post-submit: render the PDF, upload it, store the URL, and fire
-// the buyer confirmation + Rakesh alert. Any failure is swallowed — the order
-// already exists and the PDF is reachable via the on-demand download route.
-export async function finalizeOrder(orderId: string): Promise<void> {
+// Best-effort post-submit: render the PDF, upload it, store the URL, and (unless
+// suppressed) fire the buyer confirmation + Rakesh alert. Any failure is
+// swallowed — the order already exists and the PDF is reachable via the
+// on-demand download route.
+//
+// `notify` defaults to true (initial submission). Edits pass notify:false so a
+// staff correction regenerates the invoice PDF silently instead of pinging the
+// buyer a fresh "order confirmed, total ₹X" message for every tweak.
+export async function finalizeOrder(orderId: string, opts: { notify?: boolean } = {}): Promise<void> {
+  const notify = opts.notify ?? true;
   const admin = createAdminClient();
   try {
     const { data: order } = await admin.from("orders").select("*").eq("id", orderId).maybeSingle();
@@ -25,6 +31,8 @@ export async function finalizeOrder(orderId: string): Promise<void> {
     const pdf = await renderOrderPdf(o, buyer ?? { business_name: null, owner_name: null, phone: null, city: null });
     const url = await uploadOrderPdf(o.id, o.order_number, pdf);
     await admin.from("orders").update({ pdf_url: url }).eq("id", o.id);
+
+    if (!notify) return;
 
     const total = formatINR(o.total_amount);
     const conf = buyer?.phone

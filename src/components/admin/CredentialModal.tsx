@@ -26,7 +26,6 @@ export function CredentialModal({
   const [generated, setGenerated] = useState(memorable());
   const [custom, setCustom] = useState("");
   const [showCustom, setShowCustom] = useState(false);
-  const [sendEmail, setSendEmail] = useState(true);
   const [openWa, setOpenWa] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activated, setActivated] = useState<{ password: string } | null>(null);
@@ -108,9 +107,6 @@ export function CredentialModal({
             </div>
 
             <div className="flex flex-col gap-2 mt-1">
-              <label className="flex items-center gap-2 font-body" style={{ fontSize: 12 }}>
-                <input type="checkbox" checked={sendEmail} onChange={(e) => setSendEmail(e.target.checked)} /> Send email with credentials
-              </label>
               <label className="flex items-center gap-2 font-body" style={{ fontSize: 12 }}>
                 <input type="checkbox" checked={openWa} onChange={(e) => setOpenWa(e.target.checked)} /> Open WhatsApp share sheet
               </label>

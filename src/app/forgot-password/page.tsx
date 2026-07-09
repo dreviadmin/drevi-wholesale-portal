@@ -2,25 +2,20 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
 import { palette } from "@/lib/palette";
 
 const RAKESH_PHONE = "+91 88280 43555";
+const RAKESH_WA = "918828043555";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
-  const [busy, setBusy] = useState(false);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    const supabase = createClient();
-    // Errors are swallowed deliberately — never reveal whether an email exists.
-    await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase());
-    setSent(true);
-    setBusy(false);
-  }
+  // Credentials are managed by Rakesh (there is no self-serve reset), so this
+  // page routes the buyer to him with a pre-filled WhatsApp message rather than
+  // sending a reset link that lands nowhere.
+  const waHref = `https://wa.me/${RAKESH_WA}?text=${encodeURIComponent(
+    `Hi Rakesh, please reset my Drevi wholesale portal password${email.trim() ? ` for ${email.trim()}` : ""}.`,
+  )}`;
 
   return (
     <main className="min-h-screen flex items-center justify-center px-6" style={{ background: palette.pageBg }}>
@@ -35,36 +30,31 @@ export default function ForgotPasswordPage() {
         </div>
 
         <div style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)", padding: 28 }}>
-          {sent ? (
-            <p className="font-body" style={{ fontSize: 12, color: palette.softBlack, lineHeight: 1.7 }}>
-              If an account exists for that email, a reset link is on its way. You can also message Rakesh on
-              WhatsApp ({RAKESH_PHONE}) and he&apos;ll resend your credentials.
-            </p>
-          ) : (
-            <form onSubmit={onSubmit} className="flex flex-col gap-4">
-              <label className="flex flex-col gap-1.5">
-                <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>
-                  Email
-                </span>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  className="font-body bg-transparent outline-none"
-                  style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "8px 2px", fontSize: 14, color: palette.black }}
-                />
-              </label>
-              <button
-                type="submit"
-                disabled={busy}
-                className="w-full font-body uppercase mt-2 transition-opacity disabled:opacity-60"
-                style={{ background: palette.black, color: palette.ivory, fontSize: 11, letterSpacing: "0.2em", padding: "13px 0" }}
-              >
-                {busy ? "Sending…" : "Send Reset Link"}
-              </button>
-            </form>
-          )}
+          <p className="font-body" style={{ fontSize: 12, color: palette.softBlack, lineHeight: 1.7 }}>
+            Your login is managed by the Drevi team. Enter your email and tap below to message Rakesh on
+            WhatsApp ({RAKESH_PHONE}) — he&apos;ll reset your password and send it back.
+          </p>
+          <label className="flex flex-col gap-1.5 mt-4">
+            <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>
+              Email
+            </span>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="font-body bg-transparent outline-none"
+              style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "8px 2px", fontSize: 14, color: palette.black }}
+            />
+          </label>
+          <a
+            href={waHref}
+            target="_blank"
+            rel="noopener"
+            className="w-full font-body uppercase mt-4 transition-opacity block text-center"
+            style={{ background: palette.black, color: palette.ivory, fontSize: 11, letterSpacing: "0.2em", padding: "13px 0" }}
+          >
+            Message Rakesh on WhatsApp
+          </a>
 
           <Link
             href="/login"

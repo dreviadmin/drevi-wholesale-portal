@@ -16,7 +16,16 @@ async function resolveActiveBuyer(): Promise<{ id: string }> {
   } = await supabase.auth.getUser();
   if (!user?.email) throw new Error("Not authenticated");
   const admin = createAdminClient();
-  const { data: buyer } = await admin.from("buyers").select("id, status").eq("email", user.email).maybeSingle();
+  // Emails are no longer unique (migration 0007). The logged-in identity is the
+  // credentialed row (setCredentials guarantees at most one per email), so
+  // resolve to it explicitly rather than .maybeSingle() (which errors on >1).
+  const { data: rows } = await admin
+    .from("buyers")
+    .select("id, status")
+    .eq("email", user.email)
+    .not("encrypted_password", "is", null)
+    .limit(1);
+  const buyer = rows?.[0];
   if (!buyer || buyer.status !== "active") throw new Error("Not an active buyer");
   return { id: buyer.id };
 }
@@ -122,12 +131,6 @@ export async function clearCart(): Promise<void> {
   await saveCart(buyer.id, []);
 }
 
-function orderNumberFor(seq: number): string {
-  const now = new Date();
-  const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
-  return `DW-${ymd}-${String(seq).padStart(3, "0")}`;
-}
-
 export interface SubmitState {
   error?: string;
 }
@@ -152,18 +155,15 @@ export async function submitOrder(_prev: SubmitState, formData: FormData): Promi
   }));
 
   const admin = createAdminClient();
-  // Daily sequence for DW-YYYYMMDD-###. The unique index is the real guard
-  // (Postgres is ACID); we re-count on each attempt so simultaneous submits
-  // converge after a collision instead of re-clashing.
-  const ymdPrefix = orderNumberFor(0).slice(0, 12); // "DW-YYYYMMDD-"
+  // Gapless, race-safe numbering via next_order_number() (migration 0008).
+  const now = new Date();
+  const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
 
   let orderId: string | null = null;
-  for (let attempt = 1; attempt <= 8 && !orderId; attempt++) {
-    const { count: todayCount } = await admin
-      .from("orders")
-      .select("*", { count: "exact", head: true })
-      .like("order_number", `${ymdPrefix}%`);
-    const order_number = orderNumberFor((todayCount ?? 0) + attempt);
+  for (let attempt = 1; attempt <= 3 && !orderId; attempt++) {
+    const { data: numData, error: numErr } = await admin.rpc("next_order_number", { p_prefix: "DW", p_day: ymd });
+    if (numErr || !numData) return { error: "Could not generate an order number. Please try again." };
+    const order_number = numData as string;
     const { data, error } = await admin
       .from("orders")
       .insert({

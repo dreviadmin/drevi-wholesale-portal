@@ -31,10 +31,10 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
-    const { data: buyer } = await admin.from("buyers").select("id").eq("email", email).maybeSingle();
+    const { data: buyerRows } = await admin.from("buyers").select("id").eq("email", email).limit(1);
     await writeAuditEvent({
       eventType: "login_failed",
-      buyerId: buyer?.id ?? null,
+      buyerId: buyerRows?.[0]?.id ?? null,
       ipAddress: ip,
       userAgent,
       notes: `email=${email}`,
@@ -54,11 +54,15 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     redirect("/admin");
   }
 
-  const { data: buyer } = await admin
+  // Resolve to the credentialed row (emails aren't unique since 0007); this is
+  // the row whose password just authenticated.
+  const { data: buyerRows } = await admin
     .from("buyers")
     .select("id, status")
     .eq("email", email)
-    .maybeSingle();
+    .not("encrypted_password", "is", null)
+    .limit(1);
+  const buyer = buyerRows?.[0];
 
   if (buyer?.status === "active") {
     await writeAuditEvent({ eventType: "login_success", buyerId: buyer.id, ipAddress: ip, userAgent });

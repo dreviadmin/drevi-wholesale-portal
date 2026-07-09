@@ -18,6 +18,24 @@ export async function setOrderStatus(
     return { ok: false, error: "Not authorized." };
   }
   const admin = createAdminClient();
+
+  // Enforce a valid lifecycle server-side (the UI hides buttons, but the action
+  // is directly invokable). A cancelled or fulfilled order is terminal — it must
+  // not be resurrected to submitted/confirmed, which would re-arm editing and
+  // re-fire the buyer's invoice for a dead order.
+  const { data: current } = await admin.from("orders").select("status").eq("id", orderId).maybeSingle();
+  if (!current) return { ok: false, error: "Order not found." };
+  const from = current.status as OrderStatus;
+  const ALLOWED: Record<OrderStatus, OrderStatus[]> = {
+    submitted: ["confirmed", "cancelled"],
+    confirmed: ["fulfilled", "cancelled"],
+    fulfilled: [],
+    cancelled: [],
+  };
+  if (from !== status && !ALLOWED[from].includes(status)) {
+    return { ok: false, error: `Cannot move a ${from} order to ${status}.` };
+  }
+
   const patch: Record<string, unknown> = { status };
   if (status === "confirmed") patch.confirmed_at = new Date().toISOString();
   const { error } = await admin.from("orders").update(patch).eq("id", orderId);
@@ -46,7 +64,7 @@ export type OrderEditLine =
 export async function updateOrderItems(
   orderId: string,
   lines: OrderEditLine[],
-): Promise<{ ok: boolean; error?: string; total?: number }> {
+): Promise<{ ok: boolean; error?: string; total?: number; overpaidBy?: number }> {
   try {
     await requireAdmin();
   } catch {
@@ -174,10 +192,16 @@ export async function updateOrderItems(
     .eq("id", orderId);
   if (error) return { ok: false, error: error.message };
 
-  await finalizeOrder(orderId); // regenerate the stored invoice PDF with the new figures
+  // Silent regenerate — do NOT re-notify the buyer for a staff edit.
+  await finalizeOrder(orderId, { notify: false });
   revalidatePath("/admin/orders");
   revalidatePath(`/admin/orders/${orderId}`);
-  return { ok: true, total };
+
+  // If the edit dropped the total below money already collected, surface the
+  // refund owed rather than letting the balance silently clamp to zero.
+  const advance = Number(order.advance_amount) || 0;
+  const overpaidBy = advance > total ? Math.round((advance - total) * 100) / 100 : undefined;
+  return { ok: true, total, overpaidBy };
 }
 
 // Re-fire the PDF generation + Interakt confirmation send. Used by the

@@ -80,15 +80,27 @@ export function SessionHome({ type, basePath, sessions }: { type: SessionType; b
       <div className="mt-2">
         {sessions.length === 0 ? (
           <p className="font-body" style={{ fontSize: 12, color: palette.mutedGreige }}>No sessions yet.</p>
-        ) : sessions.map((s) => (
-          <Link key={s.id} href={`${basePath}/${s.id}`} className="flex items-center justify-between py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
+        ) : sessions.map((s) => {
+          const meta = (
             <div>
-              <div className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>{s.event_name}</div>
+              <div className="font-display" style={{ fontSize: 14, fontWeight: 600, color: s.ended_at ? palette.mutedGreige : palette.black }}>{s.event_name}</div>
               <div className="font-body mt-0.5" style={{ fontSize: 10, color: palette.mutedGreige }}>{fmt(s.started_at)} · {s.orders_count} order{s.orders_count === 1 ? "" : "s"} · {s.ended_at ? "Ended" : "Active"}</div>
             </div>
-            <ChevronRight size={16} color={palette.mutedGreige} />
-          </Link>
-        ))}
+          );
+          // Ended sessions are not live links — one accidental tap on yesterday's
+          // session would otherwise start billing orders under the wrong event.
+          return s.ended_at ? (
+            <div key={s.id} className="flex items-center justify-between py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.08)", opacity: 0.6 }}>
+              {meta}
+              <span className="font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.14em", color: palette.mutedGreige }}>Ended</span>
+            </div>
+          ) : (
+            <Link key={s.id} href={`${basePath}/${s.id}`} className="flex items-center justify-between py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
+              {meta}
+              <ChevronRight size={16} color={palette.mutedGreige} />
+            </Link>
+          );
+        })}
       </div>
     </div>
   );

@@ -51,6 +51,9 @@ export function ExhibitionWizard({
   // Scanner callbacks outlive renders — read the live cart via a ref.
   const cartScanRef = useRef(cart);
   cartScanRef.current = cart;
+  // Monotonic id source for custom items — never reuses a key after removal
+  // (length-based ids could collide with a surviving line and edit both at once).
+  const customSeqRef = useRef(0);
   const [newBuyer, setNewBuyer] = useState(false);
   const NB_EMPTY = {
     business_name: "", owner_name: "", email: "", phone: "", city: "", gstin: "",
@@ -220,7 +223,7 @@ export function ExhibitionWizard({
     const name = customForm.name.trim();
     if (!name) return;
     const price = Math.max(0, Number(customForm.price) || 0);
-    const sku = `CUSTOM-${Object.keys(customItems).length + 1}`;
+    const sku = `CUSTOM-${++customSeqRef.current}`;
     setCustomItems((m) => ({ ...m, [sku]: { title: name, price } }));
     setQty(sku, 1);
     setCustomForm({ open: false, name: "", price: "" });
@@ -297,6 +300,7 @@ export function ExhibitionWizard({
         setBuyerClientRef(ref);
         setBuyer({ id: "", business_name: nb.business_name, owner_name: nb.owner_name, phone: nb.phone, city: nb.city });
         setNewBuyer(false);
+        setCardFile(null); // don't carry this card onto the next buyer captured online
         try { localStorage.removeItem(NB_DRAFT_KEY); } catch { /* non-fatal */ }
         setNb(NB_EMPTY);
         setStep("catalog");
@@ -347,7 +351,12 @@ export function ExhibitionWizard({
       advanceAmount: advanceNum, paymentMethod: advanceNum > 0 ? payMethod : undefined, paymentNotes: payNote || undefined,
     };
     start(async () => {
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
+      // Queue when offline OR when the buyer was captured offline and has no
+      // real id yet (buyerClientRef set). Submitting online with buyer.id="" was
+      // a crash: Postgres rejects buyer_id="". The drainer resolves the ref to a
+      // real id once the queued capture syncs.
+      const buyerNotYetSynced = !buyer.id && !!buyerClientRef;
+      if ((typeof navigator !== "undefined" && !navigator.onLine) || buyerNotYetSynced) {
         await enqueue("order", {
           sessionId: session.id, eventName: session.event_name,
           buyerId: buyerClientRef ? undefined : buyer.id, buyerClientRef: buyerClientRef ?? undefined,
@@ -409,6 +418,11 @@ export function ExhibitionWizard({
   function nextBuyer() {
     setBuyer(null); setBuyerClientRef(null); setCart({}); setStaffNote(""); setBuyerNote(""); setConfirmInfo(null); setQuery(""); setCatalogQuery("");
     setPriceOverrides({}); setSplitFactors({}); setDiscountType("none"); setDiscountValue(""); setAdvance(""); setPayNote("");
+    // Also clear everything that would otherwise bleed into the next buyer:
+    // the previous buyer's visiting-card photo (a cross-buyer data leak), their
+    // GST mode/rate, payment method, and any custom items.
+    setCardFile(null); setCustomItems({}); setCustomForm({ open: false, name: "", price: "" });
+    setTaxMode("none"); setTaxRate(5); setCustomRate(""); setPayMethod("Cash");
     setStep("buyer");
   }
 
@@ -457,6 +471,12 @@ export function ExhibitionWizard({
   return (
     <div className="min-h-screen" style={{ background: palette.ivory }}>
       {topBar}
+
+      {session.ended && (
+        <div className="px-4 md:px-6 py-2.5 font-body" style={{ background: palette.crimsonSoft, color: palette.crimsonText, fontSize: 12 }}>
+          This session has ended — it’s read-only. Start a new session to take orders.
+        </div>
+      )}
 
       {error && <div className="px-4 md:px-6 py-2 font-body" style={{ background: palette.crimsonSoft, color: palette.crimsonText, fontSize: 12 }}>{error}</div>}
 
@@ -770,7 +790,7 @@ export function ExhibitionWizard({
               {advanceNum > grandTotal && (
                 <p className="font-body" style={{ fontSize: 11, color: palette.crimsonText }}>Advance can&apos;t exceed the total.</p>
               )}
-              <button type="button" onClick={submit} disabled={isPending || advanceNum > grandTotal} className="mt-2 font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 11, letterSpacing: "0.2em", padding: "13px 0" }}>{isPending ? "Submitting…" : "Finalise Order"}</button>
+              <button type="button" onClick={submit} disabled={isPending || advanceNum > grandTotal || session.ended} className="mt-2 font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 11, letterSpacing: "0.2em", padding: "13px 0" }}>{isPending ? "Submitting…" : "Finalise Order"}</button>
             </div>
           )}
         </div>

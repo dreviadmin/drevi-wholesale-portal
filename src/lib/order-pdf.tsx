@@ -80,6 +80,16 @@ const s = StyleSheet.create({
 function inr(n: number): string {
   return "Rs " + Math.round(n).toLocaleString("en-IN");
 }
+// Unit prices under a GST split carry paise (e.g. 4995/4 = 1248.75). Rounding
+// them to whole rupees made the printed multiplication fail its own arithmetic
+// (4 x 1,249 = 4,996 != 4,995). Show paise only when the value actually has a
+// fractional part, so plain lines stay clean.
+function inrUnit(n: number): string {
+  const isWhole = Math.abs(n - Math.round(n)) < 0.005;
+  return isWhole
+    ? inr(n)
+    : "Rs " + n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 function stateLabel(it: OrderItem): string {
   if (it.stock_state === "ready") return "In Stock";
   if (it.stock_state === "limited") return "Limited Edition";
@@ -161,7 +171,7 @@ function OrderDoc({ order, buyer, images }: { order: Order; buyer: PdfBuyer; ima
               <Text style={[s.cQty, { fontSize: 9 }]}>
                 {/* "(was …)" marks a genuine discount — never printed for GST
                     bill-splits (actual_qty set), which must look like plain lines */}
-                {it.qty} x {inr(it.unit_price)}{it.original_price != null && it.actual_qty == null ? ` (was ${inr(it.original_price)})` : ""}
+                {it.qty} x {inrUnit(it.unit_price)}{it.original_price != null && it.actual_qty == null ? ` (was ${inr(it.original_price)})` : ""}
               </Text>
               <Text style={[s.cAmt, { fontSize: 10, fontFamily: "Times-Bold" }]}>{inr(it.qty * it.unit_price)}</Text>
             </View>
