@@ -42,6 +42,9 @@ export async function captureBuyer(form: {
   transport_details?: string;
   broker_details?: string;
   other_details?: string;
+  // Client idempotency key — an offline-queued capture that already committed
+  // (but whose response was lost) resolves to the same buyer row on replay.
+  clientRef?: string;
 }): Promise<{ ok: boolean; id?: string; error?: string }> {
   let staff;
   try { staff = await requireStaff(); } catch { return { ok: false, error: "Not authorized." }; }
@@ -50,6 +53,11 @@ export async function captureBuyer(form: {
     return { ok: false, error: "Add at least one of owner name, business name, or phone." };
   }
   const admin = createAdminClient();
+  const clientRef = form.clientRef?.trim() || null;
+  if (clientRef) {
+    const { data: existing } = await admin.from("buyers").select("id").eq("client_ref", clientRef).maybeSingle();
+    if (existing) return { ok: true, id: existing.id }; // already captured on a prior attempt
+  }
   const { data, error } = await admin
     .from("buyers")
     .insert({
@@ -68,10 +76,18 @@ export async function captureBuyer(form: {
       captured_by: staff.id,
       approved_by: staff.id,
       approved_at: new Date().toISOString(),
+      client_ref: clientRef,
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    // Lost the check-then-insert race — another replay won; return that row.
+    if (error.code === "23505" && clientRef) {
+      const { data: won } = await admin.from("buyers").select("id").eq("client_ref", clientRef).maybeSingle();
+      if (won) return { ok: true, id: won.id };
+    }
+    return { ok: false, error: error.message };
+  }
   revalidatePath("/admin/buyers");
   return { ok: true, id: data.id };
 }
@@ -94,12 +110,27 @@ export async function submitExhibitionOrder(input: {
   advanceAmount?: number;
   paymentMethod?: string;
   paymentNotes?: string;
+  // Client idempotency key — a replayed offline order resolves to the same row.
+  clientRef?: string;
 }): Promise<{ ok: boolean; orderId?: string; orderNumber?: string; pdfUrl?: string; error?: string }> {
   let staff;
   try { staff = await requireStaff(); } catch { return { ok: false, error: "Not authorized." }; }
   const admin = createAdminClient();
 
   if (input.items.length === 0) return { ok: false, error: "Cart is empty." };
+
+  // Idempotency: if this order was already committed under the same client_ref
+  // (a replayed queue item, a double-tap), return the existing row instead of
+  // billing the buyer again.
+  const clientRef = input.clientRef?.trim() || null;
+  if (clientRef) {
+    const { data: existing } = await admin
+      .from("orders")
+      .select("id, order_number, pdf_url")
+      .eq("client_ref", clientRef)
+      .maybeSingle();
+    if (existing) return { ok: true, orderId: existing.id, orderNumber: existing.order_number, pdfUrl: existing.pdf_url ?? undefined };
+  }
 
   // Session drives the source + order prefix (exhibition → DX, in-store → IS).
   const { data: sess } = await admin
@@ -239,11 +270,21 @@ export async function submitExhibitionOrder(input: {
         payment_method: input.paymentMethod?.trim() || null,
         payment_notes: input.paymentNotes?.trim() || null,
         notes: note,
+        client_ref: clientRef,
       })
       .select("id")
       .single();
     if (!error && data) { orderId = data.id; orderNumber = order_number; }
-    else if (error && error.code !== "23505") return { ok: false, error: error.message };
+    else if (error && error.code === "23505") {
+      // Could be the order_number (retry — loop again) or the client_ref (a
+      // concurrent replay already inserted this exact order — return that one).
+      if (clientRef) {
+        const { data: won } = await admin.from("orders").select("id, order_number, pdf_url").eq("client_ref", clientRef).maybeSingle();
+        if (won) return { ok: true, orderId: won.id, orderNumber: won.order_number, pdfUrl: won.pdf_url ?? undefined };
+      }
+    } else if (error) {
+      return { ok: false, error: error.message };
+    }
   }
   if (!orderId) return { ok: false, error: "Could not generate an order number." };
 

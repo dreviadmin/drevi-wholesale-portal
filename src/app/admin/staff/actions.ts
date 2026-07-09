@@ -45,6 +45,15 @@ export async function addStaffUser(form: {
   if (!canManage(actor, form.role)) return { ok: false, error: "Your role can't create that account type." };
 
   const admin = createAdminClient();
+
+  // Staff and buyers share one Supabase Auth pool. Creating a staff account with
+  // an email a buyer already logs in with would reset the buyer's password —
+  // refuse (mirror of the guard in setCredentials).
+  const { data: buyerClash } = await admin.from("buyers").select("id").eq("email", email).not("encrypted_password", "is", null).limit(1);
+  if (buyerClash && buyerClash.length > 0) {
+    return { ok: false, error: `${email} is already a buyer login — use a different email for staff.` };
+  }
+
   const password = generateMemorablePassword();
 
   const existing = await findAuthUserId(admin, email);

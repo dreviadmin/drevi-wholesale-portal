@@ -182,7 +182,10 @@ export async function submitOrder(_prev: SubmitState, formData: FormData): Promi
   }
   if (!orderId) return { error: "Could not generate an order number. Please try again." };
 
-  await finalizeOrder(orderId); // PDF + Interakt (best-effort)
+  // Clear the cart BEFORE the slow PDF/Interakt step. If finalize or the
+  // redirect times out, the order already exists and the cart is already empty,
+  // so a buyer resubmit can't create a duplicate order.
   await saveCart(buyer.id, []);
+  await finalizeOrder(orderId); // PDF + Interakt (best-effort)
   redirect(`/order/${orderId}`);
 }

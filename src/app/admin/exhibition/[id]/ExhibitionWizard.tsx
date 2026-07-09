@@ -54,6 +54,11 @@ export function ExhibitionWizard({
   // Monotonic id source for custom items — never reuses a key after removal
   // (length-based ids could collide with a surviving line and edit both at once).
   const customSeqRef = useRef(0);
+  // Stable idempotency key for the current order. Survives a failed retry and an
+  // offline replay so the buyer is never billed twice; reset per next buyer.
+  const orderRefRef = useRef<string | null>(null);
+  // Same, for an online buyer capture (stable across a timeout-retry).
+  const captureRefRef = useRef<string | null>(null);
   const [newBuyer, setNewBuyer] = useState(false);
   const NB_EMPTY = {
     business_name: "", owner_name: "", email: "", phone: "", city: "", gstin: "",
@@ -73,7 +78,7 @@ export function ExhibitionWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    const hasContent = Object.values(nb).some((v) => v.trim() !== "");
+    const hasContent = Object.values(nb).some((v) => typeof v === "string" && v.trim() !== "");
     try {
       if (hasContent) localStorage.setItem(NB_DRAFT_KEY, JSON.stringify(nb));
       else localStorage.removeItem(NB_DRAFT_KEY);
@@ -108,6 +113,64 @@ export function ExhibitionWizard({
   useEffect(() => {
     cacheProducts(products).catch(() => {});
   }, [products]);
+
+  // --- In-progress order autosave -------------------------------------------
+  // The whole cart lives in volatile React state, so an accidental back-swipe or
+  // refresh on a tablet mid-order would wipe a 40-line cart. Snapshot the
+  // working order to localStorage (keyed by session) on every change, restore it
+  // on mount, and clear it once the order is submitted.
+  const CART_DRAFT_KEY = `drevi:wizard:${session.id}`;
+  const cartRestored = useRef(false);
+  useEffect(() => {
+    if (cartRestored.current) return;
+    cartRestored.current = true;
+    try {
+      const raw = localStorage.getItem(CART_DRAFT_KEY);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (!d || !d.buyer || !d.cart || Object.keys(d.cart).length === 0) return;
+      setBuyer(d.buyer); setBuyerClientRef(d.buyerClientRef ?? null);
+      setCart(d.cart); setPriceOverrides(d.priceOverrides ?? {}); setSplitFactors(d.splitFactors ?? {});
+      setCustomItems(d.customItems ?? {});
+      setTaxMode(d.taxMode ?? "none"); setTaxRate(d.taxRate ?? 5); setCustomRate(d.customRate ?? "");
+      setDiscountType(d.discountType ?? "none"); setDiscountValue(d.discountValue ?? "");
+      setAdvance(d.advance ?? ""); setPayMethod(d.payMethod ?? "Cash"); setPayNote(d.payNote ?? "");
+      setStaffNote(d.staffNote ?? ""); setBuyerNote(d.buyerNote ?? "");
+      orderRefRef.current = d.orderRef ?? null;
+      // keep the custom-item id counter ahead of any restored keys
+      const maxCustom = Object.keys(d.customItems ?? {}).reduce((m: number, k: string) => Math.max(m, Number(k.split("-")[1]) || 0), 0);
+      customSeqRef.current = maxCustom;
+      setStep(d.step === "cart" ? "cart" : "catalog");
+    } catch { /* corrupt draft — ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    // Persist only an active, non-empty order; clear otherwise (incl. post-submit).
+    const active = !!buyer && (step === "catalog" || step === "cart") && !confirmInfo;
+    const hasItems = Object.keys(cart).length > 0;
+    try {
+      if (active && hasItems) {
+        localStorage.setItem(CART_DRAFT_KEY, JSON.stringify({
+          buyer, buyerClientRef, cart, priceOverrides, splitFactors, customItems,
+          taxMode, taxRate, customRate, discountType, discountValue,
+          advance, payMethod, payNote, staffNote, buyerNote,
+          orderRef: orderRefRef.current, step, savedAt: Date.now(),
+        }));
+      } else {
+        localStorage.removeItem(CART_DRAFT_KEY);
+      }
+    } catch { /* storage blocked — non-fatal */ }
+  }, [CART_DRAFT_KEY, buyer, buyerClientRef, cart, priceOverrides, splitFactors, customItems, taxMode, taxRate, customRate, discountType, discountValue, advance, payMethod, payNote, staffNote, buyerNote, step, confirmInfo]);
+
+  // Warn before an accidental unload (refresh / edge-swipe back) with a live cart.
+  useEffect(() => {
+    const hasItems = Object.keys(cart).length > 0 && !confirmInfo;
+    if (!hasItems) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [cart, confirmInfo]);
 
   // Custom items become pseudo-products so every cart feature (price edit,
   // split, steppers, totals) works on them unchanged. Not part of the catalog.
@@ -306,8 +369,9 @@ export function ExhibitionWizard({
         setStep("catalog");
         return;
       }
-      const res = await captureBuyer(nb);
+      const res = await captureBuyer({ ...nb, clientRef: captureRefRef.current ?? (captureRefRef.current = crypto.randomUUID()) });
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
+      captureRefRef.current = null; // consumed — next capture gets a fresh key
       if (cardFile) {
         const fd = new FormData();
         fd.append("card", cardFile);
@@ -350,6 +414,8 @@ export function ExhibitionWizard({
       discountValue: discountType === "none" ? undefined : discountNum,
       advanceAmount: advanceNum, paymentMethod: advanceNum > 0 ? payMethod : undefined, paymentNotes: payNote || undefined,
     };
+    // One key for this order across every retry / offline replay (idempotency).
+    const clientRef = orderRefRef.current ?? (orderRefRef.current = crypto.randomUUID());
     start(async () => {
       // Queue when offline OR when the buyer was captured offline and has no
       // real id yet (buyerClientRef set). Submitting online with buyer.id="" was
@@ -358,7 +424,7 @@ export function ExhibitionWizard({
       const buyerNotYetSynced = !buyer.id && !!buyerClientRef;
       if ((typeof navigator !== "undefined" && !navigator.onLine) || buyerNotYetSynced) {
         await enqueue("order", {
-          sessionId: session.id, eventName: session.event_name,
+          sessionId: session.id, eventName: session.event_name, clientRef,
           buyerId: buyerClientRef ? undefined : buyer.id, buyerClientRef: buyerClientRef ?? undefined,
           items, staffNote, buyerNote, ...taxPay,
         });
@@ -367,7 +433,7 @@ export function ExhibitionWizard({
         return;
       }
       const res = await submitExhibitionOrder({
-        sessionId: session.id, eventName: session.event_name, buyerId: buyer.id, items, staffNote, buyerNote, ...taxPay,
+        sessionId: session.id, eventName: session.event_name, buyerId: buyer.id, items, staffNote, buyerNote, clientRef, ...taxPay,
       });
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
       setConfirmInfo({ orderId: res.orderId!, orderNumber: res.orderNumber ?? "", pdfUrl: res.pdfUrl });
@@ -423,6 +489,7 @@ export function ExhibitionWizard({
     // GST mode/rate, payment method, and any custom items.
     setCardFile(null); setCustomItems({}); setCustomForm({ open: false, name: "", price: "" });
     setTaxMode("none"); setTaxRate(5); setCustomRate(""); setPayMethod("Cash");
+    orderRefRef.current = null; // fresh idempotency key for the next order
     setStep("buyer");
   }
 

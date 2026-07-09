@@ -91,6 +91,13 @@ export async function setCredentials(
     return { ok: false, error: `${email} already logs in for ${clash[0].business_name ?? "another buyer"} — use a different email.` };
   }
 
+  // Staff and buyers share one Supabase Auth pool. Activating a buyer with a
+  // staff member's email would reset that staff login's password — refuse.
+  const { data: staffClash } = await admin.from("staff_users").select("id").eq("email", email).limit(1);
+  if (staffClash && staffClash.length > 0) {
+    return { ok: false, error: `${email} is a staff login — use a different email for this buyer.` };
+  }
+
   try {
     await setAuthPassword(admin, email, password);
   } catch (e) {

@@ -11,6 +11,7 @@ const VERSION = 1;
 export interface OrderPayload {
   sessionId: string;
   eventName: string;
+  clientRef?: string; // idempotency key for the order itself (safe replay)
   buyerId?: string; // existing buyer
   buyerClientRef?: string; // links to a queued capture made offline
   items: { sku: string; qty: number; unitPrice?: number; actualQty?: number; customTitle?: string }[];
@@ -77,4 +78,10 @@ export async function removeQueued(id: number): Promise<void> {
 }
 export async function updateQueued(item: QueueItem): Promise<void> {
   await (await db()).put("queue", item);
+}
+// Repair UI: clear the attempt count so a stranded (capped) item drains again.
+export async function resetQueuedAttempts(id: number): Promise<void> {
+  const d = await db();
+  const item = (await d.get("queue", id)) as QueueItem | undefined;
+  if (item) await d.put("queue", { ...item, attempts: 0, lastError: undefined });
 }

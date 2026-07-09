@@ -38,6 +38,15 @@ export default function WholesaleInquiryPage() {
             </p>
           ) : (
             <form action={action} className="flex flex-col gap-4">
+              {/* Honeypot — hidden from real users; bots fill it and get dropped. */}
+              <input
+                type="text"
+                name="company_website"
+                tabIndex={-1}
+                autoComplete="off"
+                aria-hidden="true"
+                style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }}
+              />
               {field("Business name", "business_name")}
               {field("Owner name", "owner_name")}
               {field("Email", "email", true, "email")}
