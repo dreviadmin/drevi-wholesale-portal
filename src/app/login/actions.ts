@@ -20,7 +20,10 @@ function requestMeta() {
 }
 
 export async function login(_prev: LoginState, formData: FormData): Promise<LoginState> {
-  const email = (formData.get("email")?.toString() ?? "").trim().toLowerCase();
+  const rawId = (formData.get("email")?.toString() ?? "").trim().toLowerCase();
+  // Staff shorthand: a bare username ("ansh") is their @drevifashion.com login.
+  // Buyers always type full emails, so anything with an @ passes through as-is.
+  const email = rawId && !rawId.includes("@") ? `${rawId}@drevifashion.com` : rawId;
   const password = formData.get("password")?.toString() ?? "";
   if (!email || !password) return { error: "Enter your email and password." };
 

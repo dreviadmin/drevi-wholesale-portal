@@ -40,12 +40,18 @@ export default function LoginPage() {
         <form action={formAction} className="flex flex-col gap-4" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)", padding: 28 }}>
           <label className="flex flex-col gap-1.5">
             <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>
-              Email
+              Email or Username
             </span>
+            {/* type=text (not email) so staff can log in with just their name;
+                the server maps a bare username to @drevifashion.com */}
             <input
-              type="email"
+              type="text"
               name="email"
-              autoComplete="email"
+              autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              inputMode="email"
               required
               className="font-body bg-transparent outline-none"
               style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "8px 2px", fontSize: 14, color: palette.black }}
