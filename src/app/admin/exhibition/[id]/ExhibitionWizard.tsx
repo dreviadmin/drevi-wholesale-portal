@@ -120,30 +120,91 @@ export function ExhibitionWizard({
   // working order to localStorage (keyed by session) on every change, restore it
   // on mount, and clear it once the order is submitted.
   const CART_DRAFT_KEY = `drevi:wizard:${session.id}`;
+  const PARKED_KEY = `drevi:wizard:${session.id}:parked`;
   const cartRestored = useRef(false);
+
+  // Orders "on hold": a buyer backed out mid-checkout or two buyers are being
+  // served at once. Each entry is a full working-order snapshot (same shape as
+  // the autosave draft) that can be resumed with one tap.
+  interface ParkedOrder {
+    id: string;
+    parkedAt: number;
+    buyer: NonNullable<typeof buyer>;
+    buyerClientRef: string | null;
+    cart: Record<string, number>;
+    priceOverrides: Record<string, string>;
+    splitFactors: Record<string, number>;
+    customItems: Record<string, { title: string; price: number }>;
+    taxMode: TaxMode;
+    taxRate: number;
+    customRate: string;
+    discountType: DiscountType | "none";
+    discountValue: string;
+    advance: string;
+    payMethod: string;
+    payNote: string;
+    staffNote: string;
+    buyerNote: string;
+    orderRef: string | null;
+  }
+  const [parked, setParked] = useState<ParkedOrder[]>([]);
+
+  // Load the full working-order state from a snapshot (autosave draft or a
+  // parked order). Callers decide the step.
+  function loadSnapshot(d: Partial<ParkedOrder> & { buyer?: ParkedOrder["buyer"] }) {
+    setBuyer(d.buyer ?? null); setBuyerClientRef(d.buyerClientRef ?? null);
+    setCart(d.cart ?? {}); setPriceOverrides(d.priceOverrides ?? {}); setSplitFactors(d.splitFactors ?? {});
+    setCustomItems(d.customItems ?? {});
+    setTaxMode(d.taxMode ?? "none"); setTaxRate(d.taxRate ?? 5); setCustomRate(d.customRate ?? "");
+    setDiscountType(d.discountType ?? "none"); setDiscountValue(d.discountValue ?? "");
+    setAdvance(d.advance ?? ""); setPayMethod(d.payMethod ?? "Cash"); setPayNote(d.payNote ?? "");
+    setStaffNote(d.staffNote ?? ""); setBuyerNote(d.buyerNote ?? "");
+    setConfirmInfo(null);
+    orderRefRef.current = d.orderRef ?? null;
+    // keep the custom-item id counter ahead of any restored keys
+    const maxCustom = Object.keys(d.customItems ?? {}).reduce((m: number, k: string) => Math.max(m, Number(k.split("-")[1]) || 0), 0);
+    customSeqRef.current = Math.max(customSeqRef.current, maxCustom);
+  }
+
+  function snapshotCurrent(): ParkedOrder | null {
+    if (!buyer) return null;
+    return {
+      id: crypto.randomUUID(), parkedAt: Date.now(),
+      buyer, buyerClientRef, cart, priceOverrides, splitFactors, customItems,
+      taxMode, taxRate, customRate, discountType, discountValue,
+      advance, payMethod, payNote, staffNote, buyerNote,
+      orderRef: orderRefRef.current,
+    };
+  }
+
   useEffect(() => {
     if (cartRestored.current) return;
     cartRestored.current = true;
+    try {
+      const rawParked = localStorage.getItem(PARKED_KEY);
+      if (rawParked) {
+        const list = JSON.parse(rawParked);
+        if (Array.isArray(list)) setParked(list.filter((p) => p && p.buyer && p.cart));
+      }
+    } catch { /* corrupt parked list — ignore */ }
     try {
       const raw = localStorage.getItem(CART_DRAFT_KEY);
       if (!raw) return;
       const d = JSON.parse(raw);
       if (!d || !d.buyer || !d.cart || Object.keys(d.cart).length === 0) return;
-      setBuyer(d.buyer); setBuyerClientRef(d.buyerClientRef ?? null);
-      setCart(d.cart); setPriceOverrides(d.priceOverrides ?? {}); setSplitFactors(d.splitFactors ?? {});
-      setCustomItems(d.customItems ?? {});
-      setTaxMode(d.taxMode ?? "none"); setTaxRate(d.taxRate ?? 5); setCustomRate(d.customRate ?? "");
-      setDiscountType(d.discountType ?? "none"); setDiscountValue(d.discountValue ?? "");
-      setAdvance(d.advance ?? ""); setPayMethod(d.payMethod ?? "Cash"); setPayNote(d.payNote ?? "");
-      setStaffNote(d.staffNote ?? ""); setBuyerNote(d.buyerNote ?? "");
-      orderRefRef.current = d.orderRef ?? null;
-      // keep the custom-item id counter ahead of any restored keys
-      const maxCustom = Object.keys(d.customItems ?? {}).reduce((m: number, k: string) => Math.max(m, Number(k.split("-")[1]) || 0), 0);
-      customSeqRef.current = maxCustom;
+      loadSnapshot(d);
       setStep(d.step === "cart" ? "cart" : "catalog");
     } catch { /* corrupt draft — ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Persist the on-hold list per session.
+  useEffect(() => {
+    try {
+      if (parked.length > 0) localStorage.setItem(PARKED_KEY, JSON.stringify(parked));
+      else localStorage.removeItem(PARKED_KEY);
+    } catch { /* storage blocked — non-fatal */ }
+  }, [PARKED_KEY, parked]);
 
   useEffect(() => {
     // Persist only an active, non-empty order; clear otherwise (incl. post-submit).
@@ -493,8 +554,52 @@ export function ExhibitionWizard({
     setStep("buyer");
   }
 
+  // ---------- Hold / resume / discard (multiple buyers at the booth) ----------
+  function holdCurrent() {
+    const snap = snapshotCurrent();
+    if (!snap || Object.keys(cart).length === 0) return;
+    setParked((p) => [...p, snap]);
+    flash(`${buyer?.business_name || buyer?.owner_name || "Order"} put on hold`);
+    nextBuyer();
+  }
+
+  function discardCurrent() {
+    if (!window.confirm(`Discard this order${buyer?.business_name ? ` for ${buyer.business_name}` : ""}? The cart will be cleared.`)) return;
+    flash("Order discarded");
+    nextBuyer();
+  }
+
+  function resumeParked(id: string) {
+    const snap = parked.find((p) => p.id === id);
+    if (!snap) return;
+    const currentHasItems = !!buyer && Object.keys(cart).length > 0 && !confirmInfo;
+    if (currentHasItems) {
+      const who = buyer?.business_name || buyer?.owner_name || "the current order";
+      if (!window.confirm(`Put ${who} on hold and resume ${snap.buyer.business_name || snap.buyer.owner_name || "this order"}?`)) return;
+    }
+    const currentSnap = currentHasItems ? snapshotCurrent() : null;
+    setParked((p) => {
+      const rest = p.filter((x) => x.id !== id);
+      return currentSnap ? [...rest, currentSnap] : rest;
+    });
+    loadSnapshot(snap);
+    setQuery(""); setCatalogQuery(""); setNewBuyer(false); setCardFile(null);
+    setCustomForm({ open: false, name: "", price: "" });
+    setStep("cart");
+    flash(`Resumed ${snap.buyer.business_name || snap.buyer.owner_name || "order"}`);
+  }
+
+  function discardParked(id: string) {
+    const snap = parked.find((p) => p.id === id);
+    if (!snap) return;
+    if (!window.confirm(`Discard the held order for ${snap.buyer.business_name || snap.buyer.owner_name || "this buyer"}?`)) return;
+    setParked((p) => p.filter((x) => x.id !== id));
+  }
+
   function endSessionConfirmed() {
-    if (!window.confirm("Are you sure you want to exit and end this session?")) return;
+    const heldNote = parked.length > 0 ? ` ${parked.length} order(s) on hold will be discarded.` : "";
+    if (!window.confirm(`Are you sure you want to exit and end this session?${heldNote}`)) return;
+    try { localStorage.removeItem(PARKED_KEY); localStorage.removeItem(CART_DRAFT_KEY); } catch { /* non-fatal */ }
     endSession(session.id, session.event_name).then(() => router.push(session.type === "in_store" ? "/admin/in-store" : "/admin/exhibition"));
   }
 
@@ -506,6 +611,16 @@ export function ExhibitionWizard({
         <span className="font-body truncate" style={{ fontSize: 10, letterSpacing: "0.1em", color: palette.champagne }}>{session.event_name}{buyer ? ` · ${buyer.business_name}` : ""}</span>
       </div>
       <div className="flex items-center gap-3 md:gap-4 flex-wrap">
+        {parked.length > 0 && step !== "buyer" && (
+          <button
+            type="button"
+            onClick={() => setStep("buyer")}
+            className="font-body uppercase"
+            style={{ border: "1px solid rgba(255,255,255,0.4)", color: palette.champagne, padding: "5px 12px", fontSize: 9, letterSpacing: "0.16em" }}
+          >
+            On Hold · {parked.length}
+          </button>
+        )}
         {step === "catalog" && (
           <button type="button" onClick={() => setShowPrices((v) => !v)} className="flex items-center gap-1.5 font-body uppercase" style={{ color: showPrices ? palette.gold : "#9A9485", fontSize: 10, letterSpacing: "0.15em" }}>
             {showPrices ? <Eye size={14} /> : <EyeOff size={14} />} Prices · {showPrices ? "On" : "Off"}
@@ -550,6 +665,45 @@ export function ExhibitionWizard({
       {/* E3 — buyer */}
       {step === "buyer" && (
         <div className="px-4 md:px-6 py-5 max-w-xl">
+          {parked.length > 0 && (
+            <div className="mb-6">
+              <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.2em", color: palette.goldDeep }}>
+                On Hold ({parked.length})
+              </div>
+              <div className="mt-2 flex flex-col">
+                {parked.map((p) => {
+                  const lines = Object.keys(p.cart).length;
+                  const pcs = Object.values(p.cart).reduce((n, q) => n + q, 0);
+                  const mins = Math.max(1, Math.round((Date.now() - p.parkedAt) / 60000));
+                  return (
+                    <div key={p.id} className="flex items-center justify-between gap-3 py-2.5" style={{ borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
+                      <div className="min-w-0">
+                        <div className="font-display truncate" style={{ fontSize: 13.5, fontWeight: 600, color: palette.black }}>
+                          {p.buyer.business_name || p.buyer.owner_name || "Unnamed buyer"}
+                        </div>
+                        <div className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+                          {lines} line{lines === 1 ? "" : "s"} · {pcs} pc{pcs === 1 ? "" : "s"} · held {mins} min ago
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => resumeParked(p.id)}
+                          className="font-body uppercase"
+                          style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.14em", padding: "7px 14px" }}
+                        >
+                          Resume
+                        </button>
+                        <button type="button" onClick={() => discardParked(p.id)} aria-label={`Discard held order for ${p.buyer.business_name ?? "buyer"}`} className="p-1.5">
+                          <X size={14} color={palette.mutedGreige} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <h2 className="font-display" style={{ fontSize: 18, fontWeight: 600 }}>Who is this order for?</h2>
           {!newBuyer ? (
             <>
@@ -858,6 +1012,30 @@ export function ExhibitionWizard({
                 <p className="font-body" style={{ fontSize: 11, color: palette.crimsonText }}>Advance can&apos;t exceed the total.</p>
               )}
               <button type="button" onClick={submit} disabled={isPending || advanceNum > grandTotal || session.ended} className="mt-2 font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 11, letterSpacing: "0.2em", padding: "13px 0" }}>{isPending ? "Submitting…" : "Finalise Order"}</button>
+
+              {/* Buyer stepped away or backed out? Hold keeps everything —
+                  cart, prices, splits, tax, advance — resumable from the buyer
+                  step; Discard clears it after a confirm. */}
+              <div className="flex gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={holdCurrent}
+                  disabled={isPending}
+                  className="flex-1 font-body uppercase disabled:opacity-50"
+                  style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 10, letterSpacing: "0.16em", padding: "10px 0" }}
+                >
+                  Hold — Next Buyer
+                </button>
+                <button
+                  type="button"
+                  onClick={discardCurrent}
+                  disabled={isPending}
+                  className="font-body uppercase px-5 disabled:opacity-50"
+                  style={{ border: "1px solid rgba(155,44,44,0.5)", color: palette.crimsonText, background: "transparent", fontSize: 10, letterSpacing: "0.16em" }}
+                >
+                  Discard
+                </button>
+              </div>
             </div>
           )}
         </div>
