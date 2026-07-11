@@ -92,6 +92,33 @@ export async function captureBuyer(form: {
   return { ok: true, id: data.id };
 }
 
+// Booth-side correction of a customer's contact details (cart-page Edit).
+// Deliberately excludes email — it's the login username; changing it belongs
+// to the admin credential flow, not a checkout edit.
+export async function updateBuyerContact(
+  buyerId: string,
+  form: { business_name?: string; owner_name?: string; phone?: string; city?: string },
+): Promise<{ ok: boolean; error?: string }> {
+  try { await requireStaff(); } catch { return { ok: false, error: "Not authorized." }; }
+  if (!buyerId) return { ok: false, error: "No buyer to update." };
+  if (!form.business_name?.trim() && !form.owner_name?.trim() && !form.phone?.trim()) {
+    return { ok: false, error: "Keep at least one of business name, owner name, or phone." };
+  }
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("buyers")
+    .update({
+      business_name: form.business_name?.trim() || null,
+      owner_name: form.owner_name?.trim() || null,
+      phone: form.phone?.trim() || null,
+      city: form.city?.trim() || null,
+    })
+    .eq("id", buyerId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/admin/buyers");
+  return { ok: true };
+}
+
 // E6 — submit the order on behalf of the buyer.
 export async function submitExhibitionOrder(input: {
   sessionId: string;

@@ -10,10 +10,10 @@ import { ProductQuickView } from "@/components/ProductQuickView";
 import { QrScanner } from "@/components/QrScanner";
 import { groupByBase } from "@/lib/variants";
 import { OfflineSync } from "@/components/OfflineSync";
-import { captureBuyer, submitExhibitionOrder, endSession } from "../actions";
+import { captureBuyer, submitExhibitionOrder, endSession, updateBuyerContact } from "../actions";
 import { uploadBuyerCard } from "@/app/admin/buyers/actions";
 import { buildVCard, downloadVCard } from "@/lib/share";
-import { cacheProducts, enqueue } from "@/lib/offline";
+import { cacheProducts, enqueue, updateQueuedCaptureForm } from "@/lib/offline";
 import { getStockState, qtyCap } from "@/lib/stock";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -554,6 +554,49 @@ export function ExhibitionWizard({
     setStep("buyer");
   }
 
+  // ---------- Customer edit (cart page) ----------
+  // A modal, not a step change, so closing lands staff exactly where they were.
+  const [editBuyer, setEditBuyer] = useState<{ business_name: string; owner_name: string; phone: string; city: string } | null>(null);
+  const [editBuyerErr, setEditBuyerErr] = useState<string | null>(null);
+
+  function openBuyerEdit() {
+    if (!buyer) return;
+    setEditBuyerErr(null);
+    setEditBuyer({
+      business_name: buyer.business_name ?? "",
+      owner_name: buyer.owner_name ?? "",
+      phone: buyer.phone ?? "",
+      city: buyer.city ?? "",
+    });
+  }
+
+  function saveBuyerEdit() {
+    const f = editBuyer;
+    if (!f || !buyer) return;
+    if (!f.business_name.trim() && !f.owner_name.trim() && !f.phone.trim()) {
+      setEditBuyerErr("Keep at least one of business name, owner name, or phone.");
+      return;
+    }
+    setEditBuyerErr(null);
+    start(async () => {
+      if (buyer.id) {
+        if (typeof navigator !== "undefined" && !navigator.onLine) {
+          setEditBuyerErr("You're offline — this customer is already saved, so edit once you're back online.");
+          return;
+        }
+        const res = await updateBuyerContact(buyer.id, f);
+        if (!res.ok) { setEditBuyerErr(res.error ?? "Could not save"); return; }
+      } else if (buyerClientRef) {
+        // Offline-captured buyer: patch the queued capture so the corrected
+        // details are what eventually sync.
+        await updateQueuedCaptureForm(buyerClientRef, f);
+      }
+      setBuyer((b) => (b ? { ...b, business_name: f.business_name.trim() || null, owner_name: f.owner_name.trim() || null, phone: f.phone.trim() || null, city: f.city.trim() || null } : b));
+      setEditBuyer(null);
+      flash("Customer details updated");
+    });
+  }
+
   // ---------- Hold / resume / discard (multiple buyers at the booth) ----------
   function holdCurrent() {
     const snap = snapshotCurrent();
@@ -809,6 +852,25 @@ export function ExhibitionWizard({
               />
             ))}
           </div>
+          {catalogGroups.length === 0 && catalogQuery.trim() !== "" && (
+            <p className="font-body mt-4" style={{ fontSize: 12, color: palette.mutedGreige }}>No designs match “{catalogQuery.trim()}”.</p>
+          )}
+          {/* Custom sale is reachable from the catalog too — it opens the cart
+              with the custom-item form ready (pre-named from a dead-end search). */}
+          <button
+            type="button"
+            onClick={() => {
+              setCustomForm({ open: true, name: catalogGroups.length === 0 ? catalogQuery.trim() : "", price: "" });
+              setStep("cart");
+            }}
+            className="flex items-center gap-1.5 font-body mt-4"
+            style={{ fontSize: 11, color: palette.goldDeep, letterSpacing: "0.06em" }}
+          >
+            <Plus size={13} />
+            {catalogGroups.length === 0 && catalogQuery.trim() !== ""
+              ? `Sell “${catalogQuery.trim()}” as a custom item`
+              : "Custom sale — item not on the portal"}
+          </button>
         </div>
       )}
 
@@ -816,7 +878,31 @@ export function ExhibitionWizard({
       {step === "cart" && (
         <div className="px-4 md:px-6 py-5 max-w-2xl">
           <button type="button" onClick={() => setStep("catalog")} className="flex items-center gap-1 font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.15em", color: palette.mutedGreige }}><ChevronLeft size={14} /> Catalog</button>
-          <h2 className="font-display mt-2" style={{ fontSize: 18, fontWeight: 600 }}>Cart · {buyer?.business_name}</h2>
+          <h2 className="font-display mt-2" style={{ fontSize: 18, fontWeight: 600 }}>Cart</h2>
+
+          {/* Who this order is for — editable right here (modal), so staff land
+              straight back on the cart. */}
+          {buyer && (
+            <div className="mt-3 p-3 flex items-start justify-between gap-3" style={{ background: palette.ivoryDeep }}>
+              <div className="min-w-0">
+                <div className="font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.18em", color: palette.mutedGreige }}>Customer</div>
+                <div className="font-display mt-0.5 truncate" style={{ fontSize: 14.5, fontWeight: 600, color: palette.black }}>
+                  {buyer.business_name || buyer.owner_name || "Unnamed buyer"}
+                </div>
+                <div className="font-body mt-0.5" style={{ fontSize: 11, color: palette.softBlack }}>
+                  {[buyer.business_name ? buyer.owner_name : null, buyer.phone, buyer.city].filter(Boolean).join(" · ") || "No contact details yet"}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={openBuyerEdit}
+                className="font-body uppercase flex-shrink-0"
+                style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 9, letterSpacing: "0.14em", padding: "7px 14px" }}
+              >
+                Edit
+              </button>
+            </div>
+          )}
           {cartLines.length === 0 ? (
             <>
               <p className="font-body mt-4" style={{ fontSize: 12, color: palette.mutedGreige }}>No items yet.</p>
@@ -1072,6 +1158,45 @@ export function ExhibitionWizard({
           <div className="flex gap-2 justify-center mt-8">
             <button type="button" onClick={nextBuyer} className="font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.18em", padding: "11px 18px" }}>Next Buyer</button>
             <button type="button" onClick={endSessionConfirmed} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, fontSize: 10, letterSpacing: "0.18em", padding: "11px 18px" }}>End Session</button>
+          </div>
+        </div>
+      )}
+
+      {/* Customer edit modal — overlays the current step; closing returns to it */}
+      {editBuyer && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(26,26,26,0.45)" }} onClick={() => !isPending && setEditBuyer(null)}>
+          <div className="w-full sm:max-w-md" style={{ background: palette.ivory, padding: "20px 18px" }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h2 className="font-display" style={{ fontSize: 17, fontWeight: 600, color: palette.black }}>Edit Customer</h2>
+              <button type="button" onClick={() => !isPending && setEditBuyer(null)} aria-label="Close"><X size={18} color={palette.softBlack} /></button>
+            </div>
+            <div className="flex flex-col gap-3 mt-4">
+              <label className="flex flex-col gap-1">
+                <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>Business name</span>
+                <input value={editBuyer.business_name} onChange={(e) => setEditBuyer((f) => f && { ...f, business_name: e.target.value })} className="font-body bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "7px 2px", fontSize: 14 }} />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>Owner name</span>
+                <input value={editBuyer.owner_name} onChange={(e) => setEditBuyer((f) => f && { ...f, owner_name: e.target.value })} className="font-body bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "7px 2px", fontSize: 14 }} />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>Phone</span>
+                <PhoneInput value={editBuyer.phone} onChange={(v) => setEditBuyer((f) => f && { ...f, phone: v })} />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>City</span>
+                <input value={editBuyer.city} onChange={(e) => setEditBuyer((f) => f && { ...f, city: e.target.value })} className="font-body bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "7px 2px", fontSize: 14 }} />
+              </label>
+            </div>
+            {editBuyerErr && <p className="font-body mt-3" style={{ fontSize: 11.5, color: palette.crimsonText }}>{editBuyerErr}</p>}
+            <div className="flex gap-2 mt-5">
+              <button type="button" onClick={saveBuyerEdit} disabled={isPending} className="font-body uppercase flex-1 disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.16em", padding: "12px 0" }}>
+                {isPending ? "Saving…" : "Save — Back to Cart"}
+              </button>
+              <button type="button" onClick={() => setEditBuyer(null)} disabled={isPending} className="font-body uppercase px-5 disabled:opacity-50" style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 10, letterSpacing: "0.16em" }}>
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

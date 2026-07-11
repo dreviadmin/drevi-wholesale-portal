@@ -85,3 +85,13 @@ export async function resetQueuedAttempts(id: number): Promise<void> {
   const item = (await d.get("queue", id)) as QueueItem | undefined;
   if (item) await d.put("queue", { ...item, attempts: 0, lastError: undefined });
 }
+// Cart-page customer edit for an offline-captured buyer: patch the queued
+// capture so the corrected details are what eventually sync.
+export async function updateQueuedCaptureForm(clientRef: string, patch: Partial<CapturePayload["form"]>): Promise<void> {
+  const d = await db();
+  const all = (await d.getAll("queue")) as QueueItem[];
+  const item = all.find((i) => i.type === "capture" && (i.payload as CapturePayload).clientRef === clientRef);
+  if (!item) return;
+  const cap = item.payload as CapturePayload;
+  await d.put("queue", { ...item, payload: { ...cap, form: { ...cap.form, ...patch } } });
+}
