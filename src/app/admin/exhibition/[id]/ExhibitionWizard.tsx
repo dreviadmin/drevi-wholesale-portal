@@ -807,7 +807,8 @@ export function ExhibitionWizard({
               ))}
               <label className="flex flex-col gap-1">
                 <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.softBlack }}>visiting card / photo</span>
-                <input type="file" accept="image/*" capture="environment" onChange={(e) => setCardFile(e.target.files?.[0] ?? null)} className="font-body" style={{ fontSize: 12 }} />
+                {/* no `capture` attr — the phone offers camera AND gallery/files */}
+                <input type="file" accept="image/*" onChange={(e) => setCardFile(e.target.files?.[0] ?? null)} className="font-body" style={{ fontSize: 12 }} />
                 {cardFile && <span className="font-body" style={{ fontSize: 10, color: palette.goldDeep }}>{cardFile.name} ({Math.round(cardFile.size / 1024)} KB)</span>}
               </label>
               <div className="flex gap-2 mt-1">
