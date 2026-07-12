@@ -14,7 +14,7 @@ export interface OrderPayload {
   clientRef?: string; // idempotency key for the order itself (safe replay)
   buyerId?: string; // existing buyer
   buyerClientRef?: string; // links to a queued capture made offline
-  items: { sku: string; qty: number; unitPrice?: number; actualQty?: number; customTitle?: string }[];
+  items: { sku: string; qty: number; unitPrice?: number; actualQty?: number; customTitle?: string; customImageUrl?: string }[];
   staffNote?: string;
   buyerNote?: string;
   taxMode?: "none" | "inclusive" | "exclusive";

@@ -10,6 +10,8 @@ const nextConfig = {
     remotePatterns: [
       { protocol: "https", hostname: "cdn.shopify.com" },
       { protocol: "https", hostname: "*.myshopify.com" },
+      // Supabase Storage — custom-item photos snapped at the booth
+      { protocol: "https", hostname: "*.supabase.co" },
     ],
   },
 };

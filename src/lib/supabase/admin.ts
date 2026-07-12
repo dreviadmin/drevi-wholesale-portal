@@ -14,6 +14,13 @@ export function createAdminClient(): SupabaseClient {
   if (cached) return cached;
   cached = createClient(getEnv("NEXT_PUBLIC_SUPABASE_URL"), getEnv("SUPABASE_SERVICE_ROLE_KEY"), {
     auth: { autoRefreshToken: false, persistSession: false },
+    global: {
+      // Next.js 14 patches global fetch and caches GET requests by default, so
+      // a Supabase read could serve stale rows (a backup once missed a
+      // just-added staff member and would similarly miss fresh orders). Force
+      // every admin-client request to hit the database directly.
+      fetch: (input, init) => fetch(input, { ...init, cache: "no-store" }),
+    },
   });
   return cached;
 }

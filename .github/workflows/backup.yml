@@ -1,13 +1,15 @@
-# Daily off-site backup: pulls the full-database export from the portal and
+# Hourly off-site backup: pulls the full-database export from the portal and
 # stores it as a GitHub artifact (90-day retention, private repo). This is the
-# free-tier safety net — Supabase Free has no managed backups.
+# free-tier safety net — Supabase Free has no managed backups. Hourly (was
+# daily) since exhibition days write real money orders all day; the export is
+# tiny, so 24 artifacts/day is negligible.
 #
 # Repo secrets required: PORTAL_URL, CRON_SECRET (same as sync-cron.yml).
 name: daily-backup
 
 on:
   schedule:
-    - cron: "30 22 * * *" # 04:00 IST
+    - cron: "17 * * * *" # hourly at :17
   workflow_dispatch: {}
 
 jobs:

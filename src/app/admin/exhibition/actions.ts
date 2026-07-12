@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireStaff } from "@/lib/staff";
 import { getStockState } from "@/lib/stock";
 import { finalizeOrder } from "@/lib/order-finalize";
+import { uploadCustomItemImage } from "@/lib/storage";
 import { sendPendingReviewAlert } from "@/lib/interakt";
 import type { WholesaleProduct, OrderItem, SessionType, TaxMode, DiscountType } from "@/lib/types";
 
@@ -92,6 +93,21 @@ export async function captureBuyer(form: {
   return { ok: true, id: data.id };
 }
 
+// Photo for a custom (off-portal) item — camera or gallery. Returns a public
+// URL that goes into the order item and the invoice PDF.
+export async function uploadCustomItemPhoto(formData: FormData): Promise<{ ok: boolean; url?: string; error?: string }> {
+  try { await requireStaff(); } catch { return { ok: false, error: "Not authorized." }; }
+  const file = formData.get("image");
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "No image supplied." };
+  if (file.size > 5 * 1024 * 1024) return { ok: false, error: "Image must be under 5 MB." };
+  try {
+    const url = await uploadCustomItemImage(file);
+    return { ok: true, url };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
 // Booth-side correction of a customer's contact details (cart-page Edit).
 // Deliberately excludes email — it's the login username; changing it belongs
 // to the admin credential flow, not a checkout edit.
@@ -127,7 +143,7 @@ export async function submitExhibitionOrder(input: {
   // qty/unitPrice are the BILLED figures; actualQty (GST bill-split) keeps the
   // real piece count on record. customTitle marks a free-typed piece that is
   // not on the portal — never validated against wholesale_products.
-  items: { sku: string; qty: number; unitPrice?: number; actualQty?: number; customTitle?: string }[];
+  items: { sku: string; qty: number; unitPrice?: number; actualQty?: number; customTitle?: string; customImageUrl?: string }[];
   staffNote?: string;
   buyerNote?: string;
   taxMode?: TaxMode;
@@ -189,6 +205,10 @@ export async function submitExhibitionOrder(input: {
         it.actualQty != null && Number.isFinite(it.actualQty) && it.actualQty >= 1 && Math.floor(it.actualQty) !== qty
           ? Math.floor(it.actualQty)
           : null;
+      const customImage =
+        typeof it.customImageUrl === "string" && it.customImageUrl.startsWith("https://") && it.customImageUrl.length < 600
+          ? it.customImageUrl
+          : null;
       items.push({
         sku: "CUSTOM",
         title: it.customTitle.trim(),
@@ -196,7 +216,7 @@ export async function submitExhibitionOrder(input: {
         qty,
         stock_state: "ready",
         restock_days: null,
-        image_url: null,
+        image_url: customImage,
         custom: true,
         ...(actualQty != null ? { actual_qty: actualQty } : {}),
       });

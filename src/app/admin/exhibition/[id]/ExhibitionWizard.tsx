@@ -10,10 +10,11 @@ import { ProductQuickView } from "@/components/ProductQuickView";
 import { QrScanner } from "@/components/QrScanner";
 import { groupByBase } from "@/lib/variants";
 import { OfflineSync } from "@/components/OfflineSync";
-import { captureBuyer, submitExhibitionOrder, endSession, updateBuyerContact } from "../actions";
+import { captureBuyer, submitExhibitionOrder, endSession, updateBuyerContact, uploadCustomItemPhoto } from "../actions";
 import { uploadBuyerCard } from "@/app/admin/buyers/actions";
 import { buildVCard, downloadVCard } from "@/lib/share";
 import { cacheProducts, enqueue, updateQueuedCaptureForm } from "@/lib/offline";
+import { uuid } from "@/lib/uuid";
 import { getStockState, qtyCap } from "@/lib/stock";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -102,8 +103,9 @@ export function ExhibitionWizard({
   const [splitFactors, setSplitFactors] = useState<Record<string, number>>({});
   // Pieces not (yet) on the portal, keyed by a synthetic CUSTOM-n sku. Qty,
   // price overrides and GST splits reuse the normal per-sku machinery.
-  const [customItems, setCustomItems] = useState<Record<string, { title: string; price: number }>>({});
-  const [customForm, setCustomForm] = useState<{ open: boolean; name: string; price: string }>({ open: false, name: "", price: "" });
+  const [customItems, setCustomItems] = useState<Record<string, { title: string; price: number; image?: string | null }>>({});
+  const [customForm, setCustomForm] = useState<{ open: boolean; name: string; price: string; file: File | null }>({ open: false, name: "", price: "", file: null });
+  const [customUploading, setCustomUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmInfo, setConfirmInfo] = useState<{ orderId: string; orderNumber: string; pdfUrl?: string } | null>(null);
   const [buyerClientRef, setBuyerClientRef] = useState<string | null>(null);
@@ -134,7 +136,7 @@ export function ExhibitionWizard({
     cart: Record<string, number>;
     priceOverrides: Record<string, string>;
     splitFactors: Record<string, number>;
-    customItems: Record<string, { title: string; price: number }>;
+    customItems: Record<string, { title: string; price: number; image?: string | null }>;
     taxMode: TaxMode;
     taxRate: number;
     customRate: string;
@@ -169,7 +171,7 @@ export function ExhibitionWizard({
   function snapshotCurrent(): ParkedOrder | null {
     if (!buyer) return null;
     return {
-      id: crypto.randomUUID(), parkedAt: Date.now(),
+      id: uuid(), parkedAt: Date.now(),
       buyer, buyerClientRef, cart, priceOverrides, splitFactors, customItems,
       taxMode, taxRate, customRate, discountType, discountValue,
       advance, payMethod, payNote, staffNote, buyerNote,
@@ -253,7 +255,7 @@ export function ExhibitionWizard({
             restockable: true,
             restock_days: null,
             current_qty: 1,
-            image_urls: null,
+            image_urls: c.image ? [c.image] : null,
             shopify_product_id: null,
             shopify_live_url: null,
             synced_at: null,
@@ -343,21 +345,41 @@ export function ExhibitionWizard({
     setTimeout(() => setToast(null), 2200);
   }
 
-  function addCustomItem() {
+  async function addCustomItem() {
     const name = customForm.name.trim();
     if (!name) return;
     const price = Math.max(0, Number(customForm.price) || 0);
+    // Photo is best-effort: offline or a failed upload never blocks the sale.
+    let image: string | null = null;
+    if (customForm.file) {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        flash("Offline — adding without the photo");
+      } else {
+        setCustomUploading(true);
+        try {
+          const fd = new FormData();
+          fd.append("image", customForm.file);
+          const res = await uploadCustomItemPhoto(fd);
+          if (res.ok) image = res.url ?? null;
+          else flash(res.error ?? "Photo upload failed — added without it");
+        } catch {
+          flash("Photo upload failed — added without it");
+        } finally {
+          setCustomUploading(false);
+        }
+      }
+    }
     const sku = `CUSTOM-${++customSeqRef.current}`;
-    setCustomItems((m) => ({ ...m, [sku]: { title: name, price } }));
+    setCustomItems((m) => ({ ...m, [sku]: { title: name, price, image } }));
     setQty(sku, 1);
-    setCustomForm({ open: false, name: "", price: "" });
+    setCustomForm({ open: false, name: "", price: "", file: null });
     flash(`${name} added to cart`);
   }
 
   const customItemForm = !customForm.open ? (
     <button
       type="button"
-      onClick={() => setCustomForm({ open: true, name: "", price: "" })}
+      onClick={() => setCustomForm({ open: true, name: "", price: "", file: null })}
       className="flex items-center gap-1.5 font-body mt-3"
       style={{ fontSize: 10.5, color: palette.goldDeep, letterSpacing: "0.06em" }}
     >
@@ -386,21 +408,32 @@ export function ExhibitionWizard({
         <button
           type="button"
           onClick={addCustomItem}
-          disabled={!customForm.name.trim()}
+          disabled={!customForm.name.trim() || customUploading}
           className="font-body uppercase disabled:opacity-40"
           style={{ fontSize: 9, letterSpacing: "0.12em", padding: "8px 14px", background: palette.black, color: palette.ivory }}
         >
-          Add
+          {customUploading ? "Uploading…" : "Add"}
         </button>
         <button
           type="button"
-          onClick={() => setCustomForm({ open: false, name: "", price: "" })}
+          onClick={() => setCustomForm({ open: false, name: "", price: "", file: null })}
           aria-label="Close custom item form"
           className="p-1"
         >
           <X size={14} color={palette.mutedGreige} />
         </button>
       </div>
+      {/* Photo — camera or gallery (no capture attr, so the phone offers both) */}
+      <label className="flex items-center gap-2 mt-2 font-body" style={{ fontSize: 11, color: palette.softBlack }}>
+        <span className="uppercase" style={{ fontSize: 8, letterSpacing: "0.16em", color: palette.mutedGreige }}>Photo</span>
+        <input
+          type="file"
+          accept="image/*"
+          onChange={(e) => setCustomForm((f) => ({ ...f, file: e.target.files?.[0] ?? null }))}
+          className="font-body"
+          style={{ fontSize: 11 }}
+        />
+      </label>
     </div>
   );
 
@@ -419,7 +452,7 @@ export function ExhibitionWizard({
     setError(null);
     start(async () => {
       if (typeof navigator !== "undefined" && !navigator.onLine) {
-        const ref = crypto.randomUUID();
+        const ref = uuid();
         await enqueue("capture", { clientRef: ref, form: nb });
         setBuyerClientRef(ref);
         setBuyer({ id: "", business_name: nb.business_name, owner_name: nb.owner_name, phone: nb.phone, city: nb.city });
@@ -430,7 +463,7 @@ export function ExhibitionWizard({
         setStep("catalog");
         return;
       }
-      const res = await captureBuyer({ ...nb, clientRef: captureRefRef.current ?? (captureRefRef.current = crypto.randomUUID()) });
+      const res = await captureBuyer({ ...nb, clientRef: captureRefRef.current ?? (captureRefRef.current = uuid()) });
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
       captureRefRef.current = null; // consumed — next capture gets a fresh key
       if (cardFile) {
@@ -462,7 +495,7 @@ export function ExhibitionWizard({
         // custom lines always carry an explicit price — the server has no
         // catalog row to fall back on
         ...(cust
-          ? { unitPrice: billedPrice, customTitle: cust.title }
+          ? { unitPrice: billedPrice, customTitle: cust.title, ...(cust.image ? { customImageUrl: cust.image } : {}) }
           : billedPrice !== l.p.wholesale_price
             ? { unitPrice: billedPrice }
             : {}),
@@ -476,7 +509,7 @@ export function ExhibitionWizard({
       advanceAmount: advanceNum, paymentMethod: advanceNum > 0 ? payMethod : undefined, paymentNotes: payNote || undefined,
     };
     // One key for this order across every retry / offline replay (idempotency).
-    const clientRef = orderRefRef.current ?? (orderRefRef.current = crypto.randomUUID());
+    const clientRef = orderRefRef.current ?? (orderRefRef.current = uuid());
     start(async () => {
       // Queue when offline OR when the buyer was captured offline and has no
       // real id yet (buyerClientRef set). Submitting online with buyer.id="" was
@@ -548,7 +581,7 @@ export function ExhibitionWizard({
     // Also clear everything that would otherwise bleed into the next buyer:
     // the previous buyer's visiting-card photo (a cross-buyer data leak), their
     // GST mode/rate, payment method, and any custom items.
-    setCardFile(null); setCustomItems({}); setCustomForm({ open: false, name: "", price: "" });
+    setCardFile(null); setCustomItems({}); setCustomForm({ open: false, name: "", price: "", file: null });
     setTaxMode("none"); setTaxRate(5); setCustomRate(""); setPayMethod("Cash");
     orderRefRef.current = null; // fresh idempotency key for the next order
     setStep("buyer");
@@ -627,7 +660,7 @@ export function ExhibitionWizard({
     });
     loadSnapshot(snap);
     setQuery(""); setCatalogQuery(""); setNewBuyer(false); setCardFile(null);
-    setCustomForm({ open: false, name: "", price: "" });
+    setCustomForm({ open: false, name: "", price: "", file: null });
     setStep("cart");
     flash(`Resumed ${snap.buyer.business_name || snap.buyer.owner_name || "order"}`);
   }
@@ -861,7 +894,7 @@ export function ExhibitionWizard({
           <button
             type="button"
             onClick={() => {
-              setCustomForm({ open: true, name: catalogGroups.length === 0 ? catalogQuery.trim() : "", price: "" });
+              setCustomForm({ open: true, name: catalogGroups.length === 0 ? catalogQuery.trim() : "", price: "", file: null });
               setStep("cart");
             }}
             className="flex items-center gap-1.5 font-body mt-4"
