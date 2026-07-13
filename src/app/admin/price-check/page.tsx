@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PriceCheckClient } from "./PriceCheckClient";
+import { drivePhotosEnabled } from "@/lib/drive";
 import type { WholesaleProduct } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -15,5 +16,5 @@ export default async function PriceCheckPage() {
     .eq("wholesale_visible", true)
     .order("title", { nullsFirst: false });
 
-  return <PriceCheckClient products={(products ?? []) as WholesaleProduct[]} />;
+  return <PriceCheckClient products={(products ?? []) as WholesaleProduct[]} drivePhotos={drivePhotosEnabled()} />;
 }

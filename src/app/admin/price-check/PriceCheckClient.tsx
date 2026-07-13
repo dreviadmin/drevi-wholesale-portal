@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import { ScanLine, Search, X, Copy, Check } from "lucide-react";
+import { ScanLine, Search, X, Copy, Check, ImageOff } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
+import { lookupSkuPhoto } from "./actions";
 import { getStockState } from "@/lib/stock";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -35,12 +36,28 @@ async function copyText(text: string): Promise<boolean> {
   } catch { return false; }
 }
 
-export function PriceCheckClient({ products }: { products: WholesaleProduct[] }) {
+export function PriceCheckClient({ products, drivePhotos }: { products: WholesaleProduct[]; drivePhotos: boolean }) {
   const [scanning, setScanning] = useState(false);
   const [current, setCurrent] = useState<Result | null>(null);
   const [recent, setRecent] = useState<Result[]>([]);
   const [query, setQuery] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
+  // Drive photo for the current SKU (tagging aid). "loading" while fetching,
+  // string url when found, null when none. Keyed by sku via the ref guard.
+  const [photo, setPhoto] = useState<{ sku: string; url: string | null; loading: boolean }>({ sku: "", url: null, loading: false });
+  const photoReq = useRef(0);
+
+  // When the shown item has no built-in photo (the new, not-yet-on-portal
+  // outfits), pull its photo from the Drive folder so staff can identify it.
+  useEffect(() => {
+    if (!drivePhotos || !current) { setPhoto({ sku: "", url: null, loading: false }); return; }
+    if (current.product?.image_urls?.[0]) { setPhoto({ sku: current.sku, url: null, loading: false }); return; }
+    const reqId = ++photoReq.current;
+    setPhoto({ sku: current.sku, url: null, loading: true });
+    lookupSkuPhoto(current.sku)
+      .then((res) => { if (reqId === photoReq.current) setPhoto({ sku: current.sku, url: res.url, loading: false }); })
+      .catch(() => { if (reqId === photoReq.current) setPhoto({ sku: current.sku, url: null, loading: false }); });
+  }, [current, drivePhotos]);
 
   const bySku = useMemo(
     () => new Map(products.map((p) => [p.sku.trim().toUpperCase(), p])),
@@ -200,13 +217,31 @@ export function PriceCheckClient({ products }: { products: WholesaleProduct[] })
             </div>
           </div>
         ) : (
-          // Not on the portal yet — the missing-price items. Big SKU + copy.
-          <div className="mt-6" style={{ background: palette.ivoryDeep, padding: 16 }}>
-            <div className="font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.18em", color: palette.mutedGreige }}>SKU</div>
-            <div className="font-display mt-1" style={{ fontSize: 22, fontWeight: 700, color: palette.black, wordBreak: "break-all" }}>{current.sku}</div>
-            <div className="mt-3 flex items-center gap-3">
-              {copyBtn(current.sku, true)}
-              <span className="font-body" style={{ fontSize: 11, color: palette.mutedGreige }}>Not on the portal — paste into the sheet to add its price.</span>
+          // Not on the portal yet — the missing-price items. Photo (for
+          // tagging) + big SKU + copy (for pricing).
+          <div className="mt-6 flex gap-4" style={{ background: palette.ivoryDeep, padding: 16 }}>
+            {drivePhotos && (
+              <div className="relative flex-shrink-0 flex items-center justify-center" style={{ width: 132, height: 165, background: palette.ivory }}>
+                {photo.sku === current.sku && photo.url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={photo.url} alt={current.sku} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : photo.sku === current.sku && photo.loading ? (
+                  <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>Loading photo…</span>
+                ) : (
+                  <div className="flex flex-col items-center gap-1" style={{ color: palette.mutedGreige }}>
+                    <ImageOff size={20} strokeWidth={1.5} />
+                    <span className="font-body text-center" style={{ fontSize: 9 }}>No photo</span>
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.18em", color: palette.mutedGreige }}>SKU</div>
+              <div className="font-display mt-1" style={{ fontSize: 20, fontWeight: 700, color: palette.black, wordBreak: "break-all" }}>{current.sku}</div>
+              <div className="mt-3">{copyBtn(current.sku, true)}</div>
+              <p className="font-body mt-3" style={{ fontSize: 11, color: palette.mutedGreige, lineHeight: 1.5 }}>
+                Not on the portal yet — copy the SKU to add its price in the sheet.
+              </p>
             </div>
           </div>
         )
