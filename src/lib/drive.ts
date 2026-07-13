@@ -103,6 +103,14 @@ export async function findSkuImage(rawSku: string): Promise<{ fileId: string } |
   return f ? { fileId: f } : null;
 }
 
+// Sync helper: resolve a SKU straight to image bytes (thumbnail-sized), for
+// copying Drive photos into the public product-photos bucket.
+export async function fetchSkuImageBytes(sku: string, size = 800): Promise<{ body: ArrayBuffer; contentType: string } | null> {
+  const hit = await findSkuImage(sku);
+  if (!hit) return null;
+  return fetchDriveImage(hit.fileId, size);
+}
+
 // Stream an image (used by the proxy route). When `size` is given, serve
 // Drive's resized thumbnail instead of the full file — the front.png originals
 // are ~1.7 MB, far too heavy to load per scan on exhibition wifi; an s500

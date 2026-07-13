@@ -79,11 +79,13 @@ export interface MasterReadResult {
 /**
  * Read every data row from the Master tab, resolving each logical key in `cols`
  * (logicalKey -> display header) to a column via suffix matching.
+ * `spreadsheetId` defaults to the pipeline Master (GOOGLE_SHEET_ID); the sync
+ * also reads the Wholesale Master with the same structure.
  */
-export async function readMaster(cols: Record<string, string>): Promise<MasterReadResult> {
+export async function readMaster(cols: Record<string, string>, spreadsheetId?: string): Promise<MasterReadResult> {
   const sheets = await getSheetsApi();
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: getEnv("GOOGLE_SHEET_ID"),
+    spreadsheetId: spreadsheetId ?? getEnv("GOOGLE_SHEET_ID"),
     range: MASTER_TAB,
     valueRenderOption: "FORMATTED_VALUE",
   });

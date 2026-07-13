@@ -87,7 +87,7 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
     setCopied(sku);
     setTimeout(() => setCopied((c) => (c === sku ? null : c)), 1500);
     return p
-      ? { ok: true, message: `${formatINR(p.wholesale_price)} — ${p.title ?? p.sku}` }
+      ? { ok: true, message: p.wholesale_price > 0 ? `${formatINR(p.wholesale_price)} — ${p.title ?? p.sku}` : `${p.title ?? sku} — price not set · SKU copied` }
       : { ok: true, message: `${sku} · copied` }; // not on portal, but SKU captured
   }
 
@@ -195,7 +195,7 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
                   <div className="font-body truncate" style={{ fontSize: 12.5, color: palette.black }}>{p.title ?? p.sku}</div>
                   <div className="font-body" style={{ fontSize: 8.5, color: palette.mutedGreige, letterSpacing: "0.08em" }}>{p.sku}</div>
                 </div>
-                <span className="font-display" style={{ fontSize: 13, fontWeight: 600, color: palette.black }}>{formatINR(p.wholesale_price)}</span>
+                <span className="font-display" style={{ fontSize: 13, fontWeight: 600, color: palette.black }}>{p.wholesale_price > 0 ? formatINR(p.wholesale_price) : "—"}</span>
               </button>
             ))}
           </div>
@@ -233,9 +233,15 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
                 <span className="font-body" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.12em" }}>{current.sku}</span>
                 {copyBtn(current.sku)}
               </div>
-              <div className="font-display mt-3" style={{ fontSize: 30, fontWeight: 700, color: palette.black }}>
-                {formatINR(current.product.wholesale_price)}
-              </div>
+              {current.product.wholesale_price > 0 ? (
+                <div className="font-display mt-3" style={{ fontSize: 30, fontWeight: 700, color: palette.black }}>
+                  {formatINR(current.product.wholesale_price)}
+                </div>
+              ) : (
+                <div className="font-body mt-3" style={{ fontSize: 13, color: palette.goldDeep, fontWeight: 600 }}>
+                  Price not set — copy the SKU and add it in the sheet
+                </div>
+              )}
               <div className="font-body mt-2 flex flex-wrap gap-x-4 gap-y-1" style={{ fontSize: 11, color: palette.softBlack }}>
                 {current.product.min_order_qty != null && <span>MOQ {current.product.min_order_qty}</span>}
                 {stock && (
@@ -277,7 +283,7 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
                   </span>
                 </button>
                 {r.product
-                  ? <span className="font-body flex-shrink-0" style={{ fontSize: 12, color: palette.black, fontWeight: 600 }}>{formatINR(r.product.wholesale_price)}</span>
+                  ? <span className="font-body flex-shrink-0" style={{ fontSize: 12, color: palette.black, fontWeight: 600 }}>{r.product.wholesale_price > 0 ? formatINR(r.product.wholesale_price) : "—"}</span>
                   : <button type="button" onClick={() => doCopy(r.sku)} aria-label={`Copy ${r.sku}`} className="p-1.5 flex-shrink-0">{copied === r.sku ? <Check size={13} color={palette.goldDeep} /> : <Copy size={13} color={palette.mutedGreige} />}</button>}
               </div>
             ))}

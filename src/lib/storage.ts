@@ -14,6 +14,23 @@ async function ensureBucket(name: string, opts: { public: boolean } = { public: 
   }
 }
 
+// Catalog photo sourced from the per-SKU Drive folders (Wholesale Master rows
+// have no Shopify products). PUBLIC bucket so the URL works everywhere a
+// Shopify CDN URL would: catalog <Image>, wizard, and the invoice PDF fetcher.
+const PRODUCT_BUCKET = "product-photos";
+
+export async function uploadProductPhoto(sku: string, bytes: Buffer, contentType: string): Promise<string> {
+  await ensureBucket(PRODUCT_BUCKET, { public: true });
+  const admin = createAdminClient();
+  const safe = sku.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
+  const ext = contentType.includes("png") ? "png" : "jpg";
+  const path = `${safe}.${ext}`;
+  const { error } = await admin.storage.from(PRODUCT_BUCKET).upload(path, bytes, { contentType, upsert: true });
+  if (error) throw new Error(`Product photo upload failed: ${error.message}`);
+  const { data } = admin.storage.from(PRODUCT_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+
 // Photo of a custom (off-portal) item, snapped at the booth. PUBLIC bucket so
 // the URL baked into order items never expires (the invoice PDF fetches it).
 export async function uploadCustomItemImage(file: File): Promise<string> {

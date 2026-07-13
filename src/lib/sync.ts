@@ -3,6 +3,8 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { readMaster } from "@/lib/sheets";
 import { fetchProductImageUrls } from "@/lib/shopify-auth";
+import { drivePhotosEnabled, fetchSkuImageBytes } from "@/lib/drive";
+import { uploadProductPhoto } from "@/lib/storage";
 
 // Logical key -> Master Sheet display header (matched by suffix). Descriptive
 // fields come from the pipeline's known columns; the wholesale-specific columns
@@ -42,8 +44,17 @@ const REQUIRED_COLS = ["sku", "shopify_live_url", "wholesale_visible", "wholesal
 // populated and products are published.
 const STRICT_FILTER = false;
 
+// Second source: the Wholesale Drevi Product Master (same structure as the
+// pipeline Master). Its rows are the wholesale collection itself, so EVERY row
+// with a SKU is included — blanks (even price) stay blank per business call
+// (13 Jul 2026): prices live on physical tags until the sheet is filled in.
+const WHOLESALE_SHEET_ID = process.env.WHOLESALE_SHEET_ID ?? "1HnPYQRDwIxRTjgZ2ic8Bzfchidb1I5bbUdpO7Mbx8I8";
+
 const IMAGE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // refetch images older than 7 days
 const IMAGE_FETCH_CONCURRENCY = 2; // Shopify REST allows ~2 calls/sec
+// Drive-photo copies per run — keeps the Vercel cron under its 60s cap; the
+// 10-min cadence finishes any backlog quickly. Local runs can raise it via env.
+const DRIVE_IMAGE_BUDGET = Number(process.env.DRIVE_IMAGE_BUDGET) > 0 ? Number(process.env.DRIVE_IMAGE_BUDGET) : 12;
 
 export interface SyncResult {
   synced: number;
@@ -133,13 +144,71 @@ export async function syncProducts(): Promise<SyncResult> {
     throw new Error("Sync aborted — the Master tab returned 0 data rows.");
   }
 
+  // Second source: the Wholesale Master. A read failure is a warning, not an
+  // abort — the pipeline Master must keep syncing regardless.
+  let wholesaleRows: Array<Record<string, string>> = [];
+  if (WHOLESALE_SHEET_ID) {
+    try {
+      const w = await readMaster(COLS, WHOLESALE_SHEET_ID);
+      wholesaleRows = w.rows;
+    } catch (e) {
+      warnings.push(`Wholesale sheet read failed: ${(e as Error).message}`);
+    }
+  }
+
   // Filter + map.
   let skipped = 0;
   const products: ProductRow[] = [];
+  const included = new Set<string>();
+
+  const push = (row: Record<string, string>, opts: { price: number; liveUrl: string | null; restockable: boolean; restockDays: number | null }) => {
+    const sku = row.sku.trim();
+    products.push({
+      sku,
+      title: row.title || null,
+      description: row.description || null,
+      category: row.category || null,
+      sub_category: row.sub_category || null,
+      color: row.color || null,
+      primary_fabric: row.primary_fabric || null,
+      wholesale_price: opts.price,
+      wholesale_visible: true,
+      min_order_qty: toInt(row.min_order_qty),
+      restockable: opts.restockable,
+      restock_days: opts.restockable ? opts.restockDays : null,
+      current_qty: toIntOr0(row.current_qty),
+      shopify_product_id: row.shopify_product_id || null,
+      shopify_live_url: opts.liveUrl,
+    });
+    included.add(sku.toUpperCase());
+  };
+
+  // Wholesale Master first (it wins on SKU collisions): every row with a SKU
+  // is included unless explicitly hidden; blank price stays 0 (tags carry the
+  // real price until the sheet is filled — staff set it at billing).
+  for (const row of wholesaleRows) {
+    const sku = row.sku?.trim();
+    if (!sku || included.has(sku.toUpperCase())) continue;
+    if (isNo(row.wholesale_visible)) { skipped++; continue; }
+    const restockDays = toInt(row.restock_days);
+    // Blank restockable on a zero-qty row would render it "sold out" and make
+    // it unorderable in the wizard — treat as made-to-order instead.
+    const qty = toIntOr0(row.current_qty);
+    const restockable = isYes(row.restockable) || (qty <= 0 && !isNo(row.restockable));
+    push(row, {
+      price: toPrice(row.wholesale_price),
+      liveUrl: row.shopify_live_url?.trim() || row.shopify_product_url?.trim() || null,
+      restockable,
+      restockDays,
+    });
+  }
+
+  // Pipeline Master rows keep the original relaxed rules (URL + price gates).
   for (const row of rows) {
     const sku = row.sku?.trim();
-    if (!sku) {
-      skipped++;
+    if (!sku || included.has(sku.toUpperCase())) {
+      if (sku) skipped++; // collision — wholesale row won
+      else skipped++;
       continue;
     }
     const visible = isVisible(row.wholesale_visible);
@@ -160,23 +229,7 @@ export async function syncProducts(): Promise<SyncResult> {
       continue;
     }
 
-    products.push({
-      sku,
-      title: row.title || null,
-      description: row.description || null,
-      category: row.category || null,
-      sub_category: row.sub_category || null,
-      color: row.color || null,
-      primary_fabric: row.primary_fabric || null,
-      wholesale_price: price,
-      wholesale_visible: true,
-      min_order_qty: toInt(row.min_order_qty),
-      restockable,
-      restock_days: restockable ? restockDays : null,
-      current_qty: toIntOr0(row.current_qty),
-      shopify_product_id: row.shopify_product_id || null,
-      shopify_live_url: liveUrl,
-    });
+    push(row, { price, liveUrl: liveUrl || null, restockable, restockDays });
   }
 
   if (products.length === 0) {
@@ -222,13 +275,44 @@ export async function syncProducts(): Promise<SyncResult> {
     }
   });
 
+  // Drive fallback: products with no Shopify product (the Wholesale Master
+  // rows) get their photo from the per-SKU Drive folder, copied ONCE into the
+  // public product-photos bucket so the URL behaves like any CDN image
+  // (catalog, wizard, invoice PDF). images_fetched_at gives misses the same
+  // 7-day retry as Shopify. Budgeted per run to stay inside the cron timeout.
+  if (drivePhotosEnabled()) {
+    const needsDrive = products
+      .filter((p) => {
+        if (p.shopify_product_id) return false; // Shopify owns these
+        const ex = existingBySku.get(p.sku);
+        if (ex && ex.image_urls.length > 0) return false; // already has a photo
+        if (!ex || !ex.images_fetched_at) return true;
+        return now - new Date(ex.images_fetched_at).getTime() > IMAGE_TTL_MS;
+      })
+      .slice(0, DRIVE_IMAGE_BUDGET);
+    await mapWithConcurrency(needsDrive, 3, async (p) => {
+      try {
+        const img = await fetchSkuImageBytes(p.sku, 800);
+        if (img) {
+          const url = await uploadProductPhoto(p.sku, Buffer.from(img.body), img.contentType);
+          freshImages.set(p.sku, [url]);
+        } else {
+          freshImages.set(p.sku, []); // no folder/photo — record the attempt (TTL retry)
+        }
+        imageFetches++;
+      } catch (err) {
+        warnings.push(`Drive photo failed for ${p.sku}: ${(err as Error).message}`);
+      }
+    });
+  }
+
   // Build upsert payload — every row carries image columns (fresh, or carried
   // forward from cache) so a bulk upsert never nulls existing images.
   const nowIso = new Date().toISOString();
   const payload = products.map((p) => {
     const fresh = freshImages.get(p.sku);
     const ex = existingBySku.get(p.sku);
-    const image_urls = fresh ?? ex?.image_urls ?? [];
+    const image_urls = fresh && fresh.length > 0 ? fresh : ex?.image_urls ?? [];
     const images_fetched_at = fresh ? nowIso : ex?.images_fetched_at ?? null;
     return { ...p, image_urls, images_fetched_at, synced_at: nowIso };
   });
