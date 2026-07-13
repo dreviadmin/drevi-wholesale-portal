@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
-import { ScanLine, Search, X } from "lucide-react";
+import { ScanLine, Search, X, Copy, Check } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { getStockState } from "@/lib/stock";
 import { formatINR } from "@/lib/format";
@@ -16,31 +16,61 @@ const STOCK_LABEL: Record<string, string> = {
   sold_out: "Sold out",
 };
 
+// A scan/search result: either a matched portal product, or a bare SKU that
+// isn't on the portal yet (the missing-price items — copy the SKU to price it
+// in the sheet).
+type Result = { sku: string; product: WholesaleProduct | null };
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* fall through */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch { return false; }
+}
+
 export function PriceCheckClient({ products }: { products: WholesaleProduct[] }) {
   const [scanning, setScanning] = useState(false);
-  const [current, setCurrent] = useState<WholesaleProduct | null>(null);
-  const [recent, setRecent] = useState<WholesaleProduct[]>([]);
+  const [current, setCurrent] = useState<Result | null>(null);
+  const [recent, setRecent] = useState<Result[]>([]);
   const [query, setQuery] = useState("");
+  const [copied, setCopied] = useState<string | null>(null);
 
   const bySku = useMemo(
     () => new Map(products.map((p) => [p.sku.trim().toUpperCase(), p])),
     [products],
   );
 
-  function show(p: WholesaleProduct) {
-    setCurrent(p);
-    setRecent((r) => [p, ...r.filter((x) => x.sku !== p.sku)].slice(0, 8));
+  function show(r: Result) {
+    setCurrent(r);
+    setRecent((list) => [r, ...list.filter((x) => x.sku !== r.sku)].slice(0, 10));
     setQuery("");
   }
 
-  // The scanner overlay shows this feedback live, so the price is readable
-  // without closing the camera — staff can sweep a whole rack.
+  async function doCopy(sku: string) {
+    const ok = await copyText(sku);
+    if (ok) { setCopied(sku); setTimeout(() => setCopied((c) => (c === sku ? null : c)), 1500); }
+  }
+
+  // Scanner overlay feedback — readable without closing the camera.
   function handleScan(text: string): ScanFeedback {
-    const p = bySku.get(text.trim().toUpperCase());
-    if (!p) return { ok: false, message: `${text.trim()} — not in the catalog` };
-    show(p);
-    // Price first: on narrow screens the tail of the message crops.
-    return { ok: true, message: `${formatINR(p.wholesale_price)} — ${p.title ?? p.sku}` };
+    const sku = text.trim().toUpperCase();
+    if (!sku) return { ok: false, message: "Empty scan" };
+    const p = bySku.get(sku) ?? null;
+    show({ sku, product: p });
+    // Auto-copy every scanned SKU so a paste into the sheet is instant.
+    void copyText(sku);
+    setCopied(sku);
+    setTimeout(() => setCopied((c) => (c === sku ? null : c)), 1500);
+    return p
+      ? { ok: true, message: `${formatINR(p.wholesale_price)} — ${p.title ?? p.sku}` }
+      : { ok: true, message: `${sku} · copied` }; // not on portal, but SKU captured
   }
 
   const matches = useMemo(() => {
@@ -51,13 +81,30 @@ export function PriceCheckClient({ products }: { products: WholesaleProduct[] })
       .slice(0, 8);
   }, [query, products]);
 
-  const stock = current ? getStockState(current) : null;
+  const stock = current?.product ? getStockState(current.product) : null;
+  const trimmedQuery = query.trim();
+
+  const copyBtn = (sku: string, big = false) => (
+    <button
+      type="button"
+      onClick={() => doCopy(sku)}
+      className="flex items-center gap-1.5 font-body uppercase flex-shrink-0"
+      style={{
+        fontSize: big ? 10 : 9, letterSpacing: "0.14em",
+        padding: big ? "9px 14px" : "6px 10px",
+        background: copied === sku ? palette.goldDeep : palette.black, color: palette.ivory,
+      }}
+    >
+      {copied === sku ? <Check size={big ? 14 : 12} /> : <Copy size={big ? 14 : 12} />}
+      {copied === sku ? "Copied" : "Copy SKU"}
+    </button>
+  );
 
   return (
     <div className="px-4 md:px-8 py-6 max-w-2xl">
       <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>Price Check</h1>
       <p className="font-body mt-1" style={{ fontSize: 12, color: palette.mutedGreige }}>
-        Scan the QR on the tag — the wholesale price shows instantly.
+        Scan a tag — see the price if it’s on the portal, or copy the SKU to add its price in the sheet.
       </p>
 
       <button
@@ -75,7 +122,8 @@ export function PriceCheckClient({ products }: { products: WholesaleProduct[] })
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Or search name / SKU"
+            placeholder="Or search / type a SKU"
+            autoCapitalize="characters"
             className="font-body flex-1 bg-transparent outline-none"
             style={{ fontSize: 13, color: palette.black }}
           />
@@ -91,7 +139,7 @@ export function PriceCheckClient({ products }: { products: WholesaleProduct[] })
               <button
                 key={p.sku}
                 type="button"
-                onClick={() => show(p)}
+                onClick={() => show({ sku: p.sku.toUpperCase(), product: p })}
                 className="w-full flex items-center gap-3 px-2 py-2 text-left"
                 style={{ borderBottom: "1px solid rgba(26,26,26,0.05)", background: palette.ivory }}
               >
@@ -107,62 +155,84 @@ export function PriceCheckClient({ products }: { products: WholesaleProduct[] })
             ))}
           </div>
         )}
+        {/* Typed a SKU that isn't on the portal? Still let them grab it. */}
+        {trimmedQuery !== "" && matches.length === 0 && (
+          <button
+            type="button"
+            onClick={() => show({ sku: trimmedQuery.toUpperCase(), product: null })}
+            className="mt-2 flex items-center gap-1.5 font-body"
+            style={{ fontSize: 11.5, color: palette.goldDeep, letterSpacing: "0.04em" }}
+          >
+            <Copy size={12} /> Use “{trimmedQuery.toUpperCase()}” — copy this SKU
+          </button>
+        )}
       </div>
 
       {current && (
-        <div className="mt-6 flex gap-4" style={{ background: palette.ivoryDeep, padding: 16 }}>
-          <div className="relative flex-shrink-0" style={{ width: 110, height: 138, background: palette.ivory }}>
-            {current.image_urls?.[0] && (
-              <Image src={current.image_urls[0]} alt={current.title ?? current.sku} fill sizes="110px" className="object-cover" priority />
-            )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="font-display" style={{ fontSize: 17, fontWeight: 600, color: palette.black, lineHeight: 1.25 }}>
-              {current.title ?? current.sku}
-            </div>
-            <div className="font-body mt-1" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.12em" }}>
-              {current.sku}
-              {current.color ? ` · ${current.color}` : ""}
-              {current.primary_fabric ? ` · ${current.primary_fabric}` : ""}
-            </div>
-            <div className="font-display mt-3" style={{ fontSize: 30, fontWeight: 700, color: palette.black }}>
-              {formatINR(current.wholesale_price)}
-            </div>
-            <div className="font-body mt-2 flex flex-wrap gap-x-4 gap-y-1" style={{ fontSize: 11, color: palette.softBlack }}>
-              {current.min_order_qty != null && <span>MOQ {current.min_order_qty}</span>}
-              {stock && (
-                <span style={{ color: stock === "sold_out" ? "#9b2c2c" : palette.goldDeep }}>
-                  {STOCK_LABEL[stock]}
-                  {stock === "made_to_order" && current.restock_days ? ` · ${current.restock_days}d` : ""}
-                </span>
+        current.product ? (
+          <div className="mt-6 flex gap-4" style={{ background: palette.ivoryDeep, padding: 16 }}>
+            <div className="relative flex-shrink-0" style={{ width: 110, height: 138, background: palette.ivory }}>
+              {current.product.image_urls?.[0] && (
+                <Image src={current.product.image_urls[0]} alt={current.product.title ?? current.sku} fill sizes="110px" className="object-cover" priority />
               )}
-              {stock === "limited" && <span>{current.current_qty} pcs left</span>}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="font-display" style={{ fontSize: 17, fontWeight: 600, color: palette.black, lineHeight: 1.25 }}>
+                {current.product.title ?? current.sku}
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="font-body" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.12em" }}>{current.sku}</span>
+                {copyBtn(current.sku)}
+              </div>
+              <div className="font-display mt-3" style={{ fontSize: 30, fontWeight: 700, color: palette.black }}>
+                {formatINR(current.product.wholesale_price)}
+              </div>
+              <div className="font-body mt-2 flex flex-wrap gap-x-4 gap-y-1" style={{ fontSize: 11, color: palette.softBlack }}>
+                {current.product.min_order_qty != null && <span>MOQ {current.product.min_order_qty}</span>}
+                {stock && (
+                  <span style={{ color: stock === "sold_out" ? "#9b2c2c" : palette.goldDeep }}>
+                    {STOCK_LABEL[stock]}
+                    {stock === "made_to_order" && current.product.restock_days ? ` · ${current.product.restock_days}d` : ""}
+                  </span>
+                )}
+                {stock === "limited" && <span>{current.product.current_qty} pcs left</span>}
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          // Not on the portal yet — the missing-price items. Big SKU + copy.
+          <div className="mt-6" style={{ background: palette.ivoryDeep, padding: 16 }}>
+            <div className="font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.18em", color: palette.mutedGreige }}>SKU</div>
+            <div className="font-display mt-1" style={{ fontSize: 22, fontWeight: 700, color: palette.black, wordBreak: "break-all" }}>{current.sku}</div>
+            <div className="mt-3 flex items-center gap-3">
+              {copyBtn(current.sku, true)}
+              <span className="font-body" style={{ fontSize: 11, color: palette.mutedGreige }}>Not on the portal — paste into the sheet to add its price.</span>
+            </div>
+          </div>
+        )
       )}
 
       {recent.length > 1 && (
         <div className="mt-6">
-          <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}>Recent checks</div>
+          <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}>Recent scans</div>
           <div className="mt-2 flex flex-col">
-            {recent.slice(1).map((p) => (
-              <button
-                key={p.sku}
-                type="button"
-                onClick={() => show(p)}
-                className="flex items-baseline justify-between py-2 text-left"
-                style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}
-              >
-                <span className="font-body truncate" style={{ fontSize: 12, color: palette.softBlack, paddingRight: 12 }}>{p.title ?? p.sku}</span>
-                <span className="font-body flex-shrink-0" style={{ fontSize: 12, color: palette.black, fontWeight: 600 }}>{formatINR(p.wholesale_price)}</span>
-              </button>
+            {recent.slice(1).map((r) => (
+              <div key={r.sku} className="flex items-center justify-between gap-2 py-2" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
+                <button type="button" onClick={() => show(r)} className="min-w-0 flex-1 text-left">
+                  <span className="font-body truncate block" style={{ fontSize: 12, color: palette.softBlack }}>
+                    {r.product ? (r.product.title ?? r.sku) : r.sku}
+                  </span>
+                </button>
+                {r.product
+                  ? <span className="font-body flex-shrink-0" style={{ fontSize: 12, color: palette.black, fontWeight: 600 }}>{formatINR(r.product.wholesale_price)}</span>
+                  : <button type="button" onClick={() => doCopy(r.sku)} aria-label={`Copy ${r.sku}`} className="p-1.5 flex-shrink-0">{copied === r.sku ? <Check size={13} color={palette.goldDeep} /> : <Copy size={13} color={palette.mutedGreige} />}</button>}
+              </div>
             ))}
           </div>
         </div>
       )}
 
-      {scanning && <QrScanner title="Scan tag for price" onScan={handleScan} onClose={() => setScanning(false)} holdFeedback />}
+      {scanning && <QrScanner title="Scan tag" onScan={handleScan} onClose={() => setScanning(false)} holdFeedback />}
     </div>
   );
 }
