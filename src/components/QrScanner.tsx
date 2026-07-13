@@ -40,6 +40,8 @@ export function QrScanner({
   onGoToCart,
   title = "Scan outfit QRs",
   holdFeedback = false,
+  caption = "Keep scanning — each QR adds to the cart. Tap Done when finished.",
+  extra,
 }: {
   onScan: (text: string) => ScanFeedback;
   onClose: () => void;
@@ -48,6 +50,10 @@ export function QrScanner({
   // Keep the last result on screen until the next scan replaces it (price
   // check) instead of auto-clearing after a beat (cart flows).
   holdFeedback?: boolean;
+  caption?: string;
+  // Optional content rendered inside the overlay under the camera — used by
+  // price-check to show the scanned outfit's photo without closing the scanner.
+  extra?: React.ReactNode;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const stopRef = useRef<(() => void) | null>(null);
@@ -200,11 +206,13 @@ export function QrScanner({
               <div style={{ width: "62%", aspectRatio: "1/1", border: `2px solid ${feedback ? (feedback.ok ? "#4C9A63" : palette.crimsonText) : palette.gold}`, boxShadow: "0 0 0 2000px rgba(15,13,12,0.35)", transition: "border-color 150ms" }} />
             </div>
             <p className="font-body text-center mt-3" style={{ color: palette.champagne, fontSize: 11, letterSpacing: "0.06em" }}>
-              Keep scanning — each QR adds to the cart. Tap Done when finished.
+              {caption}
             </p>
           </div>
         )}
       </div>
+
+      {extra && <div className="px-6 pb-2 max-w-md w-full mx-auto">{extra}</div>}
 
       {/* per-scan feedback — rendered at panel level so it also shows in
           manual-entry mode (no camera) */}

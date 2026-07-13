@@ -285,7 +285,42 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
         </div>
       )}
 
-      {scanning && <QrScanner title="Scan tag" onScan={handleScan} onClose={() => setScanning(false)} holdFeedback />}
+      {scanning && (
+        <QrScanner
+          title="Scan tag"
+          onScan={handleScan}
+          onClose={() => setScanning(false)}
+          holdFeedback
+          caption={drivePhotos ? "Scan a tag — its photo shows below." : "Scan a tag — the SKU copies automatically."}
+          extra={
+            drivePhotos && current ? (
+              <button
+                type="button"
+                onClick={() => photo.sku === current.sku && photo.url && setLightbox(`${photo.url}&s=1400`)}
+                className="w-full flex items-center gap-3"
+                style={{ background: "rgba(255,255,255,0.08)", padding: 8, border: "none", cursor: photo.url ? "zoom-in" : "default" }}
+              >
+                <div className="relative flex-shrink-0 flex items-center justify-center" style={{ width: 70, height: 88, background: "rgba(0,0,0,0.3)" }}>
+                  {photo.sku === current.sku && photo.url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={`${photo.url}&s=500`} alt={current.sku} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ) : photo.sku === current.sku && photo.loading ? (
+                    <span className="font-body" style={{ fontSize: 9, color: palette.champagne }}>Loading…</span>
+                  ) : (
+                    <ImageOff size={18} color={palette.champagne} strokeWidth={1.5} />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1 text-left">
+                  <div className="font-body truncate" style={{ fontSize: 12, color: palette.ivory, fontWeight: 600, letterSpacing: "0.04em" }}>{current.sku}</div>
+                  <div className="font-body" style={{ fontSize: 9.5, color: palette.champagne }}>
+                    {photo.sku === current.sku && photo.url ? "Tap to enlarge · SKU copied" : photo.loading ? "Fetching photo…" : "SKU copied"}
+                  </div>
+                </div>
+              </button>
+            ) : null
+          }
+        />
+      )}
 
       {/* Full-size photo — tap anywhere to close. Lets staff compare the photo
           against the physical outfit while tagging. */}
