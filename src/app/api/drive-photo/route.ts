@@ -12,10 +12,13 @@ export async function GET(req: Request) {
   const staff = await getStaff();
   if (!staff) return new NextResponse("Unauthorized", { status: 401 });
 
-  const id = new URL(req.url).searchParams.get("id");
+  const params = new URL(req.url).searchParams;
+  const id = params.get("id");
   if (!id) return new NextResponse("Missing id", { status: 400 });
+  const sizeRaw = Number(params.get("s"));
+  const size = Number.isFinite(sizeRaw) && sizeRaw >= 100 && sizeRaw <= 2000 ? Math.floor(sizeRaw) : undefined;
 
-  const img = await fetchDriveImage(id);
+  const img = await fetchDriveImage(id, size);
   if (!img) return new NextResponse("Not found", { status: 404 });
 
   return new NextResponse(img.body, {

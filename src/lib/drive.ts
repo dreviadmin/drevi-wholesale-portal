@@ -26,16 +26,16 @@ function loadServiceAccount(): { client_email: string; private_key: string } {
 let driveClient: drive_v3.Drive | null = null;
 async function getDrive(): Promise<drive_v3.Drive> {
   if (driveClient) return driveClient;
-  const sa = loadServiceAccount();
-  const auth = new google.auth.JWT({
-    email: sa.client_email,
-    key: sa.private_key,
+  driveAuth = new google.auth.JWT({
+    email: loadServiceAccount().client_email,
+    key: loadServiceAccount().private_key,
     scopes: ["https://www.googleapis.com/auth/drive.readonly"],
   });
-  await auth.authorize();
-  driveClient = google.drive({ version: "v3", auth });
+  await driveAuth.authorize();
+  driveClient = google.drive({ version: "v3", auth: driveAuth });
   return driveClient;
 }
+let driveAuth: InstanceType<typeof google.auth.JWT> | null = null;
 
 export function drivePhotosEnabled(): boolean {
   return !!process.env.DRIVE_PHOTOS_FOLDER_ID;
@@ -103,11 +103,21 @@ export async function findSkuImage(rawSku: string): Promise<{ fileId: string } |
   return f ? { fileId: f } : null;
 }
 
-// Stream an image file's bytes (used by the proxy route).
-export async function fetchDriveImage(fileId: string): Promise<{ body: ArrayBuffer; contentType: string } | null> {
+// Stream an image (used by the proxy route). When `size` is given, serve
+// Drive's resized thumbnail instead of the full file — the front.png originals
+// are ~1.7 MB, far too heavy to load per scan on exhibition wifi; an s500
+// thumbnail is ~150 KB. Falls back to the full file if no thumbnail exists.
+export async function fetchDriveImage(fileId: string, size?: number): Promise<{ body: ArrayBuffer; contentType: string } | null> {
   const drive = await getDrive();
   try {
-    const meta = await drive.files.get({ fileId, fields: "mimeType", supportsAllDrives: true });
+    const meta = await drive.files.get({ fileId, fields: "mimeType, thumbnailLink", supportsAllDrives: true });
+    const thumb = meta.data.thumbnailLink as string | undefined;
+    if (size && thumb && driveAuth) {
+      const url = thumb.replace(/=s\d+$/, `=s${size}`);
+      const token = (await driveAuth.getAccessToken()).token;
+      const r = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      if (r.ok) return { body: await r.arrayBuffer(), contentType: r.headers.get("content-type") || "image/jpeg" };
+    }
     const res = await drive.files.get(
       { fileId, alt: "media", supportsAllDrives: true },
       { responseType: "arraybuffer" },

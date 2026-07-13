@@ -46,6 +46,7 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
   // string url when found, null when none. Keyed by sku via the ref guard.
   const [photo, setPhoto] = useState<{ sku: string; url: string | null; loading: boolean }>({ sku: "", url: null, loading: false });
   const photoReq = useRef(0);
+  const [lightbox, setLightbox] = useState<string | null>(null); // full-size photo overlay
 
   // When the shown item has no built-in photo (the new, not-yet-on-portal
   // outfits), pull its photo from the Drive folder so staff can identify it.
@@ -100,6 +101,33 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
 
   const stock = current?.product ? getStockState(current.product) : null;
   const trimmedQuery = query.trim();
+
+  // Drive photo box: fast s500 thumbnail, tap to open a large s1400 view.
+  const drivePhotoBox = (sku: string, w: number, h: number) => {
+    const ready = photo.sku === sku && photo.url;
+    const loading = photo.sku === sku && photo.loading;
+    return (
+      <button
+        type="button"
+        onClick={() => ready && setLightbox(`${photo.url}&s=1400`)}
+        aria-label={ready ? "Open photo" : "Photo"}
+        className="relative flex-shrink-0 flex items-center justify-center"
+        style={{ width: w, height: h, background: palette.ivory, cursor: ready ? "zoom-in" : "default", padding: 0, border: "none" }}
+      >
+        {ready ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={`${photo.url}&s=500`} alt={sku} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ) : loading ? (
+          <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>Loading photo…</span>
+        ) : (
+          <div className="flex flex-col items-center gap-1" style={{ color: palette.mutedGreige }}>
+            <ImageOff size={20} strokeWidth={1.5} />
+            <span className="font-body text-center" style={{ fontSize: 9 }}>No photo</span>
+          </div>
+        )}
+      </button>
+    );
+  };
 
   const copyBtn = (sku: string, big = false) => (
     <button
@@ -188,11 +216,15 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
       {current && (
         current.product ? (
           <div className="mt-6 flex gap-4" style={{ background: palette.ivoryDeep, padding: 16 }}>
-            <div className="relative flex-shrink-0" style={{ width: 110, height: 138, background: palette.ivory }}>
-              {current.product.image_urls?.[0] && (
+            {current.product.image_urls?.[0] ? (
+              <div className="relative flex-shrink-0" style={{ width: 110, height: 138, background: palette.ivory }}>
                 <Image src={current.product.image_urls[0]} alt={current.product.title ?? current.sku} fill sizes="110px" className="object-cover" priority />
-              )}
-            </div>
+              </div>
+            ) : (
+              // Portal item with no Shopify image — fall back to its Drive photo.
+              drivePhotos ? drivePhotoBox(current.sku, 110, 138)
+                : <div className="relative flex-shrink-0" style={{ width: 110, height: 138, background: palette.ivory }} />
+            )}
             <div className="min-w-0 flex-1">
               <div className="font-display" style={{ fontSize: 17, fontWeight: 600, color: palette.black, lineHeight: 1.25 }}>
                 {current.product.title ?? current.sku}
@@ -220,21 +252,7 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
           // Not on the portal yet — the missing-price items. Photo (for
           // tagging) + big SKU + copy (for pricing).
           <div className="mt-6 flex gap-4" style={{ background: palette.ivoryDeep, padding: 16 }}>
-            {drivePhotos && (
-              <div className="relative flex-shrink-0 flex items-center justify-center" style={{ width: 132, height: 165, background: palette.ivory }}>
-                {photo.sku === current.sku && photo.url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={photo.url} alt={current.sku} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                ) : photo.sku === current.sku && photo.loading ? (
-                  <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>Loading photo…</span>
-                ) : (
-                  <div className="flex flex-col items-center gap-1" style={{ color: palette.mutedGreige }}>
-                    <ImageOff size={20} strokeWidth={1.5} />
-                    <span className="font-body text-center" style={{ fontSize: 9 }}>No photo</span>
-                  </div>
-                )}
-              </div>
-            )}
+            {drivePhotos && drivePhotoBox(current.sku, 132, 165)}
             <div className="min-w-0 flex-1">
               <div className="font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.18em", color: palette.mutedGreige }}>SKU</div>
               <div className="font-display mt-1" style={{ fontSize: 20, fontWeight: 700, color: palette.black, wordBreak: "break-all" }}>{current.sku}</div>
@@ -268,6 +286,30 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
       )}
 
       {scanning && <QrScanner title="Scan tag" onScan={handleScan} onClose={() => setScanning(false)} holdFeedback />}
+
+      {/* Full-size photo — tap anywhere to close. Lets staff compare the photo
+          against the physical outfit while tagging. */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: "rgba(15,13,12,0.94)", padding: 16 }}
+          onClick={() => setLightbox(null)}
+          role="button"
+          aria-label="Close photo"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={lightbox} alt="Outfit" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+          <button
+            type="button"
+            onClick={() => setLightbox(null)}
+            aria-label="Close"
+            className="absolute"
+            style={{ top: 16, right: 16, color: palette.ivory }}
+          >
+            <X size={26} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
