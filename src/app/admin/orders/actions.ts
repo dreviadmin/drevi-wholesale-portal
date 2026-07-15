@@ -94,8 +94,10 @@ export async function updateOrderItems(
   const norm = {
     qty: (n: number) => Math.max(1, Math.floor(Number(n) || 1)),
     price: (n: number) => Math.max(0, Math.round((Number(n) || 0) * 100) / 100),
+    // A split's real count is always fewer pieces than the billed count —
+    // anything else is malformed and stored as a plain line.
     actual: (n: number | null | undefined, qty: number) =>
-      n != null && Number.isFinite(n) && n >= 1 && Math.floor(n) !== qty ? Math.floor(n) : null,
+      n != null && Number.isFinite(n) && n >= 1 && Math.floor(n) < qty ? Math.floor(n) : null,
   };
 
   const items: OrderItem[] = [];
@@ -106,6 +108,11 @@ export async function updateOrderItems(
       if (!prev) return { ok: false, error: "Order changed in another session — reload and retry." };
       const qty = norm.qty(line.qty);
       const unitPrice = norm.price(line.unitPrice);
+      // ₹0 is only invalid where it means "unpriced": a custom freebie line or
+      // a line that was already stored at ₹0 stays editable.
+      if (unitPrice <= 0 && !prev.custom && prev.unit_price > 0) {
+        return { ok: false, error: `Set a price for ${prev.title || prev.sku} — a line can't be ₹0.` };
+      }
       const actualQty = norm.actual(line.actualQty, qty);
       const catalog = bySku.get(prev.sku);
       const originalPrice =
@@ -126,6 +133,8 @@ export async function updateOrderItems(
       const title = (line.title ?? "").trim();
       if (!title) return { ok: false, error: "A custom item needs a name." };
       const qty = norm.qty(line.qty);
+      // Custom lines always carry an explicit price — ₹0 is a legitimate
+      // freebie, matching the exhibition submit path.
       const unitPrice = norm.price(line.unitPrice);
       const actualQty = norm.actual(line.actualQty, qty);
       items.push({
@@ -147,6 +156,7 @@ export async function updateOrderItems(
       if (state === "sold_out") return { ok: false, error: `${line.sku} is sold out.` };
       const qty = norm.qty(line.qty);
       const unitPrice = line.unitPrice != null ? norm.price(line.unitPrice) : p.wholesale_price;
+      if (unitPrice <= 0) return { ok: false, error: `Set a price for ${p.title ?? p.sku} — a line can't be ₹0.` };
       const actualQty = norm.actual(line.actualQty, qty);
       items.push({
         sku: p.sku,

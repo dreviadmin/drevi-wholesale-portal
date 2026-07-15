@@ -228,8 +228,9 @@ export function QrScanner({
         </div>
       )}
 
-      {/* manual fallback + done */}
-      <div className="px-6 pb-8 max-w-md w-full mx-auto">
+      {/* manual fallback + done — pad past the iOS keyboard so the SKU input
+          and its Add button stay visible while typing */}
+      <div className="px-6 max-w-md w-full mx-auto" style={{ paddingBottom: "calc(2rem + var(--kb-inset, 0px))" }}>
         <form onSubmit={submitManual} className="flex items-center gap-2">
           <Keyboard size={16} color={palette.champagne} strokeWidth={1.7} className="flex-shrink-0" />
           <input

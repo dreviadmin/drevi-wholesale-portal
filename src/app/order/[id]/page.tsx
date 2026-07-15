@@ -5,7 +5,7 @@ import { LogOut } from "lucide-react";
 import { logout } from "@/app/actions";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { formatINR } from "@/lib/format";
+import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { Order, OrderItem } from "@/lib/types";
 
@@ -98,7 +98,7 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
                   </div>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <div className="font-body" style={{ fontSize: 12, color: palette.softBlack }}>{it.qty} × {formatINR(it.unit_price)}</div>
+                  <div className="font-body" style={{ fontSize: 12, color: palette.softBlack }}>{it.qty} × {formatUnitINR(it.unit_price)}</div>
                   <div className="font-display mt-0.5" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>{formatINR(it.qty * it.unit_price)}</div>
                 </div>
               </div>

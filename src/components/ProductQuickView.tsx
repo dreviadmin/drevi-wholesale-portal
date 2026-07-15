@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { X, Minus, Plus } from "lucide-react";
+import { Lightbox } from "@/components/Lightbox";
 import { StockPill } from "@/components/StockPill";
 import { ProductImage } from "@/components/ProductImage";
 import { getStockState, qtyCap } from "@/lib/stock";
@@ -33,6 +34,7 @@ export function ProductQuickView({
 }) {
   const images = product.image_urls ?? [];
   const [selected, setSelected] = useState(0);
+  const [zoomed, setZoomed] = useState(false);
   const state = getStockState(product);
   const cap = qtyCap(product);
   const canOrder = state !== "sold_out";
@@ -41,7 +43,7 @@ export function ProductQuickView({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6" style={{ background: "rgba(26,26,26,0.6)" }} onClick={onClose}>
       <div
-        className="w-full max-w-2xl max-h-[92vh] overflow-y-auto md:flex"
+        className="w-full max-w-2xl max-h-modal overflow-y-auto md:flex"
         style={{ background: palette.ivory }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -49,9 +51,15 @@ export function ProductQuickView({
         <div className="md:w-1/2 flex-shrink-0">
           {images.length > 0 ? (
             <>
-              <div className="relative w-full" style={{ aspectRatio: "4/5" }}>
+              <button
+                type="button"
+                onClick={() => setZoomed(true)}
+                aria-label="Enlarge photo"
+                className="relative w-full block"
+                style={{ aspectRatio: "4/5", cursor: "zoom-in", padding: 0, border: "none", background: palette.ivoryDeep }}
+              >
                 <Image src={images[selected]} alt={product.title ?? product.sku} fill sizes="(max-width:768px) 100vw, 400px" className="object-cover" />
-              </div>
+              </button>
               {images.length > 1 && (
                 <div className="flex gap-1.5 p-2 overflow-x-auto no-scrollbar">
                   {images.map((src, i) => (
@@ -130,6 +138,10 @@ export function ProductQuickView({
           )}
         </div>
       </div>
+
+      {zoomed && images[selected] && (
+        <Lightbox src={images[selected]} alt={product.title ?? product.sku} onClose={() => setZoomed(false)} />
+      )}
     </div>
   );
 }

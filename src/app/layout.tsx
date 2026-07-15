@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Playfair_Display, Cormorant_Garamond, Montserrat } from "next/font/google";
+import { KeyboardInset } from "@/components/KeyboardInset";
 import "./globals.css";
 
 const playfair = Playfair_Display({
@@ -34,6 +35,9 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#1A1A1A",
+  // Android: resize the layout viewport when the keyboard opens, so bottom
+  // Save buttons stay reachable. iOS ignores this — KeyboardInset covers it.
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({
@@ -43,7 +47,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${playfair.variable} ${cormorant.variable} ${montserrat.variable}`}>
-      <body className="font-body antialiased bg-page-bg text-black">{children}</body>
+      <body className="font-body antialiased bg-page-bg text-black">
+        <KeyboardInset />
+        {children}
+      </body>
     </html>
   );
 }

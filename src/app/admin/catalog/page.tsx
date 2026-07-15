@@ -17,5 +17,17 @@ export default async function StaffCatalogPage() {
     .order("category", { nullsFirst: false })
     .order("title", { nullsFirst: false });
 
-  return <StaffCatalogView products={(products ?? []) as WholesaleProduct[]} />;
+  // Hidden SKUs ride along so a scanned tag can say "hidden" instead of the
+  // misleading "not on the portal".
+  const { data: hidden } = await admin
+    .from("wholesale_products")
+    .select("sku")
+    .eq("wholesale_visible", false);
+
+  return (
+    <StaffCatalogView
+      products={(products ?? []) as WholesaleProduct[]}
+      hiddenSkus={(hidden ?? []).map((h) => h.sku as string)}
+    />
+  );
 }

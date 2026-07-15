@@ -1,19 +1,41 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Search, X } from "lucide-react";
+import { Search, X, ScanLine } from "lucide-react";
 import { GroupedProductCard } from "@/components/GroupedProductCard";
 import { ProductQuickView } from "@/components/ProductQuickView";
+import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { groupByBase } from "@/lib/variants";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
 
 const PREFERRED = ["Lehenga", "Saree", "Indo-Western Set", "Suit Set", "Separates"];
 
-export function StaffCatalogView({ products }: { products: WholesaleProduct[] }) {
+export function StaffCatalogView({ products, hiddenSkus = [] }: { products: WholesaleProduct[]; hiddenSkus?: string[] }) {
   const [category, setCategory] = useState("All");
   const [query, setQuery] = useState("");
   const [detail, setDetail] = useState<WholesaleProduct | null>(null);
+  const [scanning, setScanning] = useState(false);
+
+  const bySku = useMemo(
+    () => new Map(products.map((p) => [p.sku.trim().toUpperCase(), p])),
+    [products],
+  );
+  const hidden = useMemo(() => new Set(hiddenSkus.map((s) => s.trim().toUpperCase())), [hiddenSkus]);
+
+  // Golden rule: every search has a scan. A hit opens the product straight away.
+  function handleScan(text: string): ScanFeedback {
+    const sku = text.trim().toUpperCase();
+    const p = bySku.get(sku);
+    if (!p) {
+      return hidden.has(sku)
+        ? { ok: false, message: `${sku} — hidden from the catalog (unhide it in Manage Catalog)` }
+        : { ok: false, message: `${sku || "Empty scan"} — not on the portal` };
+    }
+    setScanning(false);
+    setDetail(p);
+    return { ok: true, message: p.title ?? p.sku };
+  }
 
   const categories = useMemo(() => {
     const present = new Set(products.map((p) => p.category).filter((c): c is string => !!c));
@@ -61,6 +83,15 @@ export function StaffCatalogView({ products }: { products: WholesaleProduct[] })
             <X size={14} color={palette.mutedGreige} />
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => setScanning(true)}
+          aria-label="Scan a tag"
+          className="flex items-center gap-1.5 font-body uppercase flex-shrink-0"
+          style={{ fontSize: 9, letterSpacing: "0.12em", padding: "6px 10px", background: palette.black, color: palette.ivory }}
+        >
+          <ScanLine size={13} strokeWidth={1.7} /> Scan
+        </button>
       </div>
 
       {groups.length === 0 ? (
@@ -81,6 +112,8 @@ export function StaffCatalogView({ products }: { products: WholesaleProduct[] })
       )}
 
       {detail && <ProductQuickView product={detail} onClose={() => setDetail(null)} readOnly />}
+
+      {scanning && <QrScanner title="Scan a tag" onScan={handleScan} onClose={() => setScanning(false)} />}
     </div>
   );
 }

@@ -12,11 +12,26 @@ body {
   background: var(--background);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* iOS overlays the keyboard without extending the scroll range — pad the
+     page bottom by the covered height so Save buttons stay reachable.
+     KeyboardInset.tsx keeps --kb-inset up to date (0 when keyboard closed). */
+  padding-bottom: var(--kb-inset, 0px);
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+  /* Modal sheet height cap: vh everywhere, dvh where supported. The old
+     WebViews the portal supports (WhatsApp/old iOS) lack dvh — without this
+     fallback the cap vanishes and the sheet's internal scroll dies. */
+  .max-h-modal {
+    max-height: 90vh;
+  }
+  @supports (height: 1dvh) {
+    .max-h-modal {
+      max-height: 90dvh;
+    }
   }
   /* horizontal scroll without a visible scrollbar (filter chip rows) */
   .no-scrollbar::-webkit-scrollbar {

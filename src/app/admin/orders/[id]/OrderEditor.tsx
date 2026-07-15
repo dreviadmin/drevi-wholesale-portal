@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { X, Plus, Search, ScanLine } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
+import { ZoomImage } from "@/components/Lightbox";
 import { updateOrderItems, type OrderEditLine } from "@/app/admin/orders/actions";
-import { formatINR } from "@/lib/format";
+import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { DiscountType, OrderItem, TaxMode } from "@/lib/types";
 
@@ -17,6 +18,10 @@ export interface PickerProduct {
   image_url: string | null;
 }
 
+// Staff think in REAL pieces and REAL per-piece prices; the GST bill-split is
+// a presentation factor on top ("bill as ×N cheaper units"). The editor works
+// in those terms and derives the billed figures — so changing the real qty
+// always moves the billed qty and the amount together.
 interface DraftLine {
   key: string;
   kind: "keep" | "add" | "custom";
@@ -24,10 +29,29 @@ interface DraftLine {
   sku: string;
   title: string;
   image_url: string | null;
-  qty: string;
-  unitPrice: string;
-  actualQty: string; // blank = no GST split
+  qty: string; // real pieces
+  price: string; // ₹ per real piece
+  factor: string; // bill as ×N units ("1" = plain line)
   catalogPrice: number | null;
+  // A stored ₹0 line (freebie custom item from the exhibition flow) stays
+  // editable — the ₹0 block only applies to lines that had a price.
+  wasZero?: boolean;
+  // A stored actual_qty that doesn't map to a clean ×N factor (legacy data) is
+  // carried through untouched instead of being re-derived and mangled.
+  rawActual?: number | null;
+}
+
+// Stored figures are BILLED (qty inflated ×N, unit price deflated ÷N, real
+// count in actual_qty). The billed unit is rounded to paise HERE so the
+// preview, the "Bill shows" hint, and the server-stored total all agree.
+function calc(l: Pick<DraftLine, "qty" | "price" | "factor">) {
+  const qty = Math.max(1, Math.floor(Number(l.qty) || 1));
+  const price = Math.max(0, Number(l.price) || 0);
+  const f = Math.max(1, Math.floor(Number(l.factor) || 1));
+  const billedUnit = f > 1 ? Math.round((price / f) * 100) / 100 : price;
+  const billedQty = qty * f;
+  const total = f > 1 ? Math.round(billedQty * billedUnit * 100) / 100 : qty * price;
+  return { qty, price, f, billedQty, billedUnit, total };
 }
 
 export function OrderEditor({
@@ -72,25 +96,38 @@ export function OrderEditor({
 
   function openEditor() {
     setLines(
-      items.map((it, i) => ({
-        key: `keep-${i}`,
-        kind: "keep",
-        index: i,
-        sku: it.sku,
-        title: it.title,
-        image_url: it.image_url ?? null,
-        qty: String(it.qty),
-        unitPrice: String(it.unit_price),
-        actualQty: it.actual_qty != null ? String(it.actual_qty) : "",
-        catalogPrice: null,
-      })),
+      items.map((it, i) => {
+        // Recover the real figures from a stored bill-split line — but only
+        // when it's a well-formed ×N split. Anything else (legacy free-typed
+        // data) keeps its billed figures verbatim and carries actual_qty
+        // through untouched, so an open→save with no edits is a true no-op.
+        const wellFormed =
+          it.actual_qty != null && it.actual_qty >= 1 && it.actual_qty < it.qty && it.qty % it.actual_qty === 0;
+        const factor = wellFormed ? it.qty / it.actual_qty! : 1;
+        const realQty = wellFormed ? it.actual_qty! : it.qty;
+        const realPrice = wellFormed ? Math.round(it.unit_price * factor * 100) / 100 : it.unit_price;
+        return {
+          key: `keep-${i}`,
+          kind: "keep" as const,
+          index: i,
+          sku: it.sku,
+          title: it.title,
+          image_url: it.image_url ?? null,
+          qty: String(realQty),
+          price: String(realPrice),
+          factor: String(factor),
+          catalogPrice: null,
+          wasZero: it.unit_price <= 0,
+          rawActual: wellFormed ? null : it.actual_qty ?? null,
+        };
+      }),
     );
     setQuery("");
     setError(null);
     setOpen(true);
   }
 
-  function patch(key: string, field: "qty" | "unitPrice" | "actualQty" | "title", value: string) {
+  function patch(key: string, field: "qty" | "price" | "factor" | "title", value: string) {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, [field]: value } : l)));
   }
 
@@ -105,8 +142,8 @@ export function OrderEditor({
         title: name,
         image_url: null,
         qty: "1",
-        unitPrice: "",
-        actualQty: "",
+        price: "",
+        factor: "1",
         catalogPrice: null,
       },
     ]);
@@ -123,8 +160,8 @@ export function OrderEditor({
         title: p.title ?? p.sku,
         image_url: p.image_url,
         qty: "1",
-        unitPrice: String(p.wholesale_price),
-        actualQty: "",
+        price: String(p.wholesale_price),
+        factor: "1",
         catalogPrice: p.wholesale_price,
       },
     ]);
@@ -161,7 +198,7 @@ export function OrderEditor({
   // Live preview with the order's existing discount/tax terms — the server
   // recomputes authoritatively on save.
   const preview = useMemo(() => {
-    const subtotal = lines.reduce((s, l) => s + (Math.max(1, Math.floor(Number(l.qty) || 1)) * Math.max(0, Number(l.unitPrice) || 0)), 0);
+    const subtotal = lines.reduce((s, l) => s + calc(l).total, 0);
     let discount = 0;
     if (discountType) {
       const v = Math.max(0, Number(discountValue) || 0);
@@ -180,10 +217,23 @@ export function OrderEditor({
       setError("Give every custom item a name.");
       return;
     }
+    // Block ₹0 only where it means "unpriced": catalog lines that had a price.
+    // Custom lines carry an explicit price (a ₹0 freebie is legitimate), and a
+    // stored ₹0 line stays editable rather than bricking the whole order.
+    const unpriced = lines.find(
+      (l) => calc(l).price <= 0 && l.kind !== "custom" && !(l.kind === "keep" && l.wasZero),
+    );
+    if (unpriced) {
+      setError(`Set a price for ${unpriced.title || unpriced.sku} — a line can’t be ₹0.`);
+      return;
+    }
     const payload: OrderEditLine[] = lines.map((l) => {
-      const qty = Number(l.qty) || 1;
-      const unitPrice = Number(l.unitPrice) || 0;
-      const actualQty = l.actualQty.trim() === "" ? null : Number(l.actualQty);
+      // Send the BILLED figures the invoice needs; the real count rides along
+      // as actualQty whenever a split is in play.
+      const { qty: realQty, f, billedQty, billedUnit } = calc(l);
+      const qty = billedQty;
+      const unitPrice = billedUnit;
+      const actualQty = f > 1 ? realQty : l.rawActual ?? null;
       if (l.kind === "keep") return { kind: "keep", index: l.index!, qty, unitPrice, actualQty };
       if (l.kind === "custom") return { kind: "custom", title: l.title.trim(), qty, unitPrice, actualQty };
       return { kind: "add", sku: l.sku, qty, unitPrice, actualQty };
@@ -232,8 +282,8 @@ export function OrderEditor({
       {open && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(26,26,26,0.45)" }} onClick={() => !isPending && setOpen(false)}>
           <div
-            className="w-full sm:max-w-xl max-h-[90vh] overflow-y-auto"
-            style={{ background: palette.ivory, padding: "20px 18px" }}
+            className="w-full sm:max-w-xl max-h-modal overflow-y-auto"
+            style={{ background: palette.ivory, padding: "20px 18px", paddingBottom: "calc(20px + var(--kb-inset, 0px))" }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
@@ -245,9 +295,11 @@ export function OrderEditor({
               {lines.map((l) => (
                 <div key={l.key} className="py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
                   <div className="flex items-start gap-3">
-                    <div className="relative flex-shrink-0" style={{ width: 40, height: 50, background: palette.ivoryDeep }}>
-                      {l.image_url && <Image src={l.image_url} alt={l.title} fill sizes="40px" className="object-cover" />}
-                    </div>
+                    {l.image_url ? (
+                      <ZoomImage src={l.image_url} alt={l.title} width={40} height={50} />
+                    ) : (
+                      <div className="relative flex-shrink-0" style={{ width: 40, height: 50, background: palette.ivoryDeep }} />
+                    )}
                     <div className="min-w-0 flex-1">
                       {l.kind === "custom" ? (
                         <input
@@ -270,16 +322,21 @@ export function OrderEditor({
                     </button>
                   </div>
                   <div className="flex items-end gap-4 mt-2 flex-wrap" style={{ paddingLeft: 52 }}>
-                    <div>{label("Qty (billed)")}{numInput(l.qty, (v) => patch(l.key, "qty", v), 56)}</div>
-                    <div>{label("Unit price ₹")}{numInput(l.unitPrice, (v) => patch(l.key, "unitPrice", v), 84)}</div>
-                    <div>{label("Actual pcs (split)")}{numInput(l.actualQty, (v) => patch(l.key, "actualQty", v), 56, "—")}</div>
+                    <div>{label("Qty (pcs)")}{numInput(l.qty, (v) => patch(l.key, "qty", v), 56)}</div>
+                    <div>{label("Price / pc ₹")}{numInput(l.price, (v) => patch(l.key, "price", v), 84)}</div>
+                    <div>{label("Bill as ×N")}{numInput(l.factor, (v) => patch(l.key, "factor", v), 44)}</div>
                     <div className="ml-auto text-right">
                       {label("Line total")}
                       <span className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>
-                        {formatINR((Math.max(1, Math.floor(Number(l.qty) || 1))) * (Math.max(0, Number(l.unitPrice) || 0)))}
+                        {formatINR(calc(l).total)}
                       </span>
                     </div>
                   </div>
+                  {calc(l).f > 1 && (
+                    <div className="font-body mt-1.5" style={{ paddingLeft: 52, fontSize: 10, color: palette.goldDeep, fontWeight: 600 }}>
+                      Bill shows {calc(l).billedQty} × {formatUnitINR(calc(l).billedUnit)} · {calc(l).qty} pc kept on record
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -377,7 +434,7 @@ export function OrderEditor({
               </button>
             </div>
             <p className="font-body mt-2" style={{ fontSize: 9.5, color: palette.mutedGreige }}>
-              Saving regenerates the invoice PDF with the new figures. Leave “Actual pcs” blank unless the line is a GST bill-split.
+              Qty and price are the real figures. “Bill as ×N” shows one piece as N cheaper units on the invoice (GST split) — the real count stays on record. Saving regenerates the invoice PDF.
             </p>
           </div>
         </div>

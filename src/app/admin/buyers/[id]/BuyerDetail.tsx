@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ChevronLeft, Eye, EyeOff, Copy, MessageCircle, RefreshCw, UserPlus } from "lucide-react";
 import { StatusPill } from "@/components/admin/Pills";
 import { CredentialModal } from "@/components/admin/CredentialModal";
+import { Lightbox } from "@/components/Lightbox";
 import {
   setBuyerStatus,
   revealPassword,
@@ -60,6 +61,7 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
   const [changing, setChanging] = useState(false);
   const [newPw, setNewPw] = useState("");
   const [toast, setToast] = useState<string | null>(null);
+  const [cardZoom, setCardZoom] = useState(false);
   const [notes, setNotes] = useState(buyer.notes ?? "");
   const [editingNotes, setEditingNotes] = useState(false);
 
@@ -188,10 +190,11 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
       {buyer.cardUrl && (
         <section className="mt-7">
           <h2 className="font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.2em", color: palette.gold }}>Visiting Card / Photo</h2>
-          <a href={buyer.cardUrl} target="_blank" rel="noreferrer" className="inline-block mt-2">
+          <button type="button" onClick={() => setCardZoom(true)} aria-label="Enlarge visiting card" className="inline-block mt-2" style={{ cursor: "zoom-in", padding: 0, border: "none", background: "transparent" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={buyer.cardUrl} alt="Visiting card" style={{ maxWidth: 260, maxHeight: 170, objectFit: "cover", border: "1px solid rgba(26,26,26,0.15)" }} />
-          </a>
+          </button>
+          {cardZoom && <Lightbox src={buyer.cardUrl} alt="Visiting card" onClose={() => setCardZoom(false)} />}
         </section>
       )}
 

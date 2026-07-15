@@ -7,6 +7,7 @@ import { Eye, EyeOff, ChevronLeft, Minus, Plus, UserPlus, Search, ShoppingBag, Q
 import { GroupedProductCard } from "@/components/GroupedProductCard";
 import { PhoneInput } from "@/components/PhoneInput";
 import { ProductQuickView } from "@/components/ProductQuickView";
+import { Lightbox } from "@/components/Lightbox";
 import { QrScanner } from "@/components/QrScanner";
 import { groupByBase } from "@/lib/variants";
 import { OfflineSync } from "@/components/OfflineSync";
@@ -106,6 +107,9 @@ export function ExhibitionWizard({
   const [customItems, setCustomItems] = useState<Record<string, { title: string; price: number; image?: string | null }>>({});
   const [customForm, setCustomForm] = useState<{ open: boolean; name: string; price: string; file: File | null }>({ open: false, name: "", price: "", file: null });
   const [customUploading, setCustomUploading] = useState(false);
+  // Full-screen photo zoom for cart lines that have no product detail to open
+  // (custom items) — golden rule: every photo is clickable.
+  const [photoZoom, setPhotoZoom] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmInfo, setConfirmInfo] = useState<{ orderId: string; orderNumber: string; pdfUrl?: string } | null>(null);
   const [buyerClientRef, setBuyerClientRef] = useState<string | null>(null);
@@ -960,7 +964,7 @@ export function ExhibitionWizard({
                 const suggested = suggestSplit(eff);
                 return (
                   <div key={l.p.sku} className="flex items-center gap-3 p-3" style={{ border: "1px solid rgba(26,26,26,0.08)" }}>
-                    <button type="button" onClick={() => !customItems[l.p.sku] && setDetailProduct(l.p)} aria-label={`View ${l.p.title ?? l.p.sku}`} className="relative flex-shrink-0" style={{ width: 88, height: 110, background: palette.ivoryDeep, cursor: customItems[l.p.sku] ? "default" : "zoom-in", padding: 0, border: "none" }}>
+                    <button type="button" onClick={() => (customItems[l.p.sku] ? img && setPhotoZoom(img) : setDetailProduct(l.p))} aria-label={`View ${l.p.title ?? l.p.sku}`} className="relative flex-shrink-0" style={{ width: 88, height: 110, background: palette.ivoryDeep, cursor: !customItems[l.p.sku] || img ? "zoom-in" : "default", padding: 0, border: "none" }}>
                       {img && <Image src={img} alt={l.p.title ?? l.p.sku} fill sizes="88px" className="object-cover" />}
                     </button>
                     <div className="min-w-0 flex-1">
@@ -1208,7 +1212,7 @@ export function ExhibitionWizard({
       {/* Customer edit modal — overlays the current step; closing returns to it */}
       {editBuyer && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(26,26,26,0.45)" }} onClick={() => !isPending && setEditBuyer(null)}>
-          <div className="w-full sm:max-w-md" style={{ background: palette.ivory, padding: "20px 18px" }} onClick={(e) => e.stopPropagation()}>
+          <div className="w-full sm:max-w-md max-h-modal overflow-y-auto" style={{ background: palette.ivory, padding: "20px 18px", paddingBottom: "calc(20px + var(--kb-inset, 0px))" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h2 className="font-display" style={{ fontSize: 17, fontWeight: 600, color: palette.black }}>Edit Customer</h2>
               <button type="button" onClick={() => !isPending && setEditBuyer(null)} aria-label="Close"><X size={18} color={palette.softBlack} /></button>
@@ -1262,6 +1266,8 @@ export function ExhibitionWizard({
           enforceCaps={false}
         />
       )}
+
+      {photoZoom && <Lightbox src={photoZoom} onClose={() => setPhotoZoom(null)} />}
 
       {toast && (
         <div className="fixed left-1/2 -translate-x-1/2 bottom-6 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.18em", padding: "11px 20px", boxShadow: "0 8px 30px rgba(26,26,26,0.3)", zIndex: 60 }}>

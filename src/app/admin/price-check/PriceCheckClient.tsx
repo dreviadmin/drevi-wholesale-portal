@@ -219,9 +219,15 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
         current.product ? (
           <div className="mt-6 flex gap-4" style={{ background: palette.ivoryDeep, padding: 16 }}>
             {current.product.image_urls?.[0] ? (
-              <div className="relative flex-shrink-0" style={{ width: 110, height: 138, background: palette.ivory }}>
+              <button
+                type="button"
+                onClick={() => setLightbox(current.product!.image_urls![0])}
+                aria-label="Enlarge photo"
+                className="relative flex-shrink-0"
+                style={{ width: 110, height: 138, background: palette.ivory, cursor: "zoom-in", padding: 0, border: "none" }}
+              >
                 <Image src={current.product.image_urls[0]} alt={current.product.title ?? current.sku} fill sizes="110px" className="object-cover" priority />
-              </div>
+              </button>
             ) : (
               // Portal item with no Shopify image — fall back to its Drive photo.
               drivePhotos ? drivePhotoBox(current.sku, 110, 138)

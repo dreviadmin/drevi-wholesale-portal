@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import Image from "next/image";
 import { ChevronLeft } from "lucide-react";
+import { ZoomImage } from "@/components/Lightbox";
 import { requireAdminOrRedirect, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatINR, formatUnitINR } from "@/lib/format";
@@ -76,9 +76,11 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
       <div className="mt-6" style={{ borderTop: "1px solid rgba(26,26,26,0.1)" }}>
         {(o.items ?? []).map((it, i) => (
           <div key={`${it.sku}-${i}`} className="flex items-start gap-3 py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
-            <div className="relative flex-shrink-0" style={{ width: 56, height: 70, background: palette.ivoryDeep }}>
-              {it.image_url && <Image src={it.image_url} alt={it.title} fill sizes="56px" className="object-cover" />}
-            </div>
+            {it.image_url ? (
+              <ZoomImage src={it.image_url} alt={it.title} width={56} height={70} />
+            ) : (
+              <div className="relative flex-shrink-0" style={{ width: 56, height: 70, background: palette.ivoryDeep }} />
+            )}
             <div className="min-w-0 flex-1">
               <div className="font-display" style={{ fontSize: 14, color: palette.black, fontWeight: 500 }}>{it.title}</div>
               <div className="font-body mt-0.5" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.1em" }}>

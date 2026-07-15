@@ -2,8 +2,9 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
-import { Search, X, Lock, Unlock, Eye, EyeOff, Pencil, ImageOff } from "lucide-react";
+import { Search, X, Lock, Unlock, Eye, EyeOff, Pencil, ImageOff, ScanLine } from "lucide-react";
+import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
+import { ZoomImage } from "@/components/Lightbox";
 import {
   updateProductFields, unlockProductField, uploadProductPhotoAction, renameProductSku, setProductVisibility,
 } from "./actions";
@@ -29,12 +30,24 @@ export function ManageCatalogView({ products }: { products: WholesaleProduct[] }
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<WholesaleProduct | null>(null);
+  const [scanning, setScanning] = useState(false);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return products;
     return products.filter((p) => p.sku.toLowerCase().includes(q) || (p.title ?? "").toLowerCase().includes(q) || (p.category ?? "").toLowerCase().includes(q));
   }, [products, query]);
+
+  // Golden rule: every search has a scan. A hit opens the edit modal directly —
+  // scan a tag, fix its price/photo, done.
+  function handleScan(text: string): ScanFeedback {
+    const sku = text.trim().toUpperCase();
+    const p = products.find((x) => x.sku.trim().toUpperCase() === sku);
+    if (!p) return { ok: false, message: `${sku || "Empty scan"} — not on the portal` };
+    setScanning(false);
+    setEditing(p);
+    return { ok: true, message: p.title ?? p.sku };
+  }
 
   return (
     <div className="px-4 md:px-6 py-5 max-w-5xl">
@@ -47,6 +60,15 @@ export function ManageCatalogView({ products }: { products: WholesaleProduct[] }
         <Search size={15} color={palette.mutedGreige} />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search SKU, title, category" className="font-body bg-transparent outline-none w-full" style={{ fontSize: 13, color: palette.black }} />
         {query && <button type="button" onClick={() => setQuery("")} aria-label="Clear"><X size={14} color={palette.mutedGreige} /></button>}
+        <button
+          type="button"
+          onClick={() => setScanning(true)}
+          aria-label="Scan a tag to edit"
+          className="flex items-center gap-1.5 font-body uppercase flex-shrink-0"
+          style={{ fontSize: 9, letterSpacing: "0.12em", padding: "6px 10px", background: palette.black, color: palette.ivory }}
+        >
+          <ScanLine size={13} strokeWidth={1.7} /> Scan
+        </button>
       </div>
 
       <div className="mt-3 font-body" style={{ fontSize: 11, color: palette.mutedGreige }}>{filtered.length} of {products.length}</div>
@@ -55,16 +77,28 @@ export function ManageCatalogView({ products }: { products: WholesaleProduct[] }
         {filtered.map((p) => {
           const locked = p.locked_fields ?? [];
           return (
-            <button
+            // Row is a div (not a button) so the zoomable thumbnail inside can
+            // be its own button — tapping the photo enlarges it, tapping
+            // anywhere else opens the editor.
+            <div
               key={p.sku}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => setEditing(p)}
-              className="flex items-center gap-3 py-2.5 text-left"
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return; // let the nested photo button keep its own Enter/Space
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setEditing(p); }
+              }}
+              className="flex items-center gap-3 py-2.5 text-left cursor-pointer"
               style={{ borderBottom: "1px solid rgba(26,26,26,0.07)", opacity: p.wholesale_visible ? 1 : 0.5 }}
             >
-              <div className="relative flex-shrink-0 flex items-center justify-center" style={{ width: 40, height: 50, background: palette.ivoryDeep }}>
-                {p.image_urls?.[0] ? <Image src={p.image_urls[0]} alt="" fill sizes="40px" className="object-cover" /> : <ImageOff size={16} color={palette.mutedGreige} />}
-              </div>
+              {p.image_urls?.[0] ? (
+                <ZoomImage src={p.image_urls[0]} alt={p.title ?? p.sku} width={40} height={50} />
+              ) : (
+                <div className="relative flex-shrink-0 flex items-center justify-center" style={{ width: 40, height: 50, background: palette.ivoryDeep }}>
+                  <ImageOff size={16} color={palette.mutedGreige} />
+                </div>
+              )}
               <div className="min-w-0 flex-1">
                 <div className="font-display truncate" style={{ fontSize: 13, fontWeight: 500, color: palette.black }}>{p.title ?? p.sku}</div>
                 <div className="font-body" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.06em" }}>
@@ -77,10 +111,12 @@ export function ManageCatalogView({ products }: { products: WholesaleProduct[] }
                 </div>
               </div>
               <Pencil size={14} color={palette.mutedGreige} className="flex-shrink-0" />
-            </button>
+            </div>
           );
         })}
       </div>
+
+      {scanning && <QrScanner title="Scan a tag to edit" onScan={handleScan} onClose={() => setScanning(false)} />}
 
       {editing && (
         <EditModal
@@ -186,7 +222,7 @@ function EditModal({ product, onClose, onSaved }: { product: WholesaleProduct; o
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(26,26,26,0.5)" }} onClick={() => !isPending && onClose()}>
-      <div className="w-full sm:max-w-lg max-h-[92vh] overflow-y-auto" style={{ background: palette.ivory, padding: "20px 18px" }} onClick={(e) => e.stopPropagation()}>
+      <div className="w-full sm:max-w-lg max-h-modal overflow-y-auto" style={{ background: palette.ivory, padding: "20px 18px", paddingBottom: "calc(20px + var(--kb-inset, 0px))" }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h2 className="font-display truncate pr-3" style={{ fontSize: 16, fontWeight: 600, color: palette.black }}>{product.title ?? product.sku}</h2>
           <button type="button" onClick={() => !isPending && onClose()} aria-label="Close"><X size={18} color={palette.softBlack} /></button>
@@ -194,9 +230,13 @@ function EditModal({ product, onClose, onSaved }: { product: WholesaleProduct; o
 
         {/* Photo */}
         <div className="flex gap-3 mt-4">
-          <div className="relative flex-shrink-0 flex items-center justify-center" style={{ width: 90, height: 113, background: palette.ivoryDeep }}>
-            {photoUrl ? <Image src={photoUrl} alt="" fill sizes="90px" className="object-cover" /> : <ImageOff size={20} color={palette.mutedGreige} />}
-          </div>
+          {photoUrl ? (
+            <ZoomImage src={photoUrl} alt={product.title ?? product.sku} width={90} height={113} />
+          ) : (
+            <div className="relative flex-shrink-0 flex items-center justify-center" style={{ width: 90, height: 113, background: palette.ivoryDeep }}>
+              <ImageOff size={20} color={palette.mutedGreige} />
+            </div>
+          )}
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", color: palette.mutedGreige }}>Photo</span>
