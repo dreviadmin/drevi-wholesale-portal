@@ -1002,7 +1002,7 @@ export function ExhibitionWizard({
                           style={{ width: 70, border: "1px solid rgba(26,26,26,0.2)", padding: "4px 6px", fontSize: 12, color: unitPriceOf(l.p) !== l.p.wholesale_price ? palette.goldDeep : palette.black }}
                         />
                       </label>
-                      {eff !== l.p.wholesale_price && (
+                      {eff !== l.p.wholesale_price && l.p.wholesale_price > 0 && (
                         <span className="font-body" style={{ fontSize: 9, color: palette.mutedGreige, textDecoration: "line-through" }}>{formatINR(l.p.wholesale_price)}</span>
                       )}
                       <label className="flex items-center gap-1 font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>

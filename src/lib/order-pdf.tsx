@@ -93,7 +93,7 @@ function inrUnit(n: number): string {
 function stateLabel(it: OrderItem): string {
   if (it.stock_state === "ready") return "In Stock";
   if (it.stock_state === "limited") return "Limited Edition";
-  if (it.stock_state === "made_to_order") return `Made to Order - ${it.restock_days ?? "?"}d`;
+  if (it.stock_state === "made_to_order") return it.restock_days ? `Made to Order - ${it.restock_days}d` : "Made to Order";
   return "Sold Out";
 }
 

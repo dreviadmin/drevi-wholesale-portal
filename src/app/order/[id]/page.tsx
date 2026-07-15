@@ -18,7 +18,7 @@ function itemStateLabel(item: OrderItem): string {
     case "limited":
       return "Limited";
     case "made_to_order":
-      return `Made to Order · ${item.restock_days ?? "?"}d`;
+      return item.restock_days ? `Made to Order · ${item.restock_days}d` : "Made to Order";
     default:
       return "";
   }

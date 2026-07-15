@@ -245,7 +245,9 @@ export async function submitExhibitionOrder(input: {
       stock_state: state,
       restock_days: state === "made_to_order" ? p.restock_days : null,
       image_url: p.image_urls?.[0] ?? null,
-      ...(override != null && override !== p.wholesale_price ? { original_price: p.wholesale_price } : {}),
+      // original_price marks a real discount/markup — only meaningful when the
+      // catalog HAD a price (unpriced items are simply priced at billing).
+      ...(override != null && override !== p.wholesale_price && p.wholesale_price > 0 ? { original_price: p.wholesale_price } : {}),
       ...(actualQty != null ? { actual_qty: actualQty } : {}),
     });
     subtotal += qty * unitPrice;

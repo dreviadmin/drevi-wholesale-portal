@@ -110,7 +110,7 @@ export async function updateOrderItems(
       const catalog = bySku.get(prev.sku);
       const originalPrice =
         catalog != null
-          ? catalog.wholesale_price !== unitPrice
+          ? catalog.wholesale_price !== unitPrice && catalog.wholesale_price > 0
             ? catalog.wholesale_price
             : undefined
           : prev.original_price;
@@ -156,7 +156,7 @@ export async function updateOrderItems(
         stock_state: state,
         restock_days: state === "made_to_order" ? p.restock_days : null,
         image_url: p.image_urls?.[0] ?? null,
-        ...(unitPrice !== p.wholesale_price ? { original_price: p.wholesale_price } : {}),
+        ...(unitPrice !== p.wholesale_price && p.wholesale_price > 0 ? { original_price: p.wholesale_price } : {}),
         ...(actualQty != null ? { actual_qty: actualQty } : {}),
       });
       subtotal += qty * unitPrice;
