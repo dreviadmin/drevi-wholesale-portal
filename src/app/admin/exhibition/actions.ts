@@ -230,6 +230,9 @@ export async function submitExhibitionOrder(input: {
     const qty = Math.max(1, Math.floor(it.qty));
     const override = it.unitPrice != null && Number.isFinite(it.unitPrice) && it.unitPrice >= 0 ? Math.round(it.unitPrice * 100) / 100 : null;
     const unitPrice = override ?? p.wholesale_price;
+    // Guard against committing a ₹0 line (unpriced catalog item with no staff
+    // override) — the UI blocks this, but a replayed/crafted payload might not.
+    if (unitPrice <= 0) return { ok: false, error: `Set a price for ${p.title ?? p.sku} before finalising.` };
     const actualQty =
       it.actualQty != null && Number.isFinite(it.actualQty) && it.actualQty >= 1 && Math.floor(it.actualQty) !== qty
         ? Math.floor(it.actualQty)

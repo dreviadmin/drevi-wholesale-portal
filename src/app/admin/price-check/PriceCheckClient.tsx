@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { ScanLine, Search, X, Copy, Check, ImageOff } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
+import { ProductQuickView } from "@/components/ProductQuickView";
 import { lookupSkuPhoto } from "./actions";
 import { getStockState } from "@/lib/stock";
 import { formatINR } from "@/lib/format";
@@ -47,6 +48,7 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
   const [photo, setPhoto] = useState<{ sku: string; url: string | null; loading: boolean }>({ sku: "", url: null, loading: false });
   const photoReq = useRef(0);
   const [lightbox, setLightbox] = useState<string | null>(null); // full-size photo overlay
+  const [detail, setDetail] = useState<WholesaleProduct | null>(null); // product detail modal
 
   // When the shown item has no built-in photo (the new, not-yet-on-portal
   // outfits), pull its photo from the Drive folder so staff can identify it.
@@ -226,12 +228,15 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
                 : <div className="relative flex-shrink-0" style={{ width: 110, height: 138, background: palette.ivory }} />
             )}
             <div className="min-w-0 flex-1">
-              <div className="font-display" style={{ fontSize: 17, fontWeight: 600, color: palette.black, lineHeight: 1.25 }}>
-                {current.product.title ?? current.sku}
-              </div>
-              <div className="flex items-center gap-2 mt-1">
+              <button type="button" onClick={() => setDetail(current.product)} className="text-left">
+                <div className="font-display" style={{ fontSize: 17, fontWeight: 600, color: palette.black, lineHeight: 1.25 }}>
+                  {current.product.title ?? current.sku}
+                </div>
+              </button>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
                 <span className="font-body" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.12em" }}>{current.sku}</span>
                 {copyBtn(current.sku)}
+                <button type="button" onClick={() => setDetail(current.product)} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", color: palette.goldDeep, borderBottom: `1px solid ${palette.gold}` }}>View details</button>
               </div>
               {current.product.wholesale_price > 0 ? (
                 <div className="font-display mt-3" style={{ fontSize: 30, fontWeight: 700, color: palette.black }}>
@@ -290,6 +295,8 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
           </div>
         </div>
       )}
+
+      {detail && <ProductQuickView product={detail} onClose={() => setDetail(null)} readOnly />}
 
       {scanning && (
         <QrScanner

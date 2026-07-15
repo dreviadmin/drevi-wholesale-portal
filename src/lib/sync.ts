@@ -32,18 +32,6 @@ const COLS: Record<string, string> = {
 // Columns the sync cannot operate without (they drive the filter / pricing).
 const REQUIRED_COLS = ["sku", "shopify_live_url", "wholesale_visible", "wholesale_price"];
 
-// FILTER MODE — diverges from CLAUDE.md's strict filter by explicit decision
-// (2026-05-28): the Master Sheet's `Shopify Live URL` and `Wholesale Visible`
-// columns are not yet populated (products are still drafts), so the strict
-// filter yields 0 rows. RELAXED mode lets the portal run off current data:
-//   • visibility: blank is treated as visible (spec §4.1 "Wholesale Visible
-//     (default Y)"); only an explicit N hides a product.
-//   • live URL: falls back to `Shopify Product URL` when `Shopify Live URL`
-//     is empty.
-// Flip to true to restore the strict CLAUDE.md filter once the sheet is
-// populated and products are published.
-const STRICT_FILTER = false;
-
 // Second source: the Wholesale Drevi Product Master (same structure as the
 // pipeline Master). Its rows are the wholesale collection itself, so EVERY row
 // with a SKU is included — blanks (even price) stay blank per business call
@@ -55,6 +43,7 @@ const IMAGE_FETCH_CONCURRENCY = 2; // Shopify REST allows ~2 calls/sec
 // Drive-photo copies per run — keeps the Vercel cron under its 60s cap; the
 // 10-min cadence finishes any backlog quickly. Local runs can raise it via env.
 const DRIVE_IMAGE_BUDGET = Number(process.env.DRIVE_IMAGE_BUDGET) > 0 ? Number(process.env.DRIVE_IMAGE_BUDGET) : 12;
+const DRIVE_MISS_RETRY_MS = 30 * 60 * 1000; // photo not found → look again in 30 min
 
 export interface SyncResult {
   synced: number;
@@ -72,10 +61,6 @@ function isYes(s: string): boolean {
 function isNo(s: string): boolean {
   const v = (s ?? "").trim().toUpperCase();
   return v === "N" || v === "NO" || v === "FALSE";
-}
-// Visibility under the active filter mode (see STRICT_FILTER).
-function isVisible(s: string): boolean {
-  return STRICT_FILTER ? isYes(s) : !isNo(s);
 }
 function toInt(s: string): number | null {
   const n = parseInt((s ?? "").replace(/[^\d-]/g, ""), 10);
@@ -125,7 +110,10 @@ export async function syncProducts(): Promise<SyncResult> {
   const warnings: string[] = [];
   const supabase = createAdminClient();
 
-  const { effectiveHeaders, missing, rows } = await readMaster(COLS);
+  // SOLE source: the Wholesale Master (business call 13 Jul 2026 — the portal
+  // carries only the wholesale collection; pipeline-Master retail rows were
+  // removed). Same structure as the pipeline Master.
+  const { effectiveHeaders, missing, rows: wholesaleRows } = await readMaster(COLS, WHOLESALE_SHEET_ID);
 
   // Fail loudly if a required column wasn't found, naming what WAS present.
   const missingRequired = missing.filter((k) => REQUIRED_COLS.includes(k));
@@ -140,21 +128,14 @@ export async function syncProducts(): Promise<SyncResult> {
   for (const k of missing) warnings.push(`Optional column not found in sheet: "${COLS[k]}"`);
 
   // The sheet itself returning no data rows is a hard failure.
-  if (rows.length === 0) {
-    throw new Error("Sync aborted — the Master tab returned 0 data rows.");
+  if (wholesaleRows.length === 0) {
+    throw new Error("Sync aborted — the Wholesale Master tab returned 0 data rows.");
   }
 
-  // Second source: the Wholesale Master. A read failure is a warning, not an
-  // abort — the pipeline Master must keep syncing regardless.
-  let wholesaleRows: Array<Record<string, string>> = [];
-  if (WHOLESALE_SHEET_ID) {
-    try {
-      const w = await readMaster(COLS, WHOLESALE_SHEET_ID);
-      wholesaleRows = w.rows;
-    } catch (e) {
-      warnings.push(`Wholesale sheet read failed: ${(e as Error).message}`);
-    }
-  }
+  // SKUs an admin renamed in Manage Catalog — the sheet still carries the old
+  // name; skip those rows so they can't resurrect as duplicates.
+  const { data: ignoredRows } = await supabase.from("sync_ignored_skus").select("sku");
+  const ignored = new Set((ignoredRows ?? []).map((r) => r.sku.toUpperCase()));
 
   // Filter + map.
   let skipped = 0;
@@ -162,7 +143,11 @@ export async function syncProducts(): Promise<SyncResult> {
   const included = new Set<string>();
 
   const push = (row: Record<string, string>, opts: { price: number; liveUrl: string | null; restockable: boolean; restockDays: number | null }) => {
-    const sku = row.sku.trim();
+    // Canonicalize to uppercase — the PK is case-sensitive, and every set/map
+    // (included, ignored, qualifying, existingBySku, onConflict) keys on the
+    // uppercase form. Storing mixed case here would split a re-cased sheet SKU
+    // into a duplicate row and drop its locks. (See migration 0011.)
+    const sku = row.sku.trim().toUpperCase();
     products.push({
       sku,
       title: row.title || null,
@@ -183,12 +168,13 @@ export async function syncProducts(): Promise<SyncResult> {
     included.add(sku.toUpperCase());
   };
 
-  // Wholesale Master first (it wins on SKU collisions): every row with a SKU
-  // is included unless explicitly hidden; blank price stays 0 (tags carry the
-  // real price until the sheet is filled — staff set it at billing).
+  // Every row with a SKU is included unless explicitly hidden or ignored;
+  // blank price stays 0 (tags carry the real price until the sheet is filled —
+  // staff set it at billing).
   for (const row of wholesaleRows) {
     const sku = row.sku?.trim();
     if (!sku || included.has(sku.toUpperCase())) continue;
+    if (ignored.has(sku.toUpperCase())) { skipped++; continue; }
     if (isNo(row.wholesale_visible)) { skipped++; continue; }
     const restockDays = toInt(row.restock_days);
     // Blank restockable on a zero-qty row would render it "sold out" and make
@@ -203,51 +189,26 @@ export async function syncProducts(): Promise<SyncResult> {
     });
   }
 
-  // Pipeline Master rows keep the original relaxed rules (URL + price gates).
-  for (const row of rows) {
-    const sku = row.sku?.trim();
-    if (!sku || included.has(sku.toUpperCase())) {
-      if (sku) skipped++; // collision — wholesale row won
-      else skipped++;
-      continue;
-    }
-    const visible = isVisible(row.wholesale_visible);
-    const price = toPrice(row.wholesale_price);
-    // In relaxed mode, fall back to Shopify Product URL when Live URL is blank.
-    const liveUrl = row.shopify_live_url?.trim() || (STRICT_FILTER ? "" : row.shopify_product_url?.trim());
-
-    if (!liveUrl || !visible || price <= 0) {
-      skipped++;
-      continue;
-    }
-
-    const restockable = isYes(row.restockable);
-    const restockDays = toInt(row.restock_days);
-    if (restockable && restockDays === null) {
-      warnings.push(`SKU ${sku}: restockable but no restock_days — row skipped.`);
-      skipped++;
-      continue;
-    }
-
-    push(row, { price, liveUrl: liveUrl || null, restockable, restockDays });
-  }
-
   if (products.length === 0) {
-    warnings.push("No rows qualified (Shopify Live URL set AND Wholesale Visible=Y AND Final Wholesale>0).");
+    warnings.push("No wholesale rows qualified (need a Drevi SKU; Wholesale Visible must not be N).");
   }
 
-  // Existing image cache for the qualifying SKUs.
+  // Existing rows for the qualifying SKUs — image cache + locked fields (admin
+  // manual edits the sync must not overwrite).
   const skus = products.map((p) => p.sku);
-  const existingBySku = new Map<string, { image_urls: string[]; images_fetched_at: string | null }>();
+  type ExistingRow = { image_urls: string[]; images_fetched_at: string | null; locked_fields: string[] } & Record<string, unknown>;
+  const existingBySku = new Map<string, ExistingRow>();
   if (skus.length > 0) {
     const { data: existing } = await supabase
       .from("wholesale_products")
-      .select("sku, image_urls, images_fetched_at")
+      .select("*")
       .in("sku", skus);
     for (const e of existing ?? []) {
       existingBySku.set(e.sku, {
+        ...e,
         image_urls: Array.isArray(e.image_urls) ? (e.image_urls as string[]) : [],
         images_fetched_at: e.images_fetched_at,
+        locked_fields: Array.isArray(e.locked_fields) ? (e.locked_fields as string[]) : [],
       });
     }
   }
@@ -285,9 +246,12 @@ export async function syncProducts(): Promise<SyncResult> {
       .filter((p) => {
         if (p.shopify_product_id) return false; // Shopify owns these
         const ex = existingBySku.get(p.sku);
+        if (ex?.locked_fields.includes("image_urls")) return false; // admin owns these
         if (ex && ex.image_urls.length > 0) return false; // already has a photo
         if (!ex || !ex.images_fetched_at) return true;
-        return now - new Date(ex.images_fetched_at).getTime() > IMAGE_TTL_MS;
+        // A photo MISS retries fast (folders are being added all day); a hit
+        // would only refresh on the long TTL, but hits are excluded above.
+        return now - new Date(ex.images_fetched_at).getTime() > DRIVE_MISS_RETRY_MS;
       })
       .slice(0, DRIVE_IMAGE_BUDGET);
     await mapWithConcurrency(needsDrive, 3, async (p) => {
@@ -307,14 +271,28 @@ export async function syncProducts(): Promise<SyncResult> {
   }
 
   // Build upsert payload — every row carries image columns (fresh, or carried
-  // forward from cache) so a bulk upsert never nulls existing images.
+  // forward from cache) so a bulk upsert never nulls existing images. Fields an
+  // admin locked in Manage Catalog keep their existing DB value: the sheet no
+  // longer controls them until unlocked.
   const nowIso = new Date().toISOString();
   const payload = products.map((p) => {
     const fresh = freshImages.get(p.sku);
     const ex = existingBySku.get(p.sku);
     const image_urls = fresh && fresh.length > 0 ? fresh : ex?.image_urls ?? [];
     const images_fetched_at = fresh ? nowIso : ex?.images_fetched_at ?? null;
-    return { ...p, image_urls, images_fetched_at, synced_at: nowIso };
+    const row: Record<string, unknown> = { ...p, image_urls, images_fetched_at, synced_at: nowIso };
+    if (ex) {
+      for (const f of ex.locked_fields) {
+        if (f === "image_urls") {
+          row.image_urls = ex.image_urls;
+          row.images_fetched_at = ex.images_fetched_at;
+        } else if (f in ex) {
+          row[f] = ex[f];
+        }
+      }
+      row.locked_fields = ex.locked_fields; // never clobber the lock list itself
+    }
+    return row;
   });
 
   if (payload.length > 0) {
@@ -334,11 +312,17 @@ export async function syncProducts(): Promise<SyncResult> {
   let hidden = 0;
   const { data: visibleRows } = await supabase
     .from("wholesale_products")
-    .select("sku")
+    .select("sku, locked_fields")
     .eq("wholesale_visible", true);
   const visibleCount = (visibleRows ?? []).length;
   const qualifying = new Set(skus);
-  const toHide = (visibleRows ?? []).map((r) => r.sku).filter((s) => !qualifying.has(s));
+  // Never auto-hide a product the admin manages directly: one whose visibility
+  // is locked (they chose to show it), or whose SKU was renamed in Manage
+  // Catalog (its new SKU isn't in the sheet, but it's not gone — it's ours now).
+  const adminOwned = (lf: unknown) => Array.isArray(lf) && (lf.includes("wholesale_visible") || lf.includes("sku"));
+  const toHide = (visibleRows ?? [])
+    .filter((r) => !qualifying.has(r.sku) && !adminOwned(r.locked_fields))
+    .map((r) => r.sku);
 
   const wouldHideAll = qualifying.size === 0 && toHide.length > 0;
   const wouldHideMost = visibleCount > 0 && toHide.length > Math.max(5, Math.floor(visibleCount * 0.5));

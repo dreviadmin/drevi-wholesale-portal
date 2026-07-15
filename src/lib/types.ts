@@ -20,7 +20,8 @@ export type AuditEventType =
   | "login_failed"
   | "account_suspended"
   | "account_reactivated"
-  | "account_rejected";
+  | "account_rejected"
+  | "catalog_edit";
 
 export interface WholesaleProduct {
   sku: string;
@@ -41,6 +42,8 @@ export interface WholesaleProduct {
   shopify_live_url: string | null;
   synced_at: string | null;
   images_fetched_at: string | null;
+  // Fields an admin edited in Manage Catalog — the sheet sync leaves these alone.
+  locked_fields?: string[];
 }
 
 export interface Buyer {

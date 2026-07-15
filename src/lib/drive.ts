@@ -63,32 +63,71 @@ async function firstImageIn(drive: drive_v3.Drive, folderId: string): Promise<st
   return res.data.files?.[0]?.id ?? null;
 }
 
-async function folderIdByName(drive: drive_v3.Drive, parent: string, name: string): Promise<string | null> {
-  const res = await drive.files.list({
-    q: `'${q(parent)}' in parents and name = '${q(name)}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-    fields: "files(id, name)",
-    pageSize: 1,
-    supportsAllDrives: true,
-    includeItemsFromAllDrives: true,
-  });
-  return res.data.files?.[0]?.id ?? null;
+// Normalize a SKU/folder name for matching: uppercase, strip everything that
+// isn't a letter or digit. Absorbs case drift ("Xl" vs "XL"), stray spaces,
+// and hyphen/underscore differences between the sheet and folder names.
+function normKey(s: string): string {
+  return s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+// One listing of the whole photos folder, cached briefly. Matching in code is
+// both more robust than per-name Drive queries (those are case-sensitive) and
+// far cheaper during a sync that checks dozens of SKUs.
+// - byKey:  normalized FULL folder name → id
+// - byBase: normalized BASE (design) SKU → id of a folder for that design.
+//           Lets a variant borrow a sibling-colour folder's photo (the design
+//           was shot once; only one colour's folder often exists).
+interface FolderIndex { byKey: Map<string, string>; byBase: Map<string, string> }
+let folderCache: { at: number; idx: FolderIndex } | null = null;
+const FOLDER_CACHE_MS = 5 * 60 * 1000;
+
+async function listSkuFolders(): Promise<FolderIndex> {
+  const parent = process.env.DRIVE_PHOTOS_FOLDER_ID;
+  if (!parent) return { byKey: new Map(), byBase: new Map() };
+  if (folderCache && Date.now() - folderCache.at < FOLDER_CACHE_MS) return folderCache.idx;
+  const drive = await getDrive();
+  const byKey = new Map<string, string>();
+  const byBase = new Map<string, string>();
+  let pageToken: string | undefined;
+  do {
+    const res = await drive.files.list({
+      q: `'${q(parent)}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+      fields: "nextPageToken, files(id, name)",
+      orderBy: "name", // deterministic → the same sibling colour wins every run
+      pageSize: 1000,
+      pageToken,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+    for (const f of res.data.files ?? []) {
+      if (!f.id || !f.name) continue;
+      byKey.set(normKey(f.name), f.id);
+      const bk = normKey(baseSku(f.name.trim().toUpperCase()));
+      if (!byBase.has(bk)) byBase.set(bk, f.id); // first folder per design wins (name-sorted)
+    }
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+  const idx = { byKey, byBase };
+  folderCache = { at: Date.now(), idx };
+  return idx;
 }
 
 // Resolve a scanned SKU to a Drive image file id (or null). Tries, in order:
-// exact-SKU folder → base-SKU folder → a file directly named like the SKU.
+// exact-SKU folder → base-SKU-named folder → any sibling-colour folder of the
+// same design → a file in the parent named like the SKU.
 export async function findSkuImage(rawSku: string): Promise<{ fileId: string } | null> {
   const parent = process.env.DRIVE_PHOTOS_FOLDER_ID;
   if (!parent) return null;
   const sku = rawSku.trim().toUpperCase();
   if (!sku) return null;
   const drive = await getDrive();
+  const { byKey, byBase } = await listSkuFolders();
 
-  for (const name of [sku, baseSku(sku)]) {
-    const folderId = await folderIdByName(drive, parent, name);
-    if (folderId) {
-      const img = await firstImageIn(drive, folderId);
-      if (img) return { fileId: img };
-    }
+  const candidates = [byKey.get(normKey(sku)), byKey.get(normKey(baseSku(sku))), byBase.get(normKey(baseSku(sku)))];
+  for (const folderId of candidates) {
+    if (!folderId) continue;
+    const img = await firstImageIn(drive, folderId);
+    if (img) return { fileId: img };
   }
 
   // Fallback: images stored as files named like the SKU (not in a subfolder).

@@ -23,7 +23,7 @@ export async function uploadProductPhoto(sku: string, bytes: Buffer, contentType
   await ensureBucket(PRODUCT_BUCKET, { public: true });
   const admin = createAdminClient();
   const safe = sku.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
-  const ext = contentType.includes("png") ? "png" : "jpg";
+  const ext = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
   const path = `${safe}.${ext}`;
   const { error } = await admin.storage.from(PRODUCT_BUCKET).upload(path, bytes, { contentType, upsert: true });
   if (error) throw new Error(`Product photo upload failed: ${error.message}`);

@@ -15,18 +15,21 @@ import type { WholesaleProduct } from "@/lib/types";
 // stock pill, and the same add/stepper controls as the cards.
 export function ProductQuickView({
   product,
-  cartQty,
+  cartQty = 0,
   onChangeQty,
   onClose,
   showPrices = true,
   enforceCaps = true,
+  readOnly = false,
 }: {
   product: WholesaleProduct;
-  cartQty: number;
-  onChangeQty: (product: WholesaleProduct, qty: number) => void;
+  cartQty?: number;
+  onChangeQty?: (product: WholesaleProduct, qty: number) => void;
   onClose: () => void;
   showPrices?: boolean;
   enforceCaps?: boolean;
+  // Browse-only surfaces (View Catalog, Price Check): no cart controls.
+  readOnly?: boolean;
 }) {
   const images = product.image_urls ?? [];
   const [selected, setSelected] = useState(0);
@@ -99,23 +102,24 @@ export function ProductQuickView({
             <p className="font-body mt-2" style={{ fontSize: 12, lineHeight: 1.65, color: palette.softBlack }}>{product.description}</p>
           )}
 
-          {/* Add / stepper */}
+          {/* Add / stepper (hidden on browse-only surfaces) */}
+          {readOnly ? null : (
           <div className="mt-4">
             {!canOrder ? (
               <div className="font-body uppercase text-center" style={{ background: palette.soldBtn, color: palette.muted, fontSize: 10, letterSpacing: "0.2em", padding: "11px 0" }}>Sold Out</div>
             ) : cartQty > 0 ? (
               <div className="flex items-center gap-3">
                 <div className="flex items-center" style={{ border: "1px solid rgba(26,26,26,0.2)" }}>
-                  <button type="button" onClick={() => onChangeQty(product, cartQty - 1)} className="px-3 py-2" aria-label="Decrease"><Minus size={14} strokeWidth={2} /></button>
+                  <button type="button" onClick={() => onChangeQty?.(product, cartQty - 1)} className="px-3 py-2" aria-label="Decrease"><Minus size={14} strokeWidth={2} /></button>
                   <span className="font-body" style={{ minWidth: 30, textAlign: "center", fontSize: 14, fontWeight: 600 }}>{cartQty}</span>
-                  <button type="button" onClick={() => !atCap && onChangeQty(product, cartQty + 1)} disabled={atCap} className="px-3 py-2 disabled:opacity-40" aria-label="Increase"><Plus size={14} strokeWidth={2} /></button>
+                  <button type="button" onClick={() => !atCap && onChangeQty?.(product, cartQty + 1)} disabled={atCap} className="px-3 py-2 disabled:opacity-40" aria-label="Increase"><Plus size={14} strokeWidth={2} /></button>
                 </div>
                 <span className="font-body" style={{ fontSize: 10, color: palette.goldDeep, letterSpacing: "0.06em" }}>In cart</span>
               </div>
             ) : (
               <button
                 type="button"
-                onClick={() => onChangeQty(product, product.min_order_qty ?? 1)}
+                onClick={() => onChangeQty?.(product, product.min_order_qty ?? 1)}
                 className="w-full flex items-center justify-center gap-1.5 font-body uppercase"
                 style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.2em", padding: "11px 0" }}
               >
@@ -123,6 +127,7 @@ export function ProductQuickView({
               </button>
             )}
           </div>
+          )}
         </div>
       </div>
     </div>

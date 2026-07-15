@@ -41,7 +41,7 @@ export function StockPill({
   if (state === "made_to_order") {
     return (
       <span className={cls} style={{ color: palette.goldDeep, border: `1px solid ${palette.gold}`, ...tracking }}>
-        Made to Order · {product.restock_days}d
+        Made to Order{product.restock_days ? ` · ${product.restock_days}d` : ""}
       </span>
     );
   }

@@ -23,6 +23,7 @@ export function ProductCard({
   onGoToCart,
   variantBar,
   onOpenDetail,
+  readOnly = false,
 }: {
   product: WholesaleProduct;
   showPrices?: boolean;
@@ -35,6 +36,8 @@ export function ProductCard({
   variantBar?: React.ReactNode;
   // Opens a detail view where page navigation isn't available (exhibition).
   onOpenDetail?: (product: WholesaleProduct) => void;
+  // Browse-only surfaces (View Catalog): no Add button, no stepper.
+  readOnly?: boolean;
 }) {
   const state = getStockState(product);
   const canAdd = state !== "sold_out";
@@ -96,8 +99,8 @@ export function ProductCard({
           </div>
         ) : null}
 
-        {/* Add button OR stepper */}
-        {cartQty > 0 && canAdd ? (
+        {/* Add button OR stepper (hidden entirely on browse-only surfaces) */}
+        {readOnly ? null : cartQty > 0 && canAdd ? (
           <>
           <div
             className="mt-3 w-full grid items-center"

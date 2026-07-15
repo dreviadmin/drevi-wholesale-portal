@@ -309,6 +309,10 @@ export function ExhibitionWizard({
     const cap = qtyCap(l.p);
     return (l.p.min_order_qty != null && l.qty < l.p.min_order_qty) || (cap != null && l.qty > cap);
   }).length;
+  // Unpriced catalog items (blank price in the sheet) must get a price at
+  // billing, else a ₹0 order would commit silently. Custom items always carry
+  // an explicit price, so they're exempt.
+  const zeroPriceLines = cartLines.filter((l) => !customItems[l.p.sku] && unitPriceOf(l.p) <= 0);
 
   // Discount (before tax), then tax — mirrors the server (which recomputes).
   const discountNum = Math.max(0, Number(discountValue) || 0);
@@ -956,15 +960,15 @@ export function ExhibitionWizard({
                 const suggested = suggestSplit(eff);
                 return (
                   <div key={l.p.sku} className="flex items-center gap-3 p-3" style={{ border: "1px solid rgba(26,26,26,0.08)" }}>
-                    <div className="relative flex-shrink-0" style={{ width: 88, height: 110, background: palette.ivoryDeep }}>
+                    <button type="button" onClick={() => !customItems[l.p.sku] && setDetailProduct(l.p)} aria-label={`View ${l.p.title ?? l.p.sku}`} className="relative flex-shrink-0" style={{ width: 88, height: 110, background: palette.ivoryDeep, cursor: customItems[l.p.sku] ? "default" : "zoom-in", padding: 0, border: "none" }}>
                       {img && <Image src={img} alt={l.p.title ?? l.p.sku} fill sizes="88px" className="object-cover" />}
-                    </div>
+                    </button>
                     <div className="min-w-0 flex-1">
-                      <div className="font-display" style={{ fontSize: 13, fontWeight: 500 }}>{l.p.title}</div>
+                      <button type="button" onClick={() => !customItems[l.p.sku] && setDetailProduct(l.p)} className="text-left font-display" style={{ fontSize: 13, fontWeight: 500, background: "none", border: "none", padding: 0, cursor: customItems[l.p.sku] ? "default" : "pointer" }}>{l.p.title}</button>
                       <div className="font-body" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.1em" }}>
                         {customItems[l.p.sku] ? "CUSTOM ITEM · NOT ON PORTAL" : l.p.sku}
                       </div>
-                      {state === "made_to_order" && <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep }}>Made to Order · {l.p.restock_days}d</div>}
+                      {state === "made_to_order" && <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep }}>Made to Order{l.p.restock_days ? ` · ${l.p.restock_days}d` : ""}</div>}
                       {belowMoq && <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep }}>Below minimum of {l.p.min_order_qty} — you can override</div>}
                       {overCap && <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep }}>Exceeds stock on hand ({cap} available, not restockable) — you can override</div>}
                       {factor > 1 ? (
@@ -1131,7 +1135,12 @@ export function ExhibitionWizard({
               {advanceNum > grandTotal && (
                 <p className="font-body" style={{ fontSize: 11, color: palette.crimsonText }}>Advance can&apos;t exceed the total.</p>
               )}
-              <button type="button" onClick={submit} disabled={isPending || advanceNum > grandTotal || session.ended} className="mt-2 font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 11, letterSpacing: "0.2em", padding: "13px 0" }}>{isPending ? "Submitting…" : "Finalise Order"}</button>
+              {zeroPriceLines.length > 0 && (
+                <p className="font-body" style={{ fontSize: 11, color: palette.crimsonText }}>
+                  {zeroPriceLines.length} item{zeroPriceLines.length > 1 ? "s have" : " has"} no price — set a ₹/pc for {zeroPriceLines.map((l) => l.p.title ?? l.p.sku).slice(0, 3).join(", ")}{zeroPriceLines.length > 3 ? "…" : ""} before finalising.
+                </p>
+              )}
+              <button type="button" onClick={submit} disabled={isPending || advanceNum > grandTotal || zeroPriceLines.length > 0 || session.ended} className="mt-2 font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 11, letterSpacing: "0.2em", padding: "13px 0" }}>{isPending ? "Submitting…" : "Finalise Order"}</button>
 
               {/* Buyer stepped away or backed out? Hold keeps everything —
                   cart, prices, splits, tax, advance — resumable from the buyer

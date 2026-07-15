@@ -20,6 +20,7 @@ export function GroupedProductCard({
   showPrices = true,
   onGoToCart,
   onOpenDetail,
+  readOnly = false,
 }: {
   variants: WholesaleProduct[];
   cartBySku: Record<string, number>;
@@ -29,6 +30,7 @@ export function GroupedProductCard({
   showPrices?: boolean;
   onGoToCart?: () => void;
   onOpenDetail?: (product: WholesaleProduct) => void;
+  readOnly?: boolean;
 }) {
   // Default to the first variant already in cart, else the first one.
   const initial = variants.find((v) => (cartBySku[v.sku] ?? 0) > 0)?.sku ?? variants[0].sku;
@@ -75,6 +77,7 @@ export function GroupedProductCard({
       onGoToCart={onGoToCart}
       onOpenDetail={onOpenDetail}
       variantBar={variantBar}
+      readOnly={readOnly}
     />
   );
 }

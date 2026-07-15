@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users, ShoppingBag, Store, Tent, ScrollText, Shield, LogOut, ScanLine } from "lucide-react";
+import { Users, ShoppingBag, Store, Tent, ScrollText, Shield, LogOut, ScanLine, LayoutGrid, SlidersHorizontal } from "lucide-react";
 import { logout } from "@/app/actions";
 import { palette } from "@/lib/palette";
 import type { StaffRole } from "@/lib/types";
 
-const ICONS = { Users, ShoppingBag, Store, Tent, ScrollText, Shield, ScanLine } as const;
+const ICONS = { Users, ShoppingBag, Store, Tent, ScrollText, Shield, ScanLine, LayoutGrid, SlidersHorizontal } as const;
 
 interface NavItem {
   href: string;
@@ -21,10 +21,12 @@ interface NavItem {
 // in-store billing, exhibitions), back-office after.
 const NAV: NavItem[] = [
   { href: "/admin/price-check", label: "Price Check", icon: "ScanLine" },
+  { href: "/admin/catalog", label: "Catalog", icon: "LayoutGrid" },
   { href: "/admin/in-store", label: "In-store", icon: "Store" },
   { href: "/admin/exhibition", label: "Exhibitions", icon: "Tent" },
   { href: "/admin/buyers", label: "Buyers", icon: "Users", adminOnly: true },
   { href: "/admin/orders", label: "Orders", icon: "ShoppingBag", adminOnly: true },
+  { href: "/admin/manage-catalog", label: "Manage Catalog", icon: "SlidersHorizontal", adminOnly: true },
   { href: "/admin/audit", label: "Audit Log", icon: "ScrollText", adminOnly: true },
   { href: "/admin/staff", label: "Staff", icon: "Shield", adminOnly: true },
 ];
