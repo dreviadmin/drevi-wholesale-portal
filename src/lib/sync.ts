@@ -27,6 +27,13 @@ const COLS: Record<string, string> = {
   min_order_qty: "Min Order Qty - Wholesale",
   restockable: "Restockable",
   restock_days: "Restock Days",
+  // Procurement columns → product_vendor_info (admin dashboard only; cost
+  // price never touches wholesale_products, which buyer pages select("*")).
+  vendor_name: "Vendor Name",
+  vendor_id: "Vendor ID",
+  vendor_sku: "Vendor SKU",
+  last_cost: "Last Cost",
+  last_receipt_date: "Last Receipt Date",
 };
 
 // Columns the sync cannot operate without (they drive the filter / pricing).
@@ -141,6 +148,9 @@ export async function syncProducts(): Promise<SyncResult> {
   let skipped = 0;
   const products: ProductRow[] = [];
   const included = new Set<string>();
+  // Vendor/procurement columns for the admin dashboard's reorder table —
+  // separate table, sheet is the source of truth (no locked_fields).
+  const vendorInfo: Array<Record<string, unknown>> = [];
 
   const push = (row: Record<string, string>, opts: { price: number; liveUrl: string | null; restockable: boolean; restockDays: number | null }) => {
     // Canonicalize to uppercase — the PK is case-sensitive, and every set/map
@@ -186,6 +196,14 @@ export async function syncProducts(): Promise<SyncResult> {
       liveUrl: row.shopify_live_url?.trim() || row.shopify_product_url?.trim() || null,
       restockable,
       restockDays,
+    });
+    vendorInfo.push({
+      sku: sku.toUpperCase(),
+      vendor_name: row.vendor_name || null,
+      vendor_id: row.vendor_id || null,
+      vendor_sku: row.vendor_sku || null,
+      last_cost: toPrice(row.last_cost),
+      last_receipt_date: row.last_receipt_date || null,
     });
   }
 
@@ -280,7 +298,10 @@ export async function syncProducts(): Promise<SyncResult> {
     const ex = existingBySku.get(p.sku);
     const image_urls = fresh && fresh.length > 0 ? fresh : ex?.image_urls ?? [];
     const images_fetched_at = fresh ? nowIso : ex?.images_fetched_at ?? null;
-    const row: Record<string, unknown> = { ...p, image_urls, images_fetched_at, synced_at: nowIso };
+    // Every row must carry locked_fields: PostgREST unifies columns across a
+    // bulk upsert, so ONE brand-new sheet SKU (no existing row → key absent)
+    // would null the column for itself and abort the whole sync on NOT NULL.
+    const row: Record<string, unknown> = { ...p, image_urls, images_fetched_at, synced_at: nowIso, locked_fields: ex?.locked_fields ?? [] };
     if (ex) {
       for (const f of ex.locked_fields) {
         if (f === "image_urls") {
@@ -290,7 +311,6 @@ export async function syncProducts(): Promise<SyncResult> {
           row[f] = ex[f];
         }
       }
-      row.locked_fields = ex.locked_fields; // never clobber the lock list itself
     }
     return row;
   });
@@ -298,6 +318,13 @@ export async function syncProducts(): Promise<SyncResult> {
   if (payload.length > 0) {
     const { error } = await supabase.from("wholesale_products").upsert(payload, { onConflict: "sku" });
     if (error) throw new Error(`Upsert failed: ${error.message}`);
+  }
+
+  // Vendor info is best-effort — a failure here must not abort the product sync.
+  if (vendorInfo.length > 0) {
+    const stamped = vendorInfo.map((v) => ({ ...v, updated_at: nowIso }));
+    const { error } = await supabase.from("product_vendor_info").upsert(stamped, { onConflict: "sku" });
+    if (error) warnings.push(`Vendor-info upsert failed: ${error.message}`);
   }
 
   // Hide SKUs previously visible but no longer qualifying (preserve order history).
