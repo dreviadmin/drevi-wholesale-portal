@@ -34,6 +34,7 @@ const COLS: Record<string, string> = {
   vendor_sku: "Vendor SKU",
   last_cost: "Last Cost",
   last_receipt_date: "Last Receipt Date",
+  retail_price: "Final MRP",
 };
 
 // Columns the sync cannot operate without (they drive the filter / pricing).
@@ -151,6 +152,7 @@ export async function syncProducts(): Promise<SyncResult> {
   // Vendor/procurement columns for the admin dashboard's reorder table —
   // separate table, sheet is the source of truth (no locked_fields).
   const vendorInfo: Array<Record<string, unknown>> = [];
+  const seenVendor = new Set<string>();
 
   const push = (row: Record<string, string>, opts: { price: number; liveUrl: string | null; restockable: boolean; restockDays: number | null }) => {
     // Canonicalize to uppercase — the PK is case-sensitive, and every set/map
@@ -185,6 +187,21 @@ export async function syncProducts(): Promise<SyncResult> {
     const sku = row.sku?.trim();
     if (!sku || included.has(sku.toUpperCase())) continue;
     if (ignored.has(sku.toUpperCase())) { skipped++; continue; }
+    // Vendor/retail info covers EVERY sheet row — a garment hidden from the
+    // wholesale portal still hangs in the retail shop, and Retail Price Check
+    // must resolve its tag.
+    if (!seenVendor.has(sku.toUpperCase())) {
+      seenVendor.add(sku.toUpperCase());
+      vendorInfo.push({
+        sku: sku.toUpperCase(),
+        vendor_name: row.vendor_name || null,
+        vendor_id: row.vendor_id || null,
+        vendor_sku: row.vendor_sku || null,
+        last_cost: toPrice(row.last_cost),
+        last_receipt_date: row.last_receipt_date || null,
+        retail_price: toPrice(row.retail_price),
+      });
+    }
     if (isNo(row.wholesale_visible)) { skipped++; continue; }
     const restockDays = toInt(row.restock_days);
     // Blank restockable on a zero-qty row would render it "sold out" and make
@@ -196,14 +213,6 @@ export async function syncProducts(): Promise<SyncResult> {
       liveUrl: row.shopify_live_url?.trim() || row.shopify_product_url?.trim() || null,
       restockable,
       restockDays,
-    });
-    vendorInfo.push({
-      sku: sku.toUpperCase(),
-      vendor_name: row.vendor_name || null,
-      vendor_id: row.vendor_id || null,
-      vendor_sku: row.vendor_sku || null,
-      last_cost: toPrice(row.last_cost),
-      last_receipt_date: row.last_receipt_date || null,
     });
   }
 
@@ -376,5 +385,39 @@ export async function syncProducts(): Promise<SyncResult> {
     skipped,
     duration_ms: Date.now() - start,
     warnings,
+  };
+}
+
+// Fast path for the Retail Price Check "Sync Prices" button: read ONLY the
+// SKU + Final MRP columns and update retail_price. Touches nothing else (no
+// photos, no product upserts, no locked-field logic) so it returns in ~2s —
+// staff type a price into the sheet and see it on the shop floor immediately.
+export async function syncRetailPrices(): Promise<{
+  updated: number;
+  duration_ms: number;
+  prices: { sku: string; retail_price: number }[];
+  asOf: string;
+}> {
+  const start = Date.now();
+  const supabase = createAdminClient();
+  const { rows } = await readMaster({ sku: COLS.sku, retail_price: COLS.retail_price }, WHOLESALE_SHEET_ID);
+  const nowIso = new Date().toISOString();
+  const seen = new Set<string>();
+  const payload: Array<{ sku: string; retail_price: number; updated_at: string }> = [];
+  for (const r of rows) {
+    const sku = r.sku?.trim().toUpperCase();
+    if (!sku || seen.has(sku)) continue;
+    seen.add(sku);
+    payload.push({ sku, retail_price: toPrice(r.retail_price), updated_at: nowIso });
+  }
+  if (payload.length > 0) {
+    const { error } = await supabase.from("product_vendor_info").upsert(payload, { onConflict: "sku" });
+    if (error) throw new Error(`Retail price upsert failed: ${error.message}`);
+  }
+  return {
+    updated: payload.length,
+    duration_ms: Date.now() - start,
+    prices: payload.map(({ sku, retail_price }) => ({ sku, retail_price })),
+    asOf: nowIso,
   };
 }

@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users, ShoppingBag, Store, Tent, ScrollText, Shield, LogOut, ScanLine, LayoutGrid, SlidersHorizontal, BarChart3 } from "lucide-react";
+import { Users, ShoppingBag, Store, Tent, ScrollText, Shield, LogOut, ScanLine, LayoutGrid, SlidersHorizontal, BarChart3, Tag } from "lucide-react";
 import { logout } from "@/app/actions";
 import { palette } from "@/lib/palette";
 import type { StaffRole } from "@/lib/types";
 
-const ICONS = { Users, ShoppingBag, Store, Tent, ScrollText, Shield, ScanLine, LayoutGrid, SlidersHorizontal, BarChart3 } as const;
+const ICONS = { Users, ShoppingBag, Store, Tent, ScrollText, Shield, ScanLine, LayoutGrid, SlidersHorizontal, BarChart3, Tag } as const;
 
 interface NavItem {
   href: string;
@@ -20,7 +20,8 @@ interface NavItem {
 // Menu order is deliberate: the three shop-floor tools first (price check,
 // in-store billing, exhibitions), back-office after.
 const NAV: NavItem[] = [
-  { href: "/admin/price-check", label: "Price Check", icon: "ScanLine" },
+  { href: "/admin/retail-check", label: "Retail Price", icon: "Tag" },
+  { href: "/admin/price-check", label: "Wholesale Price", icon: "ScanLine" },
   { href: "/admin/catalog", label: "Catalog", icon: "LayoutGrid" },
   { href: "/admin/in-store", label: "In-store", icon: "Store" },
   { href: "/admin/exhibition", label: "Exhibitions", icon: "Tent" },
