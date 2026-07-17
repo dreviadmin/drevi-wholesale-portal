@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Search, X, ScanLine, Copy, Check, ImageOff } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { ZoomImage } from "@/components/Lightbox";
+import { useSort, SortTh, type SortAccessor } from "@/components/sortable";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { OrderItem, OrderStatus } from "@/lib/types";
@@ -48,6 +49,41 @@ export interface VendorInfo {
 
 type Tab = "products" | "vendors" | "customers" | "reorder";
 type Range = "today" | "7d" | "all";
+
+// Row shapes for the four tables (also used by their sort accessors).
+interface ProductRow { sku: string; title: string; image: string | null; pieces: number; value: number; orders: Set<string> }
+interface VendorRow { vendor: string; skus: Set<string>; pieces: number; value: number }
+interface CustomerRow { buyer: DashBuyer | null; id: string; orders: number; total: number; advance: number; pieces: number }
+interface ReorderRow { p: DashProduct; v: VendorInfo | null; sold: number }
+
+const PRODUCT_ACC: Record<string, SortAccessor<ProductRow>> = {
+  product: (r) => r.title,
+  pieces: (r) => r.pieces,
+  value: (r) => r.value,
+  orders: (r) => r.orders.size,
+};
+const VENDOR_ACC: Record<string, SortAccessor<VendorRow>> = {
+  vendor: (r) => r.vendor,
+  designs: (r) => r.skus.size,
+  pieces: (r) => r.pieces,
+  value: (r) => r.value,
+};
+const CUSTOMER_ACC: Record<string, SortAccessor<CustomerRow>> = {
+  customer: (r) => r.buyer?.business_name,
+  orders: (r) => r.orders,
+  pieces: (r) => r.pieces,
+  total: (r) => r.total,
+  advance: (r) => r.advance,
+  balance: (r) => Math.max(0, r.total - r.advance),
+};
+const REORDER_ACC: Record<string, SortAccessor<ReorderRow>> = {
+  product: (r) => r.p.title ?? r.p.sku,
+  vendor: (r) => r.v?.vendor_name,
+  vendorSku: (r) => r.v?.vendor_sku,
+  cost: (r) => (r.v && r.v.last_cost > 0 ? r.v.last_cost : null),
+  sold: (r) => r.sold,
+  stock: (r) => r.p.current_qty,
+};
 
 // Real pieces sold: a GST bill-split inflates qty on paper; actual_qty keeps
 // the truth. Line value stays qty × unit_price (that IS the money).
@@ -190,6 +226,12 @@ export function DashboardView({ orders, buyers, products, vendors }: {
       .sort((a, b) => b.sold - a.sold || (a.p.title ?? a.p.sku).localeCompare(b.p.title ?? b.p.sku));
   }, [products, vendorBySku, soldBySku, query, vendorFilter]);
 
+  // Golden rule: every table sorts by its column headers.
+  const prodSort = useSort(byProduct as ProductRow[], PRODUCT_ACC, { key: "pieces", dir: "desc" });
+  const vendSort = useSort(byVendor as VendorRow[], VENDOR_ACC, { key: "value", dir: "desc" });
+  const custSort = useSort(byCustomer as CustomerRow[], CUSTOMER_ACC, { key: "total", dir: "desc" });
+  const reordSort = useSort(reorderRows as ReorderRow[], REORDER_ACC, { key: "sold", dir: "desc" });
+
   // Golden rule: every search has a scan. A hit jumps to Reorder filtered to it.
   function handleScan(text: string): ScanFeedback {
     const sku = text.trim().toUpperCase();
@@ -311,9 +353,15 @@ export function DashboardView({ orders, buyers, products, vendors }: {
         {tab === "products" && (
           byProduct.length === 0 ? <Empty label="No items sold in this period." /> : (
             <table className="w-full" style={{ borderCollapse: "collapse" }}>
-              <thead><tr style={{ borderBottom: `1px solid ${palette.black}` }}>{th("")}{th("Product")}{th("Pieces", true)}{th("Value", true)}{th("Orders", true)}</tr></thead>
+              <thead><tr style={{ borderBottom: `1px solid ${palette.black}` }}>
+                {th("")}
+                <SortTh label="Product" k="product" sort={prodSort.sort} onToggle={prodSort.toggle} />
+                <SortTh label="Pieces" k="pieces" sort={prodSort.sort} onToggle={prodSort.toggle} right defaultDir="desc" />
+                <SortTh label="Value" k="value" sort={prodSort.sort} onToggle={prodSort.toggle} right defaultDir="desc" />
+                <SortTh label="Orders" k="orders" sort={prodSort.sort} onToggle={prodSort.toggle} right defaultDir="desc" />
+              </tr></thead>
               <tbody>
-                {byProduct.map((r) => (
+                {prodSort.sorted.map((r) => (
                   <tr key={r.sku} style={{ borderBottom: "1px solid rgba(26,26,26,0.07)" }}>
                     <td style={{ padding: "6px 8px", width: 44 }}>
                       {r.image ? <ZoomImage src={r.image} alt={r.title} width={36} height={45} /> : <div style={{ width: 36, height: 45, background: palette.ivoryDeep }} />}
@@ -332,9 +380,14 @@ export function DashboardView({ orders, buyers, products, vendors }: {
         {tab === "vendors" && (
           byVendor.length === 0 ? <Empty label="No items sold in this period." /> : (
             <table className="w-full" style={{ borderCollapse: "collapse" }}>
-              <thead><tr style={{ borderBottom: `1px solid ${palette.black}` }}>{th("Vendor")}{th("Designs Sold", true)}{th("Pieces", true)}{th("Value", true)}</tr></thead>
+              <thead><tr style={{ borderBottom: `1px solid ${palette.black}` }}>
+                <SortTh label="Vendor" k="vendor" sort={vendSort.sort} onToggle={vendSort.toggle} />
+                <SortTh label="Designs Sold" k="designs" sort={vendSort.sort} onToggle={vendSort.toggle} right defaultDir="desc" />
+                <SortTh label="Pieces" k="pieces" sort={vendSort.sort} onToggle={vendSort.toggle} right defaultDir="desc" />
+                <SortTh label="Value" k="value" sort={vendSort.sort} onToggle={vendSort.toggle} right defaultDir="desc" />
+              </tr></thead>
               <tbody>
-                {byVendor.map((r) => (
+                {vendSort.sorted.map((r) => (
                   <tr key={r.vendor} style={{ borderBottom: "1px solid rgba(26,26,26,0.07)" }}>
                     {td(<span className="font-display" style={{ fontSize: 13, fontWeight: 500 }}>{r.vendor}</span>)}
                     {td(String(r.skus.size), true)}
@@ -350,9 +403,16 @@ export function DashboardView({ orders, buyers, products, vendors }: {
         {tab === "customers" && (
           byCustomer.length === 0 ? <Empty label="No orders in this period." /> : (
             <table className="w-full" style={{ borderCollapse: "collapse" }}>
-              <thead><tr style={{ borderBottom: `1px solid ${palette.black}` }}>{th("Customer")}{th("Orders", true)}{th("Pieces", true)}{th("Total", true)}{th("Advance", true)}{th("Balance", true)}</tr></thead>
+              <thead><tr style={{ borderBottom: `1px solid ${palette.black}` }}>
+                <SortTh label="Customer" k="customer" sort={custSort.sort} onToggle={custSort.toggle} />
+                <SortTh label="Orders" k="orders" sort={custSort.sort} onToggle={custSort.toggle} right defaultDir="desc" />
+                <SortTh label="Pieces" k="pieces" sort={custSort.sort} onToggle={custSort.toggle} right defaultDir="desc" />
+                <SortTh label="Total" k="total" sort={custSort.sort} onToggle={custSort.toggle} right defaultDir="desc" />
+                <SortTh label="Advance" k="advance" sort={custSort.sort} onToggle={custSort.toggle} right defaultDir="desc" />
+                <SortTh label="Balance" k="balance" sort={custSort.sort} onToggle={custSort.toggle} right defaultDir="desc" />
+              </tr></thead>
               <tbody>
-                {byCustomer.map((r) => (
+                {custSort.sorted.map((r) => (
                   <tr key={r.id} style={{ borderBottom: "1px solid rgba(26,26,26,0.07)" }}>
                     {td(
                       <Link href={`/admin/buyers/${r.id}`} className="block">
@@ -380,9 +440,17 @@ export function DashboardView({ orders, buyers, products, vendors }: {
         {tab === "reorder" && (
           reorderRows.length === 0 ? <Empty label="No products match." /> : (
             <table className="w-full" style={{ borderCollapse: "collapse" }}>
-              <thead><tr style={{ borderBottom: `1px solid ${palette.black}` }}>{th("")}{th("Product")}{th("Vendor")}{th("Vendor SKU")}{th("Last Cost", true)}{th("Sold", true)}{th("In Stock", true)}</tr></thead>
+              <thead><tr style={{ borderBottom: `1px solid ${palette.black}` }}>
+                {th("")}
+                <SortTh label="Product" k="product" sort={reordSort.sort} onToggle={reordSort.toggle} />
+                <SortTh label="Vendor" k="vendor" sort={reordSort.sort} onToggle={reordSort.toggle} />
+                <SortTh label="Vendor SKU" k="vendorSku" sort={reordSort.sort} onToggle={reordSort.toggle} />
+                <SortTh label="Last Cost" k="cost" sort={reordSort.sort} onToggle={reordSort.toggle} right defaultDir="desc" />
+                <SortTh label="Sold" k="sold" sort={reordSort.sort} onToggle={reordSort.toggle} right defaultDir="desc" />
+                <SortTh label="In Stock" k="stock" sort={reordSort.sort} onToggle={reordSort.toggle} right defaultDir="desc" />
+              </tr></thead>
               <tbody>
-                {reorderRows.map(({ p, v, sold }) => (
+                {reordSort.sorted.map(({ p, v, sold }) => (
                   <tr key={p.sku} style={{ borderBottom: "1px solid rgba(26,26,26,0.07)", background: highlightSku === p.sku ? palette.ivoryDeep : undefined }}>
                     <td style={{ padding: "6px 8px", width: 44 }}>
                       {p.image_urls?.[0]

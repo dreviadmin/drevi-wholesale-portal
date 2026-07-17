@@ -4,12 +4,20 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { UserPlus, Copy } from "lucide-react";
 import { addStaffUser, setStaffActive } from "./actions";
+import { useSort, SortTh, type SortAccessor } from "@/components/sortable";
 import { palette } from "@/lib/palette";
 import type { StaffRole } from "@/lib/types";
 
 interface RowDTO { id: string; email: string; name: string | null; role: StaffRole; active: boolean; }
 
 const ROLE_LABEL: Record<StaffRole, string> = { super_admin: "Super Admin", admin: "Admin", staff: "Staff" };
+
+const ACCESSORS: Record<string, SortAccessor<RowDTO>> = {
+  name: (r) => r.name,
+  email: (r) => r.email,
+  role: (r) => ROLE_LABEL[r.role],
+  status: (r) => (r.active ? "Active" : "Inactive"),
+};
 
 export function StaffManager({ actor, rows }: { actor: { id: string; role: StaffRole }; rows: RowDTO[] }) {
   const router = useRouter();
@@ -22,6 +30,7 @@ export function StaffManager({ actor, rows }: { actor: { id: string; role: Staff
   const [createdPw, setCreatedPw] = useState<{ email: string; password: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  const { sorted, sort, toggle: toggleSort } = useSort(rows, ACCESSORS);
   const canCreateAdmin = actor.role === "super_admin";
   function canManage(target: RowDTO): boolean {
     if (target.role === "super_admin" || target.id === actor.id) return false;
@@ -99,13 +108,15 @@ export function StaffManager({ actor, rows }: { actor: { id: string; role: Staff
         <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 480 }}>
           <thead>
             <tr style={{ borderBottom: "1px solid rgba(26,26,26,0.15)" }}>
-              {["Name", "Email", "Role", "Status", ""].map((h) => (
-                <th key={h} className="font-body uppercase text-left" style={{ fontSize: 9, letterSpacing: "0.14em", color: palette.mutedGreige, padding: "8px 10px", fontWeight: 500 }}>{h}</th>
-              ))}
+              <SortTh label="Name" k="name" sort={sort} onToggle={toggleSort} />
+              <SortTh label="Email" k="email" sort={sort} onToggle={toggleSort} />
+              <SortTh label="Role" k="role" sort={sort} onToggle={toggleSort} />
+              <SortTh label="Status" k="status" sort={sort} onToggle={toggleSort} />
+              <th style={{ padding: "8px 10px" }} />
             </tr>
           </thead>
           <tbody>
-            {rows.map((s) => (
+            {sorted.map((s) => (
               <tr key={s.id} style={{ borderBottom: "1px solid rgba(26,26,26,0.06)", opacity: s.active ? 1 : 0.55 }}>
                 <td className="font-body" style={{ fontSize: 13, color: palette.black, padding: "10px" }}>{s.name ?? "—"}</td>
                 <td className="font-body" style={{ fontSize: 12, color: palette.softBlack, padding: "10px" }}>{s.email}</td>

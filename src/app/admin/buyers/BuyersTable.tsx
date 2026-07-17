@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Search, Plus, MessageCircle } from "lucide-react";
 import { StatusPill, SourcePill } from "@/components/admin/Pills";
+import { useSort, SortTh, type SortAccessor } from "@/components/sortable";
 import { palette } from "@/lib/palette";
 import type { BuyerStatus, BuyerSource } from "@/lib/types";
 
@@ -34,6 +35,18 @@ function waLink(phone: string | null): string | null {
   return digits ? `https://wa.me/${digits}` : null;
 }
 
+const ACCESSORS: Record<string, SortAccessor<BuyerRowDTO>> = {
+  business: (r) => r.business_name,
+  owner: (r) => r.owner_name,
+  phone: (r) => r.phone,
+  city: (r) => r.city,
+  status: (r) => r.status,
+  source: (r) => SOURCE_LABEL[r.source],
+  orders: (r) => r.ordersCount,
+  lastOrder: (r) => r.lastOrder,
+  created: (r) => r.created_at,
+};
+
 export function BuyersTable({ rows }: { rows: BuyerRowDTO[] }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<Set<BuyerStatus>>(new Set());
@@ -57,6 +70,8 @@ export function BuyersTable({ rows }: { rows: BuyerRowDTO[] }) {
     else next.add(value);
     setter(next);
   }
+
+  const { sorted, sort, toggle: toggleSort } = useSort(filtered, ACCESSORS);
 
   const chip = (active: boolean) => ({
     fontSize: 9,
@@ -115,13 +130,19 @@ export function BuyersTable({ rows }: { rows: BuyerRowDTO[] }) {
         <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 760 }}>
           <thead>
             <tr style={{ borderBottom: "1px solid rgba(26,26,26,0.15)" }}>
-              {["Business", "Owner", "Phone", "City", "Status", "Source", "Orders", "Last order", "Created"].map((h) => (
-                <th key={h} className="font-body uppercase text-left" style={{ fontSize: 9, letterSpacing: "0.14em", color: palette.mutedGreige, padding: "8px 10px", fontWeight: 500 }}>{h}</th>
-              ))}
+              <SortTh label="Business" k="business" sort={sort} onToggle={toggleSort} />
+              <SortTh label="Owner" k="owner" sort={sort} onToggle={toggleSort} />
+              <SortTh label="Phone" k="phone" sort={sort} onToggle={toggleSort} />
+              <SortTh label="City" k="city" sort={sort} onToggle={toggleSort} />
+              <SortTh label="Status" k="status" sort={sort} onToggle={toggleSort} />
+              <SortTh label="Source" k="source" sort={sort} onToggle={toggleSort} />
+              <SortTh label="Orders" k="orders" sort={sort} onToggle={toggleSort} defaultDir="desc" />
+              <SortTh label="Last order" k="lastOrder" sort={sort} onToggle={toggleSort} defaultDir="desc" />
+              <SortTh label="Created" k="created" sort={sort} onToggle={toggleSort} defaultDir="desc" />
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r) => {
+            {sorted.map((r) => {
               const wa = waLink(r.phone);
               return (
                 <tr key={r.id} style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
