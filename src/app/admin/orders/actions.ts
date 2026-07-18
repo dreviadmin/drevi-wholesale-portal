@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/staff";
 import { finalizeOrder } from "@/lib/order-finalize";
 import { getStockState } from "@/lib/stock";
-import type { Order, OrderItem, OrderStatus, WholesaleProduct } from "@/lib/types";
+import type { DiscountType, Order, OrderItem, OrderStatus, TaxMode, WholesaleProduct } from "@/lib/types";
 
 export async function setOrderStatus(
   orderId: string,
@@ -61,9 +61,23 @@ export type OrderEditLine =
   | { kind: "add"; sku: string; qty: number; unitPrice?: number | null; actualQty?: number | null }
   | { kind: "custom"; title: string; sku?: string; qty: number; unitPrice: number; actualQty?: number | null };
 
+// Full re-bill: the editor can change every billing term the cart page has —
+// tax mode/rate, discount, advance and payment. Omitted (undefined) terms keep
+// the order's stored values, so line-only edits stay backward compatible.
+export interface OrderEditTerms {
+  taxMode?: TaxMode;
+  taxRate?: number | null;
+  discountType?: DiscountType | null;
+  discountValue?: number | null;
+  advanceAmount?: number;
+  paymentMethod?: string | null;
+  paymentNotes?: string | null;
+}
+
 export async function updateOrderItems(
   orderId: string,
   lines: OrderEditLine[],
+  terms?: OrderEditTerms,
 ): Promise<{ ok: boolean; error?: string; total?: number; overpaidBy?: number }> {
   try {
     await requireAdmin();
@@ -173,32 +187,66 @@ export async function updateOrderItems(
     }
   }
 
-  // Recompute money server-side with the order's existing discount/tax terms —
-  // same math as order submission; never trust client totals.
+  // Recompute money server-side — same math as order submission; never trust
+  // client totals. Terms the editor sends replace the stored ones; anything
+  // omitted keeps the order's existing value.
+  const discountType: DiscountType | null =
+    terms && "discountType" in terms
+      ? terms.discountType === "percent" || terms.discountType === "absolute" ? terms.discountType : null
+      : order.discount_type;
+  let discountValue: number | null = null;
   let discountAmount = 0;
-  if (order.discount_type) {
-    const value = Math.max(0, Number(order.discount_value) || 0);
+  if (discountType) {
+    const raw = terms && "discountValue" in terms ? terms.discountValue : order.discount_value;
+    // Percent stored clamped to 100 so the invoice never prints "(150%)".
+    discountValue = discountType === "percent" ? Math.min(100, Math.max(0, Number(raw) || 0)) : Math.max(0, Number(raw) || 0);
     discountAmount =
-      order.discount_type === "percent"
-        ? Math.round(subtotal * (Math.min(100, value) / 100) * 100) / 100
-        : Math.min(subtotal, Math.round(value * 100) / 100);
+      discountType === "percent"
+        ? Math.round(subtotal * (discountValue / 100) * 100) / 100
+        : Math.min(subtotal, Math.round(discountValue * 100) / 100);
   }
   const netSubtotal = subtotal - discountAmount;
+
+  const taxMode: TaxMode =
+    terms?.taxMode === "inclusive" || terms?.taxMode === "exclusive" || terms?.taxMode === "none"
+      ? terms.taxMode
+      : (order.tax_mode ?? "none");
+  let taxRate: number | null = null;
   let taxAmount = 0;
   let total = netSubtotal;
-  if (order.tax_mode === "exclusive" || order.tax_mode === "inclusive") {
-    const rate = Number(order.tax_rate) || 0;
-    if (order.tax_mode === "exclusive") {
-      taxAmount = Math.round(netSubtotal * (rate / 100) * 100) / 100;
+  if (taxMode === "exclusive" || taxMode === "inclusive") {
+    const rawRate = terms && "taxRate" in terms ? terms.taxRate : order.tax_rate;
+    taxRate = Math.min(18, Math.max(5, Number(rawRate) || 5));
+    if (taxMode === "exclusive") {
+      taxAmount = Math.round(netSubtotal * (taxRate / 100) * 100) / 100;
       total = netSubtotal + taxAmount;
     } else {
-      taxAmount = Math.round(netSubtotal * (rate / (100 + rate)) * 100) / 100;
+      taxAmount = Math.round(netSubtotal * (taxRate / (100 + taxRate)) * 100) / 100;
     }
   }
 
+  const advanceAmount =
+    terms && "advanceAmount" in terms ? Math.max(0, Number(terms.advanceAmount) || 0) : Number(order.advance_amount) || 0;
+  const paymentMethod =
+    terms && "paymentMethod" in terms ? terms.paymentMethod?.trim() || null : order.payment_method;
+  const paymentNotes =
+    terms && "paymentNotes" in terms ? terms.paymentNotes?.trim() || null : order.payment_notes;
+
   const { error } = await admin
     .from("orders")
-    .update({ items, total_amount: total, discount_amount: discountAmount, tax_amount: taxAmount })
+    .update({
+      items,
+      total_amount: total,
+      discount_type: discountType,
+      discount_value: discountValue,
+      discount_amount: discountAmount,
+      tax_mode: taxMode,
+      tax_rate: taxRate,
+      tax_amount: taxAmount,
+      advance_amount: advanceAmount,
+      payment_method: advanceAmount > 0 ? paymentMethod : null,
+      payment_notes: paymentNotes,
+    })
     .eq("id", orderId);
   if (error) return { ok: false, error: error.message };
 
@@ -209,8 +257,7 @@ export async function updateOrderItems(
 
   // If the edit dropped the total below money already collected, surface the
   // refund owed rather than letting the balance silently clamp to zero.
-  const advance = Number(order.advance_amount) || 0;
-  const overpaidBy = advance > total ? Math.round((advance - total) * 100) / 100 : undefined;
+  const overpaidBy = advanceAmount > total ? Math.round((advanceAmount - total) * 100) / 100 : undefined;
   return { ok: true, total, overpaidBy };
 }
 

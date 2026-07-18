@@ -6,10 +6,13 @@ import Image from "next/image";
 import { X, Plus, Search, ScanLine } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { ZoomImage } from "@/components/Lightbox";
-import { updateOrderItems, type OrderEditLine } from "@/app/admin/orders/actions";
+import { updateOrderItems, type OrderEditLine, type OrderEditTerms } from "@/app/admin/orders/actions";
 import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { DiscountType, OrderItem, TaxMode } from "@/lib/types";
+
+const PAY_METHODS = ["Cash", "UPI", "Bank", "Other"];
+const TAX_RATES = [5, 12, 18];
 
 export interface PickerProduct {
   sku: string;
@@ -63,6 +66,9 @@ export function OrderEditor({
   discountValue,
   taxMode,
   taxRate,
+  advanceAmount,
+  paymentMethod,
+  paymentNotes,
 }: {
   orderId: string;
   status: string;
@@ -72,6 +78,9 @@ export function OrderEditor({
   discountValue: number | null;
   taxMode: TaxMode | null;
   taxRate: number | null;
+  advanceAmount: number | null;
+  paymentMethod: string | null;
+  paymentNotes: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -80,6 +89,15 @@ export function OrderEditor({
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [isPending, start] = useTransition();
+  // Billing terms — every option the cart page has, editable after the fact.
+  const [dType, setDType] = useState<DiscountType | "none">("none");
+  const [dValue, setDValue] = useState("");
+  const [tMode, setTMode] = useState<TaxMode>("none");
+  const [tRate, setTRate] = useState(5);
+  const [customRate, setCustomRate] = useState("");
+  const [advance, setAdvance] = useState("");
+  const [payMethod, setPayMethod] = useState("Cash");
+  const [payNote, setPayNote] = useState("");
 
   // The scanner's camera loop captures the first render's onScan, so state
   // must be read through this ref (its identity is stable across renders).
@@ -122,6 +140,16 @@ export function OrderEditor({
         };
       }),
     );
+    // Billing terms start from the order's stored values.
+    setDType(discountType ?? "none");
+    setDValue(discountValue != null && discountValue > 0 ? String(discountValue) : "");
+    setTMode(taxMode ?? "none");
+    const storedRate = taxRate != null && taxRate > 0 ? taxRate : 5;
+    setTRate(TAX_RATES.includes(storedRate) ? storedRate : 5);
+    setCustomRate(TAX_RATES.includes(storedRate) ? "" : String(storedRate));
+    setAdvance(advanceAmount != null && advanceAmount > 0 ? String(advanceAmount) : "");
+    setPayMethod(paymentMethod ?? "Cash");
+    setPayNote(paymentNotes ?? "");
     setQuery("");
     setError(null);
     setOpen(true);
@@ -195,21 +223,22 @@ export function OrderEditor({
     return { ok: true, message: `${formatINR(p.wholesale_price)} — ${p.sku} added` };
   }
 
-  // Live preview with the order's existing discount/tax terms — the server
-  // recomputes authoritatively on save.
+  // Live preview from the editable billing terms — the server recomputes
+  // authoritatively on save with the same math.
+  const effRate = tMode === "none" ? 0 : Math.min(18, Math.max(5, customRate.trim() !== "" ? Number(customRate) || 5 : tRate));
+  const advanceNum = Math.max(0, Number(advance) || 0);
   const preview = useMemo(() => {
     const subtotal = lines.reduce((s, l) => s + calc(l).total, 0);
     let discount = 0;
-    if (discountType) {
-      const v = Math.max(0, Number(discountValue) || 0);
-      discount = discountType === "percent" ? (subtotal * Math.min(100, v)) / 100 : Math.min(subtotal, v);
+    if (dType !== "none") {
+      const v = Math.max(0, Number(dValue) || 0);
+      discount = dType === "percent" ? (subtotal * Math.min(100, v)) / 100 : Math.min(subtotal, v);
     }
     const net = subtotal - discount;
-    const rate = Number(taxRate) || 0;
-    const tax = taxMode === "exclusive" ? (net * rate) / 100 : taxMode === "inclusive" ? (net * rate) / (100 + rate) : 0;
-    const total = taxMode === "exclusive" ? net + tax : net;
+    const tax = tMode === "exclusive" ? (net * effRate) / 100 : tMode === "inclusive" ? (net * effRate) / (100 + effRate) : 0;
+    const total = tMode === "exclusive" ? net + tax : net;
     return { subtotal, discount, tax, total };
-  }, [lines, discountType, discountValue, taxMode, taxRate]);
+  }, [lines, dType, dValue, tMode, effRate]);
 
   function save() {
     setError(null);
@@ -238,8 +267,17 @@ export function OrderEditor({
       if (l.kind === "custom") return { kind: "custom", title: l.title.trim(), qty, unitPrice, actualQty };
       return { kind: "add", sku: l.sku, qty, unitPrice, actualQty };
     });
+    const terms: OrderEditTerms = {
+      taxMode: tMode,
+      taxRate: tMode === "none" ? null : effRate,
+      discountType: dType === "none" ? null : dType,
+      discountValue: dType === "none" ? null : Math.max(0, Number(dValue) || 0),
+      advanceAmount: advanceNum,
+      paymentMethod: advanceNum > 0 ? payMethod : null,
+      paymentNotes: payNote || null,
+    };
     start(async () => {
-      const res = await updateOrderItems(orderId, payload);
+      const res = await updateOrderItems(orderId, payload, terms);
       if (!res.ok) { setError(res.error ?? "Failed to save"); return; }
       if (res.overpaidBy && res.overpaidBy > 0) {
         // Non-blocking: the edit saved, but staff need to know a refund is owed.
@@ -396,19 +434,90 @@ export function OrderEditor({
               </button>
             </div>
 
-            <div className="mt-5 font-body" style={{ fontSize: 12, color: palette.softBlack }}>
+            {/* Billing — every option the cart page has, editable after the fact */}
+            <div className="mt-5 p-3" style={{ background: palette.ivoryDeep }}>
+              <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}>Discount</div>
+              <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                {([["none", "None"], ["percent", "%"], ["absolute", "₹ Off"]] as const).map(([v, label]) => (
+                  <button key={v} type="button" onClick={() => setDType(v)} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", padding: "6px 12px", color: dType === v ? palette.ivory : palette.softBlack, background: dType === v ? palette.black : "transparent", border: dType === v ? "none" : "1px solid rgba(26,26,26,0.2)" }}>{label}</button>
+                ))}
+                {dType !== "none" && (
+                  <input
+                    inputMode="decimal"
+                    value={dValue}
+                    onChange={(e) => setDValue(e.target.value)}
+                    placeholder={dType === "percent" ? "e.g. 10" : "e.g. 500"}
+                    className="font-body bg-transparent outline-none"
+                    style={{ width: 84, border: "1px solid rgba(26,26,26,0.2)", padding: "6px 8px", fontSize: 12 }}
+                  />
+                )}
+              </div>
+
+              <div className="font-body uppercase mt-3" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}>GST</div>
+              <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                <button type="button" onClick={() => setTMode("none")} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", padding: "6px 11px", color: tMode === "none" ? palette.ivory : palette.softBlack, background: tMode === "none" ? palette.black : "transparent", border: tMode === "none" ? "none" : "1px solid rgba(26,26,26,0.2)" }}>No tax</button>
+                {TAX_RATES.map((r) => {
+                  const active = tMode !== "none" && customRate.trim() === "" && tRate === r;
+                  return (
+                    <button key={r} type="button" onClick={() => { setTRate(r); setCustomRate(""); if (tMode === "none") setTMode("exclusive"); }} className="font-body" style={{ fontSize: 10, padding: "6px 11px", color: active ? palette.ivory : palette.softBlack, background: active ? palette.black : "transparent", border: active ? "none" : "1px solid rgba(26,26,26,0.2)" }}>{r}%</button>
+                  );
+                })}
+                <input
+                  inputMode="decimal"
+                  value={customRate}
+                  onChange={(e) => { setCustomRate(e.target.value); if (tMode === "none" && e.target.value.trim() !== "") setTMode("exclusive"); }}
+                  onBlur={() => { if (customRate.trim() !== "") setCustomRate(String(Math.min(18, Math.max(5, Number(customRate) || 5)))); }}
+                  placeholder="Custom %"
+                  className="font-body bg-transparent outline-none"
+                  style={{ width: 76, border: "1px solid rgba(26,26,26,0.2)", padding: "6px 8px", fontSize: 10 }}
+                />
+              </div>
+              {tMode !== "none" && (
+                <div className="flex gap-1.5 mt-2">
+                  {(["inclusive", "exclusive"] as const).map((m) => (
+                    <button key={m} type="button" onClick={() => setTMode(m)} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", padding: "6px 11px", color: tMode === m ? palette.ivory : palette.softBlack, background: tMode === m ? palette.black : "transparent", border: tMode === m ? "none" : "1px solid rgba(26,26,26,0.2)" }}>
+                      {m === "inclusive" ? "Included in prices" : "Added on top"}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="font-body uppercase mt-3" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}>Payment</div>
+              <div className="flex items-center gap-3 mt-2 flex-wrap">
+                <label className="flex items-center gap-2 font-body" style={{ fontSize: 12 }}>
+                  Advance ₹
+                  <input inputMode="numeric" value={advance} onChange={(e) => setAdvance(e.target.value)} placeholder="0" className="font-body bg-transparent outline-none" style={{ width: 92, border: "1px solid rgba(26,26,26,0.2)", padding: "6px 8px", fontSize: 12, background: palette.ivory }} />
+                </label>
+                <div className="flex gap-1.5">
+                  {PAY_METHODS.map((m) => (
+                    <button key={m} type="button" onClick={() => setPayMethod(m)} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.1em", padding: "6px 10px", color: payMethod === m ? palette.ivory : palette.softBlack, background: payMethod === m ? palette.black : "transparent", border: payMethod === m ? "none" : "1px solid rgba(26,26,26,0.2)" }}>{m}</button>
+                  ))}
+                </div>
+              </div>
+              <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Payment note (optional)" className="w-full font-body bg-transparent outline-none mt-2" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "6px 8px", fontSize: 11, background: palette.ivory }} />
+            </div>
+
+            <div className="mt-4 font-body" style={{ fontSize: 12, color: palette.softBlack }}>
               <div className="flex justify-between"><span>Subtotal</span><span>{formatINR(preview.subtotal)}</span></div>
               {preview.discount > 0 && (
                 <div className="flex justify-between mt-1" style={{ color: palette.goldDeep }}>
-                  <span>Discount{discountType === "percent" ? ` (${discountValue}%)` : ""}</span><span>− {formatINR(preview.discount)}</span>
+                  <span>Discount{dType === "percent" ? ` (${Math.min(100, Number(dValue) || 0)}%)` : ""}</span><span>− {formatINR(preview.discount)}</span>
                 </div>
               )}
-              {taxMode === "exclusive" && <div className="flex justify-between mt-1"><span>GST @ {taxRate}% (added)</span><span>{formatINR(preview.tax)}</span></div>}
+              {tMode === "exclusive" && <div className="flex justify-between mt-1"><span>GST @ {effRate}% (added)</span><span>{formatINR(preview.tax)}</span></div>}
               <div className="flex justify-between items-baseline mt-2">
                 <span className="uppercase" style={{ fontSize: 10, letterSpacing: "0.18em" }}>New total</span>
                 <span className="font-display" style={{ fontSize: 19, fontWeight: 600, color: palette.black }}>{formatINR(preview.total)}</span>
               </div>
-              {taxMode === "inclusive" && <div className="text-right mt-0.5" style={{ fontSize: 9.5, color: palette.mutedGreige }}>includes GST @ {taxRate}% = {formatINR(preview.tax)}</div>}
+              {tMode === "inclusive" && <div className="text-right mt-0.5" style={{ fontSize: 9.5, color: palette.mutedGreige }}>includes GST @ {effRate}% = {formatINR(preview.tax)}</div>}
+              <div className="flex justify-between mt-1" style={{ color: advanceNum > 0 ? palette.goldDeep : palette.mutedGreige }}>
+                <span>Balance due</span><span style={{ fontWeight: 600 }}>{formatINR(Math.max(0, preview.total - advanceNum))}</span>
+              </div>
+              {advanceNum > preview.total && (
+                <p className="mt-1" style={{ fontSize: 10.5, color: palette.crimsonText }}>
+                  Advance exceeds the new total by {formatINR(advanceNum - preview.total)} — a refund will be owed.
+                </p>
+              )}
             </div>
 
             {error && <p className="font-body mt-3" style={{ fontSize: 11.5, color: "#9b2c2c" }}>{error}</p>}

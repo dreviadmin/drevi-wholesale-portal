@@ -68,6 +68,9 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
               discountValue={o.discount_value}
               taxMode={o.tax_mode}
               taxRate={o.tax_rate}
+              advanceAmount={o.advance_amount}
+              paymentMethod={o.payment_method}
+              paymentNotes={o.payment_notes}
             />
           </div>
         )}
