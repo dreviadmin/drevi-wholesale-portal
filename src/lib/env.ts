@@ -17,7 +17,13 @@ type EnvKey =
   | "GOOGLE_SHEET_ID"
   | "SHOPIFY_STORE_DOMAIN"
   | "SHOPIFY_CLIENT_ID"
-  | "SHOPIFY_CLIENT_SECRET";
+  | "SHOPIFY_CLIENT_SECRET"
+  // Phase 1 (SKU Generator) — all optional with in-code defaults:
+  // SKU_REGISTRY_SHEET_ID (legacy registry workbook), SKU_REGISTRY_TAB
+  // ('SKUs'), SKU_DUAL_MODE ('true' during the transition).
+  | "SKU_REGISTRY_SHEET_ID"
+  | "SKU_REGISTRY_TAB"
+  | "SKU_DUAL_MODE";
 
 // Vars Phase 1 needs to run. Interakt (Phase 4) is intentionally excluded.
 const REQUIRED_PHASE_1: EnvKey[] = [

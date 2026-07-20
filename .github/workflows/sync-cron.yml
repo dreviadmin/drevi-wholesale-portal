@@ -24,3 +24,12 @@ jobs:
           echo "HTTP $code"
           cat /tmp/out.json
           [ "$code" = "200" ]
+      - name: Sync SKU registry (importer + mirror retry)
+        run: |
+          set -e
+          code=$(curl -s -o /tmp/sku.json -w "%{http_code}" --max-time 120 -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.PORTAL_URL }}/api/cron/sync-sku-registry")
+          echo "HTTP $code"
+          cat /tmp/sku.json
+          [ "$code" = "200" ]
