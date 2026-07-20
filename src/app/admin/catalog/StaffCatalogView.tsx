@@ -1,21 +1,40 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Search, X, ScanLine } from "lucide-react";
+import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Search, X, ScanLine, RefreshCw } from "lucide-react";
 import { GroupedProductCard } from "@/components/GroupedProductCard";
 import { ProductQuickView } from "@/components/ProductQuickView";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
+import { resyncCatalog } from "./actions";
 import { groupByBase } from "@/lib/variants";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
 
 const PREFERRED = ["Lehenga", "Saree", "Indo-Western Set", "Suit Set", "Separates"];
 
-export function StaffCatalogView({ products, hiddenSkus = [] }: { products: WholesaleProduct[]; hiddenSkus?: string[] }) {
+export function StaffCatalogView({ products, hiddenSkus = [], lastSynced = null }: { products: WholesaleProduct[]; hiddenSkus?: string[]; lastSynced?: string | null }) {
+  const router = useRouter();
   const [category, setCategory] = useState("All");
   const [query, setQuery] = useState("");
   const [detail, setDetail] = useState<WholesaleProduct | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [isSyncing, startSync] = useTransition();
+
+  function doSync() {
+    setSyncMsg(null);
+    startSync(async () => {
+      const res = await resyncCatalog();
+      if (!res.ok) { setSyncMsg(res.error ?? "Sync failed — try again."); return; }
+      setSyncMsg(
+        `Synced ${res.synced} products · ${res.imageFetches} photo${res.imageFetches === 1 ? "" : "s"} refreshed` +
+          (res.hidden ? ` · ${res.hidden} hidden` : "") +
+          (res.warnings?.length ? ` · ${res.warnings.length} warning(s)` : ""),
+      );
+      router.refresh();
+    });
+  }
 
   const bySku = useMemo(
     () => new Map(products.map((p) => [p.sku.trim().toUpperCase(), p])),
@@ -53,10 +72,32 @@ export function StaffCatalogView({ products, hiddenSkus = [] }: { products: Whol
 
   return (
     <div className="px-4 md:px-6 py-5">
-      <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>Catalog</h1>
-      <p className="font-body mt-1" style={{ fontSize: 12, color: palette.mutedGreige }}>
-        {products.length} products · browse and search — tap any outfit for details.
-      </p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>Catalog</h1>
+          <p className="font-body mt-1" style={{ fontSize: 12, color: palette.mutedGreige }}>
+            {products.length} products · browse and search — tap any outfit for details.
+          </p>
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            type="button"
+            onClick={doSync}
+            disabled={isSyncing}
+            className="flex items-center gap-2 font-body uppercase disabled:opacity-60"
+            style={{ fontSize: 9.5, letterSpacing: "0.14em", padding: "8px 13px", border: `1px solid ${palette.black}`, color: palette.black, background: "transparent" }}
+          >
+            <RefreshCw size={13} strokeWidth={1.8} className={isSyncing ? "animate-spin" : undefined} />
+            {isSyncing ? "Syncing…" : "Sync from Sheet"}
+          </button>
+          {lastSynced && !syncMsg && (
+            <span className="font-body" style={{ fontSize: 9, color: palette.mutedGreige }}>
+              synced {new Date(lastSynced).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" })}
+            </span>
+          )}
+        </div>
+      </div>
+      {syncMsg && <p className="font-body mt-2" style={{ fontSize: 11, color: syncMsg.includes("failed") ? palette.crimsonText : palette.goldDeep }}>{syncMsg}</p>}
 
       <div className="flex gap-1.5 overflow-x-auto no-scrollbar mt-4">
         {categories.map((c) => {

@@ -3,10 +3,10 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, Eye, EyeOff, Copy, MessageCircle, RefreshCw, UserPlus } from "lucide-react";
+import { ChevronLeft, Eye, EyeOff, Copy, MessageCircle, RefreshCw, UserPlus, Pencil, ImageOff } from "lucide-react";
 import { StatusPill } from "@/components/admin/Pills";
 import { CredentialModal } from "@/components/admin/CredentialModal";
-import { Lightbox } from "@/components/Lightbox";
+import { Lightbox, ZoomImage } from "@/components/Lightbox";
 import {
   setBuyerStatus,
   revealPassword,
@@ -14,6 +14,8 @@ import {
   regeneratePassword,
   changePassword,
   addNote,
+  updateBuyerProfile,
+  uploadBuyerCard,
 } from "@/app/admin/buyers/actions";
 import { buildWhatsAppMessage, shareWhatsApp, buildVCard, downloadVCard } from "@/lib/share";
 import { formatINR } from "@/lib/format";
@@ -62,6 +64,47 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
   const [newPw, setNewPw] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const [cardZoom, setCardZoom] = useState(false);
+  // Full profile edit — every stored detail plus the photo/visiting card.
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState<Record<string, string>>({});
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
+  function openEdit() {
+    setEditForm({
+      business_name: buyer.business_name ?? "",
+      owner_name: buyer.owner_name ?? "",
+      phone: buyer.phone ?? "",
+      city: buyer.city ?? "",
+      gstin: buyer.gstin ?? "",
+      address: buyer.address ?? "",
+      transport_details: buyer.transport_details ?? "",
+      broker_details: buyer.broker_details ?? "",
+      other_details: buyer.other_details ?? "",
+    });
+    setEditOpen(true);
+  }
+  function saveEdit() {
+    start(async () => {
+      const r = await updateBuyerProfile(buyer.id, editForm);
+      if (!r.ok) { flash(r.error ?? "Failed"); return; }
+      setEditOpen(false);
+      flash("Details saved");
+      router.refresh();
+    });
+  }
+  async function onEditPhoto(file: File | null) {
+    if (!file) return;
+    setUploadingPhoto(true);
+    try {
+      const fd = new FormData();
+      fd.append("card", file);
+      const r = await uploadBuyerCard(buyer.id, fd);
+      flash(r.ok ? "Photo updated" : r.error ?? "Upload failed");
+      if (r.ok) router.refresh();
+    } finally {
+      setUploadingPhoto(false);
+    }
+  }
   const [notes, setNotes] = useState(buyer.notes ?? "");
   const [editingNotes, setEditingNotes] = useState(false);
 
@@ -141,7 +184,10 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
                 {buyer.status === "pending" && <option value="pending">Pending</option>}
               </select>
             </label>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap justify-end">
+              <button type="button" onClick={openEdit} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
+                <Pencil size={12} /> Edit Details
+              </button>
               {buyer.hasPassword && (
                 <button type="button" onClick={sendLoginLink} className="flex items-center gap-1.5 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
                   <MessageCircle size={12} /> Send Login Link
@@ -287,6 +333,66 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
           buyer={{ email: buyer.email, owner_name: buyer.owner_name, business_name: buyer.business_name, phone: buyer.phone }}
           onClose={(activated) => { setShowModal(false); if (activated) router.refresh(); }}
         />
+      )}
+
+      {/* Full profile edit — details + photo. Email stays with the credential flow. */}
+      {editOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(26,26,26,0.5)" }} onClick={() => !isPending && setEditOpen(false)}>
+          <div className="w-full sm:max-w-lg max-h-modal overflow-y-auto" style={{ background: palette.ivory, padding: "20px 18px", paddingBottom: "calc(20px + var(--kb-inset, 0px))" }} onClick={(e) => e.stopPropagation()}>
+            <h2 className="font-display" style={{ fontSize: 17, fontWeight: 600, color: palette.black }}>Edit Buyer</h2>
+
+            {/* Photo / visiting card */}
+            <div className="flex gap-3 mt-4 items-start">
+              {buyer.cardUrl ? (
+                <ZoomImage src={buyer.cardUrl} alt="Buyer photo" width={90} height={68} />
+              ) : (
+                <div className="flex items-center justify-center flex-shrink-0" style={{ width: 90, height: 68, background: palette.ivoryDeep }}>
+                  <ImageOff size={18} color={palette.mutedGreige} />
+                </div>
+              )}
+              <div>
+                <span className="font-body uppercase block" style={{ fontSize: 9, letterSpacing: "0.14em", color: palette.mutedGreige }}>Photo / Visiting Card</span>
+                <label className="mt-2 inline-block font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, padding: "7px 12px", cursor: "pointer", opacity: uploadingPhoto ? 0.6 : 1 }}>
+                  {uploadingPhoto ? "Uploading…" : buyer.cardUrl ? "Replace Photo" : "Add Photo"}
+                  <input type="file" accept="image/*" className="hidden" disabled={uploadingPhoto} onChange={(e) => onEditPhoto(e.target.files?.[0] ?? null)} />
+                </label>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 mt-4">
+              {([
+                ["business_name", "Business name"],
+                ["owner_name", "Owner name"],
+                ["phone", "Phone"],
+                ["city", "City"],
+                ["gstin", "GSTIN"],
+                ["address", "Address"],
+                ["transport_details", "Transport details"],
+                ["broker_details", "Broker details"],
+                ["other_details", "Other details"],
+              ] as const).map(([key, label]) => (
+                <label key={key} className="flex flex-col gap-1">
+                  <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.softBlack }}>{label}</span>
+                  <input
+                    value={editForm[key] ?? ""}
+                    onChange={(e) => setEditForm((f) => ({ ...f, [key]: e.target.value }))}
+                    className="font-body bg-transparent outline-none"
+                    style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "6px 2px", fontSize: 13.5 }}
+                  />
+                </label>
+              ))}
+            </div>
+
+            <div className="flex gap-2 mt-5">
+              <button type="button" onClick={saveEdit} disabled={isPending} className="flex-1 font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.16em", padding: "12px 0" }}>
+                {isPending ? "Saving…" : "Save Changes"}
+              </button>
+              <button type="button" onClick={() => setEditOpen(false)} disabled={isPending} className="font-body uppercase px-5" style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 10, letterSpacing: "0.16em" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {toast && (

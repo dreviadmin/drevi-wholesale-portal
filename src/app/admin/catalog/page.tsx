@@ -4,6 +4,8 @@ import { StaffCatalogView } from "./StaffCatalogView";
 import type { WholesaleProduct } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+// The on-click resync (sheet + Drive photos) can run past Vercel's 10s default.
+export const maxDuration = 60;
 
 // Browse-only catalog for staff/admins — see and search every product at a
 // glance without starting a billing session. Open to every staff role.
@@ -24,10 +26,16 @@ export default async function StaffCatalogPage() {
     .select("sku")
     .eq("wholesale_visible", false);
 
+  const lastSynced = (products ?? []).reduce<string | null>(
+    (max, p) => (p.synced_at && (!max || p.synced_at > max) ? p.synced_at : max),
+    null,
+  );
+
   return (
     <StaffCatalogView
       products={(products ?? []) as WholesaleProduct[]}
       hiddenSkus={(hidden ?? []).map((h) => h.sku as string)}
+      lastSynced={lastSynced}
     />
   );
 }

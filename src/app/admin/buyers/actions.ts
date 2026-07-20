@@ -295,6 +295,40 @@ export async function addBuyer(form: {
   return { ok: true, id: data.id };
 }
 
+// Full buyer profile edit from the admin buyer page. Email is deliberately
+// excluded — it's the login username and belongs to the credential flow.
+export async function updateBuyerProfile(
+  buyerId: string,
+  form: {
+    business_name?: string; owner_name?: string; phone?: string; city?: string;
+    gstin?: string; address?: string; transport_details?: string; broker_details?: string; other_details?: string;
+  },
+): Promise<{ ok: boolean; error?: string }> {
+  try { await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
+  if (!buyerId) return { ok: false, error: "No buyer to update." };
+  if (!form.business_name?.trim() && !form.owner_name?.trim() && !form.phone?.trim()) {
+    return { ok: false, error: "Keep at least one of business name, owner name, or phone." };
+  }
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("buyers")
+    .update({
+      business_name: form.business_name?.trim() || null,
+      owner_name: form.owner_name?.trim() || null,
+      phone: form.phone?.trim() || null,
+      city: form.city?.trim() || null,
+      gstin: form.gstin?.trim() || null,
+      address: form.address?.trim() || null,
+      transport_details: form.transport_details?.trim() || null,
+      broker_details: form.broker_details?.trim() || null,
+      other_details: form.other_details?.trim() || null,
+    })
+    .eq("id", buyerId);
+  if (error) return { ok: false, error: error.message };
+  revalidate(buyerId);
+  return { ok: true };
+}
+
 // Visiting card / photo upload. Staff-level (exhibition capture uses it too).
 export async function uploadBuyerCard(buyerId: string, formData: FormData): Promise<{ ok: boolean; error?: string }> {
   try {
