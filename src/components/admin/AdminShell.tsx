@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users, ShoppingBag, Store, Tent, ScrollText, Shield, LogOut, ScanLine, LayoutGrid, SlidersHorizontal, BarChart3, Tag } from "lucide-react";
+import { Users, ShoppingBag, Store, Tent, ScrollText, Shield, LogOut, ScanLine, LayoutGrid, SlidersHorizontal, BarChart3, Tag, QrCode, Truck, PackageCheck } from "lucide-react";
 import { logout } from "@/app/actions";
 import { palette } from "@/lib/palette";
 import type { StaffRole } from "@/lib/types";
 
-const ICONS = { Users, ShoppingBag, Store, Tent, ScrollText, Shield, ScanLine, LayoutGrid, SlidersHorizontal, BarChart3, Tag } as const;
+const ICONS = { Users, ShoppingBag, Store, Tent, ScrollText, Shield, ScanLine, LayoutGrid, SlidersHorizontal, BarChart3, Tag, QrCode, Truck, PackageCheck } as const;
 
 interface NavItem {
   href: string;
@@ -25,7 +25,10 @@ const NAV: NavItem[] = [
   { href: "/admin/catalog", label: "Catalog", icon: "LayoutGrid" },
   { href: "/admin/in-store", label: "In-store", icon: "Store" },
   { href: "/admin/exhibition", label: "Exhibitions", icon: "Tent" },
+  { href: "/admin/sku-generator", label: "SKU Generator", icon: "QrCode" },
   { href: "/admin/dashboard", label: "Dashboard", icon: "BarChart3", adminOnly: true },
+  { href: "/admin/vendors", label: "Vendors", icon: "Truck", adminOnly: true },
+  { href: "/admin/receipts", label: "Receipts", icon: "PackageCheck", adminOnly: true },
   { href: "/admin/buyers", label: "Buyers", icon: "Users", adminOnly: true },
   { href: "/admin/orders", label: "Orders", icon: "ShoppingBag", adminOnly: true },
   { href: "/admin/manage-catalog", label: "Manage Catalog", icon: "SlidersHorizontal", adminOnly: true },

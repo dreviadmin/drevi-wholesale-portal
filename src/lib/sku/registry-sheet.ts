@@ -232,3 +232,22 @@ export async function sheetNumberFloor(cat: string, sub: string): Promise<{ floo
     return { floor: 0, warning: `sheet floor unavailable: ${(err as Error).message}` };
   }
 }
+
+// Defence-in-depth floor from the portal's OWN product tables: until the
+// registry backfill has run (sheet access is an operator step), the legacy
+// SKUs already live in wholesale_products / product_vendor_info — never mint
+// below them. Cheap (two indexed LIKE reads) and kept on permanently.
+export async function knownSkuFloor(cat: string, sub: string): Promise<number> {
+  const admin = createAdminClient();
+  const prefix = `DD-${cat}-${sub}-%`;
+  const [a, b] = await Promise.all([
+    admin.from("wholesale_products").select("sku").like("sku", prefix),
+    admin.from("product_vendor_info").select("sku").like("sku", prefix),
+  ]);
+  let max = 0;
+  for (const r of [...(a.data ?? []), ...(b.data ?? [])]) {
+    const m = (r.sku as string).match(new RegExp(`^DD-${cat}-${sub}-(\\d{3})`));
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return max;
+}

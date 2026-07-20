@@ -23,3 +23,4 @@ One line per deviation from the spec, with rationale, as required by §0.
 5. **Audit rows reuse `auth_audit_log`** — vendor/receipt events write to the
    existing audit table with new enum values (migration 0014) rather than a
    new table, matching how catalog_edit was added in 0010.
+6. **Product-table floor added to minting** — until the registry backfill runs (sheet access pending), the empty registry would mint numbers that collide with legacy SKUs already live in `wholesale_products`/`product_vendor_info` (e.g. DD-LEH-MRM-0xx). `knownSkuFloor()` folds the max design number from both product tables into every new-design mint and peek, permanently — additive safety beyond the spec.
