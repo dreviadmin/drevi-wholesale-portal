@@ -55,6 +55,19 @@ every route by role and account status on each request.
   fields, visibility and Drive photos, identical to the 10-minute cron — and
   reports `Synced N products · M photos refreshed`, with a last-synced
   timestamp otherwise.
+- **SKU Generator** (`/admin/sku-generator`) — replaces the Apps Script SKU
+  tool. New Design mints the next number per `CAT-SUB` atomically (advisory
+  lock + a floor from the legacy sheet in dual mode + the product tables, so
+  numbers never collide during the transition); Variant of Existing reuses a
+  design's number with a new size + colour, with scan-to-resolve base and an
+  inline duplicate guard. Duplicate variants are refused with when/who and a
+  "log a Goods Receipt instead" pointer (admins get a one-tap deep link).
+  QRs encode the SKU string only and are generated on demand — never stored.
+  The Print tab holds a per-device tray (registry picker, bulk paste, scans),
+  Plain or With-price roll labels for the DCode DC421 Pro (38×25 mm
+  calibrated PDF; price labels carry a coded vendor string and MRP — never
+  raw costs), and a calibration panel. Every mint mirrors to the legacy
+  Google Sheet; a 10-minute cron imports sheet-minted rows back.
 - **Exhibition / In-store billing** (`/admin/exhibition`, `/admin/in-store`) —
   the order-taking wizard:
   - **Sessions** give orders their numbering prefix (`DX-YYYYMMDD-NNN`
@@ -123,8 +136,19 @@ every route by role and account status on each request.
   the same modal. Renamed SKUs are added to an ignore list so the sheet's old
   row can't resurrect as a duplicate. Scan a tag to jump straight into editing
   that product.
-- **Audit Log** (`/admin/audit`) — credential and catalog-edit events with
-  actor, timestamp, IP.
+- **Vendors** (`/admin/vendors`) — supplier records (name, phone/WhatsApp,
+  city, GSTIN, address, notes) with receipt counts and last-receipt dates;
+  scanning a garment tag resolves its vendor (receipt lines first, sheet
+  vendor name as fallback). Vendors with receipts deactivate, never delete.
+- **Goods Receipts** (`/admin/receipts`) — record-keeping for incoming stock:
+  GR-numbered (same atomic counter machinery as orders), vendor + date +
+  optional bill photo (private bucket, signed URLs) + bill amount with a
+  mismatch badge, lines scanned straight in (repeat scan bumps qty; unknown
+  SKUs allowed with a description), full edit/delete with audit trail.
+  Phase 1 deliberately writes nothing to product or cost tables — the
+  Reorder table shows Last GR Cost/Date *alongside* the sheet columns.
+- **Audit Log** (`/admin/audit`) — credential, catalog-edit, vendor and
+  receipt events with actor, timestamp, IP.
 - **Staff** (`/admin/staff`) — staff accounts and roles (admins manage staff;
   only the super-admin manages admins).
 
@@ -228,6 +252,9 @@ validates required vars at runtime. Highlights:
 | `CRON_SECRET` | Bearer token for `/api/cron/*` |
 | `INTERAKT_API_KEY` | WhatsApp sends (portal degrades gracefully without it) |
 | `SUPABASE_ACCESS_TOKEN` | Management API token — only for `npm run db:migrate` |
+| `SKU_REGISTRY_SHEET_ID` | Legacy SKU registry workbook (importer/mirror/floor) |
+| `SKU_REGISTRY_TAB` | Registry tab name (default `SKUs`) |
+| `SKU_DUAL_MODE` | `true` during the Apps-Script transition; `false` after retirement |
 
 ## Local development
 
@@ -245,11 +272,13 @@ npm run db:seed-auth  # dev auth users for the seeded staff + a test buyer
 npm run db:backup     # manual backup (same exporter the hourly cron uses)
 ```
 
-Migrations `0001`–`0012` are idempotent and cover: schema + RLS (`0001`), carts
+Migrations `0001`–`0014` are idempotent and cover: schema + RLS (`0001`), carts
 (`0002`), credentials (`0003`), buyer fields (`0004`), exhibition/sessions
 (`0005`), discounts + splits (`0006`), email-unique relaxation (`0007`), atomic
 order numbering (`0008`), idempotency keys (`0009`), Manage-Catalog locks +
-ignored SKUs (`0010`), vendor/procurement info (`0011`), retail price (`0012`).
+ignored SKUs (`0010`), vendor/procurement info (`0011`), retail price
+(`0012`), SKU registry + atomic `generate_sku` RPC (`0013`), vendors +
+goods receipts + audit enum values (`0014`).
 
 ### Sync manually
 
@@ -301,9 +330,11 @@ Returns `{ synced, image_fetches, hidden, skipped, duration_ms, warnings }`.
 src/
   app/
     admin/             price-check, retail-check, catalog, exhibition, in-store,
-                       dashboard, orders, buyers, manage-catalog, audit, staff
+                       sku-generator, vendors, receipts, dashboard, orders,
+                       buyers, manage-catalog, audit, staff
     (buyer routes)     catalog, cart, product/[sku], order/[id], login, wholesale
-    api/               cron (sync, backup), drive-photo proxy, orders, health
+    api/               cron (sync, backup, sync-sku-registry), sku/* (generate,
+                       state, peek, bases, print-data), drive-photo, orders, health
   components/          QrScanner, Lightbox/ZoomImage, sortable (useSort/SortTh),
                        KeyboardInset, ProductCard/QuickView, OfflineSync, admin/*
   lib/                 sync, sheets, drive, storage, order-pdf, order-finalize,

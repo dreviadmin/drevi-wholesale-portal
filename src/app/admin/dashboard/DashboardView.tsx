@@ -54,7 +54,7 @@ type Range = "today" | "7d" | "all";
 interface ProductRow { sku: string; title: string; image: string | null; pieces: number; value: number; orders: Set<string> }
 interface VendorRow { vendor: string; skus: Set<string>; pieces: number; value: number }
 interface CustomerRow { buyer: DashBuyer | null; id: string; orders: number; total: number; advance: number; pieces: number }
-interface ReorderRow { p: DashProduct; v: VendorInfo | null; sold: number }
+interface ReorderRow { p: DashProduct; v: VendorInfo | null; sold: number; gr: { cost: number; date: string } | null }
 
 const PRODUCT_ACC: Record<string, SortAccessor<ProductRow>> = {
   product: (r) => r.title,
@@ -81,6 +81,8 @@ const REORDER_ACC: Record<string, SortAccessor<ReorderRow>> = {
   vendor: (r) => r.v?.vendor_name,
   vendorSku: (r) => r.v?.vendor_sku,
   cost: (r) => (r.v && r.v.last_cost > 0 ? r.v.last_cost : null),
+  grCost: (r) => r.gr?.cost ?? null,
+  grDate: (r) => r.gr?.date ?? null,
   sold: (r) => r.sold,
   stock: (r) => r.p.current_qty,
 };
@@ -109,11 +111,13 @@ async function copyText(text: string): Promise<boolean> {
   } catch { return false; }
 }
 
-export function DashboardView({ orders, buyers, products, vendors }: {
+export function DashboardView({ orders, buyers, products, vendors, grBySku = {} }: {
   orders: DashOrder[];
   buyers: DashBuyer[];
   products: DashProduct[];
   vendors: VendorInfo[];
+  // Latest goods-receipt cost/date per SKU — shown beside the sheet columns.
+  grBySku?: Record<string, { cost: number; date: string }>;
 }) {
   const [tab, setTab] = useState<Tab>("products");
   const [range, setRange] = useState<Range>("all");
@@ -211,7 +215,7 @@ export function DashboardView({ orders, buyers, products, vendors }: {
       .filter((p) => p.wholesale_visible)
       .map((p) => {
         const key = p.sku.trim().toUpperCase();
-        return { p, v: vendorBySku.get(key) ?? null, sold: soldBySku.get(key)?.pieces ?? 0 };
+        return { p, v: vendorBySku.get(key) ?? null, sold: soldBySku.get(key)?.pieces ?? 0, gr: grBySku[key] ?? null };
       })
       .filter(({ p, v }) => {
         if (vendorFilter !== "All" && (v?.vendor_name?.trim() || "") !== vendorFilter) return false;
@@ -224,7 +228,7 @@ export function DashboardView({ orders, buyers, products, vendors }: {
         );
       })
       .sort((a, b) => b.sold - a.sold || (a.p.title ?? a.p.sku).localeCompare(b.p.title ?? b.p.sku));
-  }, [products, vendorBySku, soldBySku, query, vendorFilter]);
+  }, [products, vendorBySku, soldBySku, query, vendorFilter, grBySku]);
 
   // Golden rule: every table sorts by its column headers.
   const prodSort = useSort(byProduct as ProductRow[], PRODUCT_ACC, { key: "pieces", dir: "desc" });
@@ -445,12 +449,14 @@ export function DashboardView({ orders, buyers, products, vendors }: {
                 <SortTh label="Product" k="product" sort={reordSort.sort} onToggle={reordSort.toggle} />
                 <SortTh label="Vendor" k="vendor" sort={reordSort.sort} onToggle={reordSort.toggle} />
                 <SortTh label="Vendor SKU" k="vendorSku" sort={reordSort.sort} onToggle={reordSort.toggle} />
-                <SortTh label="Last Cost" k="cost" sort={reordSort.sort} onToggle={reordSort.toggle} right defaultDir="desc" />
+                <SortTh label="Sheet Cost" k="cost" sort={reordSort.sort} onToggle={reordSort.toggle} right defaultDir="desc" />
+                <SortTh label="Last GR Cost" k="grCost" sort={reordSort.sort} onToggle={reordSort.toggle} right defaultDir="desc" />
+                <SortTh label="Last GR Date" k="grDate" sort={reordSort.sort} onToggle={reordSort.toggle} defaultDir="desc" />
                 <SortTh label="Sold" k="sold" sort={reordSort.sort} onToggle={reordSort.toggle} right defaultDir="desc" />
                 <SortTh label="In Stock" k="stock" sort={reordSort.sort} onToggle={reordSort.toggle} right defaultDir="desc" />
               </tr></thead>
               <tbody>
-                {reordSort.sorted.map(({ p, v, sold }) => (
+                {reordSort.sorted.map(({ p, v, sold, gr }) => (
                   <tr key={p.sku} style={{ borderBottom: "1px solid rgba(26,26,26,0.07)", background: highlightSku === p.sku ? palette.ivoryDeep : undefined }}>
                     <td style={{ padding: "6px 8px", width: 44 }}>
                       {p.image_urls?.[0]
@@ -469,7 +475,21 @@ export function DashboardView({ orders, buyers, products, vendors }: {
                         <span style={{ color: palette.mutedGreige }}>—</span>
                       ),
                     )}
-                    {td(v && v.last_cost > 0 ? formatINR(v.last_cost) : <span style={{ color: palette.mutedGreige }}>—</span>, true)}
+                    {td(
+                      <span title="from sheet">{v && v.last_cost > 0 ? formatINR(v.last_cost) : "—"}</span>,
+                      true,
+                    )}
+                    {td(
+                      <span title="from Goods Receipts" style={{ color: gr ? palette.goldDeep : palette.mutedGreige }}>
+                        {gr ? formatINR(gr.cost) : "—"}
+                      </span>,
+                      true,
+                    )}
+                    {td(
+                      <span title="from Goods Receipts" style={{ color: palette.mutedGreige, fontSize: 11 }}>
+                        {gr ? new Date(gr.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "—"}
+                      </span>,
+                    )}
                     {td(sold > 0 ? <span style={{ color: palette.goldDeep, fontWeight: 600 }}>{sold}</span> : "0", true)}
                     {td(String(p.current_qty), true)}
                   </tr>

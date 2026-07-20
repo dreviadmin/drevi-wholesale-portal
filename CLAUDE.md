@@ -128,6 +128,9 @@ Stored in `.env.local` (gitignored — never commit). In Vercel, set the same as
 | `SHOPIFY_CLIENT_ID` | server | Dev-dashboard app Client ID |
 | `SHOPIFY_CLIENT_SECRET` | server | Dev-dashboard app Client Secret |
 | `INTERAKT_API_KEY` | server | WhatsApp + email (Phase 4) |
+| `SKU_REGISTRY_SHEET_ID` | server | Legacy SKU registry workbook (Phase 1 importer/mirror/floor) |
+| `SKU_REGISTRY_TAB` | server | Registry tab name (default `SKUs`) |
+| `SKU_DUAL_MODE` | server | `true` during the Apps-Script transition; `false` after retirement |
 
 `lib/env.ts` validates presence of all required vars at startup and throws a descriptive error naming any that are missing.
 

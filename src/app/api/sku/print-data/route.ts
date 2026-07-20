@@ -10,10 +10,11 @@ export const dynamic = "force-dynamic";
 // with the reference tool); receipts become the cost source at Phase 3.
 
 // kf: 1250 -> '01.2', 12500 -> '12.5', missing/NaN -> '--.-'
+// The spec's 1250 example demands truncation to one decimal, not rounding.
 function kf(v: unknown): string {
   const n = parseFloat(String(v ?? "").replace(/[^0-9.]/g, ""));
   if (!Number.isFinite(n) || String(v ?? "").trim() === "") return "--.-";
-  const k = (n / 1000).toFixed(1);
+  const k = (Math.floor(n / 100) / 10).toFixed(1);
   return n / 1000 < 10 ? k.padStart(4, "0") : k;
 }
 
