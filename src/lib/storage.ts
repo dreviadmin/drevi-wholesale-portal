@@ -81,3 +81,28 @@ export async function signedCardUrl(path: string, expiresSec = 60 * 60): Promise
   const { data } = await admin.storage.from(CARD_BUCKET).createSignedUrl(path, expiresSec);
   return data?.signedUrl ?? null;
 }
+
+// --- Goods Receipts (Phase 1) -----------------------------------------------
+// Vendor bill photos: PRIVATE bucket (cost documents), served via short-lived
+// signed URLs on the admin-only receipt pages.
+const RECEIPT_BUCKET = "receipt-photos";
+
+export async function uploadReceiptPhoto(receiptRef: string, file: File): Promise<string> {
+  await ensureBucket(RECEIPT_BUCKET);
+  const admin = createAdminClient();
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+  const path = `${receiptRef}/bill.${ext}`;
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const { error } = await admin.storage.from(RECEIPT_BUCKET).upload(path, bytes, {
+    contentType: file.type || "image/jpeg",
+    upsert: true,
+  });
+  if (error) throw new Error(`Bill photo upload failed: ${error.message}`);
+  return path;
+}
+
+export async function signedReceiptPhotoUrl(path: string, expiresSec = 60 * 60): Promise<string | null> {
+  const admin = createAdminClient();
+  const { data } = await admin.storage.from(RECEIPT_BUCKET).createSignedUrl(path, expiresSec);
+  return data?.signedUrl ?? null;
+}
