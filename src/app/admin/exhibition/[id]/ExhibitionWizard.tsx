@@ -738,8 +738,15 @@ export function ExhibitionWizard({
   function endSessionConfirmed() {
     const heldNote = parked.length > 0 ? ` ${parked.length} order(s) on hold will be discarded.` : "";
     if (!window.confirm(`Are you sure you want to exit and end this session?${heldNote}`)) return;
-    try { localStorage.removeItem(PARKED_KEY); localStorage.removeItem(CART_DRAFT_KEY); } catch { /* non-fatal */ }
-    endSession(session.id, session.event_name).then(() => router.push(session.type === "in_store" ? "/admin/in-store" : "/admin/exhibition"));
+    // Wipe local state only AFTER the server confirms — a failed call used to
+    // destroy parked orders and still navigate away (audit fix).
+    endSession(session.id, session.event_name)
+      .then((r) => {
+        if (r && r.ok === false) { setError("Could not end the session — try again."); return; }
+        try { localStorage.removeItem(PARKED_KEY); localStorage.removeItem(CART_DRAFT_KEY); } catch { /* non-fatal */ }
+        router.push(session.type === "in_store" ? "/admin/in-store" : "/admin/exhibition");
+      })
+      .catch(() => setError("Network failed while ending the session — it is still open, try again."));
   }
 
   // ---------- Top bar ----------

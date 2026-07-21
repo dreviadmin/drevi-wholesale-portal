@@ -25,7 +25,7 @@ export default async function ExhibitionSessionPage({ params }: { params: { id: 
       session={{ id: session.id, event_name: session.event_name, ended: !!session.ended_at, type: session.session_type === "in_store" ? "in_store" : "exhibition" }}
       products={(products ?? []) as WholesaleProduct[]}
       buyers={(buyers ?? []) as Pick<Buyer, "id" | "business_name" | "owner_name" | "phone" | "city" | "status">[]}
-      stockAsOf={new Date().toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}
+      stockAsOf={new Date().toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" })}
     />
   );
 }

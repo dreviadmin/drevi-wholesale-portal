@@ -9,7 +9,7 @@ import { writeAuditEvent } from "@/lib/audit";
 import { encryptPassword, decryptPassword } from "@/lib/crypto";
 import { generateMemorablePassword } from "@/lib/password";
 import { uploadBuyerCardImage } from "@/lib/storage";
-import type { BuyerStatus } from "@/lib/types";
+import type { AuditEventType, BuyerStatus } from "@/lib/types";
 
 function reqMeta() {
   const h = headers();
@@ -257,6 +257,9 @@ export async function addBuyer(form: {
   broker_details?: string;
   other_details?: string;
   notes?: string;
+  // Idempotency: flaky-wifi retries of the same Add Buyer resolve to one row
+  // (same pattern as the exhibition capture — audit fix).
+  clientRef?: string;
 }): Promise<{ ok: boolean; id?: string; error?: string }> {
   let staff;
   try {
@@ -270,10 +273,16 @@ export async function addBuyer(form: {
     return { ok: false, error: "Add at least one of owner name, business name, or phone." };
   }
   const admin = createAdminClient();
+  const clientRef = form.clientRef?.trim() || null;
+  if (clientRef) {
+    const { data: existing } = await admin.from("buyers").select("id").eq("client_ref", clientRef).maybeSingle();
+    if (existing) return { ok: true, id: existing.id };
+  }
   const { data, error } = await admin
     .from("buyers")
     .insert({
       email,
+      client_ref: clientRef,
       business_name: form.business_name?.trim() || null,
       owner_name: form.owner_name?.trim() || null,
       phone: form.phone?.trim() || null,
@@ -290,7 +299,20 @@ export async function addBuyer(form: {
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    // Lost the check-then-insert race — another retry won; return that row.
+    if (error.code === "23505" && clientRef) {
+      const { data: won } = await admin.from("buyers").select("id").eq("client_ref", clientRef).maybeSingle();
+      if (won) return { ok: true, id: won.id };
+    }
+    return { ok: false, error: error.message };
+  }
+  await writeAuditEvent({
+    eventType: "buyer_created" as AuditEventType,
+    staffUserId: staff.id,
+    buyerId: data.id,
+    notes: form.business_name?.trim() || form.owner_name?.trim() || email || "buyer",
+  });
   revalidatePath("/admin/buyers");
   return { ok: true, id: data.id };
 }

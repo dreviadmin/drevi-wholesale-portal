@@ -7,7 +7,8 @@ import { getStockState } from "@/lib/stock";
 import { finalizeOrder } from "@/lib/order-finalize";
 import { uploadCustomItemImage } from "@/lib/storage";
 import { sendPendingReviewAlert } from "@/lib/interakt";
-import type { WholesaleProduct, OrderItem, SessionType, TaxMode, DiscountType } from "@/lib/types";
+import { writeAuditEvent } from "@/lib/audit";
+import type { AuditEventType, WholesaleProduct, OrderItem, SessionType, TaxMode, DiscountType } from "@/lib/types";
 
 export async function startSession(
   eventName: string,
@@ -89,6 +90,7 @@ export async function captureBuyer(form: {
     }
     return { ok: false, error: error.message };
   }
+  await writeAuditEvent({ eventType: "buyer_created" as AuditEventType, staffUserId: staff.id, buyerId: data.id, notes: form.business_name?.trim() || form.owner_name?.trim() || "exhibition capture" });
   revalidatePath("/admin/buyers");
   return { ok: true, id: data.id };
 }
@@ -267,9 +269,12 @@ export async function submitExhibitionOrder(input: {
   let discountValue: number | null = null;
   let discountAmount = 0;
   if (discountType) {
-    discountValue = Math.max(0, Number(input.discountValue) || 0);
+    // Percent stored clamped so the invoice can never print "(150%)".
+    discountValue = discountType === "percent"
+      ? Math.min(100, Math.max(0, Number(input.discountValue) || 0))
+      : Math.max(0, Number(input.discountValue) || 0);
     discountAmount = discountType === "percent"
-      ? Math.round(subtotal * (Math.min(100, discountValue) / 100) * 100) / 100
+      ? Math.round(subtotal * (discountValue / 100) * 100) / 100
       : Math.min(subtotal, Math.round(discountValue * 100) / 100);
   }
   const netSubtotal = subtotal - discountAmount;
@@ -297,8 +302,9 @@ export async function submitExhibitionOrder(input: {
 
   const note = [input.staffNote?.trim() ? `Staff: ${input.staffNote.trim()}` : "", input.buyerNote?.trim() ? `Buyer: ${input.buyerNote.trim()}` : ""].filter(Boolean).join(" | ") || null;
 
-  const now = new Date();
-  const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+  // Day string in IST — Vercel runs UTC, and a post-midnight order must carry
+  // today's Indian date in its number (audit fix).
+  const ymd = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }).replace(/-/g, "");
 
   // Gapless, race-safe numbering: next_order_number() reserves each number
   // atomically (see migration 0008). A 23505 can now only mean a genuine

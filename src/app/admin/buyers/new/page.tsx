@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState, useTransition , useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { addBuyer, uploadBuyerCard } from "@/app/admin/buyers/actions";
+import { uuid } from "@/lib/uuid";
 import { CredentialModal } from "@/components/admin/CredentialModal";
 import { PhoneInput } from "@/components/PhoneInput";
 import { palette } from "@/lib/palette";
@@ -44,10 +45,14 @@ export default function AddBuyerPage() {
 
   const set = (k: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
 
+  // One idempotency key per form fill — flaky-wifi retries of Save resolve
+  // to the same buyer row (audit fix).
+  const clientRefRef = useRef<string | null>(null);
+
   function save() {
     setError(null);
     start(async () => {
-      const res = await addBuyer(f);
+      const res = await addBuyer({ ...f, clientRef: clientRefRef.current ?? (clientRefRef.current = uuid()) });
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
       if (cardFile) {
         const fd = new FormData();

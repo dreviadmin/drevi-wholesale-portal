@@ -131,7 +131,22 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
     start(async () => {
       const r = await shareCredentials(buyer.id, channel);
       if (!r.ok) { flash(r.error ?? "Failed"); return; }
-      if (channel === "Copy") { await navigator.clipboard?.writeText(`${buyer.email}\n${r.password}`); flash("Copied"); }
+      if (channel === "Copy") {
+        // Old WebViews lack navigator.clipboard — a false "Copied" toast made
+        // staff paste nothing (audit fix). Fall back to execCommand and be
+        // honest when both fail.
+        const text = `${buyer.email}\n${r.password}`;
+        let ok = false;
+        try { await navigator.clipboard.writeText(text); ok = true; } catch { /* fallback below */ }
+        if (!ok) {
+          const ta = document.createElement("textarea");
+          ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+          document.body.appendChild(ta); ta.focus(); ta.select();
+          ok = document.execCommand("copy");
+          ta.remove();
+        }
+        flash(ok ? "Copied" : "Copy failed — use Reveal and copy manually");
+      }
       else await shareWhatsApp(buildWhatsAppMessage(buyer.email!, r.password!), buyer.phone);
     });
   }

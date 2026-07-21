@@ -226,8 +226,12 @@ function OrderDoc({ order, buyer, images }: { order: Order; buyer: PdfBuyer; ima
               <Text style={{ fontSize: 9 }}>{inr(advance)}</Text>
             </View>
             <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 3 }}>
-              <Text style={{ fontSize: 10, fontFamily: "Times-Bold" }}>Balance due</Text>
-              <Text style={{ fontSize: 11, fontFamily: "Times-Bold", color: C.goldDeep }}>{inr(balance)}</Text>
+              <Text style={{ fontSize: 10, fontFamily: "Times-Bold" }}>
+                {advance > (order.total_amount ?? 0) ? "Refund due" : "Balance due"}
+              </Text>
+              <Text style={{ fontSize: 11, fontFamily: "Times-Bold", color: advance > (order.total_amount ?? 0) ? C.crimson : C.goldDeep }}>
+                {inr(advance > (order.total_amount ?? 0) ? advance - (order.total_amount ?? 0) : balance)}
+              </Text>
             </View>
           </View>
         )}
