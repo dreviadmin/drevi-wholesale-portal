@@ -3,9 +3,10 @@
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { writeAuditEvent } from "@/lib/audit";
 import { requireAdmin, type StaffCtx } from "@/lib/staff";
 import { generateMemorablePassword } from "@/lib/password";
-import type { StaffRole } from "@/lib/types";
+import type { AuditEventType, StaffRole } from "@/lib/types";
 
 // Hierarchy (spec + Ansh 2026-05-29): super_admin manages admins + staff;
 // admin manages staff only; nobody manages super_admin accounts from the UI.
@@ -46,6 +47,18 @@ export async function addStaffUser(form: {
 
   const admin = createAdminClient();
 
+  // An email that already belongs to a staff account must NEVER be re-added:
+  // the old flow silently reset that person's password and overwrote their
+  // role via upsert — an admin could lock out the super-admin by "re-adding"
+  // them. Deactivate/reactivate or a dedicated reset flow are the safe paths.
+  const { data: staffClash } = await admin.from("staff_users").select("id, name, role, active").eq("email", email).maybeSingle();
+  if (staffClash) {
+    return {
+      ok: false,
+      error: `${email} already belongs to ${staffClash.name ?? "a staff member"} (${staffClash.role}${staffClash.active ? "" : ", inactive"}). Use Reactivate on the list instead of re-adding — re-adding would reset their password.`,
+    };
+  }
+
   // Staff and buyers share one Supabase Auth pool. Creating a staff account with
   // an email a buyer already logs in with would reset the buyer's password —
   // refuse (mirror of the guard in setCredentials).
@@ -67,9 +80,12 @@ export async function addStaffUser(form: {
 
   const { error } = await admin
     .from("staff_users")
-    .upsert({ email, name, role: form.role, active: true }, { onConflict: "email" });
-  if (error) return { ok: false, error: error.message };
+    .insert({ email, name, role: form.role, active: true });
+  if (error) {
+    return { ok: false, error: error.code === "23505" ? `${email} already has a staff account.` : error.message };
+  }
 
+  await writeAuditEvent({ eventType: "staff_created" as AuditEventType, staffUserId: actor.id, notes: `${email} (${form.role})` });
   revalidatePath("/admin/staff");
   return { ok: true, password };
 }
@@ -90,6 +106,11 @@ export async function setStaffActive(staffId: string, active: boolean): Promise<
 
   const { error } = await admin.from("staff_users").update({ active }).eq("id", staffId);
   if (error) return { ok: false, error: error.message };
+  await writeAuditEvent({
+    eventType: (active ? "staff_reactivated" : "staff_deactivated") as AuditEventType,
+    staffUserId: actor.id,
+    notes: staffId,
+  });
   revalidatePath("/admin/staff");
   return { ok: true };
 }

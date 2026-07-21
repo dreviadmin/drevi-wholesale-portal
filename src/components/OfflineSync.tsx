@@ -86,7 +86,16 @@ export function OfflineSync() {
     window.addEventListener("online", goOnline);
     window.addEventListener("offline", goOffline);
     if (navigator.onLine) drain();
-    const poll = setInterval(refresh, 5000);
+    // The tick also DRAINS when online: items queued while already online
+    // (flaky-wifi catch paths, buyer-not-yet-synced orders) never get an
+    // 'online' event, so without this they sat until a remount.
+    const poll = setInterval(async () => {
+      await refresh();
+      if (navigator.onLine) {
+        const q = await getQueue();
+        if (q.some((i) => i.attempts < MAX_ATTEMPTS)) drain();
+      }
+    }, 5000);
     return () => { window.removeEventListener("online", goOnline); window.removeEventListener("offline", goOffline); clearInterval(poll); };
   }, [drain, refresh]);
 

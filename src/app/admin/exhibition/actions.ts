@@ -192,9 +192,11 @@ export async function submitExhibitionOrder(input: {
   const bySku = new Map<string, WholesaleProduct>((prods ?? []).map((p) => [p.sku, p as WholesaleProduct]));
 
   // Staff-assisted orders: MOQ and stock caps are advisory — the order taker
-  // can override (they're warned in the UI). Only sold-out/hidden items drop.
-  // Staff may also override the unit price per line at billing time.
+  // can override (they're warned in the UI). Sold-out/hidden items REJECT the
+  // submit with an explicit list (silently dropping them committed orders
+  // with a lower total than the staff quoted — audit finding).
   const items: OrderItem[] = [];
+  const unavailable: string[] = [];
   let subtotal = 0;
   for (const it of input.items) {
     if (it.customTitle?.trim()) {
@@ -224,9 +226,9 @@ export async function submitExhibitionOrder(input: {
       continue;
     }
     const p = bySku.get(it.sku);
-    if (!p || !p.wholesale_visible) continue;
+    if (!p || !p.wholesale_visible) { unavailable.push(it.sku); continue; }
     const state = getStockState(p);
-    if (state === "sold_out") continue;
+    if (state === "sold_out") { unavailable.push(it.sku); continue; }
     const qty = Math.max(1, Math.floor(it.qty));
     const override = it.unitPrice != null && Number.isFinite(it.unitPrice) && it.unitPrice >= 0 ? Math.round(it.unitPrice * 100) / 100 : null;
     const unitPrice = override ?? p.wholesale_price;
@@ -251,6 +253,12 @@ export async function submitExhibitionOrder(input: {
       ...(actualQty != null ? { actual_qty: actualQty } : {}),
     });
     subtotal += qty * unitPrice;
+  }
+  if (unavailable.length > 0) {
+    return {
+      ok: false,
+      error: `No longer orderable: ${unavailable.join(", ")} (sold out or hidden since scanning). Remove ${unavailable.length === 1 ? "it" : "them"} from the cart and finalise again.`,
+    };
   }
   if (items.length === 0) return { ok: false, error: "No orderable items." };
 

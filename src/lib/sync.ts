@@ -141,8 +141,11 @@ export async function syncProducts(): Promise<SyncResult> {
   }
 
   // SKUs an admin renamed in Manage Catalog — the sheet still carries the old
-  // name; skip those rows so they can't resurrect as duplicates.
-  const { data: ignoredRows } = await supabase.from("sync_ignored_skus").select("sku");
+  // name; skip those rows so they can't resurrect as duplicates. A failed
+  // read MUST abort the run: proceeding with an empty set would re-create
+  // every renamed SKU as a duplicate visible product.
+  const { data: ignoredRows, error: ignoredErr } = await supabase.from("sync_ignored_skus").select("sku");
+  if (ignoredErr) throw new Error(`Sync aborted — ignored-SKU read failed: ${ignoredErr.message}`);
   const ignored = new Set((ignoredRows ?? []).map((r) => r.sku.toUpperCase()));
 
   // Filter + map.
@@ -226,10 +229,14 @@ export async function syncProducts(): Promise<SyncResult> {
   type ExistingRow = { image_urls: string[]; images_fetched_at: string | null; locked_fields: string[] } & Record<string, unknown>;
   const existingBySku = new Map<string, ExistingRow>();
   if (skus.length > 0) {
-    const { data: existing } = await supabase
+    // A failed read here MUST abort the run: an empty map would make the
+    // upsert below blank every cached image and erase every manual-edit lock
+    // across the catalog — one transient DB blip nuking admin work.
+    const { data: existing, error: existingErr } = await supabase
       .from("wholesale_products")
       .select("*")
       .in("sku", skus);
+    if (existingErr) throw new Error(`Sync aborted — existing-rows read failed: ${existingErr.message}`);
     for (const e of existing ?? []) {
       existingBySku.set(e.sku, {
         ...e,

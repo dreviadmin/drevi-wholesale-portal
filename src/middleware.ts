@@ -60,9 +60,13 @@ export async function middleware(request: NextRequest) {
   const isAdminRoute = path.startsWith("/admin");
 
   // RLS lets a user read only their own staff/buyer row (or staff read all).
+  // NOT maybeSingle(): duplicate buyer emails made maybeSingle() error on
+  // every request, which the transient-failure branch below turned into a
+  // deterministic fail-open — a suspended buyer with a duplicate row kept
+  // full access. Plain selects can't error on multiplicity.
   const [staffRes, buyerRes] = await Promise.all([
-    supabase.from("staff_users").select("active").eq("email", email).maybeSingle(),
-    supabase.from("buyers").select("status").eq("email", email).maybeSingle(),
+    supabase.from("staff_users").select("active").eq("email", email).limit(5),
+    supabase.from("buyers").select("status").eq("email", email).limit(5),
   ]);
 
   // Transient DB failure (network blip, cold start) must NOT bounce a valid
@@ -75,8 +79,11 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  const staffActive = staffRes.data?.active === true;
-  const buyerActive = buyerRes.data?.status === "active";
+  const staffActive = (staffRes.data ?? []).some((r) => r.active === true);
+  // Duplicates resolve to the MOST restrictive answer: every row must be
+  // active for the buyer to pass.
+  const buyerRows = buyerRes.data ?? [];
+  const buyerActive = buyerRows.length > 0 && buyerRows.every((r) => r.status === "active");
 
   if (isAdminRoute) {
     if (staffActive) return response;

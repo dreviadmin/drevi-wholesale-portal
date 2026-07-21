@@ -10,7 +10,6 @@ import { ProductQuickView } from "@/components/ProductQuickView";
 import { Lightbox } from "@/components/Lightbox";
 import { QrScanner } from "@/components/QrScanner";
 import { groupByBase } from "@/lib/variants";
-import { OfflineSync } from "@/components/OfflineSync";
 import { captureBuyer, submitExhibitionOrder, endSession, updateBuyerContact, uploadCustomItemPhoto } from "../actions";
 import { uploadBuyerCard } from "@/app/admin/buyers/actions";
 import { buildVCard, downloadVCard } from "@/lib/share";
@@ -471,13 +470,32 @@ export function ExhibitionWizard({
         setStep("catalog");
         return;
       }
-      const res = await captureBuyer({ ...nb, clientRef: captureRefRef.current ?? (captureRefRef.current = uuid()) });
+      // Flaky-wifi guard: a thrown request (online-but-failing) queues the
+      // capture exactly like the detected-offline path, instead of a silent
+      // no-op that strands the form.
+      const ref = captureRefRef.current ?? (captureRefRef.current = uuid());
+      let res;
+      try {
+        res = await captureBuyer({ ...nb, clientRef: ref });
+      } catch {
+        await enqueue("capture", { clientRef: ref, form: nb });
+        setBuyerClientRef(ref);
+        setBuyer({ id: "", business_name: nb.business_name, owner_name: nb.owner_name, phone: nb.phone, city: nb.city });
+        setNewBuyer(false);
+        setCardFile(null);
+        try { localStorage.removeItem(NB_DRAFT_KEY); } catch { /* non-fatal */ }
+        setNb(NB_EMPTY);
+        setStep("catalog");
+        return;
+      }
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
       captureRefRef.current = null; // consumed — next capture gets a fresh key
       if (cardFile) {
         const fd = new FormData();
         fd.append("card", cardFile);
-        await uploadBuyerCard(res.id!, fd); // best-effort
+        try {
+          await uploadBuyerCard(res.id!, fd); // best-effort
+        } catch { /* photo can be re-added from the buyer page */ }
       }
       setBuyerClientRef(null);
       setBuyer({ id: res.id!, business_name: nb.business_name, owner_name: nb.owner_name, phone: nb.phone, city: nb.city });
@@ -500,13 +518,12 @@ export function ExhibitionWizard({
       return {
         sku: l.p.sku,
         qty: billedQty,
-        // custom lines always carry an explicit price — the server has no
-        // catalog row to fall back on
-        ...(cust
-          ? { unitPrice: billedPrice, customTitle: cust.title, ...(cust.image ? { customImageUrl: cust.image } : {}) }
-          : billedPrice !== l.p.wholesale_price
-            ? { unitPrice: billedPrice }
-            : {}),
+        // ALWAYS pin the unit price the staff quoted from — a catalog resync
+        // between scan and finalise must not silently re-price the bill
+        // (audit finding). The server still stamps original_price only when
+        // the pinned price genuinely differs from the live catalog.
+        unitPrice: billedPrice,
+        ...(cust ? { customTitle: cust.title, ...(cust.image ? { customImageUrl: cust.image } : {}) } : {}),
         ...(f > 1 ? { actualQty: l.qty } : {}),
       };
     });
@@ -534,9 +551,23 @@ export function ExhibitionWizard({
         setStep("confirm");
         return;
       }
-      const res = await submitExhibitionOrder({
-        sessionId: session.id, eventName: session.event_name, buyerId: buyer.id, items, staffNote, buyerNote, clientRef, ...taxPay,
-      });
+      // navigator.onLine lies on flaky booth wifi: the request itself can
+      // throw. An unhandled rejection here used to be a SILENT no-op — staff
+      // believed the order went through. Catch → queue → tell them.
+      let res;
+      try {
+        res = await submitExhibitionOrder({
+          sessionId: session.id, eventName: session.event_name, buyerId: buyer.id, items, staffNote, buyerNote, clientRef, ...taxPay,
+        });
+      } catch {
+        await enqueue("order", {
+          sessionId: session.id, eventName: session.event_name, clientRef,
+          buyerId: buyer.id, items, staffNote, buyerNote, ...taxPay,
+        });
+        setConfirmInfo({ orderId: "", orderNumber: "Network failed — order queued, will sync automatically" });
+        setStep("confirm");
+        return;
+      }
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
       setConfirmInfo({ orderId: res.orderId!, orderNumber: res.orderNumber ?? "", pdfUrl: res.pdfUrl });
       setStep("confirm");
@@ -1267,6 +1298,7 @@ export function ExhibitionWizard({
         />
       )}
 
+      {/* OfflineSync now mounts once in the admin layout — no wizard-local copy. */}
       {photoZoom && <Lightbox src={photoZoom} onClose={() => setPhotoZoom(null)} />}
 
       {toast && (
@@ -1275,7 +1307,6 @@ export function ExhibitionWizard({
         </div>
       )}
 
-      <OfflineSync />
     </div>
   );
 }
