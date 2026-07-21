@@ -106,10 +106,39 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
           })}
         </div>
 
+        {/* Money breakdown — without these rows a staff-billed order's items
+            didn't sum to the printed Total on the buyer's own page (audit fix). */}
+        {(o.discount_amount ?? 0) > 0 && (
+          <div className="flex items-baseline justify-between mt-4 font-body" style={{ fontSize: 12, color: palette.goldDeep }}>
+            <span>Discount{o.discount_type === "percent" ? ` (${o.discount_value}%)` : ""}</span>
+            <span>− {formatINR(o.discount_amount)}</span>
+          </div>
+        )}
+        {o.tax_mode === "exclusive" && (
+          <div className="flex items-baseline justify-between mt-2 font-body" style={{ fontSize: 12, color: palette.softBlack }}>
+            <span>GST @ {o.tax_rate}%</span>
+            <span>{formatINR(o.tax_amount)}</span>
+          </div>
+        )}
         <div className="flex items-baseline justify-between mt-4">
           <span className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.18em", color: palette.softBlack }}>Total</span>
           <span className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>{formatINR(o.total_amount)}</span>
         </div>
+        {o.tax_mode === "inclusive" && (
+          <div className="font-body text-right mt-1" style={{ fontSize: 10, color: palette.mutedGreige }}>includes GST @ {o.tax_rate}% = {formatINR(o.tax_amount)}</div>
+        )}
+        {(o.advance_amount ?? 0) > 0 && (
+          <div className="mt-3 p-3" style={{ background: palette.ivoryDeep }}>
+            <div className="flex justify-between font-body" style={{ fontSize: 12, color: palette.softBlack }}>
+              <span>Advance paid{o.payment_method ? ` (${o.payment_method})` : ""}</span>
+              <span>{formatINR(o.advance_amount)}</span>
+            </div>
+            <div className="flex justify-between font-body mt-1" style={{ fontSize: 13, color: palette.goldDeep, fontWeight: 600 }}>
+              <span>Balance due</span>
+              <span>{formatINR(Math.max(0, o.total_amount - o.advance_amount))}</span>
+            </div>
+          </div>
+        )}
 
         {maxLead > 0 && (
           <div className="font-body mt-1 text-right" style={{ fontSize: 11, color: palette.goldDeep, letterSpacing: "0.04em" }}>

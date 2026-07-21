@@ -138,10 +138,30 @@ export interface SubmitState {
 export async function submitOrder(_prev: SubmitState, formData: FormData): Promise<SubmitState> {
   const buyer = await resolveActiveBuyer();
   const note = (formData.get("note")?.toString() ?? "").trim() || null;
+  // Client-minted idempotency key: double-taps and flaky-wifi retries resolve
+  // to the one order instead of duplicating (audit fix).
+  const rawRef = formData.get("clientRef")?.toString().trim() ?? "";
+  const clientRef = /^[0-9a-f-]{36}$/i.test(rawRef) ? rawRef : null;
 
   const cart = await getDetailedCart(buyer.id);
   if (cart.lines.length === 0) return { error: "Your cart is empty." };
   if (cart.hasBlock) return { error: "Some items are below their minimum order quantity. Adjust them (or request a special quantity) before submitting." };
+
+  // Unpriced (₹0) catalog items cannot be self-ordered — the price is on the
+  // physical tag only until the sheet is filled (audit fix).
+  const unpriced = cart.lines.filter((l) => (l.product.wholesale_price ?? 0) <= 0);
+  if (unpriced.length > 0) {
+    return { error: `Pricing for ${unpriced.map((l) => l.product.title ?? l.product.sku).join(", ")} is being updated — remove ${unpriced.length === 1 ? "it" : "them"} for now or contact Drevi to order.` };
+  }
+
+  if (clientRef) {
+    const adminCheck = createAdminClient();
+    const { data: existing } = await adminCheck.from("orders").select("id").eq("client_ref", clientRef).maybeSingle();
+    if (existing) {
+      await saveCart(buyer.id, []);
+      redirect(`/order/${existing.id}`);
+    }
+  }
 
   const items: OrderItem[] = cart.lines.map((l) => ({
     sku: l.product.sku,
@@ -156,8 +176,8 @@ export async function submitOrder(_prev: SubmitState, formData: FormData): Promi
 
   const admin = createAdminClient();
   // Gapless, race-safe numbering via next_order_number() (migration 0008).
-  const now = new Date();
-  const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+  // Day string in IST — a 1 am order must carry today's Indian date, not UTC's.
+  const ymd = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }).replace(/-/g, "");
 
   let orderId: string | null = null;
   for (let attempt = 1; attempt <= 3 && !orderId; attempt++) {
@@ -174,11 +194,15 @@ export async function submitOrder(_prev: SubmitState, formData: FormData): Promi
         items,
         total_amount: cart.subtotal,
         notes: note,
+        client_ref: clientRef,
       })
       .select("id")
       .single();
     if (!error && data) orderId = data.id;
-    else if (error && error.code !== "23505") return { error: `Could not submit order: ${error.message}` };
+    else if (error && error.code === "23505" && clientRef) {
+      const { data: won } = await admin.from("orders").select("id").eq("client_ref", clientRef).maybeSingle();
+      if (won) { orderId = won.id; break; }
+    } else if (error && error.code !== "23505") return { error: `Could not submit order: ${error.message}` };
   }
   if (!orderId) return { error: "Could not generate an order number. Please try again." };
 

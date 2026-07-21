@@ -6,6 +6,8 @@ import type { Order, OrderItem } from "@/lib/types";
 // Pre-fetched outfit thumbnails, keyed by SKU. Fetched OUTSIDE the renderer
 // (with timeouts + format sniffing) so a slow/broken CDN URL can never hang or
 // crash PDF generation — a missing image just renders as an empty slot.
+// Keyed by IMAGE URL, not SKU: multiple custom lines all share sku "CUSTOM",
+// and a SKU key made every custom line show the last-fetched photo.
 type ImgMap = Map<string, { data: Buffer; format: "jpg" | "png" }>;
 
 function sniffFormat(buf: Buffer): "jpg" | "png" | null {
@@ -20,13 +22,17 @@ async function fetchItemImages(items: OrderItem[]): Promise<ImgMap> {
     items.slice(0, 20).map(async (it) => {
       if (!it.image_url) return;
       try {
-        // Shopify CDN resizes via query param — keep the embed small.
-        const url = it.image_url + (it.image_url.includes("?") ? "&" : "?") + "width=200";
+        // Shopify's CDN resizes via query param; Supabase public URLs ignore
+        // it (transforms are a paid endpoint) — only append where it works.
+        const url = it.image_url.includes("cdn.shopify.com")
+          ? it.image_url + (it.image_url.includes("?") ? "&" : "?") + "width=200"
+          : it.image_url;
         const res = await fetch(url, { signal: AbortSignal.timeout(6000), cache: "no-store" });
         if (!res.ok) return;
         const buf = Buffer.from(await res.arrayBuffer());
         const format = sniffFormat(buf);
-        if (format && buf.length < 2_000_000) map.set(it.sku, { data: buf, format });
+        if (format && buf.length < 2_000_000) map.set(it.image_url, { data: buf, format });
+        else if (buf.length >= 2_000_000) console.warn(`[order-pdf] image too large to embed (${Math.round(buf.length / 1024)}KB): ${it.image_url}`);
       } catch {
         // unreachable/slow image — render without it
       }
@@ -155,7 +161,7 @@ function OrderDoc({ order, buyer, images }: { order: Order; buyer: PdfBuyer; ima
           <Text style={[s.th, s.cAmt]}>Amount</Text>
         </View>
         {items.map((it, i) => {
-          const img = images.get(it.sku);
+          const img = it.image_url ? images.get(it.image_url) : undefined;
           return (
             <View style={s.row} key={`${it.sku}-${i}`} wrap={false}>
               {img ? (

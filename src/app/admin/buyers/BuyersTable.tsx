@@ -31,7 +31,10 @@ function fmtDate(iso: string | null): string {
 }
 function waLink(phone: string | null): string | null {
   if (!phone) return null;
-  const digits = phone.replace(/[^\d]/g, "");
+  // 10-digit numbers (inquiry-form buyers) need the country code or wa.me
+  // rejects the link (audit fix).
+  let digits = phone.replace(/[^\d]/g, "").replace(/^0+/, "");
+  if (digits.length === 10) digits = "91" + digits;
   return digits ? `https://wa.me/${digits}` : null;
 }
 

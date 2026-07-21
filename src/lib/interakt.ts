@@ -43,6 +43,9 @@ async function sendTemplate(
         type: "Template",
         template: { name: templateName, languageCode: "en", bodyValues, ...(headerValues ? { headerValues } : {}) },
       }),
+      // A hung Interakt API sits inside the awaited finalise path — never let
+      // it stall an order submit past 8s (audit fix).
+      signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");

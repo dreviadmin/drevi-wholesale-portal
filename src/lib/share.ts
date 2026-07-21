@@ -52,6 +52,15 @@ export function buildVCard(b: VCardInput): string {
   return lines.join("\n");
 }
 
+// wa.me requires FULL international format — a bare 10-digit Indian number
+// (what the public inquiry form stores) makes WhatsApp reject the link.
+// Mirrors interakt.splitPhone: strip leading zeros, prefix 91 on 10 digits.
+export function waPhone(phone?: string | null): string {
+  let digits = (phone ?? "").replace(/[^\d]/g, "").replace(/^0+/, "");
+  if (digits.length === 10) digits = "91" + digits;
+  return digits;
+}
+
 // Open the WhatsApp message via the Web Share API where available, else wa.me.
 export async function shareWhatsApp(message: string, phone?: string | null): Promise<void> {
   if (typeof navigator !== "undefined" && navigator.share) {
@@ -62,7 +71,7 @@ export async function shareWhatsApp(message: string, phone?: string | null): Pro
       // user cancelled or unsupported — fall through to wa.me
     }
   }
-  const digits = (phone ?? "").replace(/[^\d]/g, "");
+  const digits = waPhone(phone);
   const url = digits
     ? `https://wa.me/${digits}?text=${encodeURIComponent(message)}`
     : `https://wa.me/?text=${encodeURIComponent(message)}`;

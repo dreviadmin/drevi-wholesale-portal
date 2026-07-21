@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useRef, useTransition } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -54,6 +54,11 @@ export function CartView({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [state, formAction] = useFormState<SubmitState, FormData>(submitOrder, {});
+  // One idempotency key per cart screen — retries of this submit resolve to
+  // the same order server-side.
+  const clientRefRef = useRef<string>(
+    typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-xxxx-4xxx-yxxx-xxxxxxxxxxxx`.replace(/[xy]/g, (c) => { const r = (Math.random() * 16) | 0; return (c === "x" ? r : (r & 0x3) | 0x8).toString(16); }),
+  );
 
   function editQty(sku: string, qty: number, special = false) {
     startTransition(async () => {
@@ -188,6 +193,7 @@ export function CartView({
             )}
 
             <form action={formAction} className="mt-5">
+              <input type="hidden" name="clientRef" value={clientRefRef.current} />
               <label className="block">
                 <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}>Note (optional)</span>
                 <textarea
