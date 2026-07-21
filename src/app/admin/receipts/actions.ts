@@ -59,7 +59,13 @@ export async function createReceipt(input: ReceiptInput): Promise<{ ok: boolean;
   const clientRef = input.clientRef?.trim() || null;
   if (clientRef) {
     const { data: existing } = await admin.from("goods_receipts").select("id, receipt_number").eq("client_ref", clientRef).maybeSingle();
-    if (existing) return { ok: true, id: existing.id, receiptNumber: existing.receipt_number };
+    if (existing) {
+      // Only honour the replay if the first attempt actually landed its lines —
+      // a crash between header and lines must not surface as a success.
+      const { count } = await admin.from("goods_receipt_lines").select("*", { count: "exact", head: true }).eq("receipt_id", existing.id);
+      if ((count ?? 0) > 0) return { ok: true, id: existing.id, receiptNumber: existing.receipt_number };
+      await admin.from("goods_receipts").delete().eq("id", existing.id); // orphan header — recreate cleanly
+    }
   }
 
   const receiptDate = /^\d{4}-\d{2}-\d{2}$/.test(input.receiptDate ?? "") ? input.receiptDate! : istToday();
@@ -129,11 +135,17 @@ export async function updateReceipt(
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
 
-  // Full line replacement — the editor always sends the complete set.
-  const { error: delErr } = await admin.from("goods_receipt_lines").delete().eq("receipt_id", id);
-  if (delErr) return { ok: false, error: delErr.message };
+  // Full line replacement, insert-first: if the insert fails the old lines
+  // survive untouched; if the delete of old ids fails we briefly show
+  // duplicates (visible + recoverable) instead of losing data.
+  const { data: oldLines, error: oldErr } = await admin.from("goods_receipt_lines").select("id").eq("receipt_id", id);
+  if (oldErr) return { ok: false, error: oldErr.message };
   const { error: insErr } = await admin.from("goods_receipt_lines").insert(parsed.lines.map((l) => ({ ...l, receipt_id: id })));
   if (insErr) return { ok: false, error: `Lines failed: ${insErr.message}` };
+  if (oldLines && oldLines.length > 0) {
+    const { error: delErr } = await admin.from("goods_receipt_lines").delete().in("id", oldLines.map((l) => l.id));
+    if (delErr) return { ok: false, error: `Old lines could not be removed (${delErr.message}) — the receipt shows duplicates; edit again to fix.` };
+  }
 
   await writeAuditEvent({ eventType: "receipt_updated" as AuditEventType, staffUserId: staff.id, notes: rec.receipt_number });
   revalidatePath("/admin/receipts");
@@ -147,11 +159,13 @@ export async function deleteReceipt(id: string): Promise<{ ok: boolean; error?: 
   const admin = createAdminClient();
   const { data: rec } = await admin.from("goods_receipts").select("receipt_number, bill_photo_path").eq("id", id).maybeSingle();
   if (!rec) return { ok: false, error: "Receipt not found." };
-  if (rec.bill_photo_path) {
-    await admin.storage.from("receipt-photos").remove([rec.bill_photo_path]);
-  }
   const { error } = await admin.from("goods_receipts").delete().eq("id", id); // lines cascade
   if (error) return { ok: false, error: error.message };
+  if (rec.bill_photo_path) {
+    // Best-effort AFTER the row is gone — a failed row-delete must never
+    // orphan the bill evidence.
+    await admin.storage.from("receipt-photos").remove([rec.bill_photo_path]);
+  }
   await writeAuditEvent({ eventType: "receipt_deleted" as AuditEventType, staffUserId: staff.id, notes: rec.receipt_number });
   revalidatePath("/admin/receipts");
   return { ok: true };

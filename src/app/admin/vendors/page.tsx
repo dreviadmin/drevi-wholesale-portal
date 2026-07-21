@@ -1,5 +1,6 @@
 import { requireAdminOrRedirect } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 import { VendorsView, type VendorRow } from "./VendorsView";
 
 export const dynamic = "force-dynamic";
@@ -10,10 +11,10 @@ export default async function VendorsPage() {
   await requireAdminOrRedirect();
   const admin = createAdminClient();
 
-  const [{ data: vendors }, { data: receipts }, { data: lines }, { data: vendorInfo }] = await Promise.all([
+  const [{ data: vendors }, { data: receipts }, lines, { data: vendorInfo }] = await Promise.all([
     admin.from("vendors").select("*").order("name"),
     admin.from("goods_receipts").select("id, vendor_id, receipt_date"),
-    admin.from("goods_receipt_lines").select("receipt_id, sku"),
+    fetchAll<{ receipt_id: string; sku: string }>(admin, "goods_receipt_lines", "receipt_id, sku"),
     admin.from("product_vendor_info").select("sku, vendor_name"),
   ]);
 
@@ -25,7 +26,7 @@ export default async function VendorsPage() {
     if (!e.last || r.receipt_date > e.last) e.last = r.receipt_date;
     byVendor.set(r.vendor_id, e);
   }
-  for (const l of lines ?? []) {
+  for (const l of lines) {
     const rec = receiptById.get(l.receipt_id);
     if (!rec) continue;
     byVendor.get(rec.vendor_id)?.skus.add((l.sku as string).toUpperCase());

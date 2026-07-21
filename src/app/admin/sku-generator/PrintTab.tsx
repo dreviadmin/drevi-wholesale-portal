@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X, ScanLine, Minus, Plus, Trash2, Printer, Download, RefreshCw } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { buildRollPdf, printPdf, pdfFileName, DEFAULT_CAL, CAL_KEY, type Calibration, type TrayItem, type PrintDatum } from "./labels";
@@ -78,7 +78,10 @@ export function PrintTab({ tray, setTray, bases, flash }: {
     flash(`${skus.length} added${unknown > 0 ? ` · ${unknown} not in the registry (added anyway)` : ""}`);
   }
 
+  const fetchIdRef = useRef(0);
   async function fetchPrices() {
+    const fetchId = ++fetchIdRef.current;
+    const snapshot = tray.map((t) => t.sku).join(",");
     setFetching(true);
     try {
       const res = await fetch("/api/sku/print-data", {
@@ -88,6 +91,9 @@ export function PrintTab({ tray, setTray, bases, flash }: {
       });
       const d = await res.json();
       if (!res.ok) { flash(d.error ?? "Price fetch failed"); return; }
+      // A tray edited mid-fetch invalidates this response — otherwise a SKU
+      // added during the fetch would silently print with dashes.
+      if (fetchId !== fetchIdRef.current || snapshot !== trayKey) return;
       setPriceData(new Map((d.items as PrintDatum[]).map((i) => [i.sku, i])));
     } finally {
       setFetching(false);

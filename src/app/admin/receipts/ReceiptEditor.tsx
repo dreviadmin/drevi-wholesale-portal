@@ -25,6 +25,8 @@ export interface ReceiptEditorInitial {
 
 const DRAFT_KEY = "drevi_receipt_draft_v1";
 const istToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+// "1,500" or "₹1500" must not silently become 0.
+const num = (v: string) => Number(String(v ?? "").replace(/[^\d.]/g, "")) || 0;
 
 export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku }: {
   vendors: VendorOption[];
@@ -56,31 +58,34 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku }: {
   const linesRef = useRef(lines);
   linesRef.current = lines;
 
-  // ?sku= prefill from the duplicate-variant deep link.
-  useEffect(() => {
-    if (prefillSku && lines.length === 0 && !editMode) {
-      setLines([{ key: uuid(), sku: prefillSku.toUpperCase(), description: "", qty: 1, unitCost: "" }]);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Draft autosave (new mode only — receipts are logged at the desk, no queue).
+  // Draft restore (new mode only) — a ?sku= deep link ADDS its line to any
+  // saved draft rather than clobbering it (the operator may have a half-built
+  // receipt going when a duplicate-variant pops up).
   useEffect(() => {
     if (editMode || restoredRef.current) return;
     restoredRef.current = true;
-    if (prefillSku) return; // deep-link starts fresh
+    let restored: EditorLine[] = [];
     try {
       const raw = localStorage.getItem(DRAFT_KEY);
-      if (!raw) return;
-      const d = JSON.parse(raw);
-      if (d.lines?.length || d.vendorId) {
-        setVendorId(d.vendorId ?? "");
-        setReceiptDate(d.receiptDate ?? istToday());
-        setBillAmount(d.billAmount ?? "");
-        setNotes(d.notes ?? "");
-        setLines(d.lines ?? []);
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (d.lines?.length || d.vendorId) {
+          setVendorId(d.vendorId ?? "");
+          setReceiptDate(d.receiptDate ?? istToday());
+          setBillAmount(d.billAmount ?? "");
+          setNotes(d.notes ?? "");
+          restored = d.lines ?? [];
+        }
       }
     } catch { /* corrupted draft */ }
+    if (prefillSku) {
+      const key = prefillSku.toUpperCase();
+      if (!restored.some((l) => l.sku === key)) {
+        restored = [...restored, { key: uuid(), sku: key, description: "", qty: 1, unitCost: "" }];
+      }
+    }
+    if (restored.length > 0) setLines(restored);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editMode, prefillSku]);
   useEffect(() => {
     if (editMode) return;
@@ -131,10 +136,10 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku }: {
 
   const totals = useMemo(() => {
     const pieces = lines.reduce((n, l) => n + l.qty, 0);
-    const value = lines.reduce((n, l) => n + l.qty * (Number(l.unitCost) || 0), 0);
+    const value = lines.reduce((n, l) => n + l.qty * num(l.unitCost), 0);
     return { pieces, value };
   }, [lines]);
-  const billNum = Number(billAmount) || 0;
+  const billNum = num(billAmount);
   const mismatch = billNum > 0 && Math.abs(billNum - totals.value) > 0.5;
 
   async function save() {
@@ -144,9 +149,9 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku }: {
     const input: ReceiptInput = {
       vendorId,
       receiptDate,
-      billAmount: billAmount.trim() === "" ? null : Number(billAmount) || 0,
+      billAmount: billAmount.trim() === "" ? null : num(billAmount),
       notes,
-      lines: lines.map((l) => ({ sku: l.sku, description: l.description, qty: l.qty, unitCost: Number(l.unitCost) || 0 })),
+      lines: lines.map((l) => ({ sku: l.sku, description: l.description, qty: l.qty, unitCost: num(l.unitCost) })),
     };
     setBusy(true);
     try {
@@ -156,7 +161,8 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku }: {
         if (billFile) {
           const fd = new FormData();
           fd.append("bill", billFile);
-          await uploadReceiptBill(initial!.id!, fd);
+          const up = await uploadReceiptBill(initial!.id!, fd);
+          if (!up.ok) window.alert(`Saved, but the bill photo failed to upload: ${up.error ?? "unknown error"}. Add it again from the receipt page.`);
         }
         router.push(`/admin/receipts/${initial!.id}`);
         router.refresh();
@@ -167,7 +173,8 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku }: {
         if (billFile && res.id) {
           const fd = new FormData();
           fd.append("bill", billFile);
-          await uploadReceiptBill(res.id, fd); // best-effort
+          const up = await uploadReceiptBill(res.id, fd);
+          if (!up.ok) window.alert(`Receipt saved, but the bill photo failed to upload: ${up.error ?? "unknown error"}. Add it again from the receipt page.`);
         }
         try { localStorage.removeItem(DRAFT_KEY); } catch { /* non-fatal */ }
         router.push(`/admin/receipts/${res.id}`);
@@ -311,7 +318,7 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku }: {
                       <input inputMode="decimal" value={l.unitCost} onChange={(e) => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, unitCost: e.target.value } : x)))} placeholder="0" className="font-body bg-transparent outline-none text-right" style={{ width: 84, borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "3px 4px", fontSize: 13 }} />
                     </label>
                     <span className="font-display ml-auto" style={{ fontSize: 13.5, fontWeight: 600, color: palette.black }}>
-                      {formatINR(l.qty * (Number(l.unitCost) || 0))}
+                      {formatINR(l.qty * num(l.unitCost))}
                     </span>
                   </div>
                 </div>

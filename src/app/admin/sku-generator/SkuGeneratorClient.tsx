@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Search, X, ScanLine, Copy, QrCode, Printer, Download, Share2, Plus } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { CATEGORIES, COLOR_GROUPS, SIZES, type CategoryCode } from "@/lib/sku/vocab";
-import { qrPngDataUrl, shareQr, downloadDataUrl, buildRollPdf, printPdf, DEFAULT_CAL, TRAY_KEY, type TrayItem } from "./labels";
+import { qrPngDataUrl, shareQr, downloadDataUrl, buildRollPdf, printPdf, loadCal, TRAY_KEY, type TrayItem } from "./labels";
 import { PrintTab } from "./PrintTab";
 import { palette } from "@/lib/palette";
 
@@ -72,6 +72,8 @@ export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
   const [lookup, setLookup] = useState("");
   const [lookupSku, setLookupSku] = useState<string | null>(null);
   const [qrModal, setQrModal] = useState<string | null>(null);
+  // The scanner captures the first render's onScan — read state through refs.
+  const basesRef = useRef<BaseEntry[] | null>(null);
 
   // ---- bootstrap ----
   useEffect(() => {
@@ -88,20 +90,22 @@ export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
   }, [tray]);
   const loadBases = useCallback(() => {
     if (bases) return;
-    fetch("/api/sku/bases").then((r) => r.json()).then((d) => setBases(d.bases ?? [])).catch(() => setBases([]));
+    fetch("/api/sku/bases").then((r) => r.json()).then((d) => { basesRef.current = d.bases ?? []; setBases(d.bases ?? []); }).catch(() => setBases([]));
   }, [bases]);
+  useEffect(() => { basesRef.current = bases; }, [bases]);
   useEffect(() => { if (mode === "variant" || tab === "print") loadBases(); }, [mode, tab, loadBases]);
 
   // Next-# preview: local estimate instantly, server peek reconciles (400ms debounce).
   useEffect(() => {
     if (mode !== "new" || !cat || !sub) { setPeekNum(null); return; }
     setPeekNum((counters[`${cat}-${sub}`] ?? 0) + 1);
+    let stale = false; // a late response for a previous cat/sub must not land
     const t = setTimeout(() => {
       fetch(`/api/sku/peek?cat=${cat}&sub=${sub}`).then((r) => r.json()).then((d) => {
-        if (typeof d.next === "number") setPeekNum(d.next);
+        if (!stale && typeof d.next === "number") setPeekNum(d.next);
       }).catch(() => {});
     }, 400);
-    return () => clearTimeout(t);
+    return () => { stale = true; clearTimeout(t); };
   }, [mode, cat, sub, counters]);
 
   const addToTray = useCallback((sku: string) => {
@@ -145,8 +149,8 @@ export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
     const sku = text.trim().toUpperCase();
     const base = sku.match(/^(DD-[A-Z]{2,4}-[A-Z0-9]{2,4}-\d{3})/)?.[1];
     if (!base) return { ok: false, message: `${sku || "Empty scan"} — not a Drevi SKU` };
-    const entry = bases?.find((b) => b.base === base);
-    if (!entry) return { ok: false, message: `${base} — not in the registry` };
+    const entry = basesRef.current?.find((b) => b.base === base);
+    if (!entry) return { ok: false, message: basesRef.current === null ? "Registry still loading — try again" : `${base} — not in the registry` };
     setSelectedBase(entry);
     setBaseQuery(base);
     setScanTarget(null);
@@ -213,7 +217,7 @@ export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
     <div className="flex gap-2 flex-wrap mt-3">
       <button type="button" onClick={async () => downloadDataUrl(await qrPngDataUrl(sku), `${sku}.png`)} className="flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, padding: "7px 11px" }}><Download size={12} /> Download</button>
       <button type="button" onClick={async () => flash((await shareQr(sku)) === "shared" ? "Shared" : "Downloaded (share unavailable)")} className="flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, padding: "7px 11px" }}><Share2 size={12} /> Share</button>
-      <button type="button" onClick={async () => { const doc = await buildRollPdf([{ sku, copies: 1 }], DEFAULT_CAL, false, new Map()); if (!printPdf(doc)) flash("Print blocked — use Download PDF"); }} className="flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, padding: "7px 11px" }}><Printer size={12} /> Print</button>
+      <button type="button" onClick={async () => { const doc = await buildRollPdf([{ sku, copies: 1 }], loadCal(), false, new Map()); if (!printPdf(doc)) flash("Print blocked — use Download PDF"); }} className="flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, padding: "7px 11px" }}><Printer size={12} /> Print</button>
       {extra !== false && (
         <button type="button" onClick={() => addToTray(sku)} className="flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", background: palette.black, color: palette.ivory, padding: "7px 11px" }}><Plus size={12} /> Add to print sheet</button>
       )}
@@ -344,11 +348,12 @@ export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
                 value={color ? `${color} — ${colorName}` : colorQuery}
                 onChange={(e) => { setColor(""); setColorQuery(e.target.value); setColorOpen(true); setColorIdx(0); }}
                 onFocus={() => { setColorOpen(true); if (color) { setColor(""); setColorQuery(""); } }}
+                onBlur={() => setTimeout(() => setColorOpen(false), 120)}
                 onKeyDown={(e) => {
                   if (!colorOpen) return;
                   if (e.key === "ArrowDown") { e.preventDefault(); setColorIdx((i) => Math.min(i + 1, colorList.length - 1)); }
                   else if (e.key === "ArrowUp") { e.preventDefault(); setColorIdx((i) => Math.max(i - 1, 0)); }
-                  else if (e.key === "Enter") { e.preventDefault(); const c = colorList[colorIdx]; if (c) { setColor(c[0]); setColorOpen(false); } }
+                  else if (e.key === "Enter") { e.preventDefault(); if (colorQuery.trim() !== "") { const c = colorList[colorIdx]; if (c) { setColor(c[0]); setColorOpen(false); } } }
                   else if (e.key === "Escape") setColorOpen(false);
                 }}
                 placeholder="Type a colour or code"

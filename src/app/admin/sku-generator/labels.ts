@@ -101,16 +101,26 @@ function drawLabelAt(
   }
 }
 
+// Read the device's saved calibration (single-QR quick prints must honour it).
+export function loadCal(): Calibration {
+  try {
+    const raw = localStorage.getItem(CAL_KEY);
+    if (raw) return { ...DEFAULT_CAL, ...JSON.parse(raw) };
+  } catch { /* corrupted — defaults */ }
+  return DEFAULT_CAL;
+}
+
 export async function buildRollPdf(
   tray: TrayItem[],
   cal: Calibration,
   withPrice: boolean,
   data: Map<string, PrintDatum>,
 ): Promise<jsPDF> {
-  const W = cal.rollW;
-  const H = cal.rollH;
-  const across = Math.max(1, Math.floor(cal.across));
-  const gap = Math.max(0, cal.gapX);
+  // Clamp against nonsense calibration (0/negative sizes crash jsPDF).
+  const W = Math.max(10, Number(cal.rollW) || DEFAULT_CAL.rollW);
+  const H = Math.max(10, Number(cal.rollH) || DEFAULT_CAL.rollH);
+  const across = Math.max(1, Math.floor(Number(cal.across) || 1));
+  const gap = Math.max(0, Number(cal.gapX) || 0);
   const pageW = across * W + (across - 1) * gap;
   const pageH = H;
   const orientation = pageW >= pageH ? "landscape" : "portrait";
@@ -142,8 +152,11 @@ export function pdfFileName(withPrice: boolean): string {
 }
 
 // Print via hidden iframe; resolves false when the browser blocked it.
+let activePrintFrame: HTMLIFrameElement | null = null;
 export function printPdf(doc: jsPDF): boolean {
   try {
+    // One frame at a time — repeated prints must not accumulate iframes.
+    if (activePrintFrame) { activePrintFrame.remove(); activePrintFrame = null; }
     const url = doc.output("bloburl") as unknown as string;
     const frame = document.createElement("iframe");
     frame.style.position = "fixed";
@@ -162,7 +175,7 @@ export function printPdf(doc: jsPDF): boolean {
       }
     };
     document.body.appendChild(frame);
-    // Leave the frame attached — removing it cancels the print dialog.
+    activePrintFrame = frame; // left attached (removal cancels the dialog); replaced on next print
     return true;
   } catch {
     return false;

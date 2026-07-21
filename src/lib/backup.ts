@@ -13,6 +13,15 @@ export const BACKUP_TABLES = [
   "exhibition_sessions",
   "auth_audit_log",
   "wholesale_products",
+  // Restore-critical config + Phase 1 tables (audit finding: these were
+  // absent, making disaster recovery incomplete).
+  "product_vendor_info",
+  "sync_ignored_skus",
+  "order_counters",
+  "sku_registry",
+  "vendors",
+  "goods_receipts",
+  "goods_receipt_lines",
 ] as const;
 
 const PAGE = 1000;

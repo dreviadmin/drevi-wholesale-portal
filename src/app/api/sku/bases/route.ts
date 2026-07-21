@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { CATEGORIES } from "@/lib/sku/vocab";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 
 export const dynamic = "force-dynamic";
 
@@ -13,11 +14,12 @@ export async function GET() {
     return NextResponse.json({ error: "Not authorized" }, { status: 401 });
   }
   const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("sku_registry")
-    .select("base_sku, variant_sku, category, sub_category, color, size, description, created_at")
-    .order("created_at", { ascending: false });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  let data;
+  try {
+    data = await fetchAll(admin, "sku_registry", "base_sku, variant_sku, category, sub_category, color, size, description, created_at", (q) => q.order("created_at", { ascending: false }));
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  }
 
   interface BaseEntry {
     base: string; cat: string; sub: string; catName: string; subName: string;

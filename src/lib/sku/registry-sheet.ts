@@ -3,6 +3,7 @@ import "server-only";
 import { readFileSync } from "node:fs";
 import { google, type sheets_v4 } from "googleapis";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 
 // Legacy SKU registry sheet interop (transition safety, spec §4).
 // - importer: sheet -> Supabase (rows minted via the old Apps Script tool)
@@ -86,9 +87,8 @@ export async function importRegistry(): Promise<{ imported: number; qrBackfilled
   const admin = createAdminClient();
   const rows = await readAllRows();
 
-  const { data: existing, error: exErr } = await admin.from("sku_registry").select("variant_sku, qr_url");
-  if (exErr) throw new Error(`registry read failed: ${exErr.message}`);
-  const byVariant = new Map((existing ?? []).map((r) => [r.variant_sku.toUpperCase(), r]));
+  const existing = await fetchAll<{ variant_sku: string; qr_url: string | null }>(admin, "sku_registry", "variant_sku, qr_url");
+  const byVariant = new Map(existing.map((r) => [r.variant_sku.toUpperCase(), r]));
 
   const toInsert: Record<string, unknown>[] = [];
   const qrFills: { variant: string; qr: string }[] = [];

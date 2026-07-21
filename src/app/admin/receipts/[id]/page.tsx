@@ -4,6 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import { requireAdminOrRedirect } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { signedReceiptPhotoUrl } from "@/lib/storage";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 import { ReceiptDetail } from "./ReceiptDetail";
 
 export const dynamic = "force-dynamic";
@@ -14,12 +15,17 @@ export default async function ReceiptDetailPage({ params }: { params: { id: stri
   const { data: rec } = await admin.from("goods_receipts").select("*").eq("id", params.id).maybeSingle();
   if (!rec) notFound();
 
-  const [{ data: lines }, { data: vendor }, { data: vendors }, { data: skus }] = await Promise.all([
+  const [{ data: lines }, { data: vendor }, { data: activeVendors }, skus] = await Promise.all([
     admin.from("goods_receipt_lines").select("*").eq("receipt_id", params.id).order("position"),
     admin.from("vendors").select("id, name, city").eq("id", rec.vendor_id).maybeSingle(),
     admin.from("vendors").select("id, name, city").eq("active", true).order("name"),
-    admin.from("sku_registry").select("variant_sku"),
+    fetchAll<{ variant_sku: string }>(admin, "sku_registry", "variant_sku"),
   ]);
+  // The receipt's own vendor stays pickable even if deactivated — otherwise
+  // the edit form renders it unselected and invites accidental reassignment.
+  const vendors = vendor && !(activeVendors ?? []).some((v) => v.id === vendor.id)
+    ? [vendor, ...(activeVendors ?? [])]
+    : (activeVendors ?? []);
   const billUrl = rec.bill_photo_path ? await signedReceiptPhotoUrl(rec.bill_photo_path) : null;
 
   return (
@@ -44,8 +50,8 @@ export default async function ReceiptDetailPage({ params }: { params: { id: stri
         lines={(lines ?? []).map((l) => ({
           id: l.id, sku: l.sku, description: l.description ?? "", qty: l.qty, unitCost: Number(l.unit_cost),
         }))}
-        vendors={(vendors ?? []).map((v) => ({ id: v.id, name: v.name, city: v.city }))}
-        registrySkus={(skus ?? []).map((s) => s.variant_sku as string)}
+        vendors={vendors.map((v) => ({ id: v.id, name: v.name, city: v.city }))}
+        registrySkus={skus.map((s) => s.variant_sku)}
       />
     </div>
   );

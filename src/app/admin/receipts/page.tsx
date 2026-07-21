@@ -1,5 +1,6 @@
 import { requireAdminOrRedirect } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 import { ReceiptsView, type ReceiptRow } from "./ReceiptsView";
 
 export const dynamic = "force-dynamic";
@@ -9,15 +10,15 @@ export default async function ReceiptsPage() {
   await requireAdminOrRedirect();
   const admin = createAdminClient();
 
-  const [{ data: receipts }, { data: vendors }, { data: lines }] = await Promise.all([
+  const [{ data: receipts }, { data: vendors }, lines] = await Promise.all([
     admin.from("goods_receipts").select("id, receipt_number, vendor_id, receipt_date, bill_amount, created_by").order("receipt_date", { ascending: false }),
     admin.from("vendors").select("id, name"),
-    admin.from("goods_receipt_lines").select("receipt_id, sku, qty, unit_cost"),
+    fetchAll<{ receipt_id: string; sku: string; qty: number; unit_cost: number }>(admin, "goods_receipt_lines", "receipt_id, sku, qty, unit_cost"),
   ]);
 
   const vendorById = new Map((vendors ?? []).map((v) => [v.id, v.name]));
   const agg = new Map<string, { lines: number; pieces: number; value: number; skus: string[] }>();
-  for (const l of lines ?? []) {
+  for (const l of lines) {
     const e = agg.get(l.receipt_id) ?? { lines: 0, pieces: 0, value: 0, skus: [] };
     e.lines += 1;
     e.pieces += l.qty;

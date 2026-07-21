@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 
 export const dynamic = "force-dynamic";
 
@@ -14,15 +15,17 @@ export async function GET() {
   }
   const admin = createAdminClient();
 
-  const [{ data: all, error: allErr }, { data: history, count }] = await Promise.all([
-    admin.from("sku_registry").select("category, sub_category, base_sku"),
-    admin
-      .from("sku_registry")
-      .select("variant_sku, base_sku, category, sub_category, color, size, description, created_by, created_at", { count: "exact" })
-      .order("created_at", { ascending: false })
-      .limit(50),
-  ]);
-  if (allErr) return NextResponse.json({ error: allErr.message }, { status: 500 });
+  let all;
+  try {
+    all = await fetchAll(admin, "sku_registry", "category, sub_category, base_sku");
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  }
+  const { data: history, count } = await admin
+    .from("sku_registry")
+    .select("variant_sku, base_sku, category, sub_category, color, size, description, created_by, created_at", { count: "exact" })
+    .order("created_at", { ascending: false })
+    .limit(50);
 
   // counters: max design number per CAT-SUB.
   const counters: Record<string, number> = {};

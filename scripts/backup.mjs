@@ -24,6 +24,13 @@ const TABLES = [
   "exhibition_sessions",
   "auth_audit_log",
   "wholesale_products",
+  "product_vendor_info",
+  "sync_ignored_skus",
+  "order_counters",
+  "sku_registry",
+  "vendors",
+  "goods_receipts",
+  "goods_receipt_lines",
 ];
 const KEEP = 14;
 const PAGE = 1000;

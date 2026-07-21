@@ -43,7 +43,7 @@ export function ReceiptsView({ rows, vendors }: { rows: ReceiptRow[]; vendors: s
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const today = istDay(new Date());
-    const cutoff7 = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const cutoff7 = istDay(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
     return rows.filter((r) => {
       if (vendorFilter !== "All" && r.vendor !== vendorFilter) return false;
       if (range === "today" && r.date !== today) return false;
