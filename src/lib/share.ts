@@ -61,21 +61,54 @@ export function waPhone(phone?: string | null): string {
   return digits;
 }
 
-// Open the WhatsApp message via the Web Share API where available, else wa.me.
+// Open WhatsApp. With a phone number we go STRAIGHT to that customer's chat
+// (wa.me/<phone>) — the generic share sheet made staff pick the recipient by
+// hand every time. Without a phone, fall back to the share sheet / picker.
 export async function shareWhatsApp(message: string, phone?: string | null): Promise<void> {
+  const digits = waPhone(phone);
+  if (digits) {
+    window.open(`https://wa.me/${digits}?text=${encodeURIComponent(message)}`, "_blank", "noopener");
+    return;
+  }
   if (typeof navigator !== "undefined" && navigator.share) {
     try {
       await navigator.share({ text: message });
       return;
     } catch {
-      // user cancelled or unsupported — fall through to wa.me
+      // user cancelled or unsupported — fall through to wa.me picker
     }
   }
-  const digits = waPhone(phone);
-  const url = digits
-    ? `https://wa.me/${digits}?text=${encodeURIComponent(message)}`
-    : `https://wa.me/?text=${encodeURIComponent(message)}`;
-  window.open(url, "_blank", "noopener");
+  window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank", "noopener");
+}
+
+// Share the ACTUAL PDF file (not a link — buyers distrust bare links) with a
+// clean, recognisable filename. Uses the Web Share API with file support
+// (Android Chrome, iOS 15+); the caller decides the fallback when the device
+// can't share files.
+export async function sharePdfFile(opts: { url: string; filename: string; text?: string }): Promise<"shared" | "cancelled" | "unsupported" | "failed"> {
+  try {
+    const res = await fetch(opts.url);
+    if (!res.ok) return "failed";
+    const blob = await res.blob();
+    const file = new File([blob], opts.filename, { type: "application/pdf" });
+    const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean };
+    if (!nav.share || !nav.canShare?.({ files: [file] })) return "unsupported";
+    try {
+      await nav.share({ files: [file], title: opts.filename, ...(opts.text ? { text: opts.text } : {}) });
+      return "shared";
+    } catch (e) {
+      return (e as Error).name === "AbortError" ? "cancelled" : "failed";
+    }
+  } catch {
+    return "failed";
+  }
+}
+
+// House style for shared invoice files: obviously from Drevi, obviously which
+// order — suspicious-looking generic names get PDFs ignored.
+export function invoiceFileName(orderNumber: string, isInvoice = true): string {
+  const safe = orderNumber.replace(/[^A-Za-z0-9-]/g, "");
+  return `Drevi-${isInvoice ? "Invoice" : "Order"}-${safe}.pdf`;
 }
 
 export function downloadVCard(vcard: string, filename: string): void {

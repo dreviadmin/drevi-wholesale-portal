@@ -12,7 +12,7 @@ import { QrScanner } from "@/components/QrScanner";
 import { groupByBase } from "@/lib/variants";
 import { captureBuyer, submitExhibitionOrder, endSession, updateBuyerContact, uploadCustomItemPhoto } from "../actions";
 import { uploadBuyerCard } from "@/app/admin/buyers/actions";
-import { buildVCard, downloadVCard } from "@/lib/share";
+import { buildVCard, downloadVCard, sharePdfFile, invoiceFileName, waPhone } from "@/lib/share";
 import { cacheProducts, enqueue, updateQueuedCaptureForm } from "@/lib/offline";
 import { uuid } from "@/lib/uuid";
 import { getStockState, qtyCap } from "@/lib/stock";
@@ -623,6 +623,10 @@ export function ExhibitionWizard({
   async function shareInvoice() {
     if (!confirmInfo?.pdfUrl) return;
     const text = invoiceShareText();
+    // Attach the actual PDF (named Drevi-Invoice-…) where the device supports
+    // file sharing; fall back to text share, then to copying.
+    const r = await sharePdfFile({ url: confirmInfo.pdfUrl, filename: invoiceFileName(confirmInfo.orderNumber || "order"), text });
+    if (r === "shared" || r === "cancelled") return;
     if (navigator.share) {
       try { await navigator.share({ title: `Drevi ${confirmInfo.orderNumber}`, text }); return; } catch { /* cancelled */ }
     }
@@ -630,11 +634,12 @@ export function ExhibitionWizard({
     flash("Invoice link copied");
   }
 
-  // Straight to WhatsApp.
+  // Straight into THIS buyer's chat (country code normalised — 10-digit
+  // numbers previously broke the deep link and opened the picker).
   function shareInvoiceWhatsApp() {
     if (!confirmInfo?.pdfUrl) return;
-    const phone = (buyer?.phone ?? "").replace(/\D/g, "");
-    const base = phone ? `https://wa.me/${phone}` : "https://wa.me/";
+    const digits = waPhone(buyer?.phone);
+    const base = digits ? `https://wa.me/${digits}` : "https://wa.me/";
     window.open(`${base}?text=${encodeURIComponent(invoiceShareText())}`, "_blank", "noopener");
   }
 

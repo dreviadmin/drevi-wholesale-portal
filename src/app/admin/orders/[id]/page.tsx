@@ -58,7 +58,7 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
         </div>
         {isAdminRole(staff.role) && (
           <div className="flex flex-col items-end gap-2">
-            <OrderActions orderId={o.id} status={o.status} pdfUrl={o.pdf_url} orderNumber={o.order_number} total={o.total_amount} />
+            <OrderActions orderId={o.id} status={o.status} pdfUrl={o.pdf_url} orderNumber={o.order_number} total={o.total_amount} buyerPhone={buyer?.phone ?? null} />
             <OrderEditor
               orderId={o.id}
               status={o.status}

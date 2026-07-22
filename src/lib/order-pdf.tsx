@@ -132,7 +132,13 @@ function OrderDoc({ order, buyer, images }: { order: Order; buyer: PdfBuyer; ima
   const showBreakdown = discount > 0 || (taxed && order.tax_mode === "exclusive");
 
   return (
-    <Document>
+    <Document
+      title={`Drevi ${isInvoice ? "Invoice" : "Order"} ${order.order_number}`}
+      author="Drevi Fashion"
+      subject={`${isInvoice ? "Invoice" : "Order request"} ${order.order_number}`}
+      creator="Drevi Wholesale Portal"
+      producer="Drevi Wholesale Portal"
+    >
       <Page size="A4" style={s.page}>
         <View style={s.headerRow}>
           <View>

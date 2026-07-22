@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setOrderStatus, sendInvoice } from "@/app/admin/orders/actions";
+import { sharePdfFile, invoiceFileName, waPhone } from "@/lib/share";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { OrderStatus } from "@/lib/types";
@@ -13,12 +14,14 @@ export function OrderActions({
   pdfUrl,
   orderNumber,
   total,
+  buyerPhone,
 }: {
   orderId: string;
   status: OrderStatus;
   pdfUrl?: string | null;
   orderNumber?: string;
   total?: number;
+  buyerPhone?: string | null;
 }) {
   const router = useRouter();
   const [isPending, start] = useTransition();
@@ -48,9 +51,12 @@ export function OrderActions({
     return `Drevi order ${orderNumber ?? ""} — total ${total != null ? formatINR(total) : ""}. Invoice PDF: ${pdfUrl}`;
   }
 
-  // Generic share sheet; falls back to copying the link.
+  // Share the actual PDF file (named Drevi-Invoice-…) — buyers distrust bare
+  // links AND anonymous PDFs. Falls back to a text share, then to copying.
   async function shareInvoice() {
     if (!pdfUrl) { flash("Generate the invoice first (Send Invoice)"); return; }
+    const r = await sharePdfFile({ url: pdfUrl, filename: invoiceFileName(orderNumber ?? "order"), text: shareText() });
+    if (r === "shared" || r === "cancelled") return;
     if (navigator.share) {
       try { await navigator.share({ title: `Drevi ${orderNumber ?? "invoice"}`, text: shareText() }); return; } catch { /* cancelled */ }
     }
@@ -58,9 +64,15 @@ export function OrderActions({
     flash("Invoice link copied");
   }
 
-  function shareWhatsApp() {
+  // Straight into the CUSTOMER'S chat (no recipient picker). File-sharing
+  // can't target a chat, so this sends the labelled link; use Share to attach
+  // the PDF itself.
+  function shareWhatsAppDirect() {
     if (!pdfUrl) { flash("Generate the invoice first (Send Invoice)"); return; }
-    window.open(`https://wa.me/?text=${encodeURIComponent(shareText())}`, "_blank", "noopener");
+    const digits = waPhone(buyerPhone);
+    const base = digits ? `https://wa.me/${digits}` : "https://wa.me/";
+    if (!digits) flash("No phone on the buyer — opening the picker");
+    window.open(`${base}?text=${encodeURIComponent(shareText())}`, "_blank", "noopener");
   }
 
   const btn = (label: string, onClick: () => void, primary = false) => (
@@ -78,8 +90,8 @@ export function OrderActions({
         )}
         {status === "confirmed" && btn("Mark Fulfilled", () => act("fulfilled"), true)}
         {(status === "submitted" || status === "confirmed") && btn("Send Invoice", fireInvoice)}
-        {pdfUrl && btn("Share", shareInvoice)}
-        {pdfUrl && btn("WhatsApp", shareWhatsApp)}
+        {pdfUrl && btn("Share PDF", shareInvoice)}
+        {pdfUrl && btn("WhatsApp Buyer", shareWhatsAppDirect)}
         {status !== "cancelled" && status !== "fulfilled" && btn("Cancel", () => act("cancelled", { confirmMsg: "Cancel this order?" }))}
       </div>
       {toast && <span className="font-body" style={{ fontSize: 10, color: palette.goldDeep, letterSpacing: "0.04em" }}>{toast}</span>}
