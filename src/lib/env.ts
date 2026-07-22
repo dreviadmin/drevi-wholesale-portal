@@ -21,6 +21,8 @@ type EnvKey =
   // Phase 1 (SKU Generator) — all optional with in-code defaults:
   // SKU_REGISTRY_SHEET_ID (legacy registry workbook), SKU_REGISTRY_TAB
   // ('SKUs'), SKU_DUAL_MODE ('true' during the transition).
+  | "DRIVE_TRYON_FOLDER_ID"
+  | "DRIVE_INPUT_FOLDER_ID"
   | "SKU_REGISTRY_SHEET_ID"
   | "SKU_REGISTRY_TAB"
   | "SKU_DUAL_MODE";

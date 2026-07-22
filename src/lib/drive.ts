@@ -41,11 +41,23 @@ export function drivePhotosEnabled(): boolean {
   return !!process.env.DRIVE_PHOTOS_FOLDER_ID;
 }
 
-// Base (design) SKU = drop the last two segments (size, colour), mirroring the
-// portal's variant grouping. e.g. DD-SUT-PLZ-008-L-CRM → DD-SUT-PLZ-008.
+// Base (design) SKU = DD-CAT-SUB-NNN. Tolerates every naming style seen in
+// the Drive folders: full variant (…-NNN-L-CRM), colour-only tryon/input
+// folders (…-NNN-CRM), or a bare base (…-NNN).
 function baseSku(sku: string): string {
   const parts = sku.split("-");
+  if (parts.length >= 4 && /^\d{2,4}$/.test(parts[3])) return parts.slice(0, 4).join("-");
   return parts.length >= 5 ? parts.slice(0, -2).join("-") : sku;
+}
+
+// The colour-only form a variant maps to in the tryon/input folders:
+// DD-LEH-FLR-011-XL-SKY → DD-LEH-FLR-011-SKY (base + last segment).
+function baseColourSku(sku: string): string | null {
+  const parts = sku.split("-");
+  if (parts.length >= 6 && /^\d{2,4}$/.test(parts[3])) {
+    return [...parts.slice(0, 4), parts[parts.length - 1]].join("-");
+  }
+  return null;
 }
 
 const IMG = "(mimeType contains 'image/')";
@@ -78,13 +90,23 @@ function normKey(s: string): string {
 //           Lets a variant borrow a sibling-colour folder's photo (the design
 //           was shot once; only one colour's folder often exists).
 interface FolderIndex { byKey: Map<string, string>; byBase: Map<string, string> }
-let folderCache: { at: number; idx: FolderIndex } | null = null;
+// Cached per parent folder — the photo chain spans multiple Drive folders
+// (photos → tryon → per-SKU input folders from the sheet).
+const folderCaches = new Map<string, { at: number; idx: FolderIndex }>();
 const FOLDER_CACHE_MS = 5 * 60 * 1000;
 
-async function listSkuFolders(): Promise<FolderIndex> {
-  const parent = process.env.DRIVE_PHOTOS_FOLDER_ID;
+// Secondary source: the try-on shoot folder (same per-SKU layout, folder
+// names usually omit the size segment).
+export const tryonFolderId = () => process.env.DRIVE_TRYON_FOLDER_ID ?? "1wu1kvRjqWaTYs6YAtG_o2Pm7n3IjPjrs";
+// Tertiary source: the pipeline's INPUT root (Arushi's per-SKU upload folders;
+// same id the pipeline uses as DREVI_INPUT_FOLDER_ID — the sheet's "Input
+// Folder URL" column was retired in favour of name-based discovery here).
+export const inputRootFolderId = () => process.env.DRIVE_INPUT_FOLDER_ID ?? "1QFASF3YmicOYyjLv6wIHr4N2Ixz__Pk9";
+
+async function listSkuFolders(parent: string): Promise<FolderIndex> {
   if (!parent) return { byKey: new Map(), byBase: new Map() };
-  if (folderCache && Date.now() - folderCache.at < FOLDER_CACHE_MS) return folderCache.idx;
+  const cached = folderCaches.get(parent);
+  if (cached && Date.now() - cached.at < FOLDER_CACHE_MS) return cached.idx;
   const drive = await getDrive();
   const byKey = new Map<string, string>();
   const byBase = new Map<string, string>();
@@ -108,22 +130,27 @@ async function listSkuFolders(): Promise<FolderIndex> {
     pageToken = res.data.nextPageToken ?? undefined;
   } while (pageToken);
   const idx = { byKey, byBase };
-  folderCache = { at: Date.now(), idx };
+  folderCaches.set(parent, { at: Date.now(), idx });
   return idx;
 }
 
-// Resolve a scanned SKU to a Drive image file id (or null). Tries, in order:
+// Resolve a SKU to an image file id within ONE parent folder. Tries, in order:
 // exact-SKU folder → base-SKU-named folder → any sibling-colour folder of the
 // same design → a file in the parent named like the SKU.
-export async function findSkuImage(rawSku: string): Promise<{ fileId: string } | null> {
-  const parent = process.env.DRIVE_PHOTOS_FOLDER_ID;
+async function findSkuImageIn(parent: string, rawSku: string): Promise<{ fileId: string } | null> {
   if (!parent) return null;
   const sku = rawSku.trim().toUpperCase();
   if (!sku) return null;
   const drive = await getDrive();
-  const { byKey, byBase } = await listSkuFolders();
+  const { byKey, byBase } = await listSkuFolders(parent);
 
-  const candidates = [byKey.get(normKey(sku)), byKey.get(normKey(baseSku(sku))), byBase.get(normKey(baseSku(sku)))];
+  const bc = baseColourSku(sku);
+  const candidates = [
+    byKey.get(normKey(sku)),                       // exact full-SKU folder
+    bc ? byKey.get(normKey(bc)) : undefined,       // colour-only folder (tryon/input naming)
+    byKey.get(normKey(baseSku(sku))),              // base-named folder
+    byBase.get(normKey(baseSku(sku))),             // any sibling colour of the design
+  ];
   for (const folderId of candidates) {
     if (!folderId) continue;
     const img = await firstImageIn(drive, folderId);
@@ -140,6 +167,22 @@ export async function findSkuImage(rawSku: string): Promise<{ fileId: string } |
   });
   const f = byFile.data.files?.[0]?.id;
   return f ? { fileId: f } : null;
+}
+
+// The full photo chain (business rule, 22 Jul 2026):
+//   1. photos folder (DRIVE_PHOTOS_FOLDER_ID — tag/shoot photos)
+//   2. try-on folder (DRIVE_TRYON_FOLDER_ID)
+//   3. the pipeline INPUT root (DRIVE_INPUT_FOLDER_ID — raw upload folders)
+// All three use the same per-SKU-subfolder lookup with size-tolerant matching.
+export async function findSkuImage(rawSku: string): Promise<{ fileId: string } | null> {
+  for (const parent of [process.env.DRIVE_PHOTOS_FOLDER_ID, tryonFolderId(), inputRootFolderId()]) {
+    if (!parent) continue;
+    try {
+      const hit = await findSkuImageIn(parent, rawSku);
+      if (hit) return hit;
+    } catch { /* folder unreachable — keep falling through */ }
+  }
+  return null;
 }
 
 // Sync helper: resolve a SKU straight to image bytes (thumbnail-sized), for
