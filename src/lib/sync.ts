@@ -113,7 +113,7 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
   return results;
 }
 
-export async function syncProducts(): Promise<SyncResult> {
+export async function syncProducts(opts?: { driveBudget?: number }): Promise<SyncResult> {
   const start = Date.now();
   const warnings: string[] = [];
   const supabase = createAdminClient();
@@ -287,7 +287,7 @@ export async function syncProducts(): Promise<SyncResult> {
         // would only refresh on the long TTL, but hits are excluded above.
         return now - new Date(ex.images_fetched_at).getTime() > DRIVE_MISS_RETRY_MS;
       })
-      .slice(0, DRIVE_IMAGE_BUDGET);
+      .slice(0, opts?.driveBudget ?? DRIVE_IMAGE_BUDGET);
     await mapWithConcurrency(needsDrive, 3, async (p) => {
       try {
         const img = await fetchSkuImageBytes(p.sku, 800);

@@ -20,7 +20,10 @@ export async function resyncCatalog(): Promise<{
     return { ok: false, error: "Not signed in." };
   }
   try {
-    const res = await syncProducts();
+    // Manual runs get a bigger photo budget than the 10-min cron (someone
+    // clicking Sync usually just uploaded photos and wants them NOW); 40
+    // keeps the three-source chain inside the route's 60s cap.
+    const res = await syncProducts({ driveBudget: 40 });
     return { ok: true, synced: res.synced, imageFetches: res.image_fetches, hidden: res.hidden, warnings: res.warnings };
   } catch (err) {
     return { ok: false, error: (err as Error).message };
