@@ -6,12 +6,25 @@ const PDF_BUCKET = "order-pdfs";
 const CARD_BUCKET = "buyer-cards";
 const CUSTOM_BUCKET = "custom-items";
 
-async function ensureBucket(name: string, opts: { public: boolean } = { public: false }): Promise<void> {
-  const admin = createAdminClient();
-  const { data } = await admin.storage.getBucket(name);
-  if (!data) {
-    await admin.storage.createBucket(name, { public: opts.public, fileSizeLimit: "5MB" });
+// Memoized per process — buckets never disappear, and the multi-image sync
+// calls uploadProductPhoto in a hot loop where a getBucket round-trip per
+// upload would eat real seconds of the cron's 60s cap.
+const ensuredBuckets = new Map<string, Promise<void>>();
+function ensureBucket(name: string, opts: { public: boolean } = { public: false }): Promise<void> {
+  let p = ensuredBuckets.get(name);
+  if (!p) {
+    p = (async () => {
+      const admin = createAdminClient();
+      const { data } = await admin.storage.getBucket(name);
+      if (!data) {
+        await admin.storage.createBucket(name, { public: opts.public, fileSizeLimit: "5MB" });
+      }
+    })();
+    // A failed probe must not poison the cache with a rejected promise.
+    p.catch(() => ensuredBuckets.delete(name));
+    ensuredBuckets.set(name, p);
   }
+  return p;
 }
 
 // Catalog photo sourced from the per-SKU Drive folders (Wholesale Master rows
@@ -19,12 +32,14 @@ async function ensureBucket(name: string, opts: { public: boolean } = { public: 
 // Shopify CDN URL would: catalog <Image>, wizard, and the invoice PDF fetcher.
 const PRODUCT_BUCKET = "product-photos";
 
-export async function uploadProductPhoto(sku: string, bytes: Buffer, contentType: string): Promise<string> {
+// slot 0 keeps the legacy `SKU.ext` path (thumbnail URLs stay stable across
+// resyncs); additional images land at `SKU-2.ext`, `SKU-3.ext`, …
+export async function uploadProductPhoto(sku: string, bytes: Buffer, contentType: string, slot = 0): Promise<string> {
   await ensureBucket(PRODUCT_BUCKET, { public: true });
   const admin = createAdminClient();
   const safe = sku.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
   const ext = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
-  const path = `${safe}.${ext}`;
+  const path = slot > 0 ? `${safe}-${slot + 1}.${ext}` : `${safe}.${ext}`;
   const { error } = await admin.storage.from(PRODUCT_BUCKET).upload(path, bytes, { contentType, upsert: true });
   if (error) throw new Error(`Product photo upload failed: ${error.message}`);
   const { data } = admin.storage.from(PRODUCT_BUCKET).getPublicUrl(path);

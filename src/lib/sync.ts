@@ -3,7 +3,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { readMaster } from "@/lib/sheets";
 import { fetchProductImageUrls } from "@/lib/shopify-auth";
-import { drivePhotosEnabled, fetchSkuImageBytes } from "@/lib/drive";
+import { drivePhotosEnabled, fetchSkuImagesBytes } from "@/lib/drive";
 import { uploadProductPhoto } from "@/lib/storage";
 
 // Logical key -> Master Sheet display header (matched by suffix). Descriptive
@@ -52,6 +52,23 @@ const IMAGE_FETCH_CONCURRENCY = 2; // Shopify REST allows ~2 calls/sec
 // 10-min cadence finishes any backlog quickly. Local runs can raise it via env.
 const DRIVE_IMAGE_BUDGET = Number(process.env.DRIVE_IMAGE_BUDGET) > 0 ? Number(process.env.DRIVE_IMAGE_BUDGET) : 12;
 const DRIVE_MISS_RETRY_MS = 30 * 60 * 1000; // photo not found → look again in 30 min
+// All of a SKU's Drive images are synced, capped to keep a raw-upload dump
+// from flooding the bucket; a trim is reported loudly, never silent.
+const DRIVE_IMAGES_PER_SKU = 12;
+// Wall-clock cap on the Drive pass (measured from sync start). The pass stops
+// STARTING new SKUs past this point so the product/vendor upserts and the hide
+// pass always run inside the route's 60s Vercel cap — a timed-out run persists
+// nothing and would re-time-out every 10 minutes, halting sync entirely.
+const DRIVE_TIME_BUDGET_MS = 35_000;
+
+// Deterministic 0–47h spread added to each SKU's 7-day image re-check, so a
+// catalog whose photos were all stamped by one backfill doesn't come due in a
+// single cron window every week.
+function skuJitterMs(sku: string): number {
+  let h = 0;
+  for (let i = 0; i < sku.length; i++) h = (h * 31 + sku.charCodeAt(i)) | 0;
+  return (Math.abs(h) % 48) * 60 * 60 * 1000;
+}
 
 export interface SyncResult {
   synced: number;
@@ -113,7 +130,7 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
   return results;
 }
 
-export async function syncProducts(opts?: { driveBudget?: number }): Promise<SyncResult> {
+export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudgetMs?: number }): Promise<SyncResult> {
   const start = Date.now();
   const warnings: string[] = [];
   const supabase = createAdminClient();
@@ -271,37 +288,66 @@ export async function syncProducts(opts?: { driveBudget?: number }): Promise<Syn
   });
 
   // Drive fallback: products with no Shopify product (the Wholesale Master
-  // rows) get their photo from the per-SKU Drive folder, copied ONCE into the
-  // public product-photos bucket so the URL behaves like any CDN image
-  // (catalog, wizard, invoice PDF). images_fetched_at gives misses the same
-  // 7-day retry as Shopify. Budgeted per run to stay inside the cron timeout.
+  // rows) get ALL their photos from the per-SKU Drive folder, copied into the
+  // public product-photos bucket so the URLs behave like any CDN image
+  // (catalog, wizard, invoice PDF). image_urls[0] is the front shot when one
+  // exists (see orderImages). Misses retry every 30 min; rows that already
+  // have photos re-check the folder on the 7-day TTL so added/changed shots
+  // propagate without manual work. Budgeted per run (first-time fetches ahead
+  // of TTL refreshes) to stay inside the cron timeout.
   if (drivePhotosEnabled()) {
+    const neverFetched = (p: ProductRow) => {
+      const ex = existingBySku.get(p.sku);
+      return !ex || (!ex.images_fetched_at && ex.image_urls.length === 0);
+    };
     const needsDrive = products
       .filter((p) => {
         if (p.shopify_product_id) return false; // Shopify owns these
         const ex = existingBySku.get(p.sku);
         if (ex?.locked_fields.includes("image_urls")) return false; // admin owns these
-        if (ex && ex.image_urls.length > 0) return false; // already has a photo
         if (!ex || !ex.images_fetched_at) return true;
-        // A photo MISS retries fast (folders are being added all day); a hit
-        // would only refresh on the long TTL, but hits are excluded above.
-        return now - new Date(ex.images_fetched_at).getTime() > DRIVE_MISS_RETRY_MS;
+        const age = now - new Date(ex.images_fetched_at).getTime();
+        return age > (ex.image_urls.length > 0 ? IMAGE_TTL_MS + skuJitterMs(p.sku) : DRIVE_MISS_RETRY_MS);
       })
+      .sort((a, b) => Number(neverFetched(b)) - Number(neverFetched(a)))
       .slice(0, opts?.driveBudget ?? DRIVE_IMAGE_BUDGET);
+    const driveDeadline = start + (opts?.driveTimeBudgetMs ?? DRIVE_TIME_BUDGET_MS);
+    let deferred = 0;
     await mapWithConcurrency(needsDrive, 3, async (p) => {
+      if (Date.now() > driveDeadline) { deferred++; return; } // picked up next run
       try {
-        const img = await fetchSkuImageBytes(p.sku, 800);
-        if (img) {
-          const url = await uploadProductPhoto(p.sku, Buffer.from(img.body), img.contentType);
-          freshImages.set(p.sku, [url]);
+        const imgs = await fetchSkuImagesBytes(p.sku, 800, DRIVE_IMAGES_PER_SKU + 1);
+        if (imgs.length > DRIVE_IMAGES_PER_SKU) {
+          imgs.length = DRIVE_IMAGES_PER_SKU;
+          warnings.push(`${p.sku}: folder has more than ${DRIVE_IMAGES_PER_SKU} images — extra ones not synced.`);
+        }
+        if (imgs.length > 0) {
+          // Uploads run 3-wide; slots come from the ordered index, so the
+          // front shot always lands at the stable slot-0 path. A failed upload
+          // rejects into the catch — the DB keeps its previous image_urls
+          // (bytes already written this round are same-source, so harmless).
+          const urls = await mapWithConcurrency(
+            imgs.map((img, i) => ({ img, i })),
+            3,
+            ({ img, i }) => uploadProductPhoto(p.sku, Buffer.from(img.body), img.contentType, i),
+          );
+          freshImages.set(p.sku, urls);
         } else {
           freshImages.set(p.sku, []); // no folder/photo — record the attempt (TTL retry)
         }
         imageFetches++;
       } catch (err) {
+        // Record the failed attempt as a miss (30-min/7-day backoff). Leaving
+        // it unstamped would keep the SKU in the never-fetched priority class
+        // — a permanently broken folder would hog the head of the budget queue
+        // every run and starve everything behind it.
+        freshImages.set(p.sku, []);
         warnings.push(`Drive photo failed for ${p.sku}: ${(err as Error).message}`);
       }
     });
+    if (deferred > 0) {
+      warnings.push(`Drive photo pass hit its ${Math.round((opts?.driveTimeBudgetMs ?? DRIVE_TIME_BUDGET_MS) / 1000)}s time budget — ${deferred} SKU(s) deferred to the next run.`);
+    }
   }
 
   // Build upsert payload — every row carries image columns (fresh, or carried

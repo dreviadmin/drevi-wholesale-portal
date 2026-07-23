@@ -63,16 +63,38 @@ function baseColourSku(sku: string): string | null {
 const IMG = "(mimeType contains 'image/')";
 const q = (s: string) => s.replace(/'/g, "\\'");
 
-async function firstImageIn(drive: drive_v3.Drive, folderId: string): Promise<string | null> {
-  const res = await drive.files.list({
-    q: `'${q(folderId)}' in parents and ${IMG} and trashed = false`,
-    fields: "files(id, name)",
-    orderBy: "name",
-    pageSize: 1,
-    supportsAllDrives: true,
-    includeItemsFromAllDrives: true,
+export interface DriveImage { fileId: string; name: string }
+
+async function listImagesIn(drive: drive_v3.Drive, folderId: string): Promise<DriveImage[]> {
+  const out: DriveImage[] = [];
+  let pageToken: string | undefined;
+  do {
+    const res = await drive.files.list({
+      q: `'${q(folderId)}' in parents and ${IMG} and trashed = false`,
+      fields: "nextPageToken, files(id, name)",
+      orderBy: "name",
+      pageSize: 100,
+      pageToken,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+    for (const f of res.data.files ?? []) if (f.id && f.name) out.push({ fileId: f.id, name: f.name });
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+  return out;
+}
+
+// Display order (business rule, 22 Jul 2026): the thumbnail (index 0) is the
+// image named like "front" if one exists — the pipeline's hero shot — else the
+// lexicographically smallest name; the rest follow in name order.
+export function orderImages(files: DriveImage[]): DriveImage[] {
+  const sorted = [...files].sort((a, b) => {
+    const an = a.name.toLowerCase(), bn = b.name.toLowerCase();
+    return an < bn ? -1 : an > bn ? 1 : a.name < b.name ? -1 : 1;
   });
-  return res.data.files?.[0]?.id ?? null;
+  const front = sorted.findIndex((f) => /front/i.test(f.name.replace(/\.[^.]+$/, "")));
+  if (front > 0) sorted.unshift(...sorted.splice(front, 1));
+  return sorted;
 }
 
 // Normalize a SKU/folder name for matching: uppercase, strip everything that
@@ -134,13 +156,15 @@ async function listSkuFolders(parent: string): Promise<FolderIndex> {
   return idx;
 }
 
-// Resolve a SKU to an image file id within ONE parent folder. Tries, in order:
-// exact-SKU folder → base-SKU-named folder → any sibling-colour folder of the
-// same design → a file in the parent named like the SKU.
-async function findSkuImageIn(parent: string, rawSku: string): Promise<{ fileId: string } | null> {
-  if (!parent) return null;
+// Resolve a SKU to ALL its images within ONE parent folder (display-ordered).
+// Tries, in order: exact-SKU folder → colour-only folder → base-SKU-named
+// folder → any sibling-colour folder of the same design → files in the parent
+// named like the SKU. The first candidate that has any images wins whole —
+// sources are never mixed.
+async function findSkuImagesIn(parent: string, rawSku: string): Promise<DriveImage[]> {
+  if (!parent) return [];
   const sku = rawSku.trim().toUpperCase();
-  if (!sku) return null;
+  if (!sku) return [];
   const drive = await getDrive();
   const { byKey, byBase } = await listSkuFolders(parent);
 
@@ -153,44 +177,71 @@ async function findSkuImageIn(parent: string, rawSku: string): Promise<{ fileId:
   ];
   for (const folderId of candidates) {
     if (!folderId) continue;
-    const img = await firstImageIn(drive, folderId);
-    if (img) return { fileId: img };
+    const imgs = await listImagesIn(drive, folderId);
+    if (imgs.length > 0) return orderImages(imgs);
   }
 
   // Fallback: images stored as files named like the SKU (not in a subfolder).
   const byFile = await drive.files.list({
     q: `'${q(parent)}' in parents and ${IMG} and name contains '${q(sku)}' and trashed = false`,
     fields: "files(id, name)",
-    pageSize: 1,
+    pageSize: 100,
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
   });
-  const f = byFile.data.files?.[0]?.id;
-  return f ? { fileId: f } : null;
+  const loose = (byFile.data.files ?? []).flatMap((f) => (f.id && f.name ? [{ fileId: f.id, name: f.name }] : []));
+  return orderImages(loose);
 }
 
 // The full photo chain (business rule, 22 Jul 2026):
 //   1. photos folder (DRIVE_PHOTOS_FOLDER_ID — tag/shoot photos)
 //   2. try-on folder (DRIVE_TRYON_FOLDER_ID)
 //   3. the pipeline INPUT root (DRIVE_INPUT_FOLDER_ID — raw upload folders)
-// All three use the same per-SKU-subfolder lookup with size-tolerant matching.
-export async function findSkuImage(rawSku: string): Promise<{ fileId: string } | null> {
+// All three use the same per-SKU-subfolder lookup with size-tolerant matching;
+// the first source with any photos supplies ALL of them.
+export async function findSkuImages(rawSku: string): Promise<DriveImage[]> {
   for (const parent of [process.env.DRIVE_PHOTOS_FOLDER_ID, tryonFolderId(), inputRootFolderId()]) {
     if (!parent) continue;
     try {
-      const hit = await findSkuImageIn(parent, rawSku);
-      if (hit) return hit;
+      const hits = await findSkuImagesIn(parent, rawSku);
+      if (hits.length > 0) return hits;
     } catch { /* folder unreachable — keep falling through */ }
   }
-  return null;
+  return [];
 }
 
-// Sync helper: resolve a SKU straight to image bytes (thumbnail-sized), for
-// copying Drive photos into the public product-photos bucket.
-export async function fetchSkuImageBytes(sku: string, size = 800): Promise<{ body: ArrayBuffer; contentType: string } | null> {
-  const hit = await findSkuImage(sku);
-  if (!hit) return null;
-  return fetchDriveImage(hit.fileId, size);
+// Single-image form for the scan-preview routes (price/retail check): the
+// display-order head, i.e. the front shot when one exists.
+export async function findSkuImage(rawSku: string): Promise<{ fileId: string } | null> {
+  const hits = await findSkuImages(rawSku);
+  return hits.length > 0 ? { fileId: hits[0].fileId } : null;
+}
+
+// Sync helper: resolve a SKU to the bytes of ALL its images (thumbnail-sized,
+// display-ordered), for copying into the public product-photos bucket.
+// ALL-OR-NOTHING: if any single download fails the whole set throws. A partial
+// set would compact the survivors into lower slots — a transient failure on
+// front.png would let back.jpg overwrite the hero at the stable SKU.jpg URL
+// that existing orders reference. Downloads run 3-wide, order preserved.
+export async function fetchSkuImagesBytes(
+  sku: string,
+  size = 800,
+  max = Infinity,
+): Promise<Array<{ body: ArrayBuffer; contentType: string }>> {
+  const hits = (await findSkuImages(sku)).slice(0, max);
+  if (hits.length === 0) return [];
+  const out: Array<{ body: ArrayBuffer; contentType: string } | null> = new Array(hits.length).fill(null);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < hits.length) {
+      const i = cursor++;
+      out[i] = await fetchDriveImage(hits[i].fileId, size);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(3, hits.length) }, worker));
+  const failed = out.filter((x) => !x).length;
+  if (failed > 0) throw new Error(`${failed} of ${hits.length} image downloads failed`);
+  return out as Array<{ body: ArrayBuffer; contentType: string }>;
 }
 
 // Stream an image (used by the proxy route). When `size` is given, serve
