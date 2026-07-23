@@ -194,11 +194,20 @@ reformatted header doesn't break the sync).
   `select("*")` queries): vendor name / ID / SKU, `Last Cost`, last receipt
   date, and `Final MRP` as `retail_price`. Covers *every* sheet row, including
   wholesale-hidden garments (they still hang in the retail shop).
-- **Photos** — products without images get theirs from the Drive photos folder
-  (`DRIVE_PHOTOS_FOLDER_ID`): exact-SKU folder → base-design folder →
-  sibling-colour folder → loose file, copied once as ~s800 thumbnails into the
-  public `product-photos` bucket. Misses retry every 30 minutes (folders are
-  added all day); fetches are budgeted per run (`DRIVE_IMAGE_BUDGET`).
+- **Photos** — pulled from a three-source Drive chain: the photos folder
+  (`DRIVE_PHOTOS_FOLDER_ID`) → the try-on folder (`DRIVE_TRYON_FOLDER_ID`) →
+  the pipeline input root (`DRIVE_INPUT_FOLDER_ID`); within each source:
+  exact-SKU folder → colour-only folder → base-design folder → sibling-colour
+  folder → loose file. The first source with any photos supplies **all of
+  them** (up to 12/SKU, trims warned): copied as ~s800 thumbnails into the
+  public `product-photos` bucket at `SKU.ext`, `SKU-2.ext`, … The thumbnail
+  (`image_urls[0]`) is the file named like **front**, else the
+  lexicographically smallest name. Downloads are all-or-nothing per SKU so a
+  transient failure can never shuffle or shrink a good set. Misses retry every
+  30 minutes; synced sets re-check their folder weekly (jittered) so added
+  shots propagate; fetches are budgeted per run (`DRIVE_IMAGE_BUDGET`) and the
+  whole pass stops at a 35s wall-clock deadline so the rest of the sync always
+  commits.
 - **Manual edits win** — fields locked in Manage Catalog keep their DB value;
   the lock list itself is never clobbered; renamed SKUs are skipped via
   `sync_ignored_skus`; admin-hidden/shown products are never auto-toggled.
