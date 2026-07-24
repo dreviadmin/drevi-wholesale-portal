@@ -273,6 +273,29 @@ npm run dev          # http://localhost:3000  (redirects to /login)
 npm run build:local  # production build into .next-build (leaves dev server alone)
 ```
 
+### Dev environment (safe sandbox)
+
+`npm run dev` runs against the **DEV** Supabase project automatically —
+`.env.development.local` (gitignored, dev keys) overrides `.env.local` in dev
+mode only, so local experiments never touch production data. `.env.local`
+stays pointed at production for builds and the maintenance scripts.
+
+- **Dev database**: Supabase project `qvnvxcdyvcsgxulbcmzm` ("Drevi Wholesale
+  DEV") — full schema + a snapshot of prod data (products, buyers, orders,
+  registry). Staff logins use the same usernames with the `<name>123`
+  convention. Re-snapshot any time by re-running the copy (truncate + insert).
+- **Dev deployment**: https://drevi-wholesale-dev.vercel.app — a second Vercel
+  project (`drevi-wholesale-dev`) wired to the dev database. Deploy the `dev`
+  branch to it with `npx vercel deploy --prod` (the repo is CLI-linked to the
+  dev project; the production project still deploys ONLY from pushes to
+  `main`, and ignores the `dev` branch via `vercel.json`).
+- **Safety rails**: `SKU_MIRROR_DISABLED=true` in both dev environments —
+  test mints never append to the real SKU Registry sheet (reads/floors stay
+  live). Google Sheets are only ever READ from dev; Drive photos are served
+  from prod's public bucket URLs. GitHub Actions crons target production only.
+- **Workflow**: branch off `dev`, hack, verify locally or on the dev URL,
+  then merge to `main` when it's ready for the real store.
+
 ### Database
 
 ```bash
