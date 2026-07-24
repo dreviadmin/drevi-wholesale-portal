@@ -16,6 +16,10 @@ import { fetchAll } from "@/lib/supabase/fetch-all";
 const SHEET_ID = () => process.env.SKU_REGISTRY_SHEET_ID ?? "1-Gnqoq5g82R3w4g-Mo6zI0NBBlCB9Ib2bkoWpEHmZ4s";
 const TAB = () => process.env.SKU_REGISTRY_TAB ?? "SKUs";
 export const dualMode = () => (process.env.SKU_DUAL_MODE ?? "true").toLowerCase() !== "false";
+// Dev-environment safety: reads (import, floors) stay live but the mirror
+// NEVER appends to the real registry sheet — test mints must not burn real
+// numbers in the sheet the old tool and production trust.
+const mirrorDisabled = () => (process.env.SKU_MIRROR_DISABLED ?? "").toLowerCase() === "true";
 
 let client: sheets_v4.Sheets | null = null;
 async function getSheets(): Promise<sheets_v4.Sheets> {
@@ -146,6 +150,7 @@ export async function importRegistry(): Promise<{ imported: number; qrBackfilled
 
 // §4.2 Mirror — append portal rows the old tool hasn't seen yet.
 export async function mirrorRegistry(): Promise<{ mirrored: number; warnings: string[] }> {
+  if (mirrorDisabled()) return { mirrored: 0, warnings: ["mirror disabled (SKU_MIRROR_DISABLED) — dev environment"] };
   const warnings: string[] = [];
   const admin = createAdminClient();
   const { data: pending, error } = await admin
@@ -186,6 +191,7 @@ export async function mirrorRegistry(): Promise<{ mirrored: number; warnings: st
 
 // Mirror a single just-minted row inline (best-effort — the cron retries).
 export async function mirrorOne(variantSku: string): Promise<void> {
+  if (mirrorDisabled()) return;
   const admin = createAdminClient();
   const { data: row } = await admin
     .from("sku_registry")
