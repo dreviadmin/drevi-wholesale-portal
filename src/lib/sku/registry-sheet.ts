@@ -233,6 +233,36 @@ export async function sheetNumberFloor(cat: string, sub: string): Promise<{ floo
   }
 }
 
+// Third floor source: the RETAIL pipeline Master ("Drevi Product Master",
+// ~1000 rows the service account can already read). The registry sheet needs
+// an operator grant the portal may not have yet — but every LIVE design is in
+// this Master, so its floor alone stops re-minting numbers of real garments
+// for categories that never entered the wholesale tables. Cached briefly:
+// mints come in bursts while tagging a delivery.
+const RETAIL_MASTER_ID = () => process.env.PIPELINE_MASTER_SHEET_ID ?? "1FbI2SBWqBC6Wy8oTLtModXXvDKHbpIdQPRO32g2ivr0";
+let masterSkuCache: { at: number; skus: string[] } | null = null;
+const MASTER_CACHE_MS = 5 * 60 * 1000;
+
+export async function masterNumberFloor(cat: string, sub: string): Promise<{ floor: number; warning?: string }> {
+  try {
+    if (!masterSkuCache || Date.now() - masterSkuCache.at > MASTER_CACHE_MS) {
+      const { readMaster } = await import("@/lib/sheets");
+      const { rows } = await readMaster({ sku: "Drevi SKU" }, RETAIL_MASTER_ID());
+      masterSkuCache = { at: Date.now(), skus: rows.map((r) => (r.sku ?? "").trim().toUpperCase()).filter(Boolean) };
+    }
+    const re = new RegExp(`^DD-${cat}-${sub}-(\\d{3})`);
+    let max = 0;
+    for (const s of masterSkuCache.skus) {
+      const m = s.match(re);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
+    return { floor: max };
+  } catch (err) {
+    masterSkuCache = null;
+    return { floor: 0, warning: `retail master floor unavailable: ${(err as Error).message}` };
+  }
+}
+
 // Defence-in-depth floor from the portal's OWN product tables: until the
 // registry backfill has run (sheet access is an operator step), the legacy
 // SKUs already live in wholesale_products / product_vendor_info — never mint

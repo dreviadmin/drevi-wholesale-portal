@@ -151,36 +151,23 @@ export function pdfFileName(withPrice: boolean): string {
   return `drevi-${withPrice ? "price-" : ""}labels-${stamp}.pdf`;
 }
 
-// Print via hidden iframe; resolves false when the browser blocked it.
-let activePrintFrame: HTMLIFrameElement | null = null;
+// Open the label PDF in a NEW TAB and let the user print from the viewer.
+// The old hidden-iframe window.print() was a trap: the browser dialog opened
+// on the printer's default paper (A4), silently shrinking the 38×25 mm roll
+// pages onto letter stock. A visible viewer shows the roll-shaped pages and
+// the print dialog where the roll paper size must be picked.
 export function printPdf(doc: jsPDF): boolean {
   try {
-    // One frame at a time — repeated prints must not accumulate iframes.
-    if (activePrintFrame) { activePrintFrame.remove(); activePrintFrame = null; }
     const url = doc.output("bloburl") as unknown as string;
-    const frame = document.createElement("iframe");
-    frame.style.position = "fixed";
-    frame.style.right = "0";
-    frame.style.bottom = "0";
-    frame.style.width = "0";
-    frame.style.height = "0";
-    frame.style.border = "0";
-    frame.src = url;
-    frame.onload = () => {
-      try {
-        frame.contentWindow?.focus();
-        frame.contentWindow?.print();
-      } catch {
-        /* handled by caller toast */
-      }
-    };
-    document.body.appendChild(frame);
-    activePrintFrame = frame; // left attached (removal cancels the dialog); replaced on next print
-    return true;
+    return !!window.open(url, "_blank");
   } catch {
     return false;
   }
 }
+
+// The one thing the driver dialog gets wrong by default — callers flash this
+// alongside every print so nobody hunts for why tags came out A4.
+export const PRINT_PAPER_HINT = "In the print dialog pick the 38×25 mm roll paper (not A4), scale 100%";
 
 export async function shareQr(sku: string): Promise<"shared" | "downloaded"> {
   const dataUrl = await qrPngDataUrl(sku);

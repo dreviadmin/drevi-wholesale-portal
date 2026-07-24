@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X, ScanLine, Minus, Plus, Trash2, Printer, Download, RefreshCw } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
-import { buildRollPdf, printPdf, pdfFileName, DEFAULT_CAL, CAL_KEY, type Calibration, type TrayItem, type PrintDatum } from "./labels";
+import { buildRollPdf, printPdf, pdfFileName, PRINT_PAPER_HINT, DEFAULT_CAL, CAL_KEY, type Calibration, type TrayItem, type PrintDatum } from "./labels";
 import type { BaseEntry } from "./SkuGeneratorClient";
 import { palette } from "@/lib/palette";
 
@@ -111,7 +111,8 @@ export function PrintTab({ tray, setTray, bases, flash }: {
     try {
       const doc = await buildRollPdf(tray, cal, withPrice, priceData ?? new Map());
       if (kind === "download") doc.save(pdfFileName(withPrice));
-      else if (!printPdf(doc)) flash("Print blocked — use Download PDF");
+      else if (printPdf(doc)) flash(PRINT_PAPER_HINT);
+      else flash("Pop-up blocked — use Download PDF");
     } finally {
       setBuilding(false);
     }
@@ -219,10 +220,13 @@ export function PrintTab({ tray, setTray, bases, flash }: {
         <button type="button" onClick={() => output("print")} disabled={!readyToPrint || building} className="flex items-center gap-2 font-body uppercase disabled:opacity-50" style={btn(true)}>
           <Printer size={13} /> {building ? "Building…" : "Print"}
         </button>
-        <button type="button" onClick={() => output("download")} disabled={!readyToPrint || building} className="flex items-center gap-2 font-body uppercase disabled:opacity-50" style={btn()}>
+        <button type="button" onClick={() => output("download")} disabled={!readyToPrint || building} className="flex items-center gap-2 font-body uppercase disabled:opacity-50" style={btn()} title={PRINT_PAPER_HINT}>
           <Download size={13} /> Download PDF
         </button>
       </div>
+      <p className="font-body mt-2" style={{ fontSize: 10.5, color: palette.mutedGreige, lineHeight: 1.5 }}>
+        Pages are exactly {cal.rollW}×{cal.rollH} mm — one sticker each. {PRINT_PAPER_HINT}.
+      </p>
 
       {/* Calibration */}
       <div className="mt-5">

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isValidCatSub, ALL_COLOR_CODES, ALL_SIZE_CODES, BASE_SKU_RE } from "@/lib/sku/vocab";
-import { dualMode, sheetNumberFloor, knownSkuFloor, mirrorOne } from "@/lib/sku/registry-sheet";
+import { dualMode, sheetNumberFloor, masterNumberFloor, knownSkuFloor, mirrorOne } from "@/lib/sku/registry-sheet";
 
 export const dynamic = "force-dynamic";
 
@@ -43,17 +43,21 @@ export async function POST(request: Request) {
     sub = baseSku.split("-")[2];
   }
 
-  // Dual-mode transition safety: live sheet floor closes the cron-lag window.
+  // Dual-mode transition safety: the number floor is the max across every
+  // corpus of already-used numbers we can reach — the portal's product tables,
+  // the retail pipeline Master, and (when the operator grant is in place) the
+  // legacy registry sheet itself. Sheet floors fail soft into warnings.
   const warnings: string[] = [];
   let floor = 0;
   if (mode === "new") {
-    // Product-table floor always applies (legacy SKUs predate the registry).
-    floor = await knownSkuFloor(cat, sub);
-    if (dualMode()) {
-      const f = await sheetNumberFloor(cat, sub);
-      floor = Math.max(floor, f.floor);
-      if (f.warning) warnings.push(f.warning);
-    }
+    const [known, master, sheet] = await Promise.all([
+      knownSkuFloor(cat, sub),
+      masterNumberFloor(cat, sub),
+      dualMode() ? sheetNumberFloor(cat, sub) : Promise.resolve({ floor: 0 as number, warning: undefined as string | undefined }),
+    ]);
+    floor = Math.max(known, master.floor, sheet.floor);
+    if (master.warning) warnings.push(master.warning);
+    if (sheet.warning) warnings.push(sheet.warning);
   }
 
   const admin = createAdminClient();

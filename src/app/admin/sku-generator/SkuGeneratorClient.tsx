@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Search, X, ScanLine, Copy, QrCode, Printer, Download, Share2, Plus } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { CATEGORIES, COLOR_GROUPS, SIZES, type CategoryCode } from "@/lib/sku/vocab";
-import { qrPngDataUrl, shareQr, downloadDataUrl, buildRollPdf, printPdf, loadCal, TRAY_KEY, type TrayItem } from "./labels";
+import { qrPngDataUrl, shareQr, downloadDataUrl, buildRollPdf, printPdf, loadCal, PRINT_PAPER_HINT, TRAY_KEY, type TrayItem } from "./labels";
 import { PrintTab } from "./PrintTab";
 import { palette } from "@/lib/palette";
 
@@ -68,6 +68,7 @@ export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ message: string; duplicate: boolean; dupSku?: string } | null>(null);
   const [result, setResult] = useState<{ baseSku: string; variantSku: string } | null>(null);
+  const [mintWarnings, setMintWarnings] = useState<string[]>([]);
   const [scanTarget, setScanTarget] = useState<"base" | "lookup" | null>(null);
   const [lookup, setLookup] = useState("");
   const [lookupSku, setLookupSku] = useState<string | null>(null);
@@ -183,6 +184,7 @@ export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
         return;
       }
       setResult({ baseSku: d.baseSku, variantSku: d.variantSku });
+      setMintWarnings(Array.isArray(d.warnings) ? d.warnings : []);
       // refresh state + bases
       fetch("/api/sku/state").then((r) => r.json()).then((s) => {
         if (s.counters) { setCounters(s.counters); setHistory(s.history); setTotalSkus(s.totalSkus); }
@@ -217,7 +219,7 @@ export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
     <div className="flex gap-2 flex-wrap mt-3">
       <button type="button" onClick={async () => downloadDataUrl(await qrPngDataUrl(sku), `${sku}.png`)} className="flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, padding: "7px 11px" }}><Download size={12} /> Download</button>
       <button type="button" onClick={async () => flash((await shareQr(sku)) === "shared" ? "Shared" : "Downloaded (share unavailable)")} className="flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, padding: "7px 11px" }}><Share2 size={12} /> Share</button>
-      <button type="button" onClick={async () => { const doc = await buildRollPdf([{ sku, copies: 1 }], loadCal(), false, new Map()); if (!printPdf(doc)) flash("Print blocked — use Download PDF"); }} className="flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, padding: "7px 11px" }}><Printer size={12} /> Print</button>
+      <button type="button" onClick={async () => { const doc = await buildRollPdf([{ sku, copies: 1 }], loadCal(), false, new Map()); if (printPdf(doc)) flash(PRINT_PAPER_HINT); else flash("Pop-up blocked — use Download PDF"); }} className="flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, padding: "7px 11px" }}><Printer size={12} /> Print</button>
       {extra !== false && (
         <button type="button" onClick={() => addToTray(sku)} className="flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", background: palette.black, color: palette.ivory, padding: "7px 11px" }}><Plus size={12} /> Add to print sheet</button>
       )}
@@ -430,6 +432,26 @@ export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
                 <QrInline sku={result.variantSku} />
                 {qrActions(result.variantSku)}
               </div>
+            </div>
+          )}
+
+          {/* Numbering-safety warnings — a floor source we couldn't reach means
+              this number may collide with the old tool's history. */}
+          {result && mintWarnings.length > 0 && (
+            <div className="mt-3 p-3" style={{ background: "#FBF3E4", border: "1px solid #C9A227" }}>
+              <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: "#8a6d1a", fontWeight: 600 }}>
+                Check this SKU against the old registry
+              </div>
+              {mintWarnings.some((w) => /permission|unavailable/i.test(w)) && (
+                <p className="font-body mt-1.5" style={{ fontSize: 11.5, color: palette.softBlack, lineHeight: 1.55 }}>
+                  The portal cannot read the legacy SKU Registry sheet, so numbering can&apos;t see SKUs minted by the old tool.
+                  Fix: open the registry sheet → Share → add <span className="font-mono" style={{ fontSize: 10.5 }}>drevi-pipeline-sa@drevi-pipeline.iam.gserviceaccount.com</span> as <b>Editor</b>.
+                  History imports itself within 10 minutes of the grant.
+                </p>
+              )}
+              {mintWarnings.map((w, i) => (
+                <div key={i} className="font-mono mt-1" style={{ fontSize: 9.5, color: "#8a6d1a" }}>{w}</div>
+              ))}
             </div>
           )}
 
