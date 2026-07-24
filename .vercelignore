@@ -1,0 +1,7 @@
+.next
+.next-build
+.next-preview
+.local
+node_modules
+.git
+*.tsbuildinfo
