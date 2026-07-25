@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drevi — App prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Montserrat:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.2.0/tabler-icons.min.css">
+<style>
+:root{
+  --black:#1A1A1A; --soft:#2D2926; --gold:#C4A35A; --gold-lt:#d4b878;
+  --ivory:#FAF6F0; --champ:#E8D5B7; --border:#e8e0d5; --border-d:#d8cfc2;
+  --muted:#8a857c; --text-lt:#6b6b6b;
+  --grn:#2f8567; --grn-bg:rgba(93,202,165,.16);
+  --amb:#8a6d2e; --amb-bg:rgba(196,163,90,.16);
+  --blu:#4d6a86; --blu-bg:rgba(90,122,154,.14);
+  --red:#a34b4b; --red-bg:rgba(201,123,123,.14);
+  --neu:#5f5e5a; --neu-bg:#f1efe8;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:'Montserrat',system-ui,sans-serif;
+  background:#efe9df;
+  color:var(--soft);
+  display:flex;flex-direction:column;align-items:center;
+  padding:22px 12px 40px;min-height:100%;
+  -webkit-font-smoothing:antialiased;
+}
+.stage-head{max-width:412px;width:100%;text-align:center;margin-bottom:16px}
+.stage-title{font-family:'Cormorant Garamond',serif;font-size:24px;font-weight:600;letter-spacing:4px;color:var(--black)}
+.stage-sub{font-size:12px;color:var(--text-lt);margin-top:4px;line-height:1.5}
+.persona{display:inline-flex;background:#fff;border:1px solid var(--border);border-radius:10px;padding:4px;margin-top:14px;gap:4px}
+.persona button{border:none;background:transparent;font-family:inherit;font-size:12px;font-weight:600;letter-spacing:.4px;padding:8px 16px;border-radius:7px;color:var(--text-lt);cursor:pointer}
+.persona button.on{background:var(--black);color:var(--gold)}
+
+/* phone frame */
+.phone{
+  width:100%;max-width:412px;background:#111;border-radius:30px;padding:9px;
+  box-shadow:0 12px 40px rgba(0,0,0,.18);position:relative;
+}
+.screen-shell{background:var(--black);border-radius:23px;overflow:hidden;position:relative;height:760px;display:flex;flex-direction:column}
+.appview{flex:1;display:flex;flex-direction:column;min-height:0}
+.appview[hidden]{display:none}
+
+/* header */
+.brandbar{background:var(--black);padding:15px 16px 13px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.bb-l{display:flex;align-items:center;gap:11px;min-width:0}
+.bb-back{color:var(--gold);font-size:20px;cursor:pointer;flex-shrink:0}
+.bb-name{font-family:'Cormorant Garamond',serif;color:var(--gold);font-size:19px;font-weight:600;letter-spacing:3px}
+.bb-name .ws{font-family:'Montserrat';font-size:10px;letter-spacing:2px;color:var(--muted);font-weight:600}
+.bb-title{color:#fff;font-size:15px;font-weight:500}
+.bb-sub{color:var(--muted);font-size:11px;margin-top:2px}
+.bb-mono{font-family:'JetBrains Mono',monospace;color:#fff;font-size:13px;font-weight:500}
+.bb-r{display:flex;align-items:center;gap:14px;color:var(--gold);flex-shrink:0}
+.bb-r i{cursor:pointer;font-size:20px}
+.synced{display:flex;align-items:center;gap:6px;color:var(--grn);font-size:11px}
+.synced .d{width:7px;height:7px;border-radius:50%;background:var(--grn)}
+.cartbadge{position:relative}
+.cartbadge span{position:absolute;top:-5px;right:-6px;background:var(--gold);color:var(--black);font-size:10px;font-weight:600;border-radius:8px;padding:0 5px}
+
+/* body */
+.body{flex:1;overflow-y:auto;background:var(--ivory);padding:14px}
+.body::-webkit-scrollbar{width:0}
+.eyebrow{font-size:11px;letter-spacing:1px;color:var(--text-lt);text-transform:uppercase;font-weight:600;margin-bottom:9px}
+.eyebrow.mt{margin-top:18px}
+.rowbtw{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}
+.rowbtw .eyebrow{margin-bottom:0}
+.seeall{font-size:11px;color:var(--amb);font-weight:600;cursor:pointer}
+
+/* cards & tiles */
+.card{background:#fff;border:.5px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px}
+.metricgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+.metric{background:#fff;border:.5px solid var(--border);border-radius:10px;padding:10px 12px}
+.metric .l{font-size:11px;color:var(--muted)}
+.metric .v{font-size:20px;font-weight:500;color:var(--black);margin-top:2px}
+.metric .v.red{color:#c97b7b}
+
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.tile{background:#fff;border:.5px solid var(--border);border-radius:12px;padding:14px 13px;cursor:pointer;transition:transform .1s}
+.tile:active{transform:scale(.98)}
+.tile i{font-size:22px;color:var(--gold)}
+.tile .t{font-size:13px;font-weight:600;color:var(--soft);margin-top:8px}
+.tile .s{font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4}
+
+/* inbox */
+.inbox{background:#fff;border:.5px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px}
+.ibrow{display:flex;align-items:center;gap:11px;padding:12px 13px;border-bottom:.5px solid #f0ebe3;cursor:pointer}
+.ibrow:last-child{border-bottom:none}
+.ibico{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.ibrow .m{flex:1;min-width:0}
+.ibrow .m .t{font-size:13px;color:var(--soft);font-weight:500}
+.ibrow .m .s{font-size:11px;color:var(--muted);margin-top:1px}
+.count{font-size:11px;font-weight:600;border-radius:9px;padding:1px 7px}
+.chev{color:#c2bcb2;font-size:17px;flex-shrink:0}
+
+/* quick actions */
+.qa-gold{width:100%;background:var(--gold);color:var(--black);border:none;border-radius:10px;padding:13px;font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;display:flex;align-items:center;justify-content:center;gap:9px;margin-bottom:8px;cursor:pointer;font-family:inherit}
+.qa-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.qa{background:#fff;border:.5px solid var(--border-d);border-radius:10px;padding:11px;font-size:12px;color:var(--soft);font-weight:500;display:flex;align-items:center;justify-content:center;gap:7px;cursor:pointer;font-family:inherit}
+.qa i{font-size:16px;color:var(--amb)}
+
+/* list rows */
+.listcard{background:#fff;border:.5px solid var(--border);border-radius:12px;overflow:hidden}
+.lrow{display:flex;align-items:center;gap:11px;padding:12px 13px;border-bottom:.5px solid #f0ebe3;cursor:pointer}
+.lrow:last-child{border-bottom:none}
+.lrow .thumb{width:40px;height:44px;background:var(--champ);border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#b39a6a;font-size:15px}
+.lrow .m{flex:1;min-width:0}
+.lrow .m .t{font-size:13px;color:var(--soft);font-weight:500}
+.lrow .m .mono{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--black);font-weight:500}
+.lrow .m .s{font-size:11px;color:var(--muted);margin-top:2px}
+
+/* badges / pills */
+.badge{font-size:10px;font-weight:600;border-radius:6px;padding:2px 8px;white-space:nowrap}
+.b-grn{color:var(--grn);background:var(--grn-bg)}
+.b-amb{color:var(--amb);background:var(--amb-bg)}
+.b-blu{color:var(--blu);background:var(--blu-bg)}
+.b-red{color:var(--red);background:var(--red-bg)}
+.b-neu{color:var(--neu);background:var(--neu-bg)}
+.dots{display:flex;align-items:center;gap:9px;margin-top:5px;font-size:10px;color:var(--muted)}
+.dots .g{color:var(--grn)} .dots .a{color:var(--amb)} .dots .b{color:var(--blu)}
+
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:11px;border:.5px solid var(--border-d);color:var(--soft);border-radius:14px;padding:5px 12px;background:#fff;cursor:pointer}
+.chip.on{background:var(--black);color:var(--gold);border-color:var(--black)}
+.chip.solid{background:var(--gold);color:var(--black);border-color:var(--gold);font-weight:600}
+
+/* buttons */
+.btn{width:100%;border-radius:10px;padding:12px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;border:.5px solid var(--border-d);background:#fff;color:var(--soft)}
+.btn.gold{background:var(--gold);color:var(--black);border:none}
+.btn.dark{background:var(--black);color:var(--gold);border:none}
+.btn.ok{border-color:#cfe4d9;color:var(--grn);background:#fff}
+.btn.locked{background:#f3efe9;border-color:#e0d8cc;color:#a09a90}
+.btn.sm{padding:9px;font-size:12px;border-radius:8px}
+.btnrow{display:flex;gap:6px}
+
+/* forms */
+.field{margin-bottom:12px}
+.lbl{font-size:11px;letter-spacing:.5px;color:var(--text-lt);text-transform:uppercase;font-weight:600;margin-bottom:6px;display:block}
+.inp,select,textarea{width:100%;padding:11px 12px;border:.5px solid var(--border-d);border-radius:8px;font-size:14px;background:#fff;color:var(--soft);font-family:inherit;outline:none}
+.inp:focus,select:focus,textarea:focus{border-color:var(--gold)}
+.inp.mono{font-family:'JetBrains Mono',monospace;font-weight:600;letter-spacing:1px}
+textarea{resize:none}
+.toggle-2{display:flex;background:var(--ivory);border:.5px solid var(--border);border-radius:9px;padding:4px;gap:4px;margin-bottom:14px}
+.toggle-2 button{flex:1;border:none;background:transparent;font-family:inherit;font-size:11px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;padding:9px;border-radius:6px;color:var(--text-lt);cursor:pointer}
+.toggle-2 button.on{background:var(--black);color:var(--gold)}
+
+/* sku result / price */
+.skudisp{background:var(--black);border-radius:10px;padding:16px;margin:12px 0}
+.skudisp .k{font-size:9px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px}
+.skudisp .v{font-family:'JetBrains Mono',monospace;font-size:19px;color:var(--gold);font-weight:700;letter-spacing:1.5px;word-break:break-all}
+.skudisp .v.var{font-size:15px;color:#fff}
+.skudisp .div{height:1px;background:#333;margin:11px 0}
+.pricebig{font-size:34px;font-weight:600;color:var(--black);font-family:'Cormorant Garamond',serif;letter-spacing:1px}
+
+/* product cards (buyer) */
+.pgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pcard{background:#fff;border:.5px solid var(--border);border-radius:12px;overflow:hidden}
+.pcard .img{height:104px;background:var(--champ);position:relative;display:flex;align-items:center;justify-content:center;color:#b39a6a;font-size:22px}
+.pcard .img .st{position:absolute;top:7px;left:7px;font-size:10px;font-weight:600;border-radius:6px;padding:1px 6px}
+.pcard .in{padding:9px 10px 10px}
+.pcard .nm{font-size:12px;color:var(--soft);font-weight:500;line-height:1.3}
+.pcard .pr{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--black);font-weight:600;margin-top:4px}
+.pcard .pr span{color:var(--muted);font-weight:400}
+.pcard .moq{font-size:10px;color:var(--muted);margin-top:1px}
+.pcard button{width:100%;margin-top:8px;border:none;border-radius:7px;padding:8px;font-size:11px;font-weight:500;letter-spacing:.4px;cursor:pointer;font-family:inherit}
+
+/* workbench angle card */
+.angle{background:#fff;border:.5px solid var(--border);border-radius:12px;padding:11px;margin-bottom:9px}
+.angle.review{border-color:var(--gold)}
+.angle .hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}
+.angle .hd .nm{font-size:13px;color:var(--soft);font-weight:500}
+.imgrow{display:flex;align-items:center;gap:8px}
+.imgbox{flex:1;height:78px;background:var(--champ);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#9c8148}
+.imgbox.pick{border:1.5px solid #5DCAA5}
+.imgbox i{font-size:18px}
+.imgbox .cap{font-size:9px;margin-top:2px}
+.engchips{display:flex;gap:5px;margin-top:9px;flex-wrap:wrap}
+.eng{font-size:11px;border-radius:14px;padding:4px 11px;cursor:pointer}
+.eng.on{background:var(--black);color:var(--gold);font-weight:500}
+.eng.off{background:#fff;border:.5px solid var(--border-d);color:var(--text-lt)}
+.promptbox{margin-top:9px;background:var(--ivory);border:.5px solid var(--border);border-radius:8px;padding:8px 10px}
+.promptbox .ph{display:flex;align-items:center;justify-content:between;justify-content:space-between}
+.promptbox .ph .k{font-size:10px;letter-spacing:.5px;color:var(--muted);text-transform:uppercase}
+.promptbox .ph i{font-size:14px;color:var(--amb);cursor:pointer}
+.promptbox .tx{font-size:11px;color:#5f5e5a;margin-top:4px;line-height:1.4}
+
+/* batch bar */
+.batch{background:var(--black);border-radius:12px;padding:11px 12px;margin-bottom:12px}
+.batch .hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}
+.batch .hd .n{color:var(--gold);font-size:13px;font-weight:500}
+.batch .hd .clr{color:var(--muted);font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer}
+.bacts{display:flex;flex-wrap:wrap;gap:6px}
+.bact{border:none;border-radius:8px;padding:7px 11px;font-size:12px;font-family:inherit;cursor:pointer;background:#2b2723;color:#e5ddcf;border:.5px solid #3a352e}
+.bact.gold{background:var(--gold);color:var(--black);display:flex;flex-direction:column;align-items:flex-start;line-height:1.25;font-weight:500;border:none}
+.bact.gold small{font-size:10px;font-weight:400;opacity:.82}
+
+/* board row w checkbox */
+.brow{display:flex;align-items:center;gap:10px;padding:11px;border-bottom:.5px solid #f0ebe3;cursor:pointer}
+.brow:last-child{border-bottom:none}
+.brow.sel{background:#f6efe1}
+.cb{width:20px;height:20px;border-radius:5px;border:1.5px solid #cfc7ba;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.cb.on{background:var(--gold);border:none;color:var(--black)}
+.cb.on i{font-size:14px}
+.brow .thumb{width:40px;height:44px;background:var(--champ);border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#b39a6a;font-size:15px}
+
+/* dest toggles */
+.dests{display:flex;gap:8px;margin-bottom:14px}
+.dest{flex:1;background:#fff;border:.5px solid var(--border-d);border-radius:9px;padding:8px 10px;display:flex;align-items:center;justify-content:space-between}
+.dest.ok{border-color:#cfe4d9}
+.dest .n{font-size:12px;color:var(--soft);font-weight:500}
+.dest .st{font-size:11px;display:flex;align-items:center;gap:3px}
+
+/* segmented */
+.seg{display:flex;background:#fff;border:.5px solid var(--border);border-radius:9px;padding:4px;gap:4px;margin-bottom:14px}
+.seg button{flex:1;border:none;background:transparent;font-family:inherit;font-size:12px;font-weight:600;padding:8px;border-radius:6px;color:var(--text-lt);cursor:pointer}
+.seg button.on{background:var(--black);color:var(--gold)}
+.segpane[hidden]{display:none}
+
+/* bottom nav */
+.bnav{background:var(--black);display:flex;align-items:flex-end;justify-content:space-around;padding:9px 6px 12px;border-top:.5px solid #2f2b26;flex-shrink:0}
+.nitem{display:flex;flex-direction:column;align-items:center;gap:3px;color:#7c766c;flex:1;cursor:pointer}
+.nitem i{font-size:20px}
+.nitem span{font-size:10px}
+.nitem.on{color:var(--gold)}
+.nscan{flex:1;display:flex;justify-content:center;margin-top:-12px}
+.nscan .b{width:46px;height:46px;border-radius:50%;background:var(--gold);display:flex;align-items:center;justify-content:center;color:var(--black);cursor:pointer;box-shadow:0 3px 10px rgba(196,163,90,.4)}
+.nscan .b i{font-size:22px}
+
+/* scan sheet */
+.overlay{position:absolute;inset:0;background:rgba(20,18,16,.55);display:flex;align-items:flex-end;z-index:40}
+.overlay[hidden]{display:none}
+.sheet{width:100%;background:var(--ivory);border-radius:20px 20px 23px 23px;padding:16px 16px 20px;animation:up .18s ease}
+@keyframes up{from{transform:translateY(30px)}to{transform:translateY(0)}}
+.sheet-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+.sheet-h .k{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--text-lt);font-weight:600}
+.sheet-h i{font-size:22px;color:var(--muted);cursor:pointer}
+.sheet .sku{font-family:'JetBrains Mono',monospace;font-size:16px;color:var(--black);font-weight:700;margin:2px 0 3px}
+.sheet .gm{font-size:12px;color:var(--muted);margin-bottom:12px}
+.sact{display:flex;align-items:center;gap:12px;padding:12px 13px;background:#fff;border:.5px solid var(--border);border-radius:10px;margin-bottom:8px;cursor:pointer}
+.sact i{font-size:19px;color:var(--gold);width:22px;text-align:center}
+.sact .t{font-size:13px;color:var(--soft);font-weight:500}
+.sact .s{font-size:11px;color:var(--muted)}
+.sact .chev{margin-left:auto}
+
+.note{font-size:11px;color:var(--muted);text-align:center;padding:8px 0 2px}
+.hint{max-width:412px;width:100%;text-align:center;font-size:12px;color:var(--text-lt);margin-top:14px;line-height:1.6}
+.hint b{color:var(--soft);font-weight:600}
+.empty{text-align:center;color:#b7b0a4;font-size:12px;padding:22px 0}
+.arrow-i{color:#c2bcb2;font-size:16px}
+</style>
+</head>
+<body>
+
+<div class="stage-head">
+  <div class="stage-title">DREVI</div>
+  <div class="stage-sub">Interactive prototype — one app, role-personalised. Tap around.</div>
+  <div class="persona">
+    <button id="pStaff" class="on" onclick="setPersona('staff')">Staff app</button>
+    <button id="pBuyer" onclick="setPersona('buyer')">Buyer app</button>
+  </div>
+</div>
+
+<div class="phone">
+<div class="screen-shell">
+
+<!-- ============ STAFF APP ============ -->
+<div class="appview" id="staffApp">
+
+  <!-- HOME -->
+  <section class="view" data-view="home">
+    <div class="brandbar">
+      <div class="bb-l"><div>
+        <div class="bb-name">DREVI</div>
+        <div class="bb-sub">Good evening, Ansh · super admin</div>
+      </div></div>
+      <div class="synced"><span class="d"></span>synced 11:42</div>
+    </div>
+    <div class="body">
+      <div class="rowbtw"><div class="eyebrow">Today</div><div class="seeall">Today · 7 days · all</div></div>
+      <div class="metricgrid">
+        <div class="metric"><div class="l">Sales</div><div class="v">₹1,84,200</div></div>
+        <div class="metric"><div class="l">Orders</div><div class="v">23 · 71 pcs</div></div>
+        <div class="metric"><div class="l">Advance in</div><div class="v">₹42,000</div></div>
+        <div class="metric"><div class="l">Balance due</div><div class="v red">₹58,900</div></div>
+      </div>
+
+      <div class="eyebrow">Needs you</div>
+      <div class="inbox">
+        <div class="ibrow" onclick="go('office')">
+          <span class="ibico" style="background:var(--red-bg);color:var(--red)"><i class="ti ti-file-invoice"></i></span>
+          <div class="m"><div class="t">3 orders awaiting confirm</div><div class="s">₹58,900 uncollected · money-blocking</div></div>
+          <span class="count" style="background:#c97b7b;color:#fff">3</span><i class="ti ti-chevron-right chev"></i>
+        </div>
+        <div class="ibrow" onclick="go('office'); office('buyers')">
+          <span class="ibico" style="background:var(--blu-bg);color:var(--blu)"><i class="ti ti-user-plus"></i></span>
+          <div class="m"><div class="t">2 buyers pending review</div><div class="s">from the wholesale portal</div></div>
+          <span class="count" style="background:#5a7a9a;color:#fff">2</span><i class="ti ti-chevron-right chev"></i>
+        </div>
+        <div class="ibrow" onclick="go('studio')">
+          <span class="ibico" style="background:var(--amb-bg);color:var(--amb)"><i class="ti ti-camera"></i></span>
+          <div class="m"><div class="t">14 SKUs awaiting photos</div><div class="s">6 have specs · ready for pipeline</div></div>
+          <span class="count" style="background:var(--gold);color:var(--black)">14</span><i class="ti ti-chevron-right chev"></i>
+        </div>
+        <div class="ibrow" onclick="go('studio')">
+          <span class="ibico" style="background:var(--red-bg);color:var(--red)"><i class="ti ti-alert-triangle"></i></span>
+          <div class="m"><div class="t">Pipeline: 1 SKU failed tryon</div><div class="s">DD-LEH-MRM-004 · back angle</div></div>
+          <span class="count" style="background:#c97b7b;color:#fff">1</span><i class="ti ti-chevron-right chev"></i>
+        </div>
+        <div class="ibrow" onclick="go('stock')">
+          <span class="ibico" style="background:var(--grn-bg);color:var(--grn)"><i class="ti ti-refresh"></i></span>
+          <div class="m"><div class="t">4 best-sellers sold out</div><div class="s">reorder from vendors</div></div>
+          <span class="count" style="background:#5DCAA5;color:#04342C">4</span><i class="ti ti-chevron-right chev"></i>
+        </div>
+      </div>
+
+      <div class="eyebrow">Quick actions</div>
+      <button class="qa-gold" onclick="openScan()"><i class="ti ti-scan"></i>Scan a tag</button>
+      <div class="qa-grid" style="margin-bottom:16px">
+        <div class="qa" onclick="go('billing')"><i class="ti ti-file-invoice"></i>New bill</div>
+        <div class="qa" onclick="go('sku')"><i class="ti ti-tag"></i>New SKU</div>
+        <div class="qa" onclick="go('receiptnew')"><i class="ti ti-package-import"></i>Log receipt</div>
+        <div class="qa" onclick="go('pricecheck')"><i class="ti ti-search"></i>Price check</div>
+      </div>
+
+      <div class="eyebrow">Spaces</div>
+      <div class="tiles">
+        <div class="tile" onclick="go('sell')"><i class="ti ti-shopping-bag"></i><div class="t">Sell</div><div class="s">Billing, price checks</div></div>
+        <div class="tile" onclick="go('stock')"><i class="ti ti-package"></i><div class="t">Stock</div><div class="s">SKU, receipts, vendors</div></div>
+        <div class="tile" onclick="go('studio')"><i class="ti ti-brush"></i><div class="t">Studio</div><div class="s">Photos, copy, publish</div></div>
+        <div class="tile" onclick="go('office')"><i class="ti ti-chart-bar"></i><div class="t">Office</div><div class="s">Orders, buyers, reports</div></div>
+      </div>
+      <div class="note">Bottom bar adapts to role — a cashier sees only Sell.</div>
+    </div>
+  </section>
+
+  <!-- SELL -->
+  <section class="view" data-view="sell" hidden>
+    <div class="brandbar">
+      <div class="bb-l"><i class="ti ti-chevron-left bb-back" onclick="go('home')"></i><div class="bb-title">Sell</div></div>
+      <div class="bb-r"><i class="ti ti-scan" onclick="openScan()"></i></div>
+    </div>
+    <div class="body">
+      <div class="tiles">
+        <div class="tile" onclick="go('billing')"><i class="ti ti-file-invoice"></i><div class="t">New bill</div><div class="s">Exhibition or in-store</div></div>
+        <div class="tile" onclick="go('pricecheck')"><i class="ti ti-search"></i><div class="t">Retail price</div><div class="s">Scan, quote the MRP</div></div>
+        <div class="tile" onclick="go('pricecheck')"><i class="ti ti-tag"></i><div class="t">Wholesale price</div><div class="s">Scan, quote to buyers</div></div>
+        <div class="tile" onclick="go('catalog')"><i class="ti ti-books"></i><div class="t">Catalog</div><div class="s">Browse and scan</div></div>
+      </div>
+      <div class="eyebrow mt">Held orders</div>
+      <div class="listcard">
+        <div class="lrow"><div class="thumb"><i class="ti ti-clock"></i></div><div class="m"><div class="t">Meera Boutique</div><div class="s">6 pieces · parked 11:20</div></div><span class="badge b-amb">Resume</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRICE CHECK -->
+  <section class="view" data-view="pricecheck" hidden>
+    <div class="brandbar">
+      <div class="bb-l"><i class="ti ti-chevron-left bb-back" onclick="go('sell')"></i><div class="bb-title">Retail price</div></div>
+      <div class="bb-r"><i class="ti ti-scan" onclick="openScan()"></i></div>
+    </div>
+    <div class="body">
+      <div class="field"><span class="lbl">Scan or type a SKU</span>
+        <input class="inp mono" value="DD-LEH-MRM-007-M-TLG" readonly></div>
+      <div class="card" style="text-align:center;padding:20px">
+        <div class="thumb" style="width:120px;height:150px;margin:0 auto 14px;background:var(--champ);border-radius:8px;display:flex;align-items:center;justify-content:center;color:#b39a6a;font-size:26px"><i class="ti ti-photo"></i></div>
+        <div style="font-size:13px;color:var(--soft);font-weight:500">Mermaid lehenga · teal</div>
+        <div style="font-size:11px;color:var(--muted);margin:8px 0 4px">Retail price</div>
+        <div class="pricebig">₹8,999</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:8px">prices as of 11:42</div>
+      </div>
+      <button class="btn ok"><i class="ti ti-refresh"></i>Sync prices</button>
+      <div class="note">Wholesale prices never render here — the screen faces retail customers.</div>
+    </div>
+  </section>
+
+  <!-- BILLING -->
+  <section class="view" data-view="billing" hidden>
+    <div class="brandbar">
+      <div class="bb-l"><i class="ti ti-chevron-left bb-back" onclick="go('sell')"></i><div>
+        <div class="bb-title">New bill</div><div class="bb-sub">DX-20260725-013 · exhibition</div></div></div>
+      <div class="bb-r"><i class="ti ti-scan" onclick="openScan()"></i></div>
+    </div>
+    <div class="body">
+      <div class="eyebrow">Cart · 3 lines</div>
+      <div class="listcard" style="margin-bottom:12px">
+        <div class="lrow"><div class="thumb"><i class="ti ti-photo"></i></div><div class="m"><div class="mono">DD-LEH-MRM-007</div><div class="s">2 pcs × ₹4,250</div></div><span class="badge b-neu">₹8,500</span></div>
+        <div class="lrow"><div class="thumb"><i class="ti ti-photo"></i></div><div class="m"><div class="mono">DD-SAR-PRD-012</div><div class="s">3 pcs × ₹3,100</div></div><span class="badge b-neu">₹9,300</span></div>
+        <div class="lrow"><div class="thumb"><i class="ti ti-photo"></i></div><div class="m"><div class="mono">DD-GWN-CAP-003</div><div class="s">1 pc · price not set</div></div><span class="badge b-red">₹0</span></div>
+      </div>
+      <div class="card">
+        <div class="rowbtw" style="margin-bottom:6px"><span style="font-size:12px;color:var(--muted)">Pieces</span><span style="font-size:13px;font-weight:500">6</span></div>
+        <div class="rowbtw" style="margin-bottom:6px"><span style="font-size:12px;color:var(--muted)">Discount</span><span style="font-size:13px;font-weight:500">5%</span></div>
+        <div class="rowbtw" style="margin-bottom:6px"><span style="font-size:12px;color:var(--muted)">GST</span><span style="font-size:13px;font-weight:500">Included · 18%</span></div>
+        <div class="rowbtw" style="margin-bottom:0"><span style="font-size:13px;font-weight:600;color:var(--black)">Total</span><span style="font-size:15px;font-weight:600;color:var(--black)">₹16,910</span></div>
+      </div>
+      <button class="btn locked"><i class="ti ti-lock"></i>Set price on 1 line to finalise</button>
+    </div>
+  </section>
+
+  <!-- CATALOG -->
+  <section class="view" data-view="catalog" hidden>
+    <div class="brandbar">
+      <div class="bb-l"><i class="ti ti-chevron-left bb-back" onclick="go('sell')"></i><div class="bb-title">Catalog</div></div>
+      <div class="bb-r"><i class="ti ti-scan" onclick="openScan()"></i></div>
+    </div>
+    <div class="body">
+      <div class="field"><input class="inp" placeholder="Search or scan a tag"></div>
+      <div class="pgrid">
+        <div class="pcard"><div class="img"><i class="ti ti-photo"></i></div><div class="in"><div class="nm">Mermaid lehenga · teal</div><div class="pr">DD-LEH-MRM-007</div></div></div>
+        <div class="pcard"><div class="img"><i class="ti ti-photo"></i></div><div class="in"><div class="nm">Draped saree · wine</div><div class="pr">DD-SAR-PRD-012</div></div></div>
+        <div class="pcard"><div class="img"><i class="ti ti-photo"></i></div><div class="in"><div class="nm">Cape gown · black</div><div class="pr">DD-GWN-CAP-003</div></div></div>
+        <div class="pcard"><div class="img"><i class="ti ti-photo"></i></div><div class="in"><div class="nm">Anarkali · ivory</div><div class="pr">DD-SUT-ANK-021</div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STOCK -->
+  <section class="view" data-view="stock" hidden>
+    <div class="brandbar">
+      <div class="bb-l"><i class="ti ti-chevron-left bb-back" onclick="go('home')"></i><div class="bb-title">Stock</div></div>
+      <div class="bb-r"><i class="ti ti-scan" onclick="openScan()"></i></div>
+    </div>
+    <div class="body">
+      <div class="eyebrow">New stock</div>
+      <div class="tiles" style="margin-bottom:16px">
+        <div class="tile" onclick="go('sku')"><i class="ti ti-tag"></i><div class="t">New SKU + labels</div><div class="s">Generate, print tags</div></div>
+        <div class="tile" onclick="go('receiptnew')"><i class="ti ti-package-import"></i><div class="t">Log receipt</div><div class="s">Goods in from vendor</div></div>
+      </div>
+      <div class="eyebrow">Purchasing</div>
+      <div class="tiles">
+        <div class="tile" onclick="go('receipts')"><i class="ti ti-receipt"></i><div class="t">Receipts</div><div class="s">All goods-in</div></div>
+        <div class="tile" onclick="go('vendors')"><i class="ti ti-building-warehouse"></i><div class="t">Vendors</div><div class="s">Suppliers</div></div>
+      </div>
+      <div class="eyebrow mt">Reorder — sold-out best-sellers</div>
+      <div class="listcard">
+        <div class="lrow"><div class="thumb"><i class="ti ti-photo"></i></div><div class="m"><div class="mono">DD-IWS-JKT-009</div><div class="s">42 sold · last cost ₹1,850</div></div><i class="ti ti-copy arrow-i"></i></div>
+        <div class="lrow"><div class="thumb"><i class="ti ti-photo"></i></div><div class="m"><div class="mono">DD-LEH-FLR-005</div><div class="s">31 sold · last cost ₹2,400</div></div><i class="ti ti-copy arrow-i"></i></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SKU GENERATOR -->
+  <section class="view" data-view="sku" hidden>
+    <div class="brandbar">
+      <div class="bb-l"><i class="ti ti-chevron-left bb-back" onclick="go('stock')"></i><div class="bb-title">New SKU</div></div>
+      <div class="bb-r"><i class="ti ti-printer" onclick="go('sku')"></i></div>
+    </div>
+    <div class="body">
+      <div class="toggle-2"><button class="on">New design</button><button>Variant of existing</button></div>
+      <div class="field"><span class="lbl">Category</span><select><option>LEH — Lehenga</option></select></div>
+      <div class="field"><span class="lbl">Sub-category</span><select><option>MRM — Mermaid</option></select></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 80px;gap:10px">
+        <div class="field"><span class="lbl">Color</span><input class="inp" value="Teal"></div>
+        <div class="field"><span class="lbl">Size</span><select><option>M</option></select></div>
+        <div class="field"><span class="lbl">Next #</span><input class="inp mono" value="007" readonly></div>
+      </div>
+      <button class="btn gold" onclick="skuGen()"><i class="ti ti-sparkles"></i>Generate SKU</button>
+      <div id="skuOut"></div>
+    </div>
+  </section>
+
+  <!-- RECEIPTS LIST -->
+  <section class="view" data-view="receipts" hidden>
+    <div class="brandbar">
+      <div class="bb-l"><i class="ti ti-chevron-left bb-back" onclick="go('stock')"></i><div class="bb-title">Receipts</div></div>
+      <div class="bb-r"><i class="ti ti-plus" onclick="go('receiptnew')"></i></div>
+    </div>
+    <div class="body">
+      <div class="chips" style="margin-bottom:12px"><span class="chip on">Today</span><span class="chip">7 days</span><span class="chip">All</span></div>
+      <div class="listcard">
+        <div class="lrow"><div class="thumb"><i class="ti ti-receipt"></i></div><div class="m"><div class="mono">GR-20260725-003</div><div class="s">Ratna Textiles · 12 pcs · ₹28,400</div></div><i class="ti ti-chevron-right arrow-i"></i></div>
+        <div class="lrow"><div class="thumb"><i class="ti ti-receipt"></i></div><div class="m"><div class="mono">GR-20260725-002</div><div class="s">Anjali Silks · 8 pcs · ₹19,200</div></div><i class="ti ti-chevron-right arrow-i"></i></div>
+        <div class="lrow"><div class="thumb"><i class="ti ti-receipt"></i></div><div class="m"><div class="mono">GR-20260725-001</div><div class="s">Ratna Textiles · 20 pcs · ₹41,000</div></div><i class="ti ti-chevron-right arrow-i"></i></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- NEW RECEIPT -->
+  <section class="view" data-view="receiptnew" hidden>
+    <div class="brandbar">
+      <div class="bb-l"><i class="ti ti-chevron-left bb-back" onclick="go('receipts')"></i><div class="bb-title">Log receipt</div></div>
+      <div class="bb-r"><i class="ti ti-scan" onclick="openScan()"></i></div>
+    </div>
+    <div class="body">
+      <div class="field"><span class="lbl">Vendor</span><select><option>Ratna Textiles</option><option>+ New vendor</option></select></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="field"><span class="lbl">Date</span><input class="inp" value="25 Jul 2026" readonly></div>
+        <div class="field"><span class="lbl">Bill amount</span><input class="inp" placeholder="₹ optional"></div>
+      </div>
+      <div class="field"><span class="lbl">Bill photo</span>
+        <div class="card" style="margin:0;text-align:center;padding:16px;border-style:dashed;cursor:pointer">
+          <i class="ti ti-camera" style="font-size:24px;color:var(--gold)"></i>
+          <div style="font-size:12px;color:var(--muted);margin-top:6px">Camera or gallery</div>
+        </div>
+      </div>
+      <div class="rowbtw"><span class="eyebrow" style="margin:0">Lines · scan in</span><span class="seeall" onclick="openScan()">+ Scan</span></div>
+      <div class="listcard" style="margin-bottom:12px">
+        <div class="lrow"><div class="m"><div class="mono">DD-LEH-MRM-007</div><div class="s">4 pcs × ₹1,900</div></div><span class="badge b-neu">₹7,600</span></div>
+        <div class="lrow"><div class="m"><div class="mono">DD-SAR-PRD-012</div><div class="s">6 pcs × ₹1,400</div></div><span class="badge b-neu">₹8,400</span></div>
+      </div>
+      <button class="btn gold"><i class="ti ti-check"></i>Save receipt · 10 pcs · ₹16,000</button>
+    </div>
+  </section>
+
+  <!-- VENDORS -->
+  <section class="view" data-view="vendors" hidden>
+    <div class="brandbar">
+      <div class="bb-l"><i class="ti ti-chevron-left bb-back" onclick="go('stock')"></i><div class="bb-title">Vendors</div></div>
+      <div class="bb-r"><i class="ti ti-plus"></i></div>
+    </div>
+    <div class="body">
+      <div class="field"><input class="inp" placeholder="Search or scan a tag to find its vendor"></div>
+      <div class="listcard">
+        <div class="lrow"><div class="thumb"><i class="ti ti-building-warehouse"></i></div><div class="m"><div class="t">Ratna Textiles</div><div class="s">Surat · 14 receipts · last 25 Jul</div></div><i class="ti ti-brand-whatsapp arrow-i" style="color:#5DCAA5"></i></div>
+        <div class="lrow"><div class="thumb"><i class="ti ti-building-warehouse"></i></div><div class="m"><div class="t">Anjali Silks</div><div class="s">Mumbai · 9 receipts · last 24 Jul</div></div><i class="ti ti-brand-whatsapp arrow-i" style="color:#5DCAA5"></i></div>
+        <div class="lrow"><div class="thumb"><i class="ti ti-building-warehouse"></i></div><div class="m"><div class="t">Kesar Handworks</div><div class="s">Jaipur · 5 receipts · last 20 Jul</div></div><i class="ti ti-brand-whatsapp arrow-i" style="color:#5DCAA5"></i></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STUDIO BOARD -->
+  <section class="view" data-view="studio" hidden>
+    <div class="brandbar">
+      <div class="bb-l"><i class="ti ti-chevron-left bb-back" onclick="go('home')"></i><div>
+        <div class="bb-title">Design studio</div><div class="bb-sub">18 in flight</div></div></div>
+      <div class="bb-r"><i class="ti ti-search"></i><i class="ti ti-scan" onclick="openScan()"></i></div>
+    </div>
+    <div class="body">
+      <div class="chips" style="margin-bottom:12px">
+        <span class="chip solid">Needs review 6</span><span class="chip">Needs photos 4</span>
+        <span class="chip">Needs copy 3</span><span class="chip">Ready · Shopify 2</span><span class="chip">Published 3</span>
+      </div>
+
+      <div class="batch" id="batchBar" hidden>
+        <div class="hd"><span class="n" id="selCount">0 selected</span><span class="clr" onclick="clearSel()">Clear <i class="ti ti-x"></i></span></div>
+        <div class="bacts">
+          <button class="bact gold">Run FASHN<small id="fashnCost">~0 cr</small></button>
+          <button class="bact">Generate copy</button>
+          <button class="bact">Approve all</button>
+          <button class="bact">Push wholesale</button>
+          <button class="bact">Set tier</button>
+        </div>
+      </div>
+
+      <div class="listcard" id="boardList">
+        <div class="brow" data-sku="DD-LEH-MRM-007">
+          <span class="cb" onclick="toggleSel(event,this)"></span>
+          <div class="thumb" onclick="go('workbench')"><i class="ti ti-photo"></i></div>
+          <div class="m" onclick="go('workbench')">
+            <div class="rowbtw" style="margin:0"><span class="mono" style="font-size:12px;font-weight:500">DD-LEH-MRM-007</span><span class="badge b-amb">In review</span></div>
+            <div class="dots"><span class="g">✓ specs</span><span class="a">◑ 2/4</span><span>○ copy</span><span class="g">▪ WS</span><span>▫ SH</span></div>
+          </div>
+        </div>
+        <div class="brow" data-sku="DD-SAR-PRD-012">
+          <span class="cb" onclick="toggleSel(event,this)"></span>
+          <div class="thumb"><i class="ti ti-photo"></i></div>
+          <div class="m">
+            <div class="rowbtw" style="margin:0"><span class="mono" style="font-size:12px;font-weight:500">DD-SAR-PRD-012</span><span class="badge b-neu">Needs photos</span></div>
+            <div class="dots"><span class="g">✓ specs</span><span>○ 0/4</span><span>○ copy</span><span>▫ WS</span><span>▫ SH</span></div>
+          </div>
+        </div>
+        <div class="brow" data-sku="DD-GWN-CAP-003">
+          <span class="cb" onclick="toggleSel(event,this)"></span>
+          <div class="thumb" onclick="go('workbench')"><i class="ti ti-photo"></i></div>
+          <div class="m" onclick="go('workbench')">
+            <div class="rowbtw" style="margin:0"><span class="mono" style="font-size:12px;font-weight:500">DD-GWN-CAP-003</span><span class="badge b-grn">Ready · Shopify</span></div>
+            <div class="dots"><span class="g">✓ specs</span><span class="g">● 4/4</span><span class="g">✓ copy</span><span>▫ WS</span><span>▫ SH</span></div>
+          </div>
+        </div>
+        <div class="brow" data-sku="DD-SUT-ANK-021">
+          <span class="cb" onclick="toggleSel(event,this)"></span>
+          <div class="thumb"><i class="ti ti-photo"></i></div>
+          <div class="m">
+            <div class="rowbtw" style="margin:0"><span class="mono" style="font-size:12px;font-weight:500">DD-SUT-ANK-021</span><span class="badge b-neu">Awaiting specs</span></div>
+            <div class="dots"><span>○ specs</span><span>○ 0/4</span><span>○ copy</span><span>▫ WS</span><span>▫ SH</span></div>
+          </div>
+        </div>
+        <div class="brow" data-sku="DD-IWS-JKT-009">
+          <span class="cb" onclick="toggleSel(event,this)"></span>
+          <div class="thumb" onclick="go('workbench')"><i class="ti ti-photo"></i></div>
+          <div class="m" onclick="go('workbench')">
+            <div class="rowbtw" style="margin:0"><span class="mono" style="font-size:12px;font-weight:500">DD-IWS-JKT-009</span><span class="badge b-grn">Live · WS</span></div>
+            <div class="dots"><span class="g">✓ specs</span><span class="b">▨ 4/4 raw</span><span>○ copy</span><span class="g">▪ WS</span><span>▫ SH</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="note">Select rows to batch-run · FASHN cost previews before it fires.</div>
+    </div>
+  </section>
+
+  <!-- WORKBENCH -->
+  <section class="view" data-view="workbench" hidden>
+    <div class="brandbar">
+      <div class="bb-l"><i class="ti ti-chevron-left bb-back" onclick="go('studio')"></i><div>
+        <div class="bb-mono">DD-LEH-MRM-007 · TLG</div><div class="bb-sub">Mermaid lehenga · teal</div></div></div>
+      <div class="bb-r"><i class="ti ti-list-details" onclick="go('master')"></i></div>
+    </div>
+    <div class="body">
+      <div class="dests">
+        <div class="dest"><span class="n">Shopify</span><span class="st" style="color:#c97b7b"><i class="ti ti-lock" style="font-size:13px"></i>1 blocker</span></div>
+        <div class="dest ok"><span class="n">Wholesale</span><span class="st" style="color:var(--grn)"><i class="ti ti-check" style="font-size:13px"></i>ready</span></div>
+      </div>
+
+      <div class="eyebrow">Photos · 2 of 4 approved</div>
+
+      <div class="angle">
+        <div class="hd"><span class="nm">Front</span><span class="badge b-grn">Approved</span></div>
+        <div class="imgrow">
+          <div class="imgbox"><i class="ti ti-photo"></i><span class="cap">source</span></div>
+          <i class="ti ti-arrow-right arrow-i"></i>
+          <div class="imgbox pick"><i class="ti ti-photo"></i><span class="cap">FASHN</span></div>
+        </div>
+        <div class="btnrow" style="margin-top:9px"><button class="btn sm">Change engine</button><button class="btn sm">Redo</button></div>
+      </div>
+
+      <div class="angle review">
+        <div class="hd"><span class="nm">Back</span><span class="badge b-amb">Needs review</span></div>
+        <div class="imgrow">
+          <div class="imgbox"><i class="ti ti-photo"></i><span class="cap">source</span></div>
+          <i class="ti ti-arrow-right arrow-i"></i>
+          <div class="imgbox"><i class="ti ti-photo"></i><span class="cap">candidate</span></div>
+        </div>
+        <div class="engchips">
+          <span class="eng on">FASHN</span><span class="eng off">OpenAI bg</span><span class="eng off">Raw</span>
+        </div>
+        <div class="promptbox">
+          <div class="ph"><span class="k">Prompt</span><i class="ti ti-edit"></i></div>
+          <div class="tx">teal mermaid lehenga, back view, neutral grey studio, no pants…</div>
+        </div>
+        <div class="btnrow" style="margin-top:10px">
+          <button class="btn gold sm" style="flex:1.4">Approve</button>
+          <button class="btn sm" style="flex:1;color:var(--red)">Reject</button>
+          <button class="btn sm" style="flex:1">Regen</button>
+        </div>
+      </div>
+
+      <div class="angle">
+        <div class="hd"><span class="nm">Detail macro</span><span class="badge b-blu">Raw · no AI</span></div>
+        <div class="imgrow">
+          <div class="imgbox" style="flex:0 0 78px;max-width:78px"><i class="ti ti-photo"></i><span class="cap">macro</span></div>
+          <div style="flex:1;font-size:11px;color:var(--muted);line-height:1.45">Embroidery preserved untouched — try-on would re-synthesise the handwork.</div>
+        </div>
+        <button class="btn ok sm" style="margin-top:9px">Approve as-is</button>
+      </div>
+
+      <div class="eyebrow mt">Copy · Claude vision</div>
+      <div class="card">
+        <div class="rowbtw" style="margin-bottom:6px"><span style="font-size:13px;font-weight:500;color:var(--soft)">Mermaid teal lehenga in raw silk</span><span class="badge b-amb">Draft</span></div>
+        <div style="font-size:11px;color:var(--text-lt);line-height:1.5">A fitted mermaid silhouette in teal raw silk, structured through the waist and flaring below the knee…</div>
+        <div class="chips" style="margin-top:9px">
+          <span class="chip" style="font-size:10px;padding:2px 9px">occasion: reception</span>
+          <span class="chip" style="font-size:10px;padding:2px 9px">fabric: raw silk</span>
+          <span class="chip" style="font-size:10px;padding:2px 9px">tier: hero</span>
+        </div>
+        <div class="btnrow" style="margin-top:11px">
+          <button class="btn gold sm" style="flex:1.4">Approve copy</button>
+          <button class="btn sm" style="flex:1">Edit</button>
+          <button class="btn sm" style="flex:1">Regen</button>
+        </div>
+      </div>
+
+      <button class="btn ok" style="margin-bottom:8px"><i class="ti ti-cloud-upload"></i>Push to wholesale · raw ok</button>
+      <button class="btn locked"><i class="ti ti-lock"></i>Push to Shopify · approve back first</button>
+    </div>
+  </section>
+
+  <!-- PRODUCT MASTER -->
+  <section class="view" data-view="master" hidden>
+    <div class="brandbar">
+      <div class="bb-l"><i class="ti ti-chevron-left bb-back" onclick="go('workbench')"></i><div>
+        <div class="bb-mono">DD-LEH-MRM-007</div><div class="bb-sub">Product master</div></div></div>
+      <div class="bb-r"><i class="ti ti-device-floppy"></i></div>
+    </div>
+    <div class="body">
+      <div class="eyebrow">Specs · Rakesh</div>
+      <div class="card">
+        <div class="field"><span class="lbl">Fabric</span><input class="inp" value="Raw silk"></div>
+        <div class="field"><span class="lbl">Handwork</span><input class="inp" value="Zardozi border"></div>
+        <div class="field" style="margin:0"><span class="lbl">Origin</span><input class="inp" value="Surat"></div>
+      </div>
+      <div class="eyebrow">Pricing</div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="field"><span class="lbl">Last cost</span><input class="inp mono" value="1,900"></div>
+          <div class="field"><span class="lbl">Auto MRP</span><input class="inp mono" value="8,999" readonly></div>
+          <div class="field" style="margin:0"><span class="lbl">MRP override</span><input class="inp mono" placeholder="—"></div>
+          <div class="field" style="margin:0"><span class="lbl">Wholesale</span><input class="inp mono" value="4,250"></div>
+        </div>
+      </div>
+      <div class="eyebrow">Publish to</div>
+      <div class="dests">
+        <div class="dest ok"><span class="n">Shopify</span><span class="st" style="color:var(--grn)"><i class="ti ti-check" style="font-size:13px"></i>on</span></div>
+        <div class="dest ok"><span class="n">Wholesale</span><span class="st" style="color:var(--grn)"><i class="ti ti-check" style="font-size:13px"></i>on</span></div>
+      </div>
+      <button class="btn gold"><i class="ti ti-device-floppy"></i>Save master</button>
+      <div class="note">Manual edits lock — the sheet sync won't overwrite them.</div>
+    </div>
+  </section>
+
+  <!-- OFFICE -->
+  <section class="view" data-view="office" hidden>
+    <div class="brandbar">
+      <div class="bb-l"><i class="ti ti-chevron-left bb-back" onclick="go('home')"></i><div class="bb-title">Office</div></div>
+      <div class="bb-r"><i class="ti ti-scan" onclick="openScan()"></i></div>
+    </div>
+    <div class="body">
+      <div class="seg">
+        <button id="segDash" class="on" onclick="office('dash')">Dashboard</button>
+        <button id="segOrders" onclick="office('orders')">Orders</button>
+        <button id="segBuyers" onclick="office('buyers')">Buyers</button>
+      </div>
+
+      <div class="segpane" id="paneDash">
+        <div class="metricgrid">
+          <div class="metric"><div class="l">Sales · 7d</div><div class="v">₹9,42,000</div></div>
+          <div class="metric"><div class="l">Orders · 7d</div><div class="v">118</div></div>
+          <div class="metric"><div class="l">Advance in</div><div class="v">₹2,10,000</div></div>
+          <div class="metric"><div class="l">Balance due</div><div class="v red">₹3,44,000</div></div>
+        </div>
+        <div class="eyebrow">By vendor</div>
+        <div class="listcard">
+          <div class="lrow"><div class="m"><div class="t">Ratna Textiles</div><div class="s">28 designs · 96 pcs</div></div><span class="badge b-neu">₹3,10,000</span></div>
+          <div class="lrow"><div class="m"><div class="t">Anjali Silks</div><div class="s">19 designs · 61 pcs</div></div><span class="badge b-neu">₹1,98,000</span></div>
+        </div>
+      </div>
+
+      <div class="segpane" id="paneOrders" hidden>
+        <div class="chips" style="margin-bottom:12px"><span class="chip on">Submitted</span><span class="chip">Confirmed</span><span class="chip">All</span></div>
+        <div class="listcard">
+          <div class="lrow"><div class="m"><div class="mono">DX-20260725-012</div><div class="s">Meera Boutique · 14 pcs</div></div><span class="badge b-amb">Confirm</span></div>
+          <div class="lrow"><div class="m"><div class="mono">DX-20260725-011</div><div class="s">Saanvi Ethnic · 9 pcs</div></div><span class="badge b-amb">Confirm</span></div>
+          <div class="lrow"><div class="m"><div class="mono">DX-20260725-010</div><div class="s">Riya Collections · 22 pcs</div></div><span class="badge b-amb">Confirm</span></div>
+        </div>
+      </div>
+
+      <div class="segpane" id="paneBuyers" hidden>
+        <div class="chips" style="margin-bottom:12px"><span class="chip on">Pending 2</span><span class="chip">Active</span><span class="chip">All</span></div>
+        <div class="listcard">
+          <div class="lrow"><div class="thumb"><i class="ti ti-user"></i></div><div class="m"><div class="t">Nisha Boutique</div><div class="s">Ahmedabad · applied today</div></div><span class="badge b-amb">Review</span></div>
+          <div class="lrow"><div class="thumb"><i class="ti ti-user"></i></div><div class="m"><div class="t">Zara Ethnic Wear</div><div class="s">Pune · applied today</div></div><span class="badge b-amb">Review</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- staff bottom nav -->
+  <div class="bnav" id="staffNav">
+    <div class="nitem on" data-nav="home" onclick="go('home')"><i class="ti ti-home"></i><span>Home</span></div>
+    <div class="nitem" data-nav="sell" onclick="go('sell')"><i class="ti ti-shopping-bag"></i><span>Sell</span></div>
+    <div class="nscan"><div class="b" onclick="openScan()"><i class="ti ti-scan"></i></div></div>
+    <div class="nitem" data-nav="stock" onclick="go('stock')"><i class="ti ti-package"></i><span>Stock</span></div>
+    <div class="nitem" data-nav="studio" onclick="go('studio')"><i class="ti ti-brush"></i><span>Studio</span></div>
+  </div>
+</div>
+
+<!-- ============ BUYER APP ============ -->
+<div class="appview" id="buyerApp" hidden>
+
+  <!-- BUYER HOME -->
+  <section class="bview" data-bview="bhome">
+    <div class="brandbar">
+      <div class="bb-l"><div>
+        <div class="bb-name">DREVI <span class="ws">WHOLESALE</span></div>
+        <div class="bb-sub">Meera Boutique · Surat</div>
+      </div></div>
+      <div class="bb-r cartbadge" onclick="bgo('bcart')"><i class="ti ti-shopping-cart"></i><span>4</span></div>
+    </div>
+    <div class="body">
+      <div class="ibrow" style="background:#fff;border:.5px solid #cfdae4;border-radius:12px;margin-bottom:16px" onclick="bgo('borders')">
+        <span class="ibico" style="background:var(--blu-bg);color:var(--blu)"><i class="ti ti-truck-delivery"></i></span>
+        <div class="m"><div class="t">Order DX-20260722-008 confirmed</div><div class="s">14 pieces · ready to dispatch · invoice</div></div>
+        <i class="ti ti-chevron-right chev"></i>
+      </div>
+
+      <div class="rowbtw"><div class="eyebrow">Reorder your usuals</div><div class="seeall">See all</div></div>
+      <div class="pgrid" style="margin-bottom:18px">
+        <div class="pcard"><div class="img"><i class="ti ti-photo"></i><span class="st" style="background:rgba(93,202,165,.9);color:#04342C">In stock</span></div>
+          <div class="in"><div class="nm">Mermaid lehenga · teal</div><div class="pr">₹4,250 <span>/pc</span></div><div class="moq">MOQ 3</div>
+          <button style="background:var(--black);color:var(--gold)" onclick="bgo('bproduct')">Add to cart</button></div></div>
+        <div class="pcard"><div class="img"><i class="ti ti-photo"></i><span class="st" style="background:rgba(239,159,39,.9);color:#412402">Limited</span></div>
+          <div class="in"><div class="nm">Draped saree · wine</div><div class="pr">₹3,100 <span>/pc</span></div><div class="moq">MOQ 3 · 5 left</div>
+          <button style="background:var(--black);color:var(--gold)" onclick="bgo('bproduct')">Add to cart</button></div></div>
+      </div>
+
+      <div class="rowbtw"><div class="eyebrow">New this week</div><div class="seeall">See all</div></div>
+      <div class="pgrid" style="margin-bottom:18px">
+        <div class="pcard"><div class="img"><i class="ti ti-photo"></i><span class="st" style="background:rgba(90,122,154,.9);color:#fff">Made to order</span></div>
+          <div class="in"><div class="nm">Anarkali suit · ivory</div><div class="pr">₹5,400 <span>/pc</span></div><div class="moq">MOQ 2 · 10-day lead</div>
+          <button style="background:var(--black);color:var(--gold)" onclick="bgo('bproduct')">Add to cart</button></div></div>
+        <div class="pcard"><div class="img"><i class="ti ti-photo"></i><span class="st" style="background:rgba(45,41,38,.55);color:#fff">Sold out</span></div>
+          <div class="in"><div class="nm">Cape gown · black</div><div class="pr">₹6,200 <span>/pc</span></div><div class="moq">MOQ 2</div>
+          <button style="background:#fff;border:.5px solid var(--border-d);color:var(--muted)">Notify me</button></div></div>
+      </div>
+
+      <div class="eyebrow">Browse</div>
+      <div class="chips"><span class="chip">Lehengas</span><span class="chip">Sarees</span><span class="chip">Suit sets</span><span class="chip">Gowns</span><span class="chip">Indo-western</span></div>
+    </div>
+  </section>
+
+  <!-- BUYER PRODUCT -->
+  <section class="bview" data-bview="bproduct" hidden>
+    <div class="brandbar">
+      <div class="bb-l"><i class="ti ti-chevron-left bb-back" onclick="bgo('bhome')"></i><div class="bb-title">Product</div></div>
+      <div class="bb-r cartbadge" onclick="bgo('bcart')"><i class="ti ti-shopping-cart"></i><span>4</span></div>
+    </div>
+    <div class="body">
+      <div style="height:230px;background:var(--champ);border-radius:12px;display:flex;align-items:center;justify-content:center;color:#b39a6a;font-size:32px;margin-bottom:14px"><i class="ti ti-photo"></i></div>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <div style="width:52px;height:52px;background:var(--champ);border-radius:8px;border:1.5px solid var(--gold)"></div>
+        <div style="width:52px;height:52px;background:var(--champ);border-radius:8px"></div>
+        <div style="width:52px;height:52px;background:var(--champ);border-radius:8px"></div>
+      </div>
+      <div style="font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:600;color:var(--black)">Mermaid lehenga · teal</div>
+      <div class="mono" style="font-size:12px;color:var(--muted);margin-top:2px">DD-LEH-MRM-007</div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin:12px 0">
+        <span class="mono" style="font-size:22px;font-weight:600;color:var(--black)">₹4,250</span>
+        <span style="font-size:12px;color:var(--muted)">/pc · MOQ 3</span>
+        <span class="badge b-grn" style="margin-left:auto">In stock</span>
+      </div>
+      <div class="card"><div style="font-size:12px;color:var(--text-lt);line-height:1.6">Fitted mermaid silhouette in teal raw silk with a zardozi border. Structured waist, flares below the knee.</div></div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <span style="font-size:12px;color:var(--muted)">Quantity</span>
+        <div style="display:flex;align-items:center;gap:14px;background:#fff;border:.5px solid var(--border-d);border-radius:8px;padding:6px 12px">
+          <i class="ti ti-minus" style="color:var(--muted)"></i><span class="mono" style="font-weight:600">3</span><i class="ti ti-plus" style="color:var(--gold)"></i>
+        </div>
+      </div>
+      <button class="btn dark" onclick="bgo('bcart')"><i class="ti ti-shopping-cart-plus"></i>Add 3 to cart</button>
+      <div class="note">Final pricing is confirmed by Drevi on your order.</div>
+    </div>
+  </section>
+
+  <!-- BUYER CART -->
+  <section class="bview" data-bview="bcart" hidden>
+    <div class="brandbar">
+      <div class="bb-l"><i class="ti ti-chevron-left bb-back" onclick="bgo('bhome')"></i><div class="bb-title">Cart</div></div>
+    </div>
+    <div class="body">
+      <div class="listcard" style="margin-bottom:14px">
+        <div class="lrow"><div class="thumb"><i class="ti ti-photo"></i></div><div class="m"><div class="t">Mermaid lehenga · teal</div><div class="s">3 pcs × ₹4,250</div></div><span class="badge b-neu">₹12,750</span></div>
+        <div class="lrow"><div class="thumb"><i class="ti ti-photo"></i></div><div class="m"><div class="t">Draped saree · wine</div><div class="s">3 pcs × ₹3,100</div></div><span class="badge b-neu">₹9,300</span></div>
+      </div>
+      <div class="card">
+        <div class="rowbtw" style="margin-bottom:6px"><span style="font-size:12px;color:var(--muted)">Pieces</span><span style="font-size:13px;font-weight:500">6</span></div>
+        <div class="rowbtw" style="margin-bottom:6px"><span style="font-size:12px;color:var(--muted)">List total</span><span style="font-size:13px;font-weight:500">₹22,050</span></div>
+        <div class="rowbtw" style="margin:0"><span style="font-size:12px;color:var(--muted)">Your discount</span><span style="font-size:12px;color:var(--amb)">confirmed by Drevi</span></div>
+      </div>
+      <button class="btn dark"><i class="ti ti-send"></i>Submit order request</button>
+      <div class="note">Not a checkout — Drevi confirms price and sends your invoice on WhatsApp.</div>
+    </div>
+  </section>
+
+  <!-- BUYER ORDERS -->
+  <section class="bview" data-bview="borders" hidden>
+    <div class="brandbar">
+      <div class="bb-l"><i class="ti ti-chevron-left bb-back" onclick="bgo('bhome')"></i><div class="bb-title">Your orders</div></div>
+    </div>
+    <div class="body">
+      <div class="listcard">
+        <div class="lrow"><div class="thumb"><i class="ti ti-truck-delivery"></i></div><div class="m"><div class="mono">DX-20260722-008</div><div class="s">14 pcs · ₹52,400</div></div><span class="badge b-grn">Confirmed</span></div>
+        <div class="lrow"><div class="thumb"><i class="ti ti-clipboard-list"></i></div><div class="m"><div class="mono">DX-20260710-041</div><div class="s">9 pcs · ₹31,200</div></div><span class="badge b-blu">Fulfilled</span></div>
+        <div class="lrow"><div class="thumb"><i class="ti ti-clock"></i></div><div class="m"><div class="mono">Request · pending</div><div class="s">6 pcs · awaiting Drevi</div></div><span class="badge b-amb">Submitted</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- buyer bottom nav -->
+  <div class="bnav">
+    <div class="nitem on" data-bnav="bhome" onclick="bgo('bhome')"><i class="ti ti-building-store"></i><span>Shop</span></div>
+    <div class="nitem" data-bnav="borders" onclick="bgo('borders')"><i class="ti ti-clipboard-list"></i><span>Orders</span></div>
+    <div class="nscan"><div class="b" onclick="openScan(true)"><i class="ti ti-scan"></i></div></div>
+    <div class="nitem" data-bnav="bcart" onclick="bgo('bcart')"><i class="ti ti-shopping-cart"></i><span>Cart</span></div>
+    <div class="nitem" onclick="alert('Account')"><i class="ti ti-user"></i><span>Account</span></div>
+  </div>
+</div>
+
+<!-- ============ SCAN SHEET ============ -->
+<div class="overlay" id="scanSheet" hidden onclick="if(event.target===this)closeScan()">
+  <div class="sheet">
+    <div class="sheet-h"><span class="k">Scanned tag</span><i class="ti ti-x" onclick="closeScan()"></i></div>
+    <div class="sku">DD-LEH-MRM-007-M-TLG</div>
+    <div class="gm">Mermaid lehenga · teal · size M</div>
+    <div id="scanActions"></div>
+  </div>
+</div>
+
+</div>
+</div>
+
+<div class="hint">
+  <b>Tap the gold scan button</b> to see the universal action sheet — the same SKU, every module's action, gated by role. Switch to the <b>Buyer app</b> above to walk the wholesale storefront.
+</div>
+
+<script>
+// ---- screen router (staff) ----
+function go(view){
+  document.querySelectorAll('#staffApp .view').forEach(v=>v.hidden = v.dataset.view!==view);
+  document.querySelectorAll('#staffNav .nitem').forEach(n=>{
+    const map={home:'home',sell:'sell',stock:'stock',studio:'studio'};
+    n.classList.toggle('on', n.dataset.nav===view);
+  });
+  // keep a nav item lit for sub-screens
+  const parent={pricecheck:'sell',billing:'sell',catalog:'sell',sku:'stock',receipts:'stock',receiptnew:'stock',vendors:'stock',workbench:'studio',master:'studio',office:'home'};
+  if(parent[view]){
+    document.querySelectorAll('#staffNav .nitem').forEach(n=>n.classList.toggle('on', n.dataset.nav===parent[view]));
+  }
+  scrollBody('#staffApp');
+  closeScan();
+}
+function scrollBody(scope){ const b=document.querySelector(scope+' .view:not([hidden]) .body, '+scope+' .bview:not([hidden]) .body'); if(b) b.scrollTop=0; }
+
+// ---- office segmented ----
+function office(pane){
+  ['dash','orders','buyers'].forEach(p=>{
+    document.getElementById('pane'+cap(p)).hidden = p!==pane;
+    document.getElementById('seg'+cap(p==='dash'?'Dash':p==='orders'?'Orders':'Buyers')).classList.toggle('on',p===pane);
+  });
+}
+function cap(s){return s.charAt(0).toUpperCase()+s.slice(1);}
+
+// ---- sku generate ----
+function skuGen(){
+  document.getElementById('skuOut').innerHTML =
+    '<div class="skudisp">'+
+      '<div class="k">Base SKU · design-level</div><div class="v">DD-LEH-MRM-007</div>'+
+      '<div class="div"></div>'+
+      '<div class="k">Variant SKU · for Shopify</div><div class="v var">DD-LEH-MRM-007-M-TLG</div>'+
+    '</div>'+
+    '<div class="card" style="text-align:center;padding:16px">'+
+      '<div style="width:120px;height:120px;margin:0 auto;background:#fff;border:.5px solid var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center"><i class="ti ti-qrcode" style="font-size:80px;color:#141414"></i></div>'+
+      '<div class="btnrow" style="margin-top:12px"><button class="btn sm">Download</button><button class="btn sm">Print</button><button class="btn sm" onclick="go(\'sku\')">+ Sheet</button></div>'+
+    '</div>';
+}
+
+// ---- board multiselect ----
+const COST_PER = 14; // credits/design (standard tier)
+function toggleSel(e,el){
+  e.stopPropagation();
+  el.classList.toggle('on');
+  el.closest('.brow').classList.toggle('sel', el.classList.contains('on'));
+  el.innerHTML = el.classList.contains('on') ? '<i class="ti ti-check"></i>' : '';
+  refreshBatch();
+}
+function refreshBatch(){
+  const n = document.querySelectorAll('#boardList .cb.on').length;
+  const bar = document.getElementById('batchBar');
+  bar.hidden = n===0;
+  document.getElementById('selCount').textContent = n+' selected';
+  const cr = n*COST_PER;
+  document.getElementById('fashnCost').textContent = '~'+cr+' cr · ₹'+(cr*10).toLocaleString('en-IN');
+}
+function clearSel(){
+  document.querySelectorAll('#boardList .cb.on').forEach(cb=>{cb.classList.remove('on');cb.innerHTML='';cb.closest('.brow').classList.remove('sel');});
+  refreshBatch();
+}
+
+// ---- scan action sheet ----
+const STAFF_ACTIONS=[
+  ['ti-search','Check retail price','₹8,999','pricecheck'],
+  ['ti-file-invoice','Add to current bill','2 pcs in cart','billing'],
+  ['ti-package-import','Log into a receipt','goods in','receiptnew'],
+  ['ti-brush','Open in studio','photos 2/4','workbench'],
+  ['ti-list-details','Edit product master','specs, pricing','master'],
+  ['ti-printer','Add to print sheet','QR label','sku'],
+];
+const BUYER_ACTIONS=[
+  ['ti-eye','View product','₹4,250 /pc','bproduct'],
+  ['ti-shopping-cart-plus','Reorder this','add to cart','bcart'],
+];
+let scanBuyer=false;
+function openScan(buyer){
+  scanBuyer = !!buyer;
+  const acts = scanBuyer?BUYER_ACTIONS:STAFF_ACTIONS;
+  document.getElementById('scanActions').innerHTML = acts.map(a=>
+    '<div class="sact" onclick="scanTo(\''+a[3]+'\')"><i class="ti '+a[0]+'"></i><div><div class="t">'+a[1]+'</div><div class="s">'+a[2]+'</div></div><i class="ti ti-chevron-right chev arrow-i"></i></div>'
+  ).join('');
+  document.getElementById('scanSheet').hidden=false;
+}
+function closeScan(){ document.getElementById('scanSheet').hidden=true; }
+function scanTo(v){ closeScan(); if(scanBuyer) bgo(v); else go(v); }
+
+// ---- buyer router ----
+function bgo(view){
+  document.querySelectorAll('#buyerApp .bview').forEach(v=>v.hidden = v.dataset.bview!==view);
+  document.querySelectorAll('#buyerApp .nitem').forEach(n=>n.classList.toggle('on', n.dataset.bnav===view));
+  scrollBody('#buyerApp');
+  closeScan();
+}
+
+// ---- persona ----
+function setPersona(p){
+  const staff=p==='staff';
+  document.getElementById('staffApp').hidden=!staff;
+  document.getElementById('buyerApp').hidden=staff;
+  document.getElementById('pStaff').classList.toggle('on',staff);
+  document.getElementById('pBuyer').classList.toggle('on',!staff);
+  if(staff) go('home'); else bgo('bhome');
+}
+</script>
+</body>
+</html>

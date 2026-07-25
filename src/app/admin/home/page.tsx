@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ReceiptText, QrCode, PackageCheck, Tag, ChevronRight } from "lucide-react";
+import { ReceiptText, QrCode, PackageCheck, Tag, ChevronRight, Store, Boxes, Briefcase, Palette } from "lucide-react";
 import { getStaff, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { computeAttention, computeToday } from "@/lib/attention";
@@ -64,12 +64,14 @@ export default async function HomePage() {
         <div>
           <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>
             {greeting()}, {staff.name?.split(" ")[0] ?? staff.email.split("@")[0]}
+            <span className="font-body ml-2" style={{ fontSize: 11, letterSpacing: "0.08em", color: palette.mutedGreige, fontWeight: 400 }}>
+              · {staff.role.replace("_", " ")}
+            </span>
           </h1>
           <div className="font-body mt-1" style={{ fontSize: 11, letterSpacing: "0.06em", color: palette.mutedGreige }}>
             {t("home.synced")} {syncStamp} IST
           </div>
         </div>
-        <HomeScanButton />
       </div>
 
       {/* Today's money */}
@@ -94,10 +96,15 @@ export default async function HomePage() {
           )}
           {attention.map((a) => (
             <Link key={a.key} href={a.href} className="flex items-center gap-3 p-3.5" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
-              <span className="flex-shrink-0 rounded-full" style={{ width: 8, height: 8, background: SEVERITY_COLOR[a.severity] }} />
               <span className="min-w-0 flex-1">
                 <span className="font-body block" style={{ fontSize: 13, color: palette.black, fontWeight: 500 }}>{a.title}</span>
                 <span className="font-body block mt-0.5" style={{ fontSize: 11, color: palette.mutedGreige }}>{a.sub}</span>
+              </span>
+              <span
+                className="flex-shrink-0 flex items-center justify-center rounded-full font-body"
+                style={{ minWidth: 22, height: 22, padding: "0 6px", fontSize: 10.5, fontWeight: 700, background: SEVERITY_COLOR[a.severity], color: palette.ivory }}
+              >
+                {a.count}
               </span>
               <ChevronRight size={15} color={palette.mutedGreige} />
             </Link>
@@ -105,9 +112,10 @@ export default async function HomePage() {
         </div>
       </div>
 
-      {/* Quick actions */}
+      {/* Quick actions — gold full-width scan first, per prototype */}
       <div className="mt-6">
         <div className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>{t("home.quick_actions")}</div>
+        <div className="mt-2"><HomeScanButton fullWidth /></div>
         <div className="grid grid-cols-4 gap-2 mt-2">
           {quickActions.map((a) => {
             const Icon = a.icon;
@@ -125,14 +133,17 @@ export default async function HomePage() {
       <div className="mt-6">
         <div className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>{t("home.spaces")}</div>
         <div className="grid grid-cols-2 gap-2 mt-2">
-          {spaces.map((s) => (
-            <Link key={s.key} href={s.items[0].href} className="p-4" style={{ background: palette.black }}>
-              <div className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.2em", color: palette.gold, fontWeight: 600 }}>{t(s.label)}</div>
-              <div className="font-body mt-1" style={{ fontSize: 10, color: palette.champagne }}>
-                {s.items.slice(0, 3).map((i) => t(i.label)).join(" · ")}{s.items.length > 3 ? " …" : ""}
-              </div>
-            </Link>
-          ))}
+          {spaces.map((s) => {
+            const Icon = ({ sell: Store, stock: Boxes, studio: Palette, office: Briefcase } as Record<string, typeof Store>)[s.key] ?? Store;
+            const sub = ({ sell: "Billing, price checks", stock: "SKU, receipts, vendors", studio: "Photos, copy, publish", office: "Orders, buyers, reports" } as Record<string, string>)[s.key] ?? "";
+            return (
+              <Link key={s.key} href={s.items[0].href} className="p-4" style={{ background: palette.black }}>
+                <Icon size={17} strokeWidth={1.6} color={palette.gold} />
+                <div className="font-body uppercase mt-2" style={{ fontSize: 11, letterSpacing: "0.2em", color: palette.gold, fontWeight: 600 }}>{t(s.label)}</div>
+                <div className="font-body mt-1" style={{ fontSize: 10, color: palette.champagne }}>{sub}</div>
+              </Link>
+            );
+          })}
         </div>
       </div>
     </div>
