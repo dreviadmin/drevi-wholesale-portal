@@ -1,0 +1,10 @@
+# Decisions log — unified Drevi App build (guide §0.4)
+
+One line per deviation from the master build guide, with rationale. Phase 1 decisions live in `DECISIONS-phase1.md`.
+
+- **25 Jul 2026 · Dev-only delivery**: per Ansh, every stage lands on the `dev` branch + dev Supabase (`qvnvxcdyvcsgxulbcmzm`) + dev Vercel project (`drevi-wholesale-dev`) — production (`main`) is untouched until the app is complete. The guide's "one stage = one PR" becomes "one stage = one dev-branch commit series + dev deploy".
+- **25 Jul 2026 · Migration numbering**: repo already had `0015_audit_events.sql` before this guide, so guide numbers shift by one from Stage 3 on (guide 0015_studio → repo 0016, guide 0016_pipeline_jobs → 0017, etc.).
+- **25 Jul 2026 · Prototype absent (ANSH-02)**: `docs/design/drevi-app-prototype.html` isn't in the repo or Downloads; Stage 2 is built from the guide's §6 textual spec + existing Royal Noir tokens. Side-by-side fidelity pass parked until the file lands.
+- **25 Jul 2026 · Stock space is admin+ in nav**: guide lists sku-generator as staff+ inside Stock, but the Stage 2 done-when requires a staff login to see ONLY Home+Sell. Resolution: Stock space hidden from staff in nav; staff reach the generator via the Home "New SKU" quick action (route access unchanged, staff+).
+- **25 Jul 2026 · Manage Catalog homed under Office**: the guide's Office list omits it, but it must stay reachable until Stage 8 re-homes it as the master editor.
+- **25 Jul 2026 · Studio space defined but empty**: nav config carries the space with `items: []` (hidden) until Stage 3 ships the board — avoids a dead tab.

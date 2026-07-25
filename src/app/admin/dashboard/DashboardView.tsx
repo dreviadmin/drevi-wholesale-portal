@@ -111,15 +111,16 @@ async function copyText(text: string): Promise<boolean> {
   } catch { return false; }
 }
 
-export function DashboardView({ orders, buyers, products, vendors, grBySku = {} }: {
+export function DashboardView({ orders, buyers, products, vendors, grBySku = {}, initialTab }: {
   orders: DashOrder[];
   buyers: DashBuyer[];
   products: DashProduct[];
   vendors: VendorInfo[];
   // Latest goods-receipt cost/date per SKU — shown beside the sheet columns.
   grBySku?: Record<string, { cost: number; date: string }>;
+  initialTab?: Tab; // /admin/reorder opens straight on the Reorder view
 }) {
-  const [tab, setTab] = useState<Tab>("products");
+  const [tab, setTab] = useState<Tab>(initialTab ?? "products");
   const [range, setRange] = useState<Range>("all");
   const [query, setQuery] = useState("");
   const [vendorFilter, setVendorFilter] = useState<string>("All");

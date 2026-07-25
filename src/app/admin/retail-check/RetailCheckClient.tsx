@@ -91,6 +91,18 @@ export function RetailCheckClient({ products, retail, pricesAsOf, drivePhotos }:
     });
   }
 
+  // Deep-link from the global scan sheet: /admin/retail-check?sku=… looks the
+  // tag up immediately, exactly as if it had just been scanned here.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const sku = (p.get("sku") ?? "").trim();
+    if (!sku) return;
+    handleScan(sku);
+    p.delete("sku");
+    window.history.replaceState(null, "", window.location.pathname + (p.toString() ? `?${p}` : ""));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function handleScan(text: string): ScanFeedback {
     const sku = text.trim().toUpperCase();
     if (!sku) return { ok: false, message: "Empty scan" };

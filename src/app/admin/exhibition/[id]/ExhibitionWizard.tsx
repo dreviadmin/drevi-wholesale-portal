@@ -68,6 +68,24 @@ export function ExhibitionWizard({
   const [nb, setNb] = useState(NB_EMPTY);
   const [cardFile, setCardFile] = useState<File | null>(null);
 
+  // Global scan sheet hand-off (build guide §6.5): ?add=SKU appends one piece
+  // to the current bill, then strips the param so refreshes don't re-add.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const addSku = (p.get("add") ?? "").trim().toUpperCase();
+    if (!addSku) return;
+    const prod = products.find((x) => x.sku.toUpperCase() === addSku);
+    if (prod) {
+      setCart((c) => ({ ...c, [prod.sku]: (c[prod.sku] ?? 0) + 1 }));
+      flash(`${prod.sku} added to the bill`);
+    } else {
+      flash(`${addSku} is not in the catalog`);
+    }
+    p.delete("add");
+    window.history.replaceState(null, "", window.location.pathname + (p.toString() ? `?${p}` : ""));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Draft autosave — a half-captured buyer survives closing the tablet app
   // mid-conversation. Cleared once the capture succeeds.
   const NB_DRAFT_KEY = "drevi:draft:exh-buyer";

@@ -85,7 +85,40 @@ export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
       const raw = localStorage.getItem(TRAY_KEY);
       if (raw) setTray(JSON.parse(raw));
     } catch { /* corrupted tray — start fresh */ }
+    // Scan-sheet hand-off (?variant=DD-CAT-SUB-NNN-SIZE-COLOR): an unknown tag
+    // lands here with everything derivable pre-filled. A parseable base flips
+    // to variant mode (bases list resolves the match once loaded via
+    // pendingVariantRef); otherwise new-design mode with cat/sub seeded.
+    const p = new URLSearchParams(window.location.search);
+    const scanned = (p.get("variant") ?? "").trim().toUpperCase();
+    if (scanned) {
+      const parts = scanned.split("-");
+      if (parts[0] === "DD" && parts.length >= 4) {
+        const base = parts.slice(0, 4).join("-");
+        if (/^\d{3}$/.test(parts[3])) {
+          setMode("variant");
+          pendingVariantRef.current = base;
+          loadBases();
+        } else {
+          setMode("new");
+          setCat(parts[1] as CategoryCode);
+          setSub(parts[2]);
+        }
+        if (parts[4]) setSize(parts[4]);
+        if (parts[5]) setColor(parts.slice(5).join("-"));
+      }
+      p.delete("variant");
+      window.history.replaceState(null, "", window.location.pathname + (p.toString() ? `?${p}` : ""));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const pendingVariantRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!bases || !pendingVariantRef.current) return;
+    const match = bases.find((b) => b.base === pendingVariantRef.current);
+    pendingVariantRef.current = null;
+    if (match) setSelectedBase(match);
+  }, [bases]);
   useEffect(() => {
     try { localStorage.setItem(TRAY_KEY, JSON.stringify(tray)); } catch { /* full */ }
   }, [tray]);

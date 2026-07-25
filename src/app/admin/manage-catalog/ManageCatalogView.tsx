@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Search, X, Lock, Unlock, Eye, EyeOff, Pencil, ImageOff, ScanLine } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
@@ -29,6 +29,15 @@ const FIELDS: { key: string; label: string; type?: "number" | "textarea" | "bool
 export function ManageCatalogView({ products }: { products: WholesaleProduct[] }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
+
+  // Deep-link from the global scan sheet: ?sku=… opens with the search
+  // pre-filtered to that product.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const sku = (p.get("sku") ?? "").trim();
+    if (sku) setQuery(sku);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [editing, setEditing] = useState<WholesaleProduct | null>(null);
   const [scanning, setScanning] = useState(false);
 

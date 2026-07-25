@@ -1,0 +1,14 @@
+# Parked ledger — items waiting on Ansh (build guide §14)
+
+Format: `- [ ] ANSH-## · <stage/feature stubbed> · <exact flag or file waiting> · <what to hand back>`
+
+- [x] ANSH-01 · Stage 1 registry mirror + dual-mode floor · registry sheet Editor grant · CLEARED 25 Jul 2026 (361-row history imported, mirror verified)
+- [ ] ANSH-02 · Stage 2 prototype fidelity + Stage 4/6 references · `docs/design/drevi-app-prototype.html`, `docs/reference/sku-generator/{Code.gs,Index-v6.html}`, `docs/reference/copy-template.md`, `pipeline/` copy into repo · Stage 2 shell built from the guide's §6 text; do a side-by-side pass when the prototype lands. Pipeline lives at `~/Documents/drevi/pipeline` (creds in its `.env`) — will be copied into the repo at Stage 4.
+- [ ] ANSH-03 · per-stage env vars on the PROD Vercel project (dev project is self-managed) · §15 table (incl. `ANTHROPIC_API_KEY`) · needed only at production cutover — all stages ship to the DEV project first per Ansh's 25 Jul directive.
+- [ ] ANSH-04 · Stage 4 job runner · GitHub repo secrets (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `FASHN_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) + a PAT scoped to Actions dispatch (`GITHUB_PAT`) · hand back: secret names confirmed set.
+- [ ] ANSH-05 · Stage 7b Shopify push · `SHOPIFY_ENABLED` + custom app Client ID/Secret + shop domain · until then buttons render "Connect Shopify — parked (ANSH-05)".
+- [ ] ANSH-06 · Stage 5 `openai_bg` engine live · `OPENAI_API_KEY` / `OPENAI_BG_ENABLED` · engine chip ships disabled.
+- [ ] ANSH-07 · Stage 8 cutover go/no-go · review `docs/CUTOVER-LOG.md` diff reports · verbal sign-off.
+- [ ] ANSH-08 · post-Stage-1 adoption · repoint legacy Apps Script `doGet` to the portal; set `SKU_DUAL_MODE=false` · confirmation the old tool is retired.
+- [ ] ANSH-09 · Stage 2 role→space grants · per-item `roles` overrides in `src/lib/nav.ts` (Grishma → Studio? Rakesh Stock scope?) · shipped with admin+ defaults until confirmed.
+- [ ] ANSH-10 · Seedream evaluation · `seedream` stays a reserved enum + disabled chip · someday.

@@ -94,6 +94,18 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku }: {
     } catch { /* full */ }
   }, [editMode, vendorId, receiptDate, billAmount, notes, lines]);
 
+  // Deep-link from the global scan sheet: /admin/receipts/new?sku=… starts
+  // the receipt with that garment already on line one.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const sku = (p.get("sku") ?? "").trim().toUpperCase();
+    if (!sku) return;
+    setLines((ls) => (ls.some((l) => l.sku === sku) ? ls : [...ls, { key: uuid(), sku, description: "", qty: 1, unitCost: "" }]));
+    p.delete("sku");
+    window.history.replaceState(null, "", window.location.pathname + (p.toString() ? `?${p}` : ""));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const addLine = useCallback((sku: string) => {
     const key = sku.trim().toUpperCase();
     if (!key) return { qty: 0, known: true };

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getStaff } from "@/lib/staff";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { AppShell } from "@/components/shell/AppShell";
 import { OfflineSync } from "@/components/OfflineSync";
 
 export const dynamic = "force-dynamic";
@@ -13,9 +13,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const staff = await getStaff();
   if (!staff) redirect("/login");
   return (
-    <AdminShell staff={{ name: staff.name, email: staff.email, role: staff.role }}>
+    <AppShell staff={{ name: staff.name, email: staff.email, role: staff.role }}>
       {children}
       <OfflineSync />
-    </AdminShell>
+    </AppShell>
   );
 }
