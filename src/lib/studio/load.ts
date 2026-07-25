@@ -124,12 +124,14 @@ export interface AngleDetail {
   candidates: { id: string; engine: string; fileRef: string; status: string; createdAt: string; costCredits: number }[];
 }
 
-export async function loadDesignDetail(designId: string): Promise<{ board: BoardRow; angles: AngleDetail[]; activeJobs: { angleId: string | null; type: string; status: string; progress: number }[] } | null> {
+export interface CopyDetail { title: string; description: string; tags: Record<string, string>; status: "none" | "draft" | "approved"; model: string | null; editedBy: string | null; approvedBy: string | null }
+
+export async function loadDesignDetail(designId: string): Promise<{ board: BoardRow; angles: AngleDetail[]; copy: CopyDetail | null; activeJobs: { angleId: string | null; type: string; status: string; progress: number }[] } | null> {
   const rows = await loadBoard();
   const board = rows.find((r) => r.id === designId);
   if (!board) return null;
   const admin = createAdminClient();
-  const [{ data: angles }, { data: jobs }] = await Promise.all([
+  const [{ data: angles }, { data: jobs }, { data: copyRow }] = await Promise.all([
     admin
       .from("design_angles")
       // Two FKs link these tables (angle_id + approved_candidate_id) — the
@@ -141,10 +143,14 @@ export async function loadDesignDetail(designId: string): Promise<{ board: Board
       .select("angle_id, type, status, progress")
       .eq("design_id", designId)
       .in("status", ["queued", "claimed", "running"]),
+    admin.from("design_copy").select("title, description, tags, status, model, edited_by, approved_by").eq("design_id", designId).maybeSingle(),
   ]);
   const order: Record<string, number> = { front: 0, back: 1, side: 2, closeup: 3, detail_1: 4, detail_2: 5 };
   return {
     board,
+    copy: copyRow
+      ? { title: copyRow.title ?? "", description: copyRow.description ?? "", tags: (copyRow.tags as Record<string, string>) ?? {}, status: copyRow.status, model: copyRow.model, editedBy: copyRow.edited_by, approvedBy: copyRow.approved_by }
+      : null,
     angles: (angles ?? [])
       .map((a) => ({
         id: a.id,

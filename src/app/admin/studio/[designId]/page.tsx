@@ -13,5 +13,5 @@ export default async function WorkbenchPage({ params }: { params: { designId: st
   const detail = await loadDesignDetail(params.designId);
   if (!detail) notFound();
   const openaiEnabled = (process.env.OPENAI_BG_ENABLED ?? "").toLowerCase() === "true";
-  return <Workbench board={detail.board} angles={detail.angles} activeJobs={detail.activeJobs} openaiEnabled={openaiEnabled} />;
+  return <Workbench board={detail.board} angles={detail.angles} copy={detail.copy} activeJobs={detail.activeJobs} openaiEnabled={openaiEnabled} />;
 }

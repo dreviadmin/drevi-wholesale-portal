@@ -182,3 +182,28 @@ export async function approveAllBatch(candidateIds: string[]): Promise<{ ok: boo
   revalidatePath("/admin/studio");
   return { ok: true, approved };
 }
+
+// ---- Stage 6 batch: generate copy across a selection (§10) ----------------
+// STRICT_SPEC_MODE designs are SKIPPED and reported, matching the pipeline
+// principle. Capped per call to stay inside the action budget.
+export async function generateCopyBatch(
+  designIds: string[],
+): Promise<{ ok: boolean; error?: string; generated?: number; skipped?: number; failed?: number }> {
+  let staff;
+  try {
+    staff = await requireAdmin();
+  } catch {
+    return { ok: false, error: "Not authorized" };
+  }
+  if (designIds.length === 0) return { ok: false, error: "Nothing selected" };
+  const { generateCopyForDesign } = await import("@/lib/studio/copy");
+  let generated = 0, skipped = 0, failed = 0;
+  for (const id of designIds.slice(0, 10)) {
+    const res = await generateCopyForDesign(id, staff.email);
+    if (res.ok) generated++;
+    else if (res.skipped) skipped++;
+    else failed++;
+  }
+  revalidatePath("/admin/studio");
+  return { ok: true, generated, skipped, failed };
+}

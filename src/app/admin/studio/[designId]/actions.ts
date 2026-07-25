@@ -190,3 +190,66 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
   revalidatePath(`/admin/studio/${angle.design_id}`);
   return { ok: true, jobId: job.id };
 }
+
+// ---- Stage 6: copy track (§10) -------------------------------------------
+
+export async function generateCopy(designId: string): Promise<Res> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
+  const { generateCopyForDesign } = await import("@/lib/studio/copy");
+  const res = await generateCopyForDesign(designId, staff.email);
+  if (!res.ok) return fail(res.error ?? "Generation failed");
+  revalidatePath(`/admin/studio/${designId}`);
+  revalidatePath("/admin/studio");
+  return { ok: true };
+}
+
+// Inline edit saves an edited DRAFT; editing after approval reverts to draft
+// and (D3) flips live portals to changes_pending.
+export async function saveCopyEdit(
+  designId: string,
+  patch: { title: string; description: string; tags: Record<string, string> },
+): Promise<Res> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
+  const admin = createAdminClient();
+  const { data: existing } = await admin.from("design_copy").select("status").eq("design_id", designId).maybeSingle();
+  const wasApproved = existing?.status === "approved";
+  const { error } = await admin.from("design_copy").upsert(
+    {
+      design_id: designId,
+      title: patch.title.slice(0, 60),
+      description: patch.description,
+      tags: patch.tags,
+      status: "draft",
+      edited_by: staff.email,
+      approved_by: null,
+      approved_at: null,
+    },
+    { onConflict: "design_id" },
+  );
+  if (error) return fail(error.message);
+  if (wasApproved) {
+    await admin.from("publish_targets").update({ state: "changes_pending" }).eq("design_id", designId).eq("state", "live");
+  }
+  revalidatePath(`/admin/studio/${designId}`);
+  revalidatePath("/admin/studio");
+  return { ok: true };
+}
+
+// Approval changes READINESS only (D2 — no auto-push).
+export async function approveCopy(designId: string): Promise<Res> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
+  const admin = createAdminClient();
+  const { data: row } = await admin.from("design_copy").select("status").eq("design_id", designId).maybeSingle();
+  if (!row || row.status === "none") return fail("No copy draft to approve");
+  const { error } = await admin
+    .from("design_copy")
+    .update({ status: "approved", approved_by: staff.email, approved_at: new Date().toISOString() })
+    .eq("design_id", designId);
+  if (error) return fail(error.message);
+  revalidatePath(`/admin/studio/${designId}`);
+  revalidatePath("/admin/studio");
+  return { ok: true };
+}
