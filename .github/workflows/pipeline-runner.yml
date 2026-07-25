@@ -1,0 +1,43 @@
+# Pipeline job runner (build guide §8.3). Dispatched per-job by
+# POST /api/pipeline/jobs once ANSH-04 lands the repo secrets + PAT.
+# Secrets required: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+# GOOGLE_SERVICE_ACCOUNT_JSON, FASHN_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY.
+name: pipeline-runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "pipeline_jobs.id to execute"
+        required: true
+
+concurrency:
+  # One runner per job; per-design serialisation is enforced by job claiming.
+  group: pipeline-job-${{ inputs.job_id }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r pipeline/requirements.txt
+      - name: Write service account
+        run: printf '%s' "$SA_JSON" > /tmp/sa.json
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      - name: Run job
+        run: python3 -m pipeline.runner --job "${{ inputs.job_id }}" --state supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/sa.json
+          GOOGLE_SERVICE_ACCOUNT_JSON: /tmp/sa.json
+          FASHN_API_KEY: ${{ secrets.FASHN_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

@@ -10,6 +10,7 @@ import { palette } from "@/lib/palette";
 import { BADGE_LABEL, type DesignBadge } from "@/lib/studio/state";
 import type { BoardRow } from "@/lib/studio/load";
 import { setTierBatch, togglePortalBatch } from "./actions";
+import { JobsTicker } from "./JobsTicker";
 
 // Studio board (§7.4): derived-state chips with live counts, rows with
 // thumb/badge/dot-strip, multiselect batch bar. Spend/push batch actions are
@@ -124,10 +125,35 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
 
   return (
     <div className="px-4 md:px-8 py-6 max-w-5xl">
-      <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>Studio</h1>
-      <p className="font-body mt-1" style={{ fontSize: 11.5, color: palette.mutedGreige }}>
-        {rows.length} designs · photos, copy and publishing converge here.
-      </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>Studio</h1>
+          <p className="font-body mt-1" style={{ fontSize: 11.5, color: palette.mutedGreige }}>
+            {rows.length} designs · photos, copy and publishing converge here.
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            startTransition(async () => {
+              const res = await fetch("/api/pipeline/jobs", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ type: "scan_drive", params: { all: true } }),
+              });
+              const d = await res.json();
+              flash(res.ok ? "Drive backfill queued" : d.error ?? "Failed");
+              router.refresh();
+            });
+          }}
+          className="font-body uppercase disabled:opacity-50"
+          style={{ fontSize: 9.5, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, padding: "9px 12px" }}
+        >
+          Backfill from Drive
+        </button>
+      </div>
+      <JobsTicker />
 
       {/* Search + scan (golden rule 1) */}
       <div className="flex items-center gap-2 mt-4 p-2.5" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>

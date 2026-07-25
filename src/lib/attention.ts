@@ -67,8 +67,25 @@ export async function computeAttention(): Promise<AttentionItem[]> {
     });
   }
 
+  // 4. Failed pipeline jobs — a dead run blocks a design silently otherwise.
+  try {
+    const { count: failedJobs } = await admin
+      .from("pipeline_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "error");
+    if ((failedJobs ?? 0) > 0) {
+      items.push({
+        key: "pipeline_failed",
+        title: `Pipeline: ${failedJobs} failed job${failedJobs === 1 ? "" : "s"}`,
+        sub: "Open the board's job strip for logs",
+        count: failedJobs ?? 0,
+        severity: "high",
+        href: "/admin/studio",
+      });
+    }
+  } catch { /* table not migrated yet */ }
+
   // 3. Studio: designs stuck before the camera or waiting on a reviewer.
-  //    (4. pipeline job failures arrive with Stage 4.)
   try {
     const { loadBoard } = await import("@/lib/studio/load");
     const board = await loadBoard();
