@@ -253,3 +253,28 @@ export async function approveCopy(designId: string): Promise<Res> {
   revalidatePath("/admin/studio");
   return { ok: true };
 }
+
+// ---- Stage 7: publish (§11) -----------------------------------------------
+
+export async function pushWholesale(designId: string): Promise<Res & { blockers?: string[] }> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
+  const { publishWholesale } = await import("@/lib/studio/publish");
+  const res = await publishWholesale(designId, staff.id, staff.email);
+  if (!res.ok) return { ok: false, error: res.error, blockers: res.blockers };
+  revalidatePath(`/admin/studio/${designId}`);
+  revalidatePath("/admin/studio");
+  revalidatePath("/catalog");
+  return { ok: true };
+}
+
+export async function pushShopify(designId: string): Promise<Res & { blockers?: string[] }> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
+  const { publishShopify } = await import("@/lib/shopify");
+  const res = await publishShopify(designId, staff.id, staff.email);
+  if (!res.ok) return { ok: false, error: res.error, blockers: res.blockers };
+  revalidatePath(`/admin/studio/${designId}`);
+  revalidatePath("/admin/studio");
+  return { ok: true };
+}

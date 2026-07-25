@@ -25,7 +25,8 @@ export type AuditEventType =
   | "studio_tier_set"
   | "studio_portal_toggled"
   | "studio_candidate_approved"
-  | "studio_candidate_rejected";
+  | "studio_candidate_rejected"
+  | "studio_published";
 
 export interface WholesaleProduct {
   sku: string;

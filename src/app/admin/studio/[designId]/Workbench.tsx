@@ -9,7 +9,7 @@ import { palette } from "@/lib/palette";
 import type { BoardRow, AngleDetail, CopyDetail } from "@/lib/studio/load";
 import { AI_ANGLES } from "@/lib/studio/state";
 import { JobsTicker } from "../JobsTicker";
-import { approveCandidate, rejectCandidate, approveAsIs, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, approveCopy } from "./actions";
+import { approveCandidate, rejectCandidate, approveAsIs, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, approveCopy, pushWholesale, pushShopify } from "./actions";
 
 // Workbench client (§9). Card per angle: source vs current candidate (both
 // zoomable — golden rule 2), engine chips (D4; seedream disabled; openai_bg
@@ -269,8 +269,20 @@ export function Workbench({ board, angles, copy, activeJobs, openaiEnabled }: {
                   {g.blockers.map((b) => <li key={b} className="font-body" style={{ fontSize: 10, color: palette.mutedGreige, lineHeight: 1.7 }}>· {b}</li>)}
                 </ul>
               )}
-              <button type="button" disabled title="Publishing arrives in Stage 7" className="mt-2 w-full font-body uppercase opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, color: palette.black, padding: "6px 0" }}>
-                Push {portal === "wholesale" ? "wholesale" : "Shopify"}
+              <button
+                type="button"
+                disabled={pending || (!g.ready && t?.state !== "changes_pending") || t?.enabled === false}
+                onClick={() =>
+                  run(
+                    () => (portal === "wholesale" ? pushWholesale(board.id) : pushShopify(board.id)),
+                    t?.state === "changes_pending" ? "Re-pushed" : "Pushed",
+                  )
+                }
+                className="mt-2 w-full font-body uppercase disabled:opacity-40"
+                style={{ fontSize: 8.5, letterSpacing: "0.12em", background: g.ready || t?.state === "changes_pending" ? palette.black : "transparent", color: g.ready || t?.state === "changes_pending" ? palette.ivory : palette.black, border: `1px solid ${palette.black}`, padding: "7px 0" }}
+                title={portal === "shopify" ? "Creates a DRAFT product — parked until ANSH-05 flips SHOPIFY_ENABLED" : undefined}
+              >
+                {t?.state === "changes_pending" ? "Re-push" : "Push"} {portal === "wholesale" ? "wholesale" : "Shopify"}
               </button>
             </details>
           );

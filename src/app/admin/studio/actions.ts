@@ -207,3 +207,26 @@ export async function generateCopyBatch(
   revalidatePath("/admin/studio");
   return { ok: true, generated, skipped, failed };
 }
+
+// ---- Stage 7 batch: push wholesale across a selection ----------------------
+export async function pushWholesaleBatch(
+  designIds: string[],
+): Promise<{ ok: boolean; error?: string; pushed?: number; blocked?: number; failed?: number }> {
+  let staff;
+  try {
+    staff = await requireAdmin();
+  } catch {
+    return { ok: false, error: "Not authorized" };
+  }
+  if (designIds.length === 0) return { ok: false, error: "Nothing selected" };
+  const { publishWholesale } = await import("@/lib/studio/publish");
+  let pushed = 0, blocked = 0, failed = 0;
+  for (const id of designIds.slice(0, 20)) {
+    const res = await publishWholesale(id, staff.id, staff.email);
+    if (res.ok) pushed++;
+    else if (res.blockers) blocked++;
+    else failed++;
+  }
+  revalidatePath("/admin/studio");
+  return { ok: true, pushed, blocked, failed };
+}

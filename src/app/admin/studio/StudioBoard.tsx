@@ -9,7 +9,7 @@ import { useSort, SortTh } from "@/components/sortable";
 import { palette } from "@/lib/palette";
 import { BADGE_LABEL, type DesignBadge } from "@/lib/studio/state";
 import type { BoardRow } from "@/lib/studio/load";
-import { setTierBatch, togglePortalBatch, runFashnBatch, approveAllPreflight, approveAllBatch, generateCopyBatch } from "./actions";
+import { setTierBatch, togglePortalBatch, runFashnBatch, approveAllPreflight, approveAllBatch, generateCopyBatch, pushWholesaleBatch } from "./actions";
 import { JobsTicker } from "./JobsTicker";
 
 // Studio board (§7.4): derived-state chips with live counts, rows with
@@ -302,7 +302,22 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
             >
               Generate copy
             </button>
-            <button type="button" disabled title="Publishing arrives in Stage 7" className="font-body uppercase opacity-40" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: "1px solid rgba(214,197,161,0.4)", padding: "8px 10px" }}>Push WS</button>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                if (!window.confirm(`Push up to ${Math.min(ids.length, 20)} design(s) to wholesale? Gate-blocked designs are skipped and reported.`)) return;
+                startTransition(async () => {
+                  const r = await pushWholesaleBatch(ids);
+                  flash(r.ok ? `Wholesale: ${r.pushed} pushed · ${r.blocked} gate-blocked · ${r.failed} failed` : r.error ?? "Failed");
+                  router.refresh();
+                });
+              }}
+              className="font-body uppercase disabled:opacity-50"
+              style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.black, background: palette.gold, padding: "8px 10px" }}
+            >
+              Push WS
+            </button>
           </div>
         </div>
       )}
