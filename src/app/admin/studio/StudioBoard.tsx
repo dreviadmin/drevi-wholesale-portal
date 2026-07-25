@@ -9,7 +9,7 @@ import { useSort, SortTh } from "@/components/sortable";
 import { palette } from "@/lib/palette";
 import { BADGE_LABEL, type DesignBadge } from "@/lib/studio/state";
 import type { BoardRow } from "@/lib/studio/load";
-import { setTierBatch, togglePortalBatch } from "./actions";
+import { setTierBatch, togglePortalBatch, runFashnBatch, approveAllPreflight, approveAllBatch } from "./actions";
 import { JobsTicker } from "./JobsTicker";
 
 // Studio board (§7.4): derived-state chips with live counts, rows with
@@ -37,6 +37,12 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  // D8 confirm sheets: FASHN spend (count + credits) and batch-approve (thumbnails).
+  const [confirm, setConfirm] = useState<
+    | { kind: "fashn"; jobs: number; credits: number }
+    | { kind: "approve"; items: { candidateId: string; fileRef: string; label: string }[] }
+    | null
+  >(null);
 
   // Cockpit deep-links land pre-filtered: /admin/studio?state=needs_photos
   useEffect(() => {
@@ -250,8 +256,89 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
             <button type="button" disabled={pending} onClick={() => runBatch(() => setTierBatch(ids, "standard"), "Tier set to standard")} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}>Set standard</button>
             <button type="button" disabled={pending} onClick={() => runBatch(() => togglePortalBatch(ids, "shopify", false), "Shopify disabled")} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}>SH off</button>
             <button type="button" disabled={pending} onClick={() => runBatch(() => togglePortalBatch(ids, "shopify", true), "Shopify enabled")} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}>SH on</button>
-            <button type="button" disabled title="Runner arrives in Stage 4" className="font-body uppercase opacity-40" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: "1px solid rgba(214,197,161,0.4)", padding: "8px 10px" }}>Run FASHN</button>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                startTransition(async () => {
+                  const pre = await runFashnBatch(ids, true);
+                  if (!pre.ok || !pre.jobs) { flash(pre.error ?? "No pending AI angles in the selection"); return; }
+                  setConfirm({ kind: "fashn", jobs: pre.jobs, credits: pre.credits ?? 0 });
+                });
+              }}
+              className="font-body uppercase disabled:opacity-50"
+              style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.black, background: palette.gold, padding: "8px 10px" }}
+            >
+              Run FASHN
+            </button>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                startTransition(async () => {
+                  const pre = await approveAllPreflight(ids);
+                  if (!pre.ok || !pre.items?.length) { flash(pre.error ?? "Nothing awaiting review in the selection"); return; }
+                  setConfirm({ kind: "approve", items: pre.items });
+                });
+              }}
+              className="font-body uppercase disabled:opacity-50"
+              style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}
+            >
+              Approve all
+            </button>
             <button type="button" disabled title="Publishing arrives in Stage 7" className="font-body uppercase opacity-40" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: "1px solid rgba(214,197,161,0.4)", padding: "8px 10px" }}>Push WS</button>
+          </div>
+        </div>
+      )}
+
+      {/* D8 confirm sheets */}
+      {confirm && (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center md:justify-center" style={{ background: "rgba(20,20,20,0.55)" }} onClick={() => setConfirm(null)}>
+          <div className="w-full md:w-[440px] max-h-modal overflow-y-auto p-5" style={{ background: palette.ivory }} onClick={(e) => e.stopPropagation()}>
+            {confirm.kind === "fashn" ? (
+              <>
+                <div className="font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.2em", color: palette.softBlack }}>Run FASHN</div>
+                <p className="font-body mt-2" style={{ fontSize: 13, color: palette.black }}>
+                  {confirm.jobs} render job{confirm.jobs === 1 ? "" : "s"} · estimated <b>{confirm.credits} credits</b> (1k · balanced).
+                </p>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => { setConfirm(null); runBatch(() => runFashnBatch(ids, false).then((r) => ({ ok: r.ok, error: r.error })), "FASHN jobs queued"); }}
+                  className="mt-4 w-full font-body uppercase disabled:opacity-50"
+                  style={{ fontSize: 10.5, letterSpacing: "0.18em", background: palette.gold, color: palette.black, fontWeight: 600, padding: "12px 0" }}
+                >
+                  Spend {confirm.credits} credits
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.2em", color: palette.softBlack }}>
+                  Approve {confirm.items.length} candidate{confirm.items.length === 1 ? "" : "s"}
+                </div>
+                <div className="grid grid-cols-4 gap-2 mt-3">
+                  {confirm.items.map((it) => (
+                    <div key={it.candidateId}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={`/api/drive-photo?id=${encodeURIComponent(it.fileRef)}&s=200`} alt={it.label} style={{ width: "100%", aspectRatio: "4/5", objectFit: "cover", background: palette.ivoryDeep }} />
+                      <div className="font-mono truncate" style={{ fontSize: 7, color: palette.mutedGreige }}>{it.label}</div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => { const idsToApprove = confirm.items.map((i) => i.candidateId); setConfirm(null); runBatch(() => approveAllBatch(idsToApprove).then((r) => ({ ok: r.ok, error: r.error })), "Batch approved"); }}
+                  className="mt-4 w-full font-body uppercase disabled:opacity-50"
+                  style={{ fontSize: 10.5, letterSpacing: "0.18em", background: "#1F6B45", color: "#fff", fontWeight: 600, padding: "12px 0" }}
+                >
+                  Approve all shown
+                </button>
+              </>
+            )}
+            <button type="button" onClick={() => setConfirm(null)} className="mt-2 w-full font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.14em", color: palette.softBlack, padding: "8px 0" }}>
+              Cancel
+            </button>
           </div>
         </div>
       )}

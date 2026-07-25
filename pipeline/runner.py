@@ -177,13 +177,173 @@ def run_scan_drive(job: dict, rep: JobReporter, rest: SupabaseRest):
     rep.log(f"sources filled: {filled_sources} · candidates registered: {new_candidates} · fronts approved: {approved}")
 
 
-HANDLERS = {"scan_drive": run_scan_drive}
+def _web_ready_copy(drive, file_id: str, rep: JobReporter) -> str:
+    """FASHN can't ingest HEIC. If the source is HEIC, convert to JPEG once,
+    park the web copy next to the original (\"<name>_web.jpg\") and reuse it
+    on every later run. JPEG/PNG sources pass straight through."""
+    import io
+    import tempfile
+    from pathlib import Path
+
+    from googleapiclient.http import MediaIoBaseDownload
+
+    from drevi_common import upload_file_to_drive
+
+    meta = drive.files().get(fileId=file_id, fields="mimeType,name,parents", supportsAllDrives=True).execute()
+    mime = (meta.get("mimeType") or "").lower()
+    if "heic" not in mime and "heif" not in mime:
+        return file_id
+    parent = (meta.get("parents") or [None])[0]
+    web_name = Path(meta["name"]).stem + "_web.jpg"
+    if parent:
+        existing = drive.files().list(
+            q=f"'{parent}' in parents and name = '{web_name}' and trashed = false",
+            fields="files(id)", supportsAllDrives=True, includeItemsFromAllDrives=True,
+        ).execute().get("files", [])
+        if existing:
+            return existing[0]["id"]
+
+    rep.log(f"converting HEIC source {meta['name']} → {web_name}")
+    from pillow_heif import register_heif_opener  # available in the pipeline venv
+    from PIL import Image
+
+    register_heif_opener()
+    buf = io.BytesIO()
+    downloader = MediaIoBaseDownload(buf, drive.files().get_media(fileId=file_id, supportsAllDrives=True))
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    buf.seek(0)
+    img = Image.open(buf).convert("RGB")
+    img.thumbnail((2048, 2048))
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / web_name
+        img.save(out, "JPEG", quality=92)
+        uploaded = upload_file_to_drive(drive, out, parent or file_id, mime_type="image/jpeg")
+    return uploaded["id"]
+
+
+def run_tryon(job: dict, rep: JobReporter, rest: SupabaseRest):
+    """One FASHN tryon-max render for one angle (§9 Regen).
+
+    garment = the angle's source image (Drive, made link-readable)
+    model   = the brand-model pose for that angle (DREVI_BRAND_MODEL_FOLDER_ID)
+    Output uploads to the design's TRYON folder and registers a 'generated'
+    image_candidates row (cost recorded, D8)."""
+    import importlib
+    import logging
+    import tempfile
+    import urllib.request
+    from pathlib import Path
+
+    from drevi_common import (
+        DEFAULT_BRAND_MODEL, ensure_anyone_can_read, list_drive_folder,
+        list_drive_subfolders, make_public_url, normalize_brand_model,
+        resolve_angle_pose_filenames, tryon_max_credits, upload_file_to_drive,
+    )
+
+    log = logging.getLogger("runner.tryon")
+    if not job.get("angle_id"):
+        raise RuntimeError("tryon needs angle_id")
+    rows = rest.select(
+        "design_angles",
+        f"id=eq.{job['angle_id']}&select=id,angle,prompt,engine,source_ref,design_id,designs(id,base_sku,color,drive_tryon_id)",
+    )
+    if not rows:
+        raise RuntimeError("angle not found")
+    angle = rows[0]
+    design = angle["designs"]
+    if angle["angle"].startswith("detail"):
+        raise RuntimeError("Detail angles are raw-only (D5)")
+    if not angle["source_ref"]:
+        raise RuntimeError("No source image on this angle")
+
+    params = job.get("params") or {}
+    resolution = params.get("resolution", "1k")
+    mode = params.get("generation_mode", "balanced")
+    drive = get_drive_service()
+
+    rep.progress(5, "resolving inputs")
+    garment_id = _web_ready_copy(drive, angle["source_ref"], rep)
+    ensure_anyone_can_read(drive, garment_id)
+    garment_url = make_public_url(garment_id)
+
+    pose_root = os.environ.get("DREVI_BRAND_MODEL_FOLDER_ID", "").strip()
+    if not pose_root:
+        raise RuntimeError("DREVI_BRAND_MODEL_FOLDER_ID not set")
+    brand_model = normalize_brand_model(params.get("brand_model", DEFAULT_BRAND_MODEL), log)
+    pose_name = resolve_angle_pose_filenames(brand_model, params.get("movement_pose", ""), log).get(angle["angle"])
+    if not pose_name:
+        raise RuntimeError(f"no pose mapping for angle {angle['angle']}")
+    pose_id = None
+    candidates_dirs = [pose_root] + [f["id"] for f in list_drive_subfolders(drive, pose_root)]
+    for folder in candidates_dirs:
+        for f in list_drive_folder(drive, folder):
+            if (f.get("name") or "").lower() == pose_name.lower():
+                pose_id = f["id"]
+                break
+        if pose_id:
+            break
+    if not pose_id:
+        raise RuntimeError(f"pose {pose_name} not found under brand-model folder")
+    ensure_anyone_can_read(drive, pose_id)
+    pose_url = make_public_url(pose_id)
+
+    fashn_mod = importlib.import_module("03_fashn_runner")
+    api_key = os.environ.get("FASHN_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("FASHN_API_KEY not set")
+    client = fashn_mod.FashnClient(api_key, log)
+
+    credits = tryon_max_credits(resolution, mode)
+    rep.progress(15, f"FASHN submit ({resolution} · {mode} · ~{credits} credits)")
+    pred = client.submit_tryon(
+        model_image_url=pose_url,
+        garment_image_url=garment_url,
+        resolution=resolution,
+        generation_mode=mode,
+        prompt=angle.get("prompt") or "",
+    )
+    rep.progress(30, f"prediction {pred} — polling")
+    body = client.poll_status(pred)
+    outputs = body.get("output") or []
+    if not outputs:
+        raise RuntimeError("FASHN completed with no output")
+
+    rep.progress(70, "downloading output")
+    with tempfile.TemporaryDirectory() as td:
+        out_path = Path(td) / f"{angle['angle']}_{job['id'][:8]}.png"
+        urllib.request.urlretrieve(outputs[0], out_path)
+
+        tryon_folder = design.get("drive_tryon_id")
+        if not tryon_folder:
+            folder_name = f"{design['base_sku']}-{design['color']}"
+            created = drive.files().create(
+                body={"name": folder_name, "mimeType": "application/vnd.google-apps.folder",
+                      "parents": [os.environ.get("DRIVE_TRYON_FOLDER_ID", TRYON_FOLDER)]},
+                fields="id", supportsAllDrives=True,
+            ).execute()
+            tryon_folder = created["id"]
+            rest.update("designs", f"id=eq.{design['id']}", {"drive_tryon_id": tryon_folder})
+        rep.progress(85, "uploading to Drive")
+        uploaded = upload_file_to_drive(drive, out_path, tryon_folder, mime_type="image/png")
+
+    rest.insert("image_candidates", [{
+        "angle_id": angle["id"], "engine": "fashn", "file_ref": uploaded["id"],
+        "status": "generated", "job_id": job["id"], "cost_credits": credits,
+        "params": {"resolution": resolution, "generation_mode": mode},
+        "created_by": job.get("requested_by") or "runner",
+    }])
+    rep.add_cost(credits)
+    rep.log(f"candidate registered ({uploaded['id']}) · {credits} credits")
+
+
+HANDLERS = {"scan_drive": run_scan_drive, "tryon": run_tryon}
 PARKED = {
-    "tryon": "FASHN per-angle runs land with Stage 5 (workbench contract) — parked with ANSH-04.",
-    "openai_bg": "Background engine lands with Stage 5 — parked (ANSH-06).",
+    "openai_bg": "Background engine is parked (ANSH-06 — OPENAI_BG_ENABLED).",
     "copy": "Copy generation lands with Stage 6.",
-    "vision": "Vision runs land with Stage 5.",
-    "preprocess": "Preprocess runs land with Stage 5.",
+    "vision": "Vision runs land with Stage 5 follow-up.",
+    "preprocess": "Preprocess runs land with Stage 5 follow-up.",
 }
 
 

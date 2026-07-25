@@ -110,3 +110,55 @@ export async function loadBoard(): Promise<BoardRow[]> {
     };
   });
 }
+
+// Per-design detail for the workbench (§9): angles with their full candidate
+// history (D1), newest first.
+export interface AngleDetail {
+  id: string;
+  angle: Angle;
+  sourceRef: string | null;
+  prompt: string;
+  promptEditedByHuman: boolean;
+  engine: "fashn" | "openai_bg" | "raw" | "seedream";
+  approvedCandidateId: string | null;
+  candidates: { id: string; engine: string; fileRef: string; status: string; createdAt: string; costCredits: number }[];
+}
+
+export async function loadDesignDetail(designId: string): Promise<{ board: BoardRow; angles: AngleDetail[]; activeJobs: { angleId: string | null; type: string; status: string; progress: number }[] } | null> {
+  const rows = await loadBoard();
+  const board = rows.find((r) => r.id === designId);
+  if (!board) return null;
+  const admin = createAdminClient();
+  const [{ data: angles }, { data: jobs }] = await Promise.all([
+    admin
+      .from("design_angles")
+      // Two FKs link these tables (angle_id + approved_candidate_id) — the
+      // !angle_id hint picks the one-to-many history relation.
+      .select("id, angle, source_ref, prompt, prompt_edited_by_human, engine, approved_candidate_id, image_candidates!angle_id(id, engine, file_ref, status, created_at, cost_credits)")
+      .eq("design_id", designId),
+    admin
+      .from("pipeline_jobs")
+      .select("angle_id, type, status, progress")
+      .eq("design_id", designId)
+      .in("status", ["queued", "claimed", "running"]),
+  ]);
+  const order: Record<string, number> = { front: 0, back: 1, side: 2, closeup: 3, detail_1: 4, detail_2: 5 };
+  return {
+    board,
+    angles: (angles ?? [])
+      .map((a) => ({
+        id: a.id,
+        angle: a.angle as Angle,
+        sourceRef: a.source_ref,
+        prompt: a.prompt ?? "",
+        promptEditedByHuman: a.prompt_edited_by_human,
+        engine: a.engine as AngleDetail["engine"],
+        approvedCandidateId: a.approved_candidate_id,
+        candidates: ((a.image_candidates as { id: string; engine: string; file_ref: string; status: string; created_at: string; cost_credits: number }[] | null) ?? [])
+          .map((c) => ({ id: c.id, engine: c.engine, fileRef: c.file_ref, status: c.status, createdAt: c.created_at, costCredits: Number(c.cost_credits ?? 0) }))
+          .sort((x, y) => y.createdAt.localeCompare(x.createdAt)),
+      }))
+      .sort((x, y) => order[x.angle] - order[y.angle]),
+    activeJobs: (jobs ?? []).map((j) => ({ angleId: j.angle_id, type: j.type, status: j.status, progress: j.progress })),
+  };
+}
