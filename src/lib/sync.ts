@@ -5,6 +5,7 @@ import { readMaster } from "@/lib/sheets";
 import { fetchProductImageUrls } from "@/lib/shopify-auth";
 import { drivePhotosEnabled, fetchSkuImagesBytes } from "@/lib/drive";
 import { uploadProductPhoto } from "@/lib/storage";
+import { ingestDesigns } from "@/lib/studio/ingest";
 
 // Logical key -> Master Sheet display header (matched by suffix). Descriptive
 // fields come from the pipeline's known columns; the wholesale-specific columns
@@ -387,6 +388,14 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
     const stamped = vendorInfo.map((v) => ({ ...v, updated_at: nowIso }));
     const { error } = await supabase.from("product_vendor_info").upsert(stamped, { onConflict: "sku" });
     if (error) warnings.push(`Vendor-info upsert failed: ${error.message}`);
+  }
+
+  // Studio ingest (Stage 3, §7.3): keep the designs board scaffolded for every
+  // catalog SKU. Best-effort and additive — product sync must never fail on it.
+  try {
+    await ingestDesigns(supabase, products, warnings);
+  } catch (err) {
+    warnings.push(`Studio ingest failed: ${(err as Error).message}`);
   }
 
   // Hide SKUs previously visible but no longer qualifying (preserve order history).

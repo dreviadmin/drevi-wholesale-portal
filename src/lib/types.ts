@@ -21,7 +21,9 @@ export type AuditEventType =
   | "account_suspended"
   | "account_reactivated"
   | "account_rejected"
-  | "catalog_edit";
+  | "catalog_edit"
+  | "studio_tier_set"
+  | "studio_portal_toggled";
 
 export interface WholesaleProduct {
   sku: string;

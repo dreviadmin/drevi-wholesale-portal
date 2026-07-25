@@ -67,7 +67,34 @@ export async function computeAttention(): Promise<AttentionItem[]> {
     });
   }
 
-  // 3/4. Studio + pipeline sources arrive with Stages 3–4; zero-count now.
+  // 3. Studio: designs stuck before the camera or waiting on a reviewer.
+  //    (4. pipeline job failures arrive with Stage 4.)
+  try {
+    const { loadBoard } = await import("@/lib/studio/load");
+    const board = await loadBoard();
+    const needsPhotos = board.filter((b) => b.badge === "needs_photos").length;
+    const inReview = board.filter((b) => b.badge === "in_review").length;
+    if (needsPhotos > 0) {
+      items.push({
+        key: "studio_needs_photos",
+        title: `${needsPhotos} design${needsPhotos === 1 ? "" : "s"} awaiting photos`,
+        sub: "Specs verified · ready for the pipeline",
+        count: needsPhotos,
+        severity: "medium",
+        href: "/admin/studio?state=needs_photos",
+      });
+    }
+    if (inReview > 0) {
+      items.push({
+        key: "studio_in_review",
+        title: `${inReview} design${inReview === 1 ? "" : "s"} need photo review`,
+        sub: "Candidates waiting for approval",
+        count: inReview,
+        severity: "medium",
+        href: "/admin/studio?state=in_review",
+      });
+    }
+  } catch { /* studio tables not migrated yet — zero-count gracefully */ }
 
   const soldOut = (soldOutBest.data ?? []).filter((p) => orderedSkus.has(p.sku.toUpperCase())).length;
   if (soldOut > 0) {

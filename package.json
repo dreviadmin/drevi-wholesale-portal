@@ -10,7 +10,8 @@
     "db:migrate": "node scripts/apply-migration.mjs",
     "db:seed-auth": "node scripts/seed-auth.mjs",
     "db:backup": "node scripts/backup.mjs",
-    "build:local": "NEXT_BUILD_DIR=.next-build next build"
+    "build:local": "NEXT_BUILD_DIR=.next-build next build",
+    "test": "vitest run"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",
@@ -40,6 +41,7 @@
     "pg": "^8.21.0",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }

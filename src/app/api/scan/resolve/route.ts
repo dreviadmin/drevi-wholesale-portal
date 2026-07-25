@@ -24,13 +24,21 @@ export async function GET(request: Request) {
   if (!sku) return NextResponse.json({ error: "sku required" }, { status: 400 });
 
   const admin = createAdminClient();
-  const [{ data: product }, { data: vendorInfo }] = await Promise.all([
+  // Studio lookup key: DD-CAT-SUB-NNN…-COLOR → (base, color)
+  const parts = sku.split("-");
+  const designKey = parts.length >= 5 && /^\d{2,4}$/.test(parts[3])
+    ? { base: parts.slice(0, 4).join("-"), color: parts[parts.length - 1] }
+    : null;
+  const [{ data: product }, { data: vendorInfo }, { data: design }] = await Promise.all([
     admin
       .from("wholesale_products")
       .select("sku, title, image_urls, wholesale_visible")
       .eq("sku", sku)
       .maybeSingle(),
     admin.from("product_vendor_info").select("sku, retail_price").eq("sku", sku).maybeSingle(),
+    designKey
+      ? admin.from("designs").select("id").eq("base_sku", designKey.base).eq("color", designKey.color).maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const known = !!(product || vendorInfo);
@@ -53,6 +61,7 @@ export async function GET(request: Request) {
   ];
   if (isAdmin) {
     actions.push({ key: "log_receipt", label: "Log into a receipt", href: `/admin/receipts/new?sku=${encodeURIComponent(sku)}` });
+    if (design?.id) actions.push({ key: "open_studio", label: "Open in studio", href: `/admin/studio/${design.id}` });
     actions.push({ key: "edit_master", label: "Edit product master", href: `/admin/manage-catalog?sku=${encodeURIComponent(sku)}` });
   }
   actions.push({ key: "add_to_print", label: "Add to print sheet" }); // client handles

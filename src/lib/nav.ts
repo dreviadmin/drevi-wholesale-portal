@@ -55,12 +55,12 @@ export const SPACES: Space[] = [
     ],
   },
   {
-    // Populated in Stage 3 (board). Empty items → hidden everywhere for now.
+    // Grishma's Studio access is parked (ANSH-09) — admin+ until confirmed.
     key: "studio",
     label: "nav.studio",
     icon: "Palette",
     roles: ADMIN_PLUS,
-    items: [],
+    items: [{ label: "nav.studio", href: "/admin/studio" }],
   },
   {
     key: "office",
