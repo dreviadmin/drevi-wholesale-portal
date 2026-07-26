@@ -244,7 +244,7 @@ export function Workbench({ board, angles, copy, activeJobs, openaiEnabled }: {
             {board.badgeLabel}
           </div>
         </div>
-        <Link href={`/admin/manage-catalog?sku=${encodeURIComponent(board.baseSku)}`} aria-label="Product master" title="Product master (re-homes in Stage 8)">
+        <Link href={`/admin/studio/master/${board.id}`} aria-label="Product master" title="Product Master editor">
           <SlidersHorizontal size={16} color={palette.mutedGreige} />
         </Link>
       </div>

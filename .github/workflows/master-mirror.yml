@@ -1,0 +1,20 @@
+# Stage 8 §12.3 — nightly Supabase → sheet "App Mirror" tab (one-way).
+# Same PORTAL_URL/CRON_SECRET repo secrets as the other crons.
+name: master-mirror
+
+on:
+  schedule:
+    - cron: "45 21 * * *" # 03:15 IST nightly
+  workflow_dispatch: {}
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Export master mirror
+        run: |
+          code=$(curl -s -o /tmp/out -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.PORTAL_URL }}/api/cron/export-master")
+          cat /tmp/out
+          [ "$code" = "200" ]

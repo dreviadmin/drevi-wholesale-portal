@@ -8,7 +8,7 @@ Format: `- [ ] ANSH-## · <stage/feature stubbed> · <exact flag or file waiting
 - [ ] ANSH-04 · Stage 4 job runner · GitHub repo secrets (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `FASHN_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) + a PAT scoped to Actions dispatch (`GITHUB_PAT`) · hand back: secret names confirmed set.
 - [ ] ANSH-05 · Stage 7b Shopify push · `SHOPIFY_ENABLED` + custom app Client ID/Secret + shop domain · until then buttons render "Connect Shopify — parked (ANSH-05)".
 - [ ] ANSH-06 · Stage 5 `openai_bg` engine live · `OPENAI_API_KEY` / `OPENAI_BG_ENABLED` · engine chip ships disabled.
-- [ ] ANSH-07 · Stage 8 cutover go/no-go · review `docs/CUTOVER-LOG.md` diff reports · verbal sign-off.
+- [ ] ANSH-07 · Stage 8 cutover go/no-go · review `docs/CUTOVER-LOG.md` (needs 5 clean days; team edits must move to the master editor first) · verbal sign-off, then: SHEET_SYNC_ENABLED=false + cleanup migration + pipeline CLI default → supabase.
 - [ ] ANSH-08 · post-Stage-1 adoption · repoint legacy Apps Script `doGet` to the portal; set `SKU_DUAL_MODE=false` · confirmation the old tool is retired.
 - [ ] ANSH-09 · Stage 2 role→space grants · per-item `roles` overrides in `src/lib/nav.ts` (Grishma → Studio? Rakesh Stock scope?) · shipped with admin+ defaults until confirmed.
 - [ ] ANSH-10 · Seedream evaluation · `seedream` stays a reserved enum + disabled chip · someday.
