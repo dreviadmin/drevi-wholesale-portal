@@ -26,11 +26,12 @@ export interface BoardRow {
   gates: Record<PortalKey, { ready: boolean; blockers: string[] }>;
   thumb: string | null;
   wholesalePriceSet: boolean;
+  notifyCount: number; // open back-in-stock requests (Stage 9)
 }
 
 export async function loadBoard(): Promise<BoardRow[]> {
   const admin = createAdminClient();
-  const [designs, angles, generatedAngleIds, copies, targets, products] = await Promise.all([
+  const [designs, angles, generatedAngleIds, copies, targets, products, notifies] = await Promise.all([
     fetchAll<{ id: string; base_sku: string; color: string; title: string | null; category: string | null; tier: "standard" | "hero"; specs_verified: boolean }>(
       admin, "designs", "id, base_sku, color, title, category, tier, specs_verified"),
     fetchAll<{ id: string; design_id: string; angle: Angle; approved_candidate_id: string | null; source_ref: string | null }>(
@@ -41,7 +42,13 @@ export async function loadBoard(): Promise<BoardRow[]> {
       admin, "publish_targets", "design_id, portal, enabled, state"),
     fetchAll<{ sku: string; wholesale_price: number; image_urls: string[] | null }>(
       admin, "wholesale_products", "sku, wholesale_price, image_urls"),
+    fetchAll<{ sku_base: string; color: string }>(admin, "notify_me", "sku_base, color", (q) => q.is("fulfilled_at", null)),
   ]);
+  const notifyByGroup = new Map<string, number>();
+  for (const n of notifies) {
+    const key = `${n.sku_base.toUpperCase()}|${n.color.toUpperCase()}`;
+    notifyByGroup.set(key, (notifyByGroup.get(key) ?? 0) + 1);
+  }
 
   const reviewAngles = new Set(generatedAngleIds.map((c) => c.angle_id));
   const anglesByDesign = new Map<string, typeof angles>();
@@ -107,6 +114,7 @@ export async function loadBoard(): Promise<BoardRow[]> {
       },
       thumb: groupThumb.get(key) ?? null,
       wholesalePriceSet: input.wholesalePriceSet,
+      notifyCount: notifyByGroup.get(key.toUpperCase()) ?? 0,
     };
   });
 }

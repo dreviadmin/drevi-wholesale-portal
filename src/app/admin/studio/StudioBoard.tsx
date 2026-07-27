@@ -120,6 +120,7 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
           <span className="font-mono block mt-0.5" style={{ fontSize: 9.5, color: palette.mutedGreige }}>
             {dot(r.specsVerified)} specs · ◑ {r.approvedAiCount}/4 · {dot(r.copyStatus === "approved")} copy ·{" "}
             {r.targets.map((t) => `${t.state === "live" ? "▪" : "▫"}${t.portal === "wholesale" ? "WS" : "SH"}`).join(" ")}
+            {r.notifyCount > 0 ? ` · 🔔 ${r.notifyCount}` : ""}
           </span>
         </span>
         <span className="font-body uppercase flex-shrink-0 px-2 py-1" style={{ fontSize: 8.5, letterSpacing: "0.1em", fontWeight: 600, background: BADGE_STYLE[r.badge].bg, color: BADGE_STYLE[r.badge].fg }}>
