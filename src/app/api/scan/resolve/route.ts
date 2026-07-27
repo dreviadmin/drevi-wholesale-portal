@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getStaff, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createServerSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -17,11 +18,41 @@ export interface ScanAction {
 
 export async function GET(request: Request) {
   const staff = await getStaff();
-  if (!staff) return NextResponse.json({ error: "Not authorized" }, { status: 401 });
 
   const url = new URL(request.url);
   const sku = (url.searchParams.get("sku") ?? "").trim().toUpperCase();
   if (!sku) return NextResponse.json({ error: "sku required" }, { status: 400 });
+
+  // BUYER MODE (§13): only View product / Add to cart, and only for visible
+  // products. Unknown or hidden SKUs read "not available" — nothing
+  // operational (no retail flags, no studio ids, no create-SKU) ever leaks.
+  if (!staff) {
+    const supabase = createServerSupabase();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user?.email) return NextResponse.json({ error: "Not authorized" }, { status: 401 });
+    const adminB = createAdminClient();
+    const { data: buyerRows } = await adminB
+      .from("buyers").select("id, status").eq("email", user.email).not("encrypted_password", "is", null).limit(1);
+    if (buyerRows?.[0]?.status !== "active") return NextResponse.json({ error: "Not authorized" }, { status: 401 });
+    const { data: prod } = await adminB
+      .from("wholesale_products")
+      .select("sku, title, image_urls, wholesale_visible")
+      .eq("sku", sku)
+      .maybeSingle();
+    if (!prod || !prod.wholesale_visible) {
+      return NextResponse.json({ sku, known: false, message: "Not available on the wholesale portal.", actions: [] });
+    }
+    return NextResponse.json({
+      sku,
+      known: true,
+      title: prod.title,
+      thumb: (prod.image_urls as string[] | null)?.[0] ?? null,
+      actions: [
+        { key: "view_product", label: "View product", href: `/product/${encodeURIComponent(sku)}` },
+        { key: "add_to_cart", label: "Add to cart" }, // client calls the cart action
+      ],
+    });
+  }
 
   const admin = createAdminClient();
   // Studio lookup key: DD-CAT-SUB-NNN…-COLOR → (base, color)

@@ -87,7 +87,7 @@ export async function middleware(request: NextRequest) {
 
   if (isAdminRoute) {
     if (staffActive) return response;
-    return redirectTo(buyerActive ? "/catalog" : "/login");
+    return redirectTo(buyerActive ? "/home" : "/login");
   }
 
   // Buyer routes (/catalog, /cart, /account, /product, /order)

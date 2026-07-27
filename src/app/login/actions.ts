@@ -69,7 +69,7 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
 
   if (buyer?.status === "active") {
     await writeAuditEvent({ eventType: "login_success", buyerId: buyer.id, ipAddress: ip, userAgent });
-    redirect("/catalog");
+    redirect("/home"); // Stage 9 storefront home (catalog stays reachable, D10)
   }
 
   // Valid credentials but no active access — sign back out and explain.

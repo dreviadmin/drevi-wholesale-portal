@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Search, QrCode } from "lucide-react";
 import { DreviHeader } from "@/components/DreviHeader";
@@ -34,6 +34,12 @@ export function CatalogView({
 }) {
   const router = useRouter();
   const [category, setCategory] = useState("All");
+  // Buyer-home category chips deep-link /catalog?cat=…
+  useEffect(() => {
+    const c = new URLSearchParams(window.location.search).get("cat");
+    if (c) setCategory(c);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [query, setQuery] = useState("");
   const [cart, setCart] = useState<Record<string, number>>(initialCartBySku);
   const [scanning, setScanning] = useState(false);
