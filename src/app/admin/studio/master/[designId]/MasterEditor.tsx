@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, Check } from "lucide-react";
 import { palette } from "@/lib/palette";
+import { supplyAge } from "@/lib/availability";
 import type { BoardRow } from "@/lib/studio/load";
 import { saveSpecs, savePricing, saveVariant, togglePortal } from "./actions";
 
@@ -136,7 +137,7 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp }: {
             Edit specs &amp; supply
           </Link>
           <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
-            {design.supplyUpdatedAt ? `updated ${Math.max(0, Math.floor((Date.now() - new Date(design.supplyUpdatedAt).getTime()) / 86400000))} days ago` : "never recorded"}
+            {supplyAge(design.supplyUpdatedAt ?? null)?.label ?? "never recorded"}
           </span>
         </div>
       </div>

@@ -9,6 +9,7 @@ import { StockPill } from "@/components/StockPill";
 import { ProductImage } from "@/components/ProductImage";
 import { addToCart } from "@/app/cart/actions";
 import { getStockState, qtyCap } from "@/lib/stock";
+import type { Availability } from "@/lib/availability";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
@@ -16,9 +17,11 @@ import type { WholesaleProduct } from "@/lib/types";
 export function ProductDetailView({
   product,
   initialCartCount,
+  availability,
 }: {
   product: WholesaleProduct;
   initialCartCount: number;
+  availability: Availability;
 }) {
   const router = useRouter();
   const images = product.image_urls ?? [];
@@ -143,11 +146,12 @@ export function ProductDetailView({
             </p>
           )}
 
-          {state === "made_to_order" && (
-            <p className="font-body mt-3" style={{ fontSize: 11, color: palette.goldDeep, letterSpacing: "0.04em" }}>
-              Made to order · ships in {product.restock_days} days
-            </p>
-          )}
+          {/* R7 §9 — the one availability line. Approximate, never a date, and
+              it carries no vendor detail: computed server-side by
+              availabilityForSku and already stripped to the five safe keys. */}
+          <p className="font-body mt-3" style={{ fontSize: 11, color: availability.orderable ? palette.goldDeep : palette.mutedGreige, letterSpacing: "0.04em" }}>
+            {availability.label}
+          </p>
 
           {/* Qty + add */}
           {canOrder ? (

@@ -72,3 +72,20 @@ One line per deviation from the master build guide, with rationale. Phase 1 deci
 - **`db:migrate` now defaults to dev.** It loaded `.env.local` — production —
   unconditionally, which sent 0022–0027 to prod. Fixed, and the full assessment
   is in docs/CUTOVER-LOG.md.
+
+### R7 — Buyer availability (v1.3 §9)
+
+- **`getStockState` is now a projection, not a second implementation.** The
+  legacy four-state model (ready/limited/made_to_order/sold_out) that the cart,
+  qty caps and the order PDF speak is derived from `computeAvailability`, so
+  there is genuinely one brain. The per-SKU `restockable` boolean is the
+  pre-supply-data stand-in; a design carrying real supply fields goes through
+  `availabilityForSkus` instead.
+- **Raw supply rows never leave `availability-load.ts`.** Buyer pages get the
+  five-key object and nothing else, so no card, page or RSC payload can
+  serialise vendor stock, the making MOQ or the individual lead-time
+  components — only their sum reaches a buyer. Enforced by the firewall test.
+- **"Limited" also covers stock below the buyer's MOQ.** A thin shelf is still
+  worth showing honestly rather than reporting the design as unavailable.
+- **`discontinued` beats stock on hand.** A retired design should not be
+  re-promised even if a few pieces remain.

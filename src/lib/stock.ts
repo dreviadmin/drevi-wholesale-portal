@@ -1,4 +1,5 @@
 import type { StockState } from "@/lib/types";
+import { computeAvailability, type SupplyInput } from "@/lib/availability";
 
 // Minimal shape the four-state model needs. Real products satisfy it; the
 // prototype legend passes the same three fields.
@@ -19,10 +20,35 @@ export interface StockInput {
  *  | 0           | false       | sold_out       | no        | —              |
  */
 export function getStockState(p: StockInput): StockState {
-  if (p.current_qty > 0 && p.restockable) return "ready";
-  if (p.current_qty > 0 && !p.restockable) return "limited";
-  if (p.current_qty <= 0 && p.restockable) return "made_to_order";
-  return "sold_out";
+  // Retrofit R7 (§9.1): ONE implementation. The four-state model the cart and
+  // PDF speak is now a projection of computeAvailability, not a second copy.
+  // `restockable` is the pre-supply-data stand-in — a design with real supply
+  // fields goes through availabilityForSkus instead.
+  const supply: SupplyInput = {
+    supplyMode: p.restockable ? "made_to_order" : "",
+    vendorStockQty: null,
+    makingDays: null,
+    deliveryDays: p.restock_days ?? null,
+    makingMoq: null,
+    supplyUpdatedAt: null,
+  };
+  const a = computeAvailability({
+    ourStock: p.current_qty,
+    supply,
+    buyerMoq: 1,
+    handlingDays: 0,
+    bufferDays: 0,
+    // The legacy model calls ANY on-hand quantity "limited" when the SKU is not
+    // restockable, so the threshold has to be effectively unbounded here.
+    limitedThreshold: p.restockable ? 0 : Number.MAX_SAFE_INTEGER,
+  });
+  switch (a.state) {
+    case "in_stock": return "ready";
+    case "limited": return "limited";
+    case "on_order_ready":
+    case "made_to_order": return "made_to_order";
+    default: return "sold_out";
+  }
 }
 
 export function canOrder(p: StockInput): boolean {

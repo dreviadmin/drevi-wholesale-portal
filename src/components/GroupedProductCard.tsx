@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ProductCard } from "@/components/ProductCard";
 import { variantLabelOf } from "@/lib/variants";
 import { palette } from "@/lib/palette";
+import type { Availability } from "@/lib/availability";
 import type { WholesaleProduct } from "@/lib/types";
 
 /**
@@ -21,6 +22,7 @@ export function GroupedProductCard({
   onGoToCart,
   onOpenDetail,
   readOnly = false,
+  availabilityBySku,
 }: {
   variants: WholesaleProduct[];
   cartBySku: Record<string, number>;
@@ -31,6 +33,7 @@ export function GroupedProductCard({
   onGoToCart?: () => void;
   onOpenDetail?: (product: WholesaleProduct) => void;
   readOnly?: boolean;
+  availabilityBySku?: Record<string, Availability>;
 }) {
   // Default to the first variant already in cart, else the first one.
   const initial = variants.find((v) => (cartBySku[v.sku] ?? 0) > 0)?.sku ?? variants[0].sku;
@@ -78,6 +81,7 @@ export function GroupedProductCard({
       onOpenDetail={onOpenDetail}
       variantBar={variantBar}
       readOnly={readOnly}
+      availability={availabilityBySku?.[selected.sku]}
     />
   );
 }

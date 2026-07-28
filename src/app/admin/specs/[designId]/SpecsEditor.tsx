@@ -7,6 +7,7 @@ import { ChevronLeft, Check, ImageOff } from "lucide-react";
 import { KeyboardInset } from "@/components/KeyboardInset";
 import { ZoomImage } from "@/components/Lightbox";
 import { palette } from "@/lib/palette";
+import { supplyAge } from "@/lib/availability";
 import { saveSpecsAndSupply } from "./actions";
 import type { SupplyBlock } from "@/app/admin/receipts/new/delivery-actions";
 
@@ -21,15 +22,6 @@ interface DesignFields {
   supply: SupplyBlock; supplyUpdatedAt: string | null; supplyUpdatedBy: string | null;
 }
 
-function relativeAge(iso: string | null): string {
-  if (!iso) return "never recorded";
-  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
-  if (days <= 0) return "updated today";
-  if (days === 1) return "updated yesterday";
-  if (days < 30) return `updated ${days} days ago`;
-  const months = Math.round(days / 30);
-  return `updated ${months} month${months === 1 ? "" : "s"} ago`;
-}
 
 export function SpecsEditor({ design }: { design: DesignFields }) {
   const router = useRouter();
@@ -87,7 +79,7 @@ export function SpecsEditor({ design }: { design: DesignFields }) {
 
       <div className="flex items-baseline justify-between mt-6">
         <span className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>Supplier availability</span>
-        <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>{relativeAge(design.supplyUpdatedAt)}</span>
+        <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>{supplyAge(design.supplyUpdatedAt)?.label ?? "never recorded"}</span>
       </div>
       <div className="mt-2 p-3.5 flex flex-col gap-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
         <div>

@@ -9,6 +9,7 @@ import { palette } from "@/lib/palette";
 import { OrderActions } from "./OrderActions";
 import { OrderEditor, type PickerProduct } from "./OrderEditor";
 import type { Order, Buyer } from "@/lib/types";
+import { productionMoqFlag, supplyAge, type SupplyInput } from "@/lib/availability";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,44 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
       wholesale_price: p.wholesale_price,
       image_url: (p.image_urls as string[] | null)?.[0] ?? null,
     }));
+  }
+
+  // R7 §9.3 — production-MOQ flags. Admin only, decision support only: it
+  // never blocks confirmation, and none of this reaches the buyer's copy.
+  const lineSkus = (o.items ?? []).map((it) => it.sku).filter(Boolean);
+  const moqFlags = new Map<string, { message: string; age: string | null }>();
+  if (lineSkus.length) {
+    const bases = [...new Set(lineSkus.map((sku) => sku.split("-").slice(0, 4).join("-")))];
+    const [{ data: designs }, { data: stockRows }] = await Promise.all([
+      admin
+        .from("designs")
+        .select("base_sku, color, supply_mode, vendor_stock_qty, making_days, making_moq, delivery_days, supply_updated_at")
+        .in("base_sku", bases),
+      admin.from("wholesale_products").select("sku, current_qty").in("sku", lineSkus),
+    ]);
+    const stockBySku = new Map((stockRows ?? []).map((r) => [r.sku, Number(r.current_qty) || 0]));
+    const supplyByKey = new Map<string, SupplyInput>(
+      (designs ?? []).map((d) => [
+        `${d.base_sku}|${String(d.color).toUpperCase()}`,
+        {
+          supplyMode: d.supply_mode ?? "",
+          vendorStockQty: d.vendor_stock_qty ?? null,
+          makingDays: d.making_days ?? null,
+          deliveryDays: d.delivery_days ?? null,
+          makingMoq: d.making_moq ?? null,
+          supplyUpdatedAt: d.supply_updated_at ?? null,
+        },
+      ]),
+    );
+    for (const it of o.items ?? []) {
+      if (!it.sku) continue;
+      const parts = it.sku.split("-");
+      if (parts.length < 6) continue;
+      const supply = supplyByKey.get(`${parts.slice(0, 4).join("-")}|${parts[parts.length - 1].toUpperCase()}`);
+      if (!supply) continue;
+      const flag = productionMoqFlag({ ourStock: stockBySku.get(it.sku) ?? 0, qty: it.qty, supply });
+      if (flag) moqFlags.set(it.sku, { message: flag.message, age: supplyAge(supply.supplyUpdatedAt)?.label ?? null });
+    }
   }
 
   return (
@@ -89,6 +128,14 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
               <div className="font-body mt-0.5" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.1em" }}>
                 {it.custom ? "custom item · not on portal" : `${it.sku} · ${it.stock_state}${it.restock_days ? ` · ${it.restock_days}d` : ""}`}{it.special_request ? " · SPECIAL QTY REQUEST" : ""}
               </div>
+              {moqFlags.get(it.sku) && (
+                <div className="font-body mt-1.5 p-2" style={{ fontSize: 10.5, lineHeight: 1.5, background: "#FBF3E2", color: "#8a6d1a", border: "1px solid rgba(196,163,90,0.4)" }}>
+                  <b>Below vendor production minimum</b> — {moqFlags.get(it.sku)!.message.replace("Below vendor production minimum — ", "")}
+                  {moqFlags.get(it.sku)!.age && (
+                    <span style={{ color: palette.mutedGreige }}> · supply {moqFlags.get(it.sku)!.age}</span>
+                  )}
+                </div>
+              )}
               {it.actual_qty != null && (
                 <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep, fontWeight: 600 }}>
                   GST split — actual: {it.actual_qty} pc @ {formatINR((it.qty * it.unit_price) / it.actual_qty)} (billed as {it.qty} × {formatUnitINR(it.unit_price)})

@@ -6,6 +6,7 @@ import { Search, QrCode } from "lucide-react";
 import { DreviHeader } from "@/components/DreviHeader";
 import { FilterChips } from "@/components/FilterChips";
 import { GroupedProductCard } from "@/components/GroupedProductCard";
+import type { Availability } from "@/lib/availability";
 import { QrScanner } from "@/components/QrScanner";
 import { setQty as setCartQty } from "@/app/cart/actions";
 import { qtyCap } from "@/lib/stock";
@@ -27,10 +28,12 @@ export function CatalogView({
   businessName,
   products,
   initialCartBySku,
+  availabilityBySku,
 }: {
   businessName: string;
   products: WholesaleProduct[];
   initialCartBySku: Record<string, number>;
+  availabilityBySku: Record<string, Availability>;
 }) {
   const router = useRouter();
   const [category, setCategory] = useState("All");
@@ -154,6 +157,7 @@ export function CatalogView({
                 onChangeQty={changeQty}
                 detailHrefFor={(sku) => `/product/${encodeURIComponent(sku)}`}
                 onGoToCart={() => router.push("/cart")}
+                availabilityBySku={availabilityBySku}
               />
             ))}
           </div>
