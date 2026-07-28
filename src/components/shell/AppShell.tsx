@@ -29,6 +29,8 @@ const ITEM_ICONS: Record<string, typeof Tag> = {
   "/admin/in-store": Store,
   "/admin/sku-generator": QrCode,
   "/admin/receipts": PackageCheck,
+  "/admin/receipts/new": PackageCheck,
+  "/admin/stock-take": Boxes,
   "/admin/vendors": Truck,
   "/admin/reorder": RefreshCw,
   "/admin/dashboard": BarChart3,

@@ -16,6 +16,9 @@ import { saveSpecs, savePricing, saveVariant, togglePortal } from "./actions";
 interface DesignFields {
   fabric: string; handwork: string; origin: string; specsVerified: boolean;
   tier: string; markupMultiplier: number; autoMrp: number | null; mrpOverride: number | null;
+  vendorSku?: string | null;
+  supply?: { supplyMode?: string; vendorStockQty?: number | null; makingDays?: number | null; makingMoq?: number | null; deliveryDays?: number | null; supplyNote?: string };
+  supplyUpdatedAt?: string | null;
 }
 interface VariantRow { sku: string; current_qty: number; wholesale_price: number; wholesale_visible: boolean }
 
@@ -104,6 +107,38 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp }: {
         <button type="button" disabled={pending} onClick={() => run(() => savePricing(board.id, { markupMultiplier: Number(pricing.markupMultiplier), mrpOverride: pricing.mrpOverride ? Number(pricing.mrpOverride) : null }), "Pricing saved")} className="mt-2 font-body uppercase disabled:opacity-40" style={{ fontSize: 9, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "8px 12px" }}>
           Save pricing
         </button>
+      </div>
+
+      {/* Supplier availability — read-only summary; edited on the cost-free
+          specs view so Rakesh can work on the shared counter device (§6.2). */}
+      {section("Supplier availability")}
+      <div className="mt-2 p-3.5" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
+        {design.supply?.supplyMode ? (
+          <>
+            <div className="font-body" style={{ fontSize: 12.5, color: palette.black }}>
+              {design.supply.supplyMode.replace("_", " ")}
+              {design.supply.vendorStockQty != null ? ` · ~${design.supply.vendorStockQty} ready` : ""}
+              {design.supply.makingDays != null ? ` · ${design.supply.makingDays}d to make` : ""}
+              {design.supply.deliveryDays != null ? ` · ${design.supply.deliveryDays}d transit` : ""}
+            </div>
+            {design.supply.makingMoq != null && (
+              <div className="font-body mt-1" style={{ fontSize: 11, color: palette.goldDeep }}>
+                Vendor makes minimum {design.supply.makingMoq} — internal only; raise the buyer MOQ if it should be passed on.
+              </div>
+            )}
+            {design.supply.supplyNote && <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige }}>{design.supply.supplyNote}</div>}
+          </>
+        ) : (
+          <div className="font-body" style={{ fontSize: 11.5, color: palette.mutedGreige }}>No supplier data recorded.</div>
+        )}
+        <div className="flex items-center gap-3 mt-2">
+          <Link href={`/admin/specs/${board.id}`} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }}>
+            Edit specs &amp; supply
+          </Link>
+          <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+            {design.supplyUpdatedAt ? `updated ${Math.max(0, Math.floor((Date.now() - new Date(design.supplyUpdatedAt).getTime()) / 86400000))} days ago` : "never recorded"}
+          </span>
+        </div>
       </div>
 
       {/* Publish toggles */}

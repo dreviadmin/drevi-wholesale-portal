@@ -244,9 +244,14 @@ export function Workbench({ board, angles, copy, activeJobs, openaiEnabled }: {
             {board.badgeLabel}
           </div>
         </div>
-        <Link href={`/admin/studio/master/${board.id}`} aria-label="Product master" title="Product Master editor">
-          <SlidersHorizontal size={16} color={palette.mutedGreige} />
-        </Link>
+        <span className="flex items-center gap-3">
+          <Link href={`/admin/specs/${board.id}`} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }} title="Specs & supply (no pricing — counter-device safe)">
+            Specs
+          </Link>
+          <Link href={`/admin/studio/master/${board.id}`} aria-label="Product master" title="Product Master editor">
+            <SlidersHorizontal size={16} color={palette.mutedGreige} />
+          </Link>
+        </span>
       </div>
 
       {/* Destination strip — same gate functions Stage 7 pushes call */}

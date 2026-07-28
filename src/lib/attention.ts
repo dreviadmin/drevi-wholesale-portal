@@ -85,6 +85,52 @@ export async function computeAttention(): Promise<AttentionItem[]> {
     }
   } catch { /* table not migrated yet */ }
 
+  // Retrofit §6.3 — specs queue, missing ident photos, stale supply data.
+  try {
+    const staleDays = Number(process.env.SUPPLY_STALE_DAYS ?? 60);
+    const staleBefore = new Date(Date.now() - staleDays * 86_400_000).toISOString();
+    const [{ count: awaitingSpecs }, { count: noIdent }, { data: staleSupply }] = await Promise.all([
+      admin.from("designs").select("id", { count: "exact", head: true }).eq("specs_verified", false),
+      admin.from("designs").select("id", { count: "exact", head: true }).is("ident_image_id", null),
+      admin
+        .from("designs")
+        .select("id, supply_updated_at, supply_mode")
+        .in("supply_mode", ["made_to_order", "both"])
+        .or(`supply_updated_at.is.null,supply_updated_at.lt.${staleBefore}`),
+    ]);
+    if ((awaitingSpecs ?? 0) > 0) {
+      items.push({
+        key: "designs_awaiting_specs",
+        title: `${awaitingSpecs} design${awaitingSpecs === 1 ? "" : "s"} awaiting specs`,
+        sub: "Fabric, handwork and origin — then Confirmed by Rakesh",
+        count: awaitingSpecs ?? 0,
+        severity: "medium",
+        href: "/admin/studio?state=awaiting_specs",
+      });
+    }
+    if ((noIdent ?? 0) > 0) {
+      items.push({
+        key: "designs_no_ident",
+        title: `${noIdent} design${noIdent === 1 ? "" : "s"} without an ident photo`,
+        sub: "A hanging shot makes the garment recognisable everywhere",
+        count: noIdent ?? 0,
+        severity: "low",
+        href: "/admin/studio",
+      });
+    }
+    const stale = (staleSupply ?? []).length;
+    if (stale > 0) {
+      items.push({
+        key: "supply_stale",
+        title: `${stale} made-to-order design${stale === 1 ? "" : "s"} with old supply info`,
+        sub: `Lead times older than ${staleDays} days — re-ask the vendor`,
+        count: stale,
+        severity: "medium",
+        href: "/admin/studio?supply=stale",
+      });
+    }
+  } catch { /* retrofit columns absent — nothing to report */ }
+
   // 3. Studio: designs stuck before the camera or waiting on a reviewer.
   try {
     const { loadBoard } = await import("@/lib/studio/load");

@@ -47,9 +47,13 @@ export const SPACES: Space[] = [
     label: "nav.stock",
     icon: "Boxes",
     roles: ADMIN_PLUS,
+    // Retrofit §5.10 — "Log delivery" is the primary Stock entry; the SKU
+    // generator is reframed labels-first and sits below it.
     items: [
-      { label: "nav.sku_generator", href: "/admin/sku-generator" },
+      { label: "nav.log_delivery", href: "/admin/receipts/new" },
       { label: "nav.receipts", href: "/admin/receipts" },
+      { label: "nav.sku_generator", href: "/admin/sku-generator" },
+      { label: "nav.stock_take", href: "/admin/stock-take" },
       { label: "nav.vendors", href: "/admin/vendors" },
       { label: "nav.reorder", href: "/admin/reorder" },
     ],

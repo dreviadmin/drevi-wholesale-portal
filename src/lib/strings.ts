@@ -19,6 +19,9 @@ const STRINGS = {
     "nav.in_store": "In-store",
     "nav.sku_generator": "SKU Generator",
     "nav.receipts": "Receipts",
+    "nav.log_delivery": "Log delivery",
+    "nav.stock_take": "Stock take",
+    "nav.specs": "Specs",
     "nav.vendors": "Vendors",
     "nav.reorder": "Reorder",
     "nav.dashboard": "Dashboard",
@@ -58,6 +61,17 @@ const STRINGS = {
     "scan.add_to_print": "Add to print sheet",
     "scan.added_to_print": "Added to the print sheet",
     "scan.rescan": "Scan another",
+    // retrofit
+    "supply.mode.ready_stock": "Ready stock",
+    "supply.mode.made_to_order": "Made to order",
+    "supply.mode.both": "Both",
+    "supply.mode.discontinued": "Discontinued",
+    "avail.in_stock": "In stock",
+    "avail.limited": "Limited",
+    "avail.on_order_ready": "Available on order",
+    "avail.made_to_order": "Made to order",
+    "avail.sold_out": "Sold out",
+    "avail.discontinued": "No longer available",
   },
 } as const;
 

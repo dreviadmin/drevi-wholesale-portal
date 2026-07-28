@@ -18,7 +18,7 @@ export default async function MasterPage({ params }: { params: { designId: strin
 
   const { data: design } = await admin
     .from("designs")
-    .select("fabric, handwork, origin, specs_verified, tier, markup_multiplier, auto_mrp, mrp_override")
+    .select("fabric, handwork, origin, specs_verified, tier, markup_multiplier, auto_mrp, mrp_override, supply_mode, vendor_stock_qty, making_days, making_moq, delivery_days, supply_note, supply_updated_at, vendor_sku, ident_image_id")
     .eq("id", params.designId)
     .single();
   const { data: allVariants } = await admin
@@ -46,6 +46,16 @@ export default async function MasterPage({ params }: { params: { designId: strin
         markupMultiplier: Number(design?.markup_multiplier ?? 2.5),
         autoMrp: design?.auto_mrp != null ? Number(design.auto_mrp) : null,
         mrpOverride: design?.mrp_override != null ? Number(design.mrp_override) : null,
+        vendorSku: design?.vendor_sku ?? null,
+        supply: {
+          supplyMode: (design?.supply_mode ?? "") as "" | "ready_stock" | "made_to_order" | "both" | "discontinued",
+          vendorStockQty: design?.vendor_stock_qty ?? null,
+          makingDays: design?.making_days ?? null,
+          makingMoq: design?.making_moq ?? null,
+          deliveryDays: design?.delivery_days ?? null,
+          supplyNote: design?.supply_note ?? "",
+        },
+        supplyUpdatedAt: design?.supply_updated_at ?? null,
       }}
       variants={variants}
       lastCost={lastCost}
