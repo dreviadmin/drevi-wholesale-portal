@@ -89,3 +89,24 @@ One line per deviation from the master build guide, with rationale. Phase 1 deci
   worth showing honestly rather than reporting the design as unavailable.
 - **`discontinued` beats stock on hand.** A retired design should not be
   re-promised even if a few pieces remain.
+
+### R8 — Inventory ledger (v1.3 §10)
+
+- **The cache is allowed to go negative.** `wholesale_products.current_qty`
+  follows whatever the canonical function returns, including below zero. A
+  negative reading means we shipped stock the books never had — usually a
+  Shopify POS sale the app cannot see (ANSH-18). Clamping it at zero would hide
+  exactly the discrepancy this ledger exists to surface. Buyer-facing code
+  clamps for display (`computeAvailability`), so a negative never reaches a
+  buyer as anything but "sold out".
+- **Movements are written on a status TRANSITION, never on a re-save.** Stock
+  leaves on confirm and returns as a `correction` if a confirmed order is
+  cancelled; re-saving the same status writes nothing, so nothing double-counts.
+- **A manual stock edit in the master editor now requires a note** and becomes
+  a `manual` movement. The price half of the same save is unaffected.
+- **`stock-ledger-core.ts` holds the pure math.** The server module keeps the
+  `server-only` guard; the canonical calculation and its types live in a plain
+  module so tests and client components can import them.
+- **Drift report lives at `/admin/stock-check`** with the API at
+  `/api/admin/stock-reconcile`, both in the Stock space. ANSH-20 (device/floor
+  scope) is still parked, so both are admin-role gated.

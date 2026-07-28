@@ -1,6 +1,10 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { canonicalFromMovements, type Movement, type MovementReason } from "./stock-ledger-core";
+
+export { canonicalFromMovements };
+export type { Movement, MovementReason };
 
 // Retrofit R8 (§3.5, §10) — Supabase is authoritative for inventory.
 //
@@ -12,34 +16,6 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // wholesale_products.current_qty is the fast cached read; every mutation goes
 // through applyMovement(), which writes the movement AND sets the cache to the
 // canonical value — never an unchecked increment, so the cache cannot drift.
-
-export type MovementReason = "reset" | "receipt" | "order" | "manual" | "correction" | "shopify_sync";
-
-export interface Movement {
-  id: string;
-  sku: string;
-  delta: number;
-  snapshot_qty: number | null;
-  reason: MovementReason;
-  ref_type: string | null;
-  ref_id: string | null;
-  note: string | null;
-  created_by: string | null;
-  created_at: string;
-}
-
-/** Canonical quantity from the ledger. Single implementation (§3.5). */
-export function canonicalFromMovements(movements: Movement[]): number {
-  if (movements.length === 0) return 0;
-  const sorted = [...movements].sort((a, b) => a.created_at.localeCompare(b.created_at));
-  let lastResetIdx = -1;
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    if (sorted[i].reason === "reset") { lastResetIdx = i; break; }
-  }
-  if (lastResetIdx === -1) return sorted.reduce((s, m) => s + (m.delta ?? 0), 0);
-  const base = sorted[lastResetIdx].snapshot_qty ?? 0;
-  return base + sorted.slice(lastResetIdx + 1).reduce((s, m) => s + (m.delta ?? 0), 0);
-}
 
 export async function movementsFor(sku: string): Promise<Movement[]> {
   const admin = createAdminClient();
@@ -124,4 +100,102 @@ export async function reconcile(): Promise<{
     }
   }
   return { checked: (products ?? []).length, drift };
+}
+
+/**
+ * §10.1 — order movements. Confirming an order is the commitment point, so
+ * that is where stock leaves. Cancelling a confirmed order puts it back as a
+ * `correction` rather than deleting history.
+ *
+ * Idempotency is the caller's job: pass only on a real status TRANSITION, so
+ * re-saving the same status never double-counts.
+ */
+export async function postOrderMovements(
+  orderId: string,
+  direction: "out" | "back",
+  actor: string | null,
+): Promise<{ ok: boolean; lines: number; error?: string }> {
+  const admin = createAdminClient();
+  const { data: order } = await admin.from("orders").select("id, order_number, items").eq("id", orderId).maybeSingle();
+  if (!order) return { ok: false, lines: 0, error: "Order not found" };
+
+  const items = (order.items ?? []) as { sku?: string; qty?: number; custom?: boolean }[];
+  let lines = 0;
+  for (const it of items) {
+    // Custom items are not catalog SKUs and hold no stock.
+    if (!it.sku || it.custom) continue;
+    const qty = Math.trunc(Number(it.qty) || 0);
+    if (qty <= 0) continue;
+    const res = await applyMovement({
+      sku: it.sku,
+      delta: direction === "out" ? -qty : qty,
+      reason: direction === "out" ? "order" : "correction",
+      refType: "order",
+      refId: orderId,
+      note: direction === "out" ? `Order ${order.order_number} confirmed` : `Order ${order.order_number} cancelled — stock returned`,
+      createdBy: actor ?? undefined,
+    });
+    if (res.ok) lines++;
+  }
+  return { ok: true, lines };
+}
+
+/**
+ * §10.2a — the single-SKU stock declaration. An absolute counted quantity that
+ * SUPERSEDES earlier receipt-derived arithmetic for this SKU: nothing is
+ * deleted, but the canonical calculation restarts here.
+ */
+export async function setStock(input: {
+  sku: string;
+  countedQty: number;
+  note: string;
+  createdBy: string;
+  refType?: string;
+  refId?: string;
+}): Promise<{ ok: boolean; error?: string; stock?: number }> {
+  if (!input.note.trim()) return { ok: false, error: "A reset needs a note — say what was counted and why" };
+  if (!Number.isFinite(input.countedQty) || input.countedQty < 0) return { ok: false, error: "Counted quantity must be zero or more" };
+  return applyMovement({
+    sku: input.sku,
+    snapshotQty: Math.trunc(input.countedQty),
+    reason: "reset",
+    note: input.note.trim(),
+    createdBy: input.createdBy,
+    refType: input.refType,
+    refId: input.refId,
+  });
+}
+
+/**
+ * §10.2b — commit a stock take: one reset per COUNTED sku, sharing a session
+ * note. Uncounted SKUs are left completely untouched; a partial stock take is
+ * normal and must never zero anything by omission.
+ */
+export async function commitStockTake(input: {
+  counts: { sku: string; countedQty: number }[];
+  sessionNote: string;
+  createdBy: string;
+}): Promise<{ ok: boolean; committed: number; failed: { sku: string; error: string }[] }> {
+  const failed: { sku: string; error: string }[] = [];
+  let committed = 0;
+  for (const c of input.counts) {
+    const res = await setStock({
+      sku: c.sku,
+      countedQty: c.countedQty,
+      note: input.sessionNote,
+      createdBy: input.createdBy,
+      refType: "stock_take",
+    });
+    if (res.ok) committed++;
+    else failed.push({ sku: c.sku, error: res.error ?? "failed" });
+  }
+  return { ok: failed.length === 0, committed, failed };
+}
+
+/** §10.3 — recompute the cached column from the ledger, no new movement. */
+export async function recomputeCache(sku: string): Promise<{ ok: boolean; stock: number }> {
+  const admin = createAdminClient();
+  const stock = await canonicalStock(sku);
+  await admin.from("wholesale_products").update({ current_qty: stock }).eq("sku", sku.trim().toUpperCase());
+  return { ok: true, stock };
 }

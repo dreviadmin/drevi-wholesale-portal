@@ -7,7 +7,7 @@ import { ChevronLeft, Check } from "lucide-react";
 import { palette } from "@/lib/palette";
 import { supplyAge } from "@/lib/availability";
 import type { BoardRow } from "@/lib/studio/load";
-import { saveSpecs, savePricing, saveVariant, togglePortal } from "./actions";
+import { saveSpecs, savePricing, saveVariant, setStockForSku, togglePortal } from "./actions";
 
 // Master editor client (§12.1). Group-level fields save once per design;
 // size-level rows save per variant. Sheet-owned live prices keep flowing
@@ -32,10 +32,14 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp }: {
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [stockNote, setStockNote] = useState<Record<string, string>>({});
+  const [resetFor, setResetFor] = useState<string | null>(null);
+  const [resetQty, setResetQty] = useState("");
+  const [resetNote, setResetNote] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const [specs, setSpecs] = useState({ fabric: design.fabric, handwork: design.handwork, origin: design.origin, specsVerified: design.specsVerified });
   const [pricing, setPricing] = useState({ markupMultiplier: design.markupMultiplier, mrpOverride: design.mrpOverride?.toString() ?? "" });
-  const [rows, setRows] = useState(variants.map((v) => ({ ...v, qty: String(v.current_qty), ws: String(v.wholesale_price) })));
+  const [rows, setRows] = useState(variants.map((v) => ({ ...v, qty: String(v.current_qty), ws: String(v.wholesale_price), savedQty: Number(v.current_qty) || 0 })));
 
   function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2400); }
   function run(fn: () => Promise<{ ok: boolean; error?: string }>, done: string) {
@@ -174,9 +178,46 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp }: {
             <label className="font-body" style={{ fontSize: 9, color: palette.mutedGreige }}>
               ₹ <input type="number" min="0" value={v.ws} onChange={(e) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ws: e.target.value } : r)))} className="font-body ml-1" style={{ ...inputStyle, width: 84, padding: "5px 7px" }} />
             </label>
-            <button type="button" disabled={pending} onClick={() => run(() => saveVariant(v.sku, { currentQty: Number(v.qty) || 0, wholesalePrice: Number(v.ws) || 0 }), `${v.sku} saved`)} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "6px 9px" }}>
+            <button type="button" disabled={pending} onClick={() => run(() => saveVariant(v.sku, { currentQty: Number(v.qty) || 0, wholesalePrice: Number(v.ws) || 0, stockNote: stockNote[v.sku] }), `${v.sku} saved`)} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "6px 9px" }}>
               Save
             </button>
+            <button type="button" onClick={() => setResetFor((cur) => (cur === v.sku ? null : v.sku))} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.1em", color: palette.mutedGreige, padding: "6px 4px" }} title="Declare a counted quantity">
+              Set stock
+            </button>
+
+            {/* §10.1 — a manual stock change is a movement and needs a note. */}
+            {Number(v.qty) !== v.savedQty && (
+              <input
+                value={stockNote[v.sku] ?? ""}
+                onChange={(e) => setStockNote((s) => ({ ...s, [v.sku]: e.target.value }))}
+                placeholder="Why did stock change? — required"
+                className="w-full font-body p-2"
+                style={{ fontSize: 11, border: "1px solid rgba(196,163,90,0.5)", background: "#FBF3E2", color: palette.black }}
+              />
+            )}
+
+            {/* §10.2a — the absolute declaration. */}
+            {resetFor === v.sku && (
+              <div className="w-full mt-1 p-2.5" style={{ background: "#FBF3E2", border: "1px solid rgba(196,163,90,0.4)" }}>
+                <div className="font-body" style={{ fontSize: 10.5, lineHeight: 1.5, color: "#8a6d1a" }}>
+                  A counted quantity <b>supersedes earlier receipt arithmetic</b> for {v.sku}. Nothing is deleted —
+                  earlier movements stay as history but stop counting toward stock.
+                </div>
+                <div className="flex flex-wrap items-end gap-2 mt-2">
+                  <input value={resetQty} onChange={(e) => setResetQty(e.target.value.replace(/[^\d]/g, ""))} inputMode="numeric" placeholder="counted" className="font-body text-center" style={{ width: 74, fontSize: 12.5, padding: "6px 4px", border: "1px solid rgba(26,26,26,0.2)", background: "#fff", color: palette.black }} />
+                  <input value={resetNote} onChange={(e) => setResetNote(e.target.value)} placeholder="Why — required" className="flex-1 font-body p-2" style={{ minWidth: 160, fontSize: 11, border: "1px solid rgba(26,26,26,0.15)", background: "#fff", color: palette.black }} />
+                  <button
+                    type="button"
+                    disabled={pending || !resetQty.length || !resetNote.trim()}
+                    onClick={() => { const sku = v.sku; run(() => setStockForSku(sku, parseInt(resetQty, 10), resetNote), `${sku} set to ${resetQty}`); setResetFor(null); setResetQty(""); setResetNote(""); }}
+                    className="font-body uppercase disabled:opacity-40"
+                    style={{ fontSize: 8.5, letterSpacing: "0.12em", background: palette.black, color: palette.ivory, padding: "7px 11px" }}
+                  >
+                    Set stock
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
         {rows.length === 0 && <div className="font-body py-4" style={{ fontSize: 11.5, color: palette.mutedGreige }}>No size variants on the wholesale portal yet.</div>}

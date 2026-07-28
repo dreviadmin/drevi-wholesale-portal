@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatINR } from "@/lib/format";
+import { reconcile } from "@/lib/stock-ledger";
 
 // "Needs you" inbox (build guide §6.4) — ordered by cost of inaction. Used by
 // both the Home cockpit (server render) and GET /api/home/attention. Each item
@@ -84,6 +85,24 @@ export async function computeAttention(): Promise<AttentionItem[]> {
       });
     }
   } catch { /* table not migrated yet */ }
+
+  // Retrofit §10.3 — "N SKUs need a stock check": the ledger and the cached
+  // quantity disagree. Anything sold through Shopify POS is invisible here
+  // (ANSH-18), so this is expected to be non-zero and is the honest surface
+  // for it rather than a number nobody trusts.
+  try {
+    const { drift } = await reconcile();
+    if (drift.length > 0) {
+      items.push({
+        key: "stock_drift",
+        title: `${drift.length} SKU${drift.length === 1 ? "" : "s"} need a stock check`,
+        sub: "The movement ledger and the cached quantity disagree",
+        count: drift.length,
+        severity: "medium",
+        href: "/admin/stock-check",
+      });
+    }
+  } catch { /* ledger not migrated yet */ }
 
   // Retrofit §6.3 — specs queue, missing ident photos, stale supply data.
   try {

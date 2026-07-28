@@ -54,6 +54,7 @@ export const SPACES: Space[] = [
       { label: "nav.receipts", href: "/admin/receipts" },
       { label: "nav.sku_generator", href: "/admin/sku-generator" },
       { label: "nav.stock_take", href: "/admin/stock-take" },
+      { label: "nav.stock_check", href: "/admin/stock-check" },
       { label: "nav.vendors", href: "/admin/vendors" },
       { label: "nav.reorder", href: "/admin/reorder" },
     ],

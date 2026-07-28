@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/staff";
 import { finalizeOrder } from "@/lib/order-finalize";
+import { postOrderMovements } from "@/lib/stock-ledger";
 import { getStockState } from "@/lib/stock";
 import type { DiscountType, Order, OrderItem, OrderStatus, TaxMode, WholesaleProduct } from "@/lib/types";
 
@@ -12,8 +13,9 @@ export async function setOrderStatus(
   status: OrderStatus,
   options?: { sendInvoice?: boolean },
 ): Promise<{ ok: boolean; error?: string; invoiceSent?: boolean }> {
+  let staff;
   try {
-    await requireAdmin();
+    staff = await requireAdmin();
   } catch {
     return { ok: false, error: "Not authorized." };
   }
@@ -40,6 +42,14 @@ export async function setOrderStatus(
   if (status === "confirmed") patch.confirmed_at = new Date().toISOString();
   const { error } = await admin.from("orders").update(patch).eq("id", orderId);
   if (error) return { ok: false, error: error.message };
+
+  // §10.1 — stock leaves on confirmation and comes back if a confirmed order
+  // is cancelled. Only on a real TRANSITION, so re-saving never double-counts.
+  if (from !== status) {
+    if (status === "confirmed") await postOrderMovements(orderId, "out", staff.email);
+    else if (status === "cancelled" && from === "confirmed") await postOrderMovements(orderId, "back", staff.email);
+  }
+
   let invoiceSent = false;
   if (options?.sendInvoice) {
     await finalizeOrder(orderId); // best-effort: PDF + Interakt confirmation

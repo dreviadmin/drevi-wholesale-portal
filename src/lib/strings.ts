@@ -21,6 +21,7 @@ const STRINGS = {
     "nav.receipts": "Receipts",
     "nav.log_delivery": "Log delivery",
     "nav.stock_take": "Stock take",
+    "nav.stock_check": "Stock check",
     "nav.specs": "Specs",
     "nav.vendors": "Vendors",
     "nav.reorder": "Reorder",
