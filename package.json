@@ -14,7 +14,8 @@
     "test": "vitest run",
     "retrofit:baseline": "node scripts/verify-retrofit-state.mjs",
     "retrofit:folder-audit": "node scripts/drive-folder-audit.mjs",
-    "retrofit:drive-map": "node scripts/drive-map-report.mjs"
+    "retrofit:drive-map": "node scripts/drive-map-report.mjs",
+    "retrofit:reconcile": "node scripts/retrofit-reconciliation.mjs"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",

@@ -77,6 +77,24 @@ describe("computeAvailability (§9.1)", () => {
     expect(a.label).not.toMatch(/\d/);
   });
 
+  // §13.6 — the acceptance example, with its exact numbers.
+  it("acceptance §13.6: making 12 + delivery 3 at default handling 2 and buffer 3 reads ~20 days", () => {
+    const withDays = computeAvailability({
+      ...base, ourStock: 0,
+      supply: supply({ supplyMode: "made_to_order", makingDays: 12, deliveryDays: 3 }),
+    });
+    expect(withDays.label).toBe("Made to order · ~20 days");
+    expect(withDays.orderable).toBe(true);
+
+    const withoutMaking = computeAvailability({
+      ...base, ourStock: 0,
+      supply: supply({ supplyMode: "made_to_order", makingDays: null, deliveryDays: 3 }),
+    });
+    expect(withoutMaking.label).toBe("Made to order");
+    expect(withoutMaking.etaDays).toBeUndefined();
+    expect(JSON.stringify(withoutMaking)).not.toMatch(/\d/);
+  });
+
   it("sold out when there is no usable supply data", () => {
     const a = computeAvailability({ ...base, ourStock: 0, supply: supply({ supplyMode: "ready_stock", vendorStockQty: 0 }) });
     expect(a).toEqual({ state: "sold_out", label: "Sold out", orderable: false });

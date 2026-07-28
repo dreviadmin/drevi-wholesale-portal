@@ -47,6 +47,21 @@ describe("canonical stock from the ledger (§3.5, §10)", () => {
     ])).toBe(14);
   });
 
+  // §13.9a — the acceptance example, with its exact numbers.
+  it("acceptance §13.9a: reset 12 over prior receipts yields 12; a later receipt of 3 yields 15", () => {
+    const history = [
+      m("receipt", { delta: 40, day: 1 }),
+      m("order", { delta: -6, day: 2 }),
+    ];
+    const afterReset = [...history, m("reset", { snapshot: 12, day: 3 })];
+    expect(canonicalFromMovements(afterReset)).toBe(12);
+
+    const afterReceipt = [...afterReset, m("receipt", { delta: 3, day: 4 })];
+    expect(canonicalFromMovements(afterReceipt)).toBe(15);
+    // Earlier movements remain — visible history, zero contribution.
+    expect(afterReceipt).toHaveLength(4);
+  });
+
   it("only the MOST RECENT reset counts", () => {
     expect(canonicalFromMovements([
       m("reset", { snapshot: 50, day: 1 }),
