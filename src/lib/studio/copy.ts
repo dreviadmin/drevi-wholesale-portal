@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchDriveImage } from "@/lib/drive";
+import { defaultCopyModel } from "./copy-models";
 
 // Copy track (build guide §10). ONE implementation — the workbench single
 // generate and the board batch both call generateCopyForDesign. Inputs are
@@ -27,23 +28,43 @@ function strictSpecMode(): boolean {
   return (process.env.STRICT_SPEC_MODE ?? "true").toLowerCase() !== "false";
 }
 
-// D9: COPY_MODEL env (default claude-sonnet-4-6); hero designs use Opus.
-function modelFor(tier: string): string {
-  if (tier === "hero") return process.env.COPY_MODEL_HERO ?? "claude-opus-4-8";
-  return process.env.COPY_MODEL ?? "claude-sonnet-4-6";
-}
-
-const BUILT_IN_TEMPLATE = `You write product copy for Drevi, an Indian occasion-wear fashion house (lehengas, sarees, sharara sets, gowns). Voice: refined, confident, tactile — never salesy. No exclamation marks. Sentences end with periods.
+export const BUILT_IN_TEMPLATE = `You write product copy for Drevi, an Indian occasion-wear fashion house (lehengas, sarees, sharara sets, gowns). Voice: refined, confident, tactile — never salesy. No exclamation marks. Sentences end with periods.
 
 From the photos and the facts below, return STRICT JSON only (no markdown fence):
 {"title": "<= 60 characters, Title Case, no SKU>",
  "description": "2-3 sentences: silhouette, fabric/handwork, occasion. Specific to what is visible.",
  "tags": {"occasion": "...", "fabric": "...", "silhouette": "...", "color": "..."}}`;
 
+export interface PromptFacts {
+  title?: string | null; category?: string | null; subCategory?: string | null;
+  color?: string | null; fabric?: string | null; handwork?: string | null;
+  origin?: string | null; tier?: string | null;
+}
+
+/** §8 — the prompt an unedited design would run, built from its own specs. */
+export function defaultCopyPrompt(d: PromptFacts): string {
+  const facts = [
+    d.title && `Working name: ${d.title}`,
+    d.category && `Category: ${d.category} / ${d.subCategory ?? ""}`,
+    d.color && `Colour code: ${d.color}`,
+    d.fabric && `Fabric (verified): ${d.fabric}`,
+    d.handwork && `Handwork (verified): ${d.handwork}`,
+    d.origin && `Origin: ${d.origin}`,
+    d.tier && `Tier: ${d.tier}`,
+  ].filter(Boolean).join("\n");
+  return `${BUILT_IN_TEMPLATE}\n\nFACTS:\n${facts}`;
+}
+
 export async function generateCopyForDesign(designId: string, requestedBy: string): Promise<CopyResult> {
   const admin = createAdminClient();
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: false, error: "ANTHROPIC_API_KEY not configured (ANSH-03)" };
+
+  const { data: saved } = await admin
+    .from("design_copy")
+    .select("prompt, prompt_edited_by, model_override")
+    .eq("design_id", designId)
+    .maybeSingle();
 
   const { data: design } = await admin
     .from("designs")
@@ -84,24 +105,23 @@ export async function generateCopyForDesign(designId: string, requestedBy: strin
   }
   if (images.length === 0) return { ok: false, error: "Could not fetch any design image from Drive" };
 
-  const facts = [
-    design.title && `Working name: ${design.title}`,
-    design.category && `Category: ${design.category} / ${design.sub_category ?? ""}`,
-    design.color && `Colour code: ${design.color}`,
-    design.fabric && `Fabric (verified): ${design.fabric}`,
-    design.handwork && `Handwork (verified): ${design.handwork}`,
-    design.origin && `Origin: ${design.origin}`,
-    `Tier: ${design.tier}`,
-  ].filter(Boolean).join("\n");
-
-  const model = modelFor(design.tier);
+  // An edited prompt wins; otherwise the default is rebuilt from the specs, so
+  // a spec correction flows through without anyone re-saving the prompt (§8).
+  const prompt = saved?.prompt?.trim()
+    ? saved.prompt
+    : defaultCopyPrompt({
+        title: design.title, category: design.category, subCategory: design.sub_category,
+        color: design.color, fabric: design.fabric, handwork: design.handwork,
+        origin: design.origin, tier: design.tier,
+      });
+  const model = saved?.model_override || defaultCopyModel(design.tier);
   const res = await fetch(ANTHROPIC_URL, {
     method: "POST",
     headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify({
       model,
       max_tokens: 700,
-      messages: [{ role: "user", content: [...images, { type: "text", text: `${BUILT_IN_TEMPLATE}\n\nFACTS:\n${facts}` }] }],
+      messages: [{ role: "user", content: [...images, { type: "text", text: prompt }] }],
     }),
   });
   if (!res.ok) {
@@ -135,6 +155,9 @@ export async function generateCopyForDesign(designId: string, requestedBy: strin
       edited_by: null,
       approved_by: null,
       approved_at: null,
+      prompt: saved?.prompt ?? null,
+      prompt_edited_by: saved?.prompt_edited_by ?? null,
+      model_override: saved?.model_override ?? null,
     },
     { onConflict: "design_id" },
   );

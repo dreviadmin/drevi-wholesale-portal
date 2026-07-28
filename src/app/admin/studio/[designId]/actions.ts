@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import { defaultAnglePrompt } from "@/lib/studio/prompts";
+import { COPY_MODELS } from "@/lib/studio/copy-models";
 import { DETAIL_ANGLES } from "@/lib/studio/state";
 
 // Workbench actions (build guide §9). Every mutation is admin+, audit-logged
@@ -302,5 +303,32 @@ export async function pushShopify(designId: string): Promise<Res & { blockers?: 
   if (!res.ok) return { ok: false, error: res.error, blockers: res.blockers };
   revalidatePath(`/admin/studio/${designId}`);
   revalidatePath("/admin/studio");
+  return { ok: true };
+}
+
+/** R6 §8 — persist the vision prompt for this design. Empty restores the spec-built default. */
+export async function setCopyPrompt(designId: string, prompt: string): Promise<Res> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
+  const admin = createAdminClient();
+  const value = prompt.trim() ? prompt : null;
+  const { error } = await admin
+    .from("design_copy")
+    .upsert({ design_id: designId, prompt: value, prompt_edited_by: value ? staff.email : null }, { onConflict: "design_id" });
+  if (error) return fail(error.message);
+  revalidatePath(`/admin/studio/${designId}`);
+  return { ok: true };
+}
+
+/** R6 §8 — pick the copy model. Empty restores the tier default. */
+export async function setCopyModel(designId: string, model: string): Promise<Res> {
+  try { await requireAdmin(); } catch { return fail("Not authorized"); }
+  if (model && !COPY_MODELS.some((m) => m.id === model)) return fail("Unknown model");
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("design_copy")
+    .upsert({ design_id: designId, model_override: model || null }, { onConflict: "design_id" });
+  if (error) return fail(error.message);
+  revalidatePath(`/admin/studio/${designId}`);
   return { ok: true };
 }

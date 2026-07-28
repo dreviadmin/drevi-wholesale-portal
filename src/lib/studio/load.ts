@@ -1,6 +1,8 @@
 import "server-only";
 
 import { defaultAnglePrompt } from "./prompts";
+import { defaultCopyPrompt } from "./copy";
+import { defaultCopyModel } from "./copy-models";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import {
@@ -139,12 +141,22 @@ export interface DesignImage {
   fileRef: string; fileName: string | null; status: string; createdAt: string; derivedFrom: string | null;
 }
 
-export interface CopyDetail { title: string; description: string; tags: Record<string, string>; status: "none" | "draft" | "approved"; model: string | null; editedBy: string | null; approvedBy: string | null }
+export interface CopyDetail {
+  title: string; description: string; tags: Record<string, string>;
+  status: "none" | "draft" | "approved";
+  model: string | null; editedBy: string | null; approvedBy: string | null;
+  /** §8 — the prompt this design would run: the saved override, or the default rebuilt from its specs. */
+  prompt: string;
+  promptEdited: boolean;
+  /** The model this design would run: the saved override, or the tier default. */
+  effectiveModel: string;
+  modelOverridden: boolean;
+}
 
 export async function loadDesignDetail(designId: string): Promise<{
   board: BoardRow;
   angles: AngleDetail[];
-  copy: CopyDetail | null;
+  copy: CopyDetail;
   pool: DesignImage[];
   identImageId: string | null;
   driveFolderId: string | null;
@@ -166,7 +178,7 @@ export async function loadDesignDetail(designId: string): Promise<{
       .select("angle_id, type, status, progress")
       .eq("design_id", designId)
       .in("status", ["queued", "claimed", "running"]),
-    admin.from("design_copy").select("title, description, tags, status, model, edited_by, approved_by").eq("design_id", designId).maybeSingle(),
+    admin.from("design_copy").select("title, description, tags, status, model, edited_by, approved_by, prompt, model_override").eq("design_id", designId).maybeSingle(),
     // §7.2 picker pool: EVERY image of the design, incl. ident and images
     // detached from closeup angles by migration 0023.
     admin
@@ -174,11 +186,12 @@ export async function loadDesignDetail(designId: string): Promise<{
       .select("id, role, angle_id, engine, file_ref, file_name, status, created_at, derived_from")
       .eq("design_id", designId)
       .order("created_at", { ascending: false }),
-    admin.from("designs").select("ident_image_id, drive_folder_id, title, category, sub_category, color, fabric, handwork").eq("id", designId).maybeSingle(),
+    admin.from("designs").select("ident_image_id, drive_folder_id, title, category, sub_category, color, fabric, handwork, origin, tier").eq("id", designId).maybeSingle(),
   ]);
   const promptDesign = {
     title: designRow?.title, category: designRow?.category, subCategory: designRow?.sub_category,
     color: designRow?.color, fabric: designRow?.fabric, handwork: designRow?.handwork,
+    origin: designRow?.origin, tier: designRow?.tier,
   };
   const order: Record<string, number> = { front: 0, back: 1, side: 2, lifestyle: 3, detail_1: 4, detail_2: 5 };
   const angleNameById = new Map((angles ?? []).map((a) => [a.id, a.angle as string]));
@@ -198,9 +211,19 @@ export async function loadDesignDetail(designId: string): Promise<{
     pool,
     identImageId: designRow?.ident_image_id ?? null,
     driveFolderId: designRow?.drive_folder_id ?? null,
-    copy: copyRow
-      ? { title: copyRow.title ?? "", description: copyRow.description ?? "", tags: (copyRow.tags as Record<string, string>) ?? {}, status: copyRow.status, model: copyRow.model, editedBy: copyRow.edited_by, approvedBy: copyRow.approved_by }
-      : null,
+    copy: {
+      title: copyRow?.title ?? "",
+      description: copyRow?.description ?? "",
+      tags: (copyRow?.tags as Record<string, string>) ?? {},
+      status: (copyRow?.status ?? "none") as CopyDetail["status"],
+      model: copyRow?.model ?? null,
+      editedBy: copyRow?.edited_by ?? null,
+      approvedBy: copyRow?.approved_by ?? null,
+      prompt: copyRow?.prompt?.trim() ? copyRow.prompt : defaultCopyPrompt(promptDesign),
+      promptEdited: !!copyRow?.prompt?.trim(),
+      effectiveModel: copyRow?.model_override || defaultCopyModel(designRow?.tier),
+      modelOverridden: !!copyRow?.model_override,
+    },
     angles: (angles ?? [])
       .map((a) => ({
         id: a.id,

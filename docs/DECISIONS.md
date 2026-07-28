@@ -59,3 +59,16 @@ One line per deviation from the master build guide, with rationale. Phase 1 deci
 - **Crop is hidden while uploads are off (ANSH-19).** A crop writes a new Drive
   file, so with `DRIVE_DESIGN_FOLDER_ID` unset the button does not appear —
   never a silent fallback to a legacy folder.
+
+### R6 — Vision controls (v1.3 §8)
+
+- **The prompt is computed until edited**, same rule as angle prompts:
+  `design_copy.prompt` starts null and `defaultCopyPrompt()` rebuilds it from
+  the design's specs at read time, so a spec correction flows through. Saving
+  stamps `prompt_edited_by`; "Reset to default" clears it back to null.
+- **Model registry, not free text.** `src/lib/studio/copy-models.ts` is the one
+  list the panel and the generator share, so the estimate on screen is the
+  estimate the run costs. `setCopyModel` rejects ids outside it.
+- **`db:migrate` now defaults to dev.** It loaded `.env.local` — production —
+  unconditionally, which sent 0022–0027 to prod. Fixed, and the full assessment
+  is in docs/CUTOVER-LOG.md.

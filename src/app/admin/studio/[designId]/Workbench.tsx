@@ -6,10 +6,11 @@ import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronDown, Check, X as XIcon, RefreshCw, SlidersHorizontal, Loader2, Camera, Upload, Crop as CropIcon, Columns2, Image as ImageIcon } from "lucide-react";
 import { ZoomImage } from "@/components/Lightbox";
 import { palette } from "@/lib/palette";
+import { COPY_MODELS, estimateLabel } from "@/lib/studio/copy-models";
 import type { BoardRow, AngleDetail, CopyDetail, DesignImage } from "@/lib/studio/load";
 import { AI_ANGLES } from "@/lib/studio/state";
 import { JobsTicker } from "../JobsTicker";
-import { approveAsIs, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, approveCopy, pushWholesale, pushShopify } from "./actions";
+import { setCopyPrompt as setCopyPromptAction, setCopyModel, approveAsIs, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, approveCopy, pushWholesale, pushShopify } from "./actions";
 import { uploadSource, importFinished, applyImageDirectly, approveImage, rejectImage, saveCrop, setAngleSource } from "./image-actions";
 import { ImagePicker, CropSheet, CompareSheet } from "./ImageTools";
 
@@ -28,7 +29,7 @@ const drivePhoto = (id: string, s = 600) => `/api/drive-photo?id=${encodeURIComp
 export function Workbench({ board, angles, copy, pool, activeJobs, openaiEnabled, uploadsOk, uploadsMessage }: {
   board: BoardRow;
   angles: AngleDetail[];
-  copy: CopyDetail | null;
+  copy: CopyDetail;
   pool: DesignImage[];
   activeJobs: Job[];
   openaiEnabled: boolean;
@@ -46,6 +47,8 @@ export function Workbench({ board, angles, copy, pool, activeJobs, openaiEnabled
   const [crop, setCrop] = useState<{ angleId: string | null; parentId: string; fileRef: string } | null>(null);
   const [compare, setCompare] = useState<{ left: string; right: string; leftLabel: string; rightLabel: string } | null>(null);
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [copyPromptOpen, setCopyPromptOpen] = useState(false);
+  const [copyPrompt, setCopyPrompt] = useState(copy.prompt);
 
   function uploadFor(angleId: string, kind: "source" | "import", file: File) {
     if (!uploadsOk) { flash(uploadsMessage); return; }
@@ -64,6 +67,8 @@ export function Workbench({ board, angles, copy, pool, activeJobs, openaiEnabled
   useEffect(() => {
     setCopyDraft({ title: copy?.title ?? "", description: copy?.description ?? "", tags: copy?.tags ?? {} });
   }, [copy?.title, copy?.description, copy?.tags]);
+
+  useEffect(() => { setCopyPrompt(copy.prompt); }, [copy.prompt]);
 
   function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2400); }
   function run(fn: () => Promise<{ ok: boolean; error?: string }>, done: string) {
@@ -367,8 +372,8 @@ export function Workbench({ board, angles, copy, pool, activeJobs, openaiEnabled
         <div className="mt-2 p-3.5" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
           <div className="flex items-center justify-between">
             <span className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>Copy</span>
-            <span className="font-body uppercase px-2 py-0.5" style={{ fontSize: 8, letterSpacing: "0.1em", fontWeight: 600, background: copy?.status === "approved" ? "#DFF0E4" : copy ? "#F6E7CB" : palette.ivoryDeep, color: copy?.status === "approved" ? "#1F6B45" : copy ? "#8a6d1a" : palette.mutedGreige }}>
-              {copy?.status ?? "none"}
+            <span className="font-body uppercase px-2 py-0.5" style={{ fontSize: 8, letterSpacing: "0.1em", fontWeight: 600, background: copy.status === "approved" ? "#DFF0E4" : copy.status === "draft" ? "#F6E7CB" : palette.ivoryDeep, color: copy.status === "approved" ? "#1F6B45" : copy.status === "draft" ? "#8a6d1a" : palette.mutedGreige }}>
+              {copy.status}
             </span>
           </div>
 
@@ -378,7 +383,55 @@ export function Workbench({ board, angles, copy, pool, activeJobs, openaiEnabled
             </div>
           )}
 
-          {copy ? (
+          {/* R6 §8 — vision controls: editable prompt (persisted per design),
+              model selector and the cost estimate, all BEFORE the run. */}
+          <div className="mt-2">
+            <button type="button" onClick={() => setCopyPromptOpen((v) => !v)} className="flex items-center gap-1 font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.mutedGreige }}>
+              <ChevronDown size={11} style={{ transform: copyPromptOpen ? "rotate(180deg)" : "none" }} />
+              Vision prompt{copy.promptEdited ? " · edited" : " · from specs"}
+            </button>
+            {copyPromptOpen && (
+              <div className="mt-1.5">
+                <textarea
+                  value={copyPrompt}
+                  onChange={(e) => setCopyPrompt(e.target.value)}
+                  rows={8}
+                  className="w-full font-mono p-2"
+                  style={{ fontSize: 10, lineHeight: 1.5, border: "1px solid rgba(26,26,26,0.15)", background: "#fff", color: palette.black }}
+                />
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  <button type="button" disabled={pending || copyPrompt === copy.prompt} onClick={() => run(() => setCopyPromptAction(board.id, copyPrompt), "Prompt saved")} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, color: palette.black, padding: "5px 9px" }}>
+                    Save prompt
+                  </button>
+                  {copy.promptEdited && (
+                    <button type="button" disabled={pending} onClick={() => run(() => setCopyPromptAction(board.id, ""), "Back to the spec-built default")} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.mutedGreige, padding: "5px 9px" }}>
+                      Reset to default
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              <span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.14em", color: palette.mutedGreige }}>Model</span>
+              <select
+                value={copy.effectiveModel}
+                disabled={pending}
+                onChange={(e) => run(() => setCopyModel(board.id, e.target.value), "Model set")}
+                className="font-body p-1.5"
+                style={{ fontSize: 10.5, border: "1px solid rgba(26,26,26,0.15)", background: "#fff", color: palette.black }}
+              >
+                {COPY_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label} · {m.note}</option>
+                ))}
+              </select>
+              <span className="font-body" style={{ fontSize: 9.5, color: palette.mutedGreige }}>
+                {estimateLabel(copy.effectiveModel)} per run{copy.modelOverridden ? " · overridden" : ` · ${board.tier} default`}
+              </span>
+            </div>
+          </div>
+
+          {copy.status !== "none" ? (
             <div className="mt-2">
               <input
                 value={copyDraft.title}
@@ -414,14 +467,14 @@ export function Workbench({ board, angles, copy, pool, activeJobs, openaiEnabled
                     <Check size={11} /> Approve copy
                   </button>
                 )}
-                <button type="button" disabled={pending || !board.specsVerified} onClick={() => run(() => generateCopy(board.id), "Copy regenerated")} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }} title="One vision call — a few paise">
-                  <RefreshCw size={11} /> Regen · vision call
+                <button type="button" disabled={pending || !board.specsVerified} onClick={() => run(() => generateCopy(board.id), "Copy regenerated")} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }} title={`One vision call · ${estimateLabel(copy.effectiveModel)}`}>
+                  <RefreshCw size={11} /> Regen · {estimateLabel(copy.effectiveModel)}
                 </button>
               </div>
             </div>
           ) : (
-            <button type="button" disabled={pending || !board.specsVerified} onClick={() => run(() => generateCopy(board.id), "Copy generated")} className="mt-2 flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: palette.black, color: palette.ivory, padding: "8px 11px" }} title="One vision call — a few paise">
-              Generate copy · vision call
+            <button type="button" disabled={pending || !board.specsVerified} onClick={() => run(() => generateCopy(board.id), "Copy generated")} className="mt-2 flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: palette.black, color: palette.ivory, padding: "8px 11px" }} title={`One vision call · ${estimateLabel(copy.effectiveModel)}`}>
+              Generate copy · {estimateLabel(copy.effectiveModel)}
             </button>
           )}
         </div>
