@@ -47,3 +47,18 @@ for a dev run.
 **For Ansh to decide:** leave the drift (recommended — it is additive and
 cutover needs it), or have the 205 `stock_movements` rows deleted and the table
 dropped so prod returns to exactly its pre-retrofit shape.
+
+## Dev credentials changed during R7–R9 verification (28 Jul 2026)
+
+To drive the buyer and staff surfaces end-to-end on **dev only**
+(`qvnvxcdyvcsgxulbcmzm`), two dev auth passwords were reset:
+
+- `rivaaz.dev@drevifashion.com` → `DevBuyer!2026`
+- `ansh@drevifashion.com` → `DevStaff!2026`
+
+Production auth is untouched. Change or rotate these whenever convenient.
+
+Dev data also carries deliberate test artefacts from this verification: order
+`DX-20260717-022` is now cancelled (its stock movements went out and came back),
+`DD-LEH-FLR-050-L-GRN` holds a stock-take reset of 9, and a few designs have
+supply blocks set to exercise the availability states.
