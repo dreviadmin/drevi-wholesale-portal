@@ -24,6 +24,10 @@ function loadServiceAccount(): { client_email: string; private_key: string } {
 }
 
 let driveClient: drive_v3.Drive | null = null;
+export async function getDriveClient(): Promise<drive_v3.Drive> {
+  return getDrive();
+}
+
 async function getDrive(): Promise<drive_v3.Drive> {
   if (driveClient) return driveClient;
   driveAuth = new google.auth.JWT({

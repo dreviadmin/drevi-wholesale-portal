@@ -12,7 +12,9 @@
     "db:backup": "node scripts/backup.mjs",
     "build:local": "NEXT_BUILD_DIR=.next-build next build",
     "test": "vitest run",
-    "retrofit:baseline": "node scripts/verify-retrofit-state.mjs"
+    "retrofit:baseline": "node scripts/verify-retrofit-state.mjs",
+    "retrofit:folder-audit": "node scripts/drive-folder-audit.mjs",
+    "retrofit:drive-map": "node scripts/drive-map-report.mjs"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",
