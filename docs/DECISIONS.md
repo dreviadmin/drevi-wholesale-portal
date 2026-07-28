@@ -37,3 +37,25 @@ One line per deviation from the master build guide, with rationale. Phase 1 deci
 - **R2 · service-account quota risk surfaced to ANSH-19**: uploads into a *My Drive* folder will fail with `storageQuotaExceeded` (service accounts have 0 personal quota — observed on 25 Jul when copying a sheet). The parent for `DRIVE_DESIGN_FOLDER_ID` should be a Shared Drive folder. Matching and reads are unaffected.
 - **R3 · receipts create catalog rows**: an app-born design has no sheet row, so `saveDelivery` inserts a `wholesale_products` row per received variant — **hidden** (`wholesale_visible=false`, lock on that field) until Rakesh sets specs and price (§6.1 "Awaiting specs"). Without this the garment would exist as a design and a receipt line but never as a product.
 - **R3 · §3.7 guard implemented (A1 false)**: the sheet sync now computes the set of `origin_source='app'` variants and (a) skips them on ingest and (b) excludes them from the hide pass, reporting the count as a warning. Delete when the cutover flips `SHEET_SYNC_ENABLED`.
+
+### R5 — Studio input modes (v1.3 §7)
+
+- **`useDirectly` renamed `applyImageDirectly`.** ESLint's `react-hooks/rules-of-hooks`
+  treats any `use*` identifier as a hook, so a server action named `useDirectly`
+  cannot be called from a callback. Behaviour is exactly the spec's mode B.
+- **Angle prompts are computed, not stored, until edited.** `design_angles.prompt`
+  starts null; `defaultAnglePrompt()` (src/lib/studio/prompts.ts) builds the
+  uniform grey-studio prompt from the design's own specs at read time, so a spec
+  correction flows into the prompt. Saving one marks `prompt_edited_by_human`
+  and nothing regenerates over it.
+- **`approveAsIs` no longer mints a duplicate row.** Post-0022 the source IS a
+  `design_images` row, so approve-as-is approves it in place and archives the
+  previous approval (§7.5). The legacy branch (source_ref with no source_image_id)
+  still inserts, now carrying `design_id` and `role='source'`.
+- **An approved source shows in the Production pane.** Sources are otherwise
+  excluded from an angle's candidate list; the approved one is the exception,
+  else a mode-B angle reads "none yet" while being approved. Compare hides
+  itself when both sides are the same image.
+- **Crop is hidden while uploads are off (ANSH-19).** A crop writes a new Drive
+  file, so with `DRIVE_DESIGN_FOLDER_ID` unset the button does not appear —
+  never a silent fallback to a legacy folder.

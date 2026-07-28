@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireAdminOrRedirect } from "@/lib/staff";
 import { loadDesignDetail } from "@/lib/studio/load";
+import { uploadsEnabled, UPLOADS_DISABLED_MESSAGE } from "@/lib/drive-design";
 import { Workbench } from "./Workbench";
 
 export const dynamic = "force-dynamic";
@@ -13,5 +14,16 @@ export default async function WorkbenchPage({ params }: { params: { designId: st
   const detail = await loadDesignDetail(params.designId);
   if (!detail) notFound();
   const openaiEnabled = (process.env.OPENAI_BG_ENABLED ?? "").toLowerCase() === "true";
-  return <Workbench board={detail.board} angles={detail.angles} copy={detail.copy} activeJobs={detail.activeJobs} openaiEnabled={openaiEnabled} />;
+  return (
+    <Workbench
+      board={detail.board}
+      angles={detail.angles}
+      copy={detail.copy}
+      pool={detail.pool}
+      activeJobs={detail.activeJobs}
+      openaiEnabled={openaiEnabled}
+      uploadsOk={uploadsEnabled()}
+      uploadsMessage={UPLOADS_DISABLED_MESSAGE}
+    />
+  );
 }

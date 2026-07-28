@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
+import { defaultAnglePrompt } from "@/lib/studio/prompts";
 import { DETAIL_ANGLES } from "@/lib/studio/state";
 
 // Workbench actions (build guide §9). Every mutation is admin+, audit-logged
@@ -101,15 +102,29 @@ export async function approveAsIs(angleId: string): Promise<Res> {
   const admin = createAdminClient();
   const { data: angle } = await admin
     .from("design_angles")
-    .select("id, design_id, source_ref, approved_image_id")
+    .select("id, design_id, source_ref, source_image_id, approved_image_id")
     .eq("id", angleId)
     .maybeSingle();
   if (!angle) return fail("Angle not found");
   if (!angle.source_ref) return fail("No source image on this angle yet");
 
+  // Post-0022 the source is already a design_images row — approve it in place
+  // rather than minting a duplicate (§7.5).
+  if (angle.source_image_id) {
+    if (angle.approved_image_id && angle.approved_image_id !== angle.source_image_id) {
+      await admin.from("design_images").update({ status: "archived" }).eq("id", angle.approved_image_id);
+    }
+    await admin.from("design_angles").update({ approved_image_id: angle.source_image_id, updated_at: new Date().toISOString() }).eq("id", angleId);
+    await admin.from("publish_targets").update({ state: "changes_pending" }).eq("design_id", angle.design_id).eq("state", "live");
+    await writeAuditEvent({ eventType: "studio_candidate_approved", staffUserId: staff.id, notes: `approve-as-is angle ${angleId}` });
+    revalidatePath(`/admin/studio/${angle.design_id}`);
+    revalidatePath("/admin/studio");
+    return { ok: true };
+  }
+
   const { data: cand, error } = await admin
     .from("design_images")
-    .insert({ angle_id: angleId, engine: "raw", file_ref: angle.source_ref, status: "active", created_by: staff.email })
+    .insert({ design_id: angle.design_id, angle_id: angleId, role: "source", engine: "raw", file_ref: angle.source_ref, status: "active", created_by: staff.email })
     .select("id")
     .single();
   if (error) return fail(error.message);
@@ -153,7 +168,7 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
   const admin = createAdminClient();
   const { data: angle } = await admin
     .from("design_angles")
-    .select("id, design_id, angle, engine, source_ref")
+    .select("id, design_id, angle, engine, source_ref, prompt")
     .eq("id", angleId)
     .maybeSingle();
   if (!angle) return fail("Angle not found");
@@ -165,6 +180,16 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
   }
   if (!angle.source_ref) return fail("No source image on this angle yet");
 
+  const { data: dRow } = await admin
+    .from("designs")
+    .select("title, category, sub_category, color, fabric, handwork")
+    .eq("id", angle.design_id)
+    .maybeSingle();
+  const promptDesign = {
+    title: dRow?.title, category: dRow?.category, subCategory: dRow?.sub_category,
+    color: dRow?.color, fabric: dRow?.fabric, handwork: dRow?.handwork,
+  };
+
   const dispatchConfigured = !!(process.env.GITHUB_PAT && process.env.GITHUB_RUNNER_REPO);
   const { data: job, error } = await admin
     .from("pipeline_jobs")
@@ -172,7 +197,8 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
       type: angle.engine === "openai_bg" ? "openai_bg" : "tryon",
       design_id: angle.design_id,
       angle_id: angle.id,
-      params: {},
+      // The runner needs the prompt the operator actually saw (§7.1).
+      params: { prompt: angle.prompt ?? defaultAnglePrompt(angle.angle, angle.engine, promptDesign), angle: angle.angle, engine: angle.engine },
       requested_by: staff.email,
       log: dispatchConfigured ? "" : "No hosted runner yet (ANSH-04) — run locally: python3 pipeline/runner.py --job <this id>",
     })

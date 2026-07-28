@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronDown, Check, X as XIcon, RefreshCw, SlidersHorizontal, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronDown, Check, X as XIcon, RefreshCw, SlidersHorizontal, Loader2, Camera, Upload, Crop as CropIcon, Columns2, Image as ImageIcon } from "lucide-react";
 import { ZoomImage } from "@/components/Lightbox";
 import { palette } from "@/lib/palette";
-import type { BoardRow, AngleDetail, CopyDetail } from "@/lib/studio/load";
+import type { BoardRow, AngleDetail, CopyDetail, DesignImage } from "@/lib/studio/load";
 import { AI_ANGLES } from "@/lib/studio/state";
 import { JobsTicker } from "../JobsTicker";
-import { approveCandidate, rejectCandidate, approveAsIs, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, approveCopy, pushWholesale, pushShopify } from "./actions";
+import { approveAsIs, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, approveCopy, pushWholesale, pushShopify } from "./actions";
+import { uploadSource, importFinished, applyImageDirectly, approveImage, rejectImage, saveCrop, setAngleSource } from "./image-actions";
+import { ImagePicker, CropSheet, CompareSheet } from "./ImageTools";
 
 // Workbench client (§9). Card per angle: source vs current candidate (both
 // zoomable — golden rule 2), engine chips (D4; seedream disabled; openai_bg
@@ -23,12 +25,15 @@ interface Job { angleId: string | null; type: string; status: string; progress: 
 
 const drivePhoto = (id: string, s = 600) => `/api/drive-photo?id=${encodeURIComponent(id)}&s=${s}`;
 
-export function Workbench({ board, angles, copy, activeJobs, openaiEnabled }: {
+export function Workbench({ board, angles, copy, pool, activeJobs, openaiEnabled, uploadsOk, uploadsMessage }: {
   board: BoardRow;
   angles: AngleDetail[];
   copy: CopyDetail | null;
+  pool: DesignImage[];
   activeJobs: Job[];
   openaiEnabled: boolean;
+  uploadsOk: boolean;
+  uploadsMessage: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -36,6 +41,22 @@ export function Workbench({ board, angles, copy, activeJobs, openaiEnabled }: {
   const [promptOpen, setPromptOpen] = useState<Record<string, boolean>>({});
   const [historyOpen, setHistoryOpen] = useState<Record<string, boolean>>({});
   const [prompts, setPrompts] = useState<Record<string, string>>({});
+  // R5 sheets
+  const [picker, setPicker] = useState<{ angleId: string; intent: "use" | "source" } | null>(null);
+  const [crop, setCrop] = useState<{ angleId: string | null; parentId: string; fileRef: string } | null>(null);
+  const [compare, setCompare] = useState<{ left: string; right: string; leftLabel: string; rightLabel: string } | null>(null);
+  const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  function uploadFor(angleId: string, kind: "source" | "import", file: File) {
+    if (!uploadsOk) { flash(uploadsMessage); return; }
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("photo", file);
+      const r = kind === "source" ? await uploadSource(angleId, fd) : await importFinished(angleId, fd);
+      flash(r.ok ? (kind === "source" ? "Source added" : "Image imported") : r.error ?? "Upload failed");
+      if (r.ok) router.refresh();
+    });
+  }
   const [copyDraft, setCopyDraft] = useState({ title: copy?.title ?? "", description: copy?.description ?? "", tags: copy?.tags ?? {} });
   const copyDirty = !!copy && (copyDraft.title !== copy.title || copyDraft.description !== copy.description);
   // router.refresh() re-renders with fresh props but never re-runs useState
@@ -178,15 +199,56 @@ export function Workbench({ board, angles, copy, activeJobs, openaiEnabled }: {
           </div>
         )}
 
-        {/* Actions */}
+        {/* Four input modes (§7.1) — A shoot · B use directly · C import · D generate */}
+        <input
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          ref={(el) => { fileInputs.current[`${a.id}:source`] = el; }}
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadFor(a.id, "source", f); e.currentTarget.value = ""; }}
+        />
+        <input
+          type="file"
+          accept="image/*"
+          className="hidden"
+          ref={(el) => { fileInputs.current[`${a.id}:import`] = el; }}
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadFor(a.id, "import", f); e.currentTarget.value = ""; }}
+        />
         <div className="flex flex-wrap gap-1.5 mt-2.5">
-          {current && current.status === "generated" && (
-            <button type="button" disabled={pending} onClick={() => run(() => approveCandidate(current.id), "Approved")} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: "#1F6B45", color: "#fff", padding: "7px 10px" }}>
+          <button type="button" disabled={pending || !uploadsOk} title={uploadsOk ? "Shoot or upload a new source" : uploadsMessage} onClick={() => fileInputs.current[`${a.id}:source`]?.click()} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }}>
+            <Camera size={11} /> Shoot
+          </button>
+          <button type="button" disabled={pending} onClick={() => setPicker({ angleId: a.id, intent: "use" })} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }} title="Use an existing image as-is — no generation, no cost">
+            <ImageIcon size={11} /> Use directly
+          </button>
+          <button type="button" disabled={pending || !uploadsOk} title={uploadsOk ? "Import a finished image (Canva, Photoshop, phone edit)" : uploadsMessage} onClick={() => fileInputs.current[`${a.id}:import`]?.click()} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }}>
+            <Upload size={11} /> Import
+          </button>
+          <button type="button" disabled={pending} onClick={() => setPicker({ angleId: a.id, intent: "source" })} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }} title="Pick an existing image of this design as the source">
+            <ImageIcon size={11} /> {a.sourceRef ? "Change source" : "Pick source"}
+          </button>
+          {current && a.sourceRef && current.id !== a.sourceImageId && (
+            <button type="button" onClick={() => setCompare({ left: a.sourceRef!, right: current.fileRef, leftLabel: "Source", rightLabel: current.id === a.approvedImageId ? "Production" : "Candidate" })} className="flex items-center gap-1 font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }}>
+              <Columns2 size={11} /> Compare
+            </button>
+          )}
+          {(current || a.sourceRef) && uploadsOk && (
+            <button type="button" onClick={() => setCrop({ angleId: a.id, parentId: current?.id ?? a.sourceImageId ?? "", fileRef: current?.fileRef ?? a.sourceRef! })} className="flex items-center gap-1 font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }}>
+              <CropIcon size={11} /> Crop
+            </button>
+          )}
+        </div>
+
+        {/* Review actions */}
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {current && current.id !== a.approvedImageId && (
+            <button type="button" disabled={pending} onClick={() => run(() => approveImage(a.id, current.id), "Approved")} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: "#1F6B45", color: "#fff", padding: "7px 10px" }}>
               <Check size={11} /> Approve
             </button>
           )}
           {current && (
-            <button type="button" disabled={pending} onClick={() => run(() => rejectCandidate(current.id), "Rejected")} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: "1px solid #9C3A31", color: "#9C3A31", padding: "7px 10px" }}>
+            <button type="button" disabled={pending} onClick={() => run(() => rejectImage(current.id), "Rejected")} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: "1px solid #9C3A31", color: "#9C3A31", padding: "7px 10px" }}>
               <XIcon size={11} /> Reject
             </button>
           )}
@@ -216,7 +278,7 @@ export function Workbench({ board, angles, copy, activeJobs, openaiEnabled }: {
                     <ZoomImage src={drivePhoto(c.fileRef, 300)} alt="attempt" width={84} height={105} />
                     <div className="font-mono" style={{ fontSize: 7.5, color: palette.mutedGreige }}>{c.engine} · {c.status}</div>
                     {c.id !== a.approvedImageId && (
-                      <button type="button" disabled={pending} onClick={() => run(() => approveCandidate(c.id), "Approved from history")} className="font-body uppercase mt-0.5" style={{ fontSize: 7.5, letterSpacing: "0.08em", color: "#1F6B45" }}>
+                      <button type="button" disabled={pending} onClick={() => run(() => approveImage(a.id, c.id), "Approved from history")} className="font-body uppercase mt-0.5" style={{ fontSize: 7.5, letterSpacing: "0.08em", color: "#1F6B45" }}>
                         Approve this
                       </button>
                     )}
@@ -364,6 +426,47 @@ export function Workbench({ board, angles, copy, activeJobs, openaiEnabled }: {
           )}
         </div>
       </div>
+
+      {picker && (
+        <ImagePicker
+          pool={pool}
+          title={picker.intent === "use" ? "Use an image directly" : "Choose a source"}
+          onClose={() => setPicker(null)}
+          onPick={(img) => {
+            const { angleId, intent } = picker;
+            setPicker(null);
+            run(() => (intent === "use" ? applyImageDirectly(angleId, img.id) : setAngleSource(angleId, img.id)), intent === "use" ? "Approved as-is" : "Source set");
+          }}
+        />
+      )}
+
+      {crop && (
+        <CropSheet
+          fileRef={crop.fileRef}
+          onCancel={() => setCrop(null)}
+          onCropped={(blob) => {
+            const c = crop;
+            setCrop(null);
+            startTransition(async () => {
+              const fd = new FormData();
+              fd.set("photo", new File([blob], "crop.jpg", { type: "image/jpeg" }));
+              const r = await saveCrop(c.angleId, board.id, c.parentId, fd);
+              flash(r.ok ? "Crop saved" : r.error ?? "Crop failed");
+              if (r.ok) router.refresh();
+            });
+          }}
+        />
+      )}
+
+      {compare && (
+        <CompareSheet
+          leftRef={compare.left}
+          rightRef={compare.right}
+          leftLabel={compare.leftLabel}
+          rightLabel={compare.rightLabel}
+          onClose={() => setCompare(null)}
+        />
+      )}
 
       {toast && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 font-body px-4 py-2" style={{ background: palette.black, color: palette.ivory, fontSize: 12 }}>

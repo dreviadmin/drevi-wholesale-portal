@@ -1,5 +1,6 @@
 import "server-only";
 
+import { defaultAnglePrompt } from "./prompts";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import {
@@ -129,22 +130,36 @@ export interface AngleDetail {
   promptEditedByHuman: boolean;
   engine: "fashn" | "openai_bg" | "raw" | "seedream";
   approvedImageId: string | null;
-  candidates: { id: string; engine: string; fileRef: string; status: string; createdAt: string; costCredits: number }[];
+  sourceImageId: string | null;
+  candidates: { id: string; role: string; engine: string; fileRef: string; status: string; createdAt: string; costCredits: number }[];
+}
+
+export interface DesignImage {
+  id: string; role: string; angle: string | null; engine: string | null;
+  fileRef: string; fileName: string | null; status: string; createdAt: string; derivedFrom: string | null;
 }
 
 export interface CopyDetail { title: string; description: string; tags: Record<string, string>; status: "none" | "draft" | "approved"; model: string | null; editedBy: string | null; approvedBy: string | null }
 
-export async function loadDesignDetail(designId: string): Promise<{ board: BoardRow; angles: AngleDetail[]; copy: CopyDetail | null; activeJobs: { angleId: string | null; type: string; status: string; progress: number }[] } | null> {
+export async function loadDesignDetail(designId: string): Promise<{
+  board: BoardRow;
+  angles: AngleDetail[];
+  copy: CopyDetail | null;
+  pool: DesignImage[];
+  identImageId: string | null;
+  driveFolderId: string | null;
+  activeJobs: { angleId: string | null; type: string; status: string; progress: number }[];
+} | null> {
   const rows = await loadBoard();
   const board = rows.find((r) => r.id === designId);
   if (!board) return null;
   const admin = createAdminClient();
-  const [{ data: angles }, { data: jobs }, { data: copyRow }] = await Promise.all([
+  const [{ data: angles }, { data: jobs }, { data: copyRow }, { data: poolRows }, { data: designRow }] = await Promise.all([
     admin
       .from("design_angles")
       // Two FKs link these tables (angle_id + approved_image_id) — the
       // !angle_id hint picks the one-to-many history relation.
-      .select("id, angle, source_ref, prompt, prompt_edited_by_human, engine, approved_image_id, design_images!angle_id(id, engine, file_ref, status, created_at, cost_credits)")
+      .select("id, angle, source_ref, source_image_id, prompt, prompt_edited_by_human, engine, approved_image_id, design_images!angle_id(id, role, engine, file_ref, status, created_at, cost_credits)")
       .eq("design_id", designId),
     admin
       .from("pipeline_jobs")
@@ -152,10 +167,37 @@ export async function loadDesignDetail(designId: string): Promise<{ board: Board
       .eq("design_id", designId)
       .in("status", ["queued", "claimed", "running"]),
     admin.from("design_copy").select("title, description, tags, status, model, edited_by, approved_by").eq("design_id", designId).maybeSingle(),
+    // §7.2 picker pool: EVERY image of the design, incl. ident and images
+    // detached from closeup angles by migration 0023.
+    admin
+      .from("design_images")
+      .select("id, role, angle_id, engine, file_ref, file_name, status, created_at, derived_from")
+      .eq("design_id", designId)
+      .order("created_at", { ascending: false }),
+    admin.from("designs").select("ident_image_id, drive_folder_id, title, category, sub_category, color, fabric, handwork").eq("id", designId).maybeSingle(),
   ]);
+  const promptDesign = {
+    title: designRow?.title, category: designRow?.category, subCategory: designRow?.sub_category,
+    color: designRow?.color, fabric: designRow?.fabric, handwork: designRow?.handwork,
+  };
   const order: Record<string, number> = { front: 0, back: 1, side: 2, lifestyle: 3, detail_1: 4, detail_2: 5 };
+  const angleNameById = new Map((angles ?? []).map((a) => [a.id, a.angle as string]));
+  const pool: DesignImage[] = (poolRows ?? []).map((r) => ({
+    id: r.id,
+    role: r.role,
+    angle: r.angle_id ? angleNameById.get(r.angle_id) ?? null : null,
+    engine: r.engine,
+    fileRef: r.file_ref,
+    fileName: r.file_name,
+    status: r.status,
+    createdAt: r.created_at,
+    derivedFrom: r.derived_from,
+  }));
   return {
     board,
+    pool,
+    identImageId: designRow?.ident_image_id ?? null,
+    driveFolderId: designRow?.drive_folder_id ?? null,
     copy: copyRow
       ? { title: copyRow.title ?? "", description: copyRow.description ?? "", tags: (copyRow.tags as Record<string, string>) ?? {}, status: copyRow.status, model: copyRow.model, editedBy: copyRow.edited_by, approvedBy: copyRow.approved_by }
       : null,
@@ -164,12 +206,18 @@ export async function loadDesignDetail(designId: string): Promise<{ board: Board
         id: a.id,
         angle: a.angle as Angle,
         sourceRef: a.source_ref,
-        prompt: a.prompt ?? "",
+        // §7.1 — an unedited angle shows the uniform grey-studio default,
+        // built from this design's own specs. Saved prompts always win.
+        prompt: a.prompt ?? defaultAnglePrompt(a.angle, a.engine, promptDesign),
         promptEditedByHuman: a.prompt_edited_by_human,
         engine: a.engine as AngleDetail["engine"],
         approvedImageId: a.approved_image_id,
-        candidates: ((a.design_images as { id: string; engine: string; file_ref: string; status: string; created_at: string; cost_credits: number }[] | null) ?? [])
-          .map((c) => ({ id: c.id, engine: c.engine, fileRef: c.file_ref, status: c.status, createdAt: c.created_at, costCredits: Number(c.cost_credits ?? 0) }))
+        sourceImageId: a.source_image_id ?? null,
+        candidates: ((a.design_images as { id: string; role: string; engine: string | null; file_ref: string; status: string; created_at: string; cost_credits: number }[] | null) ?? [])
+          // Sources live in their own pane — except when one has been approved
+          // outright (mode B), where it IS the production image.
+          .filter((c) => c.role !== "source" || c.id === a.approved_image_id)
+          .map((c) => ({ id: c.id, role: c.role, engine: c.engine ?? "raw", fileRef: c.file_ref, status: c.status, createdAt: c.created_at, costCredits: Number(c.cost_credits ?? 0) }))
           .sort((x, y) => y.createdAt.localeCompare(x.createdAt)),
       }))
       .sort((x, y) => order[x.angle] - order[y.angle]),
