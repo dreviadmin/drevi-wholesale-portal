@@ -166,6 +166,23 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
   if (ignoredErr) throw new Error(`Sync aborted — ignored-SKU read failed: ${ignoredErr.message}`);
   const ignored = new Set((ignoredRows ?? []).map((r) => r.sku.toUpperCase()));
 
+  // Retrofit §3.7 interim guard (applies while SHEET_SYNC_ENABLED is still on):
+  // designs born in the app have NO sheet row by definition. The sync must
+  // never hide, overwrite or delete their variants. Delete this block when the
+  // ANSH-07 cutover flips the flag.
+  const appOwned = new Set<string>();
+  try {
+    const { data: appDesigns } = await supabase.from("designs").select("base_sku, color").eq("origin_source", "app");
+    const { data: allProducts } = await supabase.from("wholesale_products").select("sku");
+    const groups = new Set((appDesigns ?? []).map((d) => `${d.base_sku.toUpperCase()}|${d.color.toUpperCase()}`));
+    for (const p of allProducts ?? []) {
+      const parts = p.sku.toUpperCase().split("-");
+      if (parts.length < 5 || !/^\d{2,4}$/.test(parts[3])) continue;
+      if (groups.has(`${parts.slice(0, 4).join("-")}|${parts[parts.length - 1]}`)) appOwned.add(p.sku.toUpperCase());
+    }
+    if (appOwned.size > 0) warnings.push(`Sync skipped ${appOwned.size} app-created SKU(s) — they have no sheet row (retrofit §3.7).`);
+  } catch { /* designs table absent — nothing to protect */ }
+
   // Filter + map.
   let skipped = 0;
   const products: ProductRow[] = [];
@@ -208,6 +225,7 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
     const sku = row.sku?.trim();
     if (!sku || included.has(sku.toUpperCase())) continue;
     if (ignored.has(sku.toUpperCase())) { skipped++; continue; }
+    if (appOwned.has(sku.toUpperCase())) { skipped++; continue; } // §3.7
     // Vendor/retail info covers EVERY sheet row — a garment hidden from the
     // wholesale portal still hangs in the retail shop, and Retail Price Check
     // must resolve its tag.
@@ -419,7 +437,7 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
   // Catalog (its new SKU isn't in the sheet, but it's not gone — it's ours now).
   const adminOwned = (lf: unknown) => Array.isArray(lf) && (lf.includes("wholesale_visible") || lf.includes("sku"));
   const toHide = (visibleRows ?? [])
-    .filter((r) => !qualifying.has(r.sku) && !adminOwned(r.locked_fields))
+    .filter((r) => !qualifying.has(r.sku) && !adminOwned(r.locked_fields) && !appOwned.has(r.sku.toUpperCase()))
     .map((r) => r.sku);
 
   const wouldHideAll = qualifying.size === 0 && toHide.length > 0;
