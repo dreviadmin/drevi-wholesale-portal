@@ -77,7 +77,7 @@ export async function runFashnBatch(
   const [{ data: angles }, { data: activeJobs }] = await Promise.all([
     admin
       .from("design_angles")
-      .select("id, design_id, angle, engine, source_ref, approved_candidate_id")
+      .select("id, design_id, angle, engine, source_ref, approved_image_id")
       .in("design_id", designIds.slice(0, 500)),
     admin.from("pipeline_jobs").select("angle_id").in("status", ["queued", "claimed", "running"]),
   ]);
@@ -87,7 +87,7 @@ export async function runFashnBatch(
       !(DETAIL_ANGLES as readonly string[]).includes(a.angle) &&
       a.engine === "fashn" &&
       a.source_ref &&
-      !a.approved_candidate_id &&
+      !a.approved_image_id &&
       !busy.has(a.id),
   );
   const CREDITS_EACH = 2; // 1k · balanced (drevi_common TRYON_MAX_CREDITS)
@@ -133,13 +133,13 @@ export async function approveAllPreflight(
   const byId = new Map((designs ?? []).map((d) => [d.id, `${d.base_sku}·${d.color}`]));
   const { data: angles } = await admin
     .from("design_angles")
-    .select("id, design_id, angle, approved_candidate_id, image_candidates!angle_id(id, file_ref, status, created_at)")
+    .select("id, design_id, angle, approved_image_id, design_images!angle_id(id, file_ref, status, created_at)")
     .in("design_id", designIds.slice(0, 500));
   const items: { candidateId: string; fileRef: string; label: string }[] = [];
   for (const a of angles ?? []) {
-    if (a.approved_candidate_id) continue;
-    const cands = ((a.image_candidates as { id: string; file_ref: string; status: string; created_at: string }[] | null) ?? [])
-      .filter((c) => c.status === "generated")
+    if (a.approved_image_id) continue;
+    const cands = ((a.design_images as { id: string; file_ref: string; status: string; created_at: string }[] | null) ?? [])
+      .filter((c) => c.status === "active")
       .sort((x, y) => y.created_at.localeCompare(x.created_at));
     if (cands[0]) items.push({ candidateId: cands[0].id, fileRef: cands[0].file_ref, label: `${byId.get(a.design_id) ?? "?"} ${a.angle}` });
   }
@@ -158,19 +158,19 @@ export async function approveAllBatch(candidateIds: string[]): Promise<{ ok: boo
   let approved = 0;
   const flippedDesigns = new Set<string>();
   for (const id of candidateIds.slice(0, 200)) {
-    const { data: cand } = await admin.from("image_candidates").select("id, angle_id, status").eq("id", id).maybeSingle();
-    if (!cand || cand.status !== "generated") continue;
+    const { data: cand } = await admin.from("design_images").select("id, angle_id, status").eq("id", id).maybeSingle();
+    if (!cand || cand.status !== "active") continue;
     const { data: angle } = await admin
       .from("design_angles")
-      .select("id, design_id, approved_candidate_id")
+      .select("id, design_id, approved_image_id")
       .eq("id", cand.angle_id)
       .single();
     if (!angle) continue;
-    if (angle.approved_candidate_id) {
-      await admin.from("image_candidates").update({ status: "generated" }).eq("id", angle.approved_candidate_id);
+    if (angle.approved_image_id) {
+      await admin.from("design_images").update({ status: "active" }).eq("id", angle.approved_image_id);
     }
-    await admin.from("image_candidates").update({ status: "approved" }).eq("id", id);
-    await admin.from("design_angles").update({ approved_candidate_id: id, updated_at: new Date().toISOString() }).eq("id", angle.id);
+    await admin.from("design_images").update({ status: "active" }).eq("id", id);
+    await admin.from("design_angles").update({ approved_image_id: id, updated_at: new Date().toISOString() }).eq("id", angle.id);
     flippedDesigns.add(angle.design_id);
     approved++;
   }

@@ -58,12 +58,12 @@ export async function generateCopyForDesign(designId: string, requestedBy: strin
   // Approved candidates first; angle sources as fallback. At most 3 images.
   const { data: angles } = await admin
     .from("design_angles")
-    .select("angle, source_ref, approved_candidate_id, image_candidates!angle_id(id, file_ref, status)")
+    .select("angle, source_ref, approved_image_id, design_images!angle_id(id, file_ref, status)")
     .eq("design_id", designId);
   const refs: string[] = [];
   for (const a of angles ?? []) {
-    const cands = (a.image_candidates as { id: string; file_ref: string; status: string }[] | null) ?? [];
-    const approved = cands.find((c) => c.id === a.approved_candidate_id);
+    const cands = (a.design_images as { id: string; file_ref: string; status: string }[] | null) ?? [];
+    const approved = cands.find((c) => c.id === a.approved_image_id);
     if (approved) refs.push(approved.file_ref);
   }
   if (refs.length === 0) for (const a of angles ?? []) if (a.source_ref) refs.push(a.source_ref);

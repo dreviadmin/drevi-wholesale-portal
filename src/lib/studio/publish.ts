@@ -44,8 +44,8 @@ export async function publishWholesale(designId: string, staffId: string, staffE
     const approved: { angle: string; fileRef: string; candidateId: string }[] = [];
     for (const angleName of ALL_ANGLES) {
       const a = angles.find((x) => x.angle === angleName);
-      if (!a?.approvedCandidateId) continue;
-      const cand = a.candidates.find((c) => c.id === a.approvedCandidateId);
+      if (!a?.approvedImageId) continue;
+      const cand = a.candidates.find((c) => c.id === a.approvedImageId);
       if (cand) approved.push({ angle: a.angle, fileRef: cand.fileRef, candidateId: cand.id });
     }
     if (approved.length === 0) return { ok: false, error: "No approved images (gate should have caught this)" };

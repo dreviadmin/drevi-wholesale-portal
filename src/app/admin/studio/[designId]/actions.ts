@@ -33,27 +33,27 @@ export async function approveCandidate(candidateId: string): Promise<Res> {
   const admin = createAdminClient();
 
   const { data: cand } = await admin
-    .from("image_candidates")
+    .from("design_images")
     .select("id, angle_id, status")
     .eq("id", candidateId)
     .maybeSingle();
   if (!cand) return fail("Candidate not found");
   const { data: angle } = await admin
     .from("design_angles")
-    .select("id, design_id, approved_candidate_id")
+    .select("id, design_id, approved_image_id")
     .eq("id", cand.angle_id)
     .single();
   if (!angle) return fail("Angle not found");
 
   // D1: approving any candidate demotes the previously-approved one.
-  if (angle.approved_candidate_id && angle.approved_candidate_id !== candidateId) {
-    await admin.from("image_candidates").update({ status: "generated" }).eq("id", angle.approved_candidate_id);
+  if (angle.approved_image_id && angle.approved_image_id !== candidateId) {
+    await admin.from("design_images").update({ status: "active" }).eq("id", angle.approved_image_id);
   }
-  const { error: e1 } = await admin.from("image_candidates").update({ status: "approved" }).eq("id", candidateId);
+  const { error: e1 } = await admin.from("design_images").update({ status: "active" }).eq("id", candidateId);
   if (e1) return fail(e1.message);
   const { error: e2 } = await admin
     .from("design_angles")
-    .update({ approved_candidate_id: candidateId, updated_at: new Date().toISOString() })
+    .update({ approved_image_id: candidateId, updated_at: new Date().toISOString() })
     .eq("id", angle.id);
   if (e2) return fail(e2.message);
 
@@ -69,22 +69,22 @@ export async function rejectCandidate(candidateId: string): Promise<Res> {
   try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
   const admin = createAdminClient();
   const { data: cand } = await admin
-    .from("image_candidates")
+    .from("design_images")
     .select("id, angle_id")
     .eq("id", candidateId)
     .maybeSingle();
   if (!cand) return fail("Candidate not found");
   const { data: angle } = await admin
     .from("design_angles")
-    .select("id, design_id, approved_candidate_id")
+    .select("id, design_id, approved_image_id")
     .eq("id", cand.angle_id)
     .single();
   if (!angle) return fail("Angle not found");
 
-  const { error } = await admin.from("image_candidates").update({ status: "rejected" }).eq("id", candidateId);
+  const { error } = await admin.from("design_images").update({ status: "rejected" }).eq("id", candidateId);
   if (error) return fail(error.message);
-  if (angle.approved_candidate_id === candidateId) {
-    await admin.from("design_angles").update({ approved_candidate_id: null }).eq("id", angle.id);
+  if (angle.approved_image_id === candidateId) {
+    await admin.from("design_angles").update({ approved_image_id: null }).eq("id", angle.id);
     await flipLiveTargets(angle.design_id); // the live set just lost a photo
   }
   await writeAuditEvent({ eventType: "studio_candidate_rejected", staffUserId: staff.id, notes: `candidate ${candidateId} on angle ${angle.id}` });
@@ -101,22 +101,22 @@ export async function approveAsIs(angleId: string): Promise<Res> {
   const admin = createAdminClient();
   const { data: angle } = await admin
     .from("design_angles")
-    .select("id, design_id, source_ref, approved_candidate_id")
+    .select("id, design_id, source_ref, approved_image_id")
     .eq("id", angleId)
     .maybeSingle();
   if (!angle) return fail("Angle not found");
   if (!angle.source_ref) return fail("No source image on this angle yet");
 
   const { data: cand, error } = await admin
-    .from("image_candidates")
-    .insert({ angle_id: angleId, engine: "raw", file_ref: angle.source_ref, status: "approved", created_by: staff.email })
+    .from("design_images")
+    .insert({ angle_id: angleId, engine: "raw", file_ref: angle.source_ref, status: "active", created_by: staff.email })
     .select("id")
     .single();
   if (error) return fail(error.message);
-  if (angle.approved_candidate_id) {
-    await admin.from("image_candidates").update({ status: "generated" }).eq("id", angle.approved_candidate_id);
+  if (angle.approved_image_id) {
+    await admin.from("design_images").update({ status: "active" }).eq("id", angle.approved_image_id);
   }
-  await admin.from("design_angles").update({ approved_candidate_id: cand.id, updated_at: new Date().toISOString() }).eq("id", angleId);
+  await admin.from("design_angles").update({ approved_image_id: cand.id, updated_at: new Date().toISOString() }).eq("id", angleId);
   await flipLiveTargets(angle.design_id);
   await writeAuditEvent({ eventType: "studio_candidate_approved", staffUserId: staff.id, notes: `approve-as-is on angle ${angleId}` });
   revalidatePath(`/admin/studio/${angle.design_id}`);
@@ -246,7 +246,7 @@ export async function approveCopy(designId: string): Promise<Res> {
   if (!row || row.status === "none") return fail("No copy draft to approve");
   const { error } = await admin
     .from("design_copy")
-    .update({ status: "approved", approved_by: staff.email, approved_at: new Date().toISOString() })
+    .update({ status: "active", approved_by: staff.email, approved_at: new Date().toISOString() })
     .eq("design_id", designId);
   if (error) return fail(error.message);
   revalidatePath(`/admin/studio/${designId}`);

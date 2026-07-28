@@ -3,7 +3,7 @@
 // Pure functions over plain inputs: no imports from server-only modules so
 // both server components and unit tests can consume it.
 
-export const AI_ANGLES = ["front", "back", "side", "closeup"] as const;
+export const AI_ANGLES = ["front", "back", "side", "lifestyle"] as const;
 export const DETAIL_ANGLES = ["detail_1", "detail_2"] as const;
 export const ALL_ANGLES = [...AI_ANGLES, ...DETAIL_ANGLES] as const;
 export type Angle = (typeof ALL_ANGLES)[number];

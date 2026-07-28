@@ -36,7 +36,7 @@ PHOTOS_FOLDER = os.environ.get("DRIVE_PHOTOS_FOLDER_ID", "166YqXyW8ogCTtYQKAQdr3
 TRYON_FOLDER = os.environ.get("DRIVE_TRYON_FOLDER_ID", "1wu1kvRjqWaTYs6YAtG_o2Pm7n3IjPjrs")
 INPUT_ROOT = os.environ.get("DRIVE_INPUT_FOLDER_ID", "1QFASF3YmicOYyjLv6wIHr4N2Ixz__Pk9")
 
-ANGLES = ["front", "back", "side", "closeup", "detail_1", "detail_2"]
+ANGLES = ["front", "back", "side", "lifestyle", "detail_1", "detail_2"]
 
 
 def parse_base_color(name: str):
@@ -48,7 +48,7 @@ def parse_base_color(name: str):
 
 def angle_for_filename(name: str) -> str | None:
     low = name.lower()
-    for a, pat in (("front", "front"), ("back", "back"), ("side", "side"), ("closeup", "close")):
+    for a, pat in (("front", "front"), ("back", "back"), ("side", "side"), ("lifestyle", "close")):
         if pat in low:
             return a
     return None
@@ -104,11 +104,11 @@ def run_scan_drive(job: dict, rep: JobReporter, rest: SupabaseRest):
         folder_map[label] = idx
         rep.log(f"{label}: {len(idx)} per-design folders indexed")
 
-    angles_rows = rest.select("design_angles", "select=id,design_id,angle,source_ref,approved_candidate_id&limit=5000")
+    angles_rows = rest.select("design_angles", "select=id,design_id,angle,source_ref,approved_image_id&limit=5000")
     angles_by_design: dict[str, dict[str, dict]] = {}
     for a in angles_rows:
         angles_by_design.setdefault(a["design_id"], {})[a["angle"]] = a
-    existing_cands = rest.select("image_candidates", "select=angle_id,file_ref&limit=10000")
+    existing_cands = rest.select("design_images", "select=angle_id,file_ref&limit=10000")
     have_cand = {(c["angle_id"], c["file_ref"]) for c in existing_cands}
 
     filled_sources = new_candidates = approved = 0
@@ -148,9 +148,9 @@ def run_scan_drive(job: dict, rep: JobReporter, rest: SupabaseRest):
                 row = d_angles.get(angle)
                 if not row or (row["id"], f["id"]) in have_cand:
                     continue
-                rest.insert("image_candidates", [{
-                    "angle_id": row["id"], "engine": "fashn", "file_ref": f["id"],
-                    "status": "generated", "created_by": "scan_drive",
+                rest.insert("design_images", [{
+                    "angle_id": row["id"], "design_id": d["id"], "engine": "fashn", "file_ref": f["id"],
+                    "role": "candidate", "status": "active", "created_by": "scan_drive",
                 }])
                 have_cand.add((row["id"], f["id"]))
                 new_candidates += 1
@@ -158,16 +158,16 @@ def run_scan_drive(job: dict, rep: JobReporter, rest: SupabaseRest):
         # The PHOTOS folder shot is what's publicly live → approved front.
         if patch.get("drive_processed_id"):
             row = d_angles.get("front")
-            if row and not row["approved_candidate_id"]:
+            if row and not row["approved_image_id"]:
                 imgs = list_images(drive, patch["drive_processed_id"])
                 pick = next((f for f in imgs if "front" in f["name"].lower()), imgs[0] if imgs else None)
                 if pick and (row["id"], pick["id"]) not in have_cand:
-                    cand = rest.insert("image_candidates", [{
-                        "angle_id": row["id"], "engine": "raw", "file_ref": pick["id"],
-                        "status": "approved", "created_by": "scan_drive",
+                    cand = rest.insert("design_images", [{
+                        "angle_id": row["id"], "design_id": d["id"], "engine": "raw", "file_ref": pick["id"],
+                        "role": "candidate", "status": "active", "created_by": "scan_drive",
                     }])
-                    rest.update("design_angles", f"id=eq.{row['id']}", {"approved_candidate_id": cand[0]["id"]})
-                    row["approved_candidate_id"] = cand[0]["id"]
+                    rest.update("design_angles", f"id=eq.{row['id']}", {"approved_image_id": cand[0]["id"]})
+                    row["approved_image_id"] = cand[0]["id"]
                     have_cand.add((row["id"], pick["id"]))
                     approved += 1
 
@@ -229,7 +229,7 @@ def run_tryon(job: dict, rep: JobReporter, rest: SupabaseRest):
     garment = the angle's source image (Drive, made link-readable)
     model   = the brand-model pose for that angle (DREVI_BRAND_MODEL_FOLDER_ID)
     Output uploads to the design's TRYON folder and registers a 'generated'
-    image_candidates row (cost recorded, D8)."""
+    design_images row with role='candidate' (cost recorded, D8)."""
     import importlib
     import logging
     import tempfile
@@ -328,9 +328,9 @@ def run_tryon(job: dict, rep: JobReporter, rest: SupabaseRest):
         rep.progress(85, "uploading to Drive")
         uploaded = upload_file_to_drive(drive, out_path, tryon_folder, mime_type="image/png")
 
-    rest.insert("image_candidates", [{
-        "angle_id": angle["id"], "engine": "fashn", "file_ref": uploaded["id"],
-        "status": "generated", "job_id": job["id"], "cost_credits": credits,
+    rest.insert("design_images", [{
+        "angle_id": angle["id"], "design_id": design["id"], "engine": "fashn", "file_ref": uploaded["id"],
+        "role": "candidate", "status": "active", "job_id": job["id"], "cost_credits": credits,
         "params": {"resolution": resolution, "generation_mode": mode},
         "created_by": job.get("requested_by") or "runner",
     }])

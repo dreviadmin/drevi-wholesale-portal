@@ -64,14 +64,14 @@ export function Workbench({ board, angles, copy, activeJobs, openaiEnabled }: {
         ? { label: `Running ${job.progress}%`, bg: "#E4EAF1", fg: "#40608a" }
         : { label: "Queued", bg: "#EFE7DA", fg: "#7A6A4F" };
     }
-    if (a.approvedCandidateId) return { label: "Approved", bg: "#DFF0E4", fg: "#1F6B45" };
-    if (a.candidates.some((c) => c.status === "generated")) return { label: "Needs review", bg: "#F6E7CB", fg: "#8a6d1a" };
+    if (a.approvedImageId) return { label: "Approved", bg: "#DFF0E4", fg: "#1F6B45" };
+    if (a.candidates.some((c) => c.status === "active")) return { label: "Needs review", bg: "#F6E7CB", fg: "#8a6d1a" };
     if (!a.sourceRef) return { label: "Needs source", bg: "#F7DFDC", fg: "#9C3A31" };
     return { label: "Ready to generate", bg: "#EFE7DA", fg: "#7A6A4F" };
   }
 
   function currentCandidate(a: AngleDetail) {
-    return a.candidates.find((c) => c.id === a.approvedCandidateId) ?? a.candidates.find((c) => c.status === "generated") ?? null;
+    return a.candidates.find((c) => c.id === a.approvedImageId) ?? a.candidates.find((c) => c.status === "active") ?? null;
   }
 
   const chipStyle = (active: boolean, disabled = false) => ({
@@ -111,7 +111,7 @@ export function Workbench({ board, angles, copy, activeJobs, openaiEnabled }: {
           </div>
           <div>
             <div className="font-body uppercase mb-1" style={{ fontSize: 7.5, letterSpacing: "0.14em", color: palette.mutedGreige }}>
-              {current?.status === "approved" ? "Production" : "Candidate"}
+              {current && current.id === a.approvedImageId ? "Production" : "Candidate"}
             </div>
             {current ? (
               <ZoomImage src={drivePhoto(current.fileRef)} alt={`${a.angle} candidate`} width={150} height={188} />
@@ -190,7 +190,7 @@ export function Workbench({ board, angles, copy, activeJobs, openaiEnabled }: {
               <XIcon size={11} /> Reject
             </button>
           )}
-          {(isDetail || a.engine === "raw") && a.sourceRef && !a.approvedCandidateId && (
+          {(isDetail || a.engine === "raw") && a.sourceRef && !a.approvedImageId && (
             <button type="button" disabled={pending} onClick={() => run(() => approveAsIs(a.id), "Approved as-is")} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: palette.black, color: palette.ivory, padding: "7px 10px" }}>
               <Check size={11} /> Approve as-is
             </button>
@@ -215,7 +215,7 @@ export function Workbench({ board, angles, copy, activeJobs, openaiEnabled }: {
                   <div key={c.id} className="flex-shrink-0" style={{ width: 84 }}>
                     <ZoomImage src={drivePhoto(c.fileRef, 300)} alt="attempt" width={84} height={105} />
                     <div className="font-mono" style={{ fontSize: 7.5, color: palette.mutedGreige }}>{c.engine} · {c.status}</div>
-                    {c.status !== "approved" && (
+                    {c.id !== a.approvedImageId && (
                       <button type="button" disabled={pending} onClick={() => run(() => approveCandidate(c.id), "Approved from history")} className="font-body uppercase mt-0.5" style={{ fontSize: 7.5, letterSpacing: "0.08em", color: "#1F6B45" }}>
                         Approve this
                       </button>

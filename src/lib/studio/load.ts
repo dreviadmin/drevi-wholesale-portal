@@ -34,9 +34,9 @@ export async function loadBoard(): Promise<BoardRow[]> {
   const [designs, angles, generatedAngleIds, copies, targets, products, notifies] = await Promise.all([
     fetchAll<{ id: string; base_sku: string; color: string; title: string | null; category: string | null; tier: "standard" | "hero"; specs_verified: boolean }>(
       admin, "designs", "id, base_sku, color, title, category, tier, specs_verified"),
-    fetchAll<{ id: string; design_id: string; angle: Angle; approved_candidate_id: string | null; source_ref: string | null }>(
-      admin, "design_angles", "id, design_id, angle, approved_candidate_id, source_ref"),
-    fetchAll<{ angle_id: string }>(admin, "image_candidates", "angle_id", (q) => q.eq("status", "generated")),
+    fetchAll<{ id: string; design_id: string; angle: Angle; approved_image_id: string | null; source_ref: string | null }>(
+      admin, "design_angles", "id, design_id, angle, approved_image_id, source_ref"),
+    fetchAll<{ angle_id: string }>(admin, "design_images", "angle_id", (q) => q.eq("status", "active")),
     fetchAll<{ design_id: string; status: "none" | "draft" | "approved" }>(admin, "design_copy", "design_id, status"),
     fetchAll<{ design_id: string; portal: PortalKey; enabled: boolean; state: TargetState }>(
       admin, "publish_targets", "design_id, portal, enabled, state"),
@@ -82,7 +82,7 @@ export async function loadBoard(): Promise<BoardRow[]> {
     const approvedAngles: Partial<Record<Angle, boolean>> = {};
     const review: Partial<Record<Angle, boolean>> = {};
     for (const a of dAngles) {
-      if (a.approved_candidate_id) approvedAngles[a.angle] = true;
+      if (a.approved_image_id) approvedAngles[a.angle] = true;
       if (reviewAngles.has(a.id)) review[a.angle] = true;
     }
     const input: DesignStateInput = {
@@ -105,7 +105,7 @@ export async function loadBoard(): Promise<BoardRow[]> {
       specsVerified: d.specs_verified,
       badge,
       badgeLabel: badgeLabelWithPortals(badge, portals),
-      approvedAiCount: (["front", "back", "side", "closeup"] as Angle[]).filter((a) => approvedAngles[a]).length,
+      approvedAiCount: (["front", "back", "side", "lifestyle"] as Angle[]).filter((a) => approvedAngles[a]).length,
       copyStatus: input.copyStatus,
       targets: input.targets,
       gates: {
@@ -128,7 +128,7 @@ export interface AngleDetail {
   prompt: string;
   promptEditedByHuman: boolean;
   engine: "fashn" | "openai_bg" | "raw" | "seedream";
-  approvedCandidateId: string | null;
+  approvedImageId: string | null;
   candidates: { id: string; engine: string; fileRef: string; status: string; createdAt: string; costCredits: number }[];
 }
 
@@ -142,9 +142,9 @@ export async function loadDesignDetail(designId: string): Promise<{ board: Board
   const [{ data: angles }, { data: jobs }, { data: copyRow }] = await Promise.all([
     admin
       .from("design_angles")
-      // Two FKs link these tables (angle_id + approved_candidate_id) — the
+      // Two FKs link these tables (angle_id + approved_image_id) — the
       // !angle_id hint picks the one-to-many history relation.
-      .select("id, angle, source_ref, prompt, prompt_edited_by_human, engine, approved_candidate_id, image_candidates!angle_id(id, engine, file_ref, status, created_at, cost_credits)")
+      .select("id, angle, source_ref, prompt, prompt_edited_by_human, engine, approved_image_id, design_images!angle_id(id, engine, file_ref, status, created_at, cost_credits)")
       .eq("design_id", designId),
     admin
       .from("pipeline_jobs")
@@ -153,7 +153,7 @@ export async function loadDesignDetail(designId: string): Promise<{ board: Board
       .in("status", ["queued", "claimed", "running"]),
     admin.from("design_copy").select("title, description, tags, status, model, edited_by, approved_by").eq("design_id", designId).maybeSingle(),
   ]);
-  const order: Record<string, number> = { front: 0, back: 1, side: 2, closeup: 3, detail_1: 4, detail_2: 5 };
+  const order: Record<string, number> = { front: 0, back: 1, side: 2, lifestyle: 3, detail_1: 4, detail_2: 5 };
   return {
     board,
     copy: copyRow
@@ -167,8 +167,8 @@ export async function loadDesignDetail(designId: string): Promise<{ board: Board
         prompt: a.prompt ?? "",
         promptEditedByHuman: a.prompt_edited_by_human,
         engine: a.engine as AngleDetail["engine"],
-        approvedCandidateId: a.approved_candidate_id,
-        candidates: ((a.image_candidates as { id: string; engine: string; file_ref: string; status: string; created_at: string; cost_credits: number }[] | null) ?? [])
+        approvedImageId: a.approved_image_id,
+        candidates: ((a.design_images as { id: string; engine: string; file_ref: string; status: string; created_at: string; cost_credits: number }[] | null) ?? [])
           .map((c) => ({ id: c.id, engine: c.engine, fileRef: c.file_ref, status: c.status, createdAt: c.created_at, costCredits: Number(c.cost_credits ?? 0) }))
           .sort((x, y) => y.createdAt.localeCompare(x.createdAt)),
       }))
