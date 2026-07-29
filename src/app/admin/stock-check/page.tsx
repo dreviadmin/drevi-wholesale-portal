@@ -1,13 +1,7 @@
-import { requireAdminOrRedirect } from "@/lib/staff";
-import { reconcile } from "@/lib/stock-ledger";
-import { DriftReport } from "./DriftReport";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-// Retrofit R8 §10.3 — the drift report screen. Same data as
-// /api/admin/stock-reconcile, rendered with the two correction actions.
-export default async function StockCheckPage() {
-  await requireAdminOrRedirect();
-  const { checked, drift } = await reconcile();
-  return <DriftReport checked={checked} rows={drift} />;
+// Folded into /admin/stock-take?tab=check (UX sprint). The route stays so the
+// cockpit item and old links land in the right place.
+export default function StockCheckRedirect() {
+  redirect("/admin/stock-take?tab=check");
 }

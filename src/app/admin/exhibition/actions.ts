@@ -157,6 +157,8 @@ export async function submitExhibitionOrder(input: {
   paymentNotes?: string;
   // Client idempotency key — a replayed offline order resolves to the same row.
   clientRef?: string;
+  /** UX sprint — staff member taking the order; defaults to the caller. */
+  takenBy?: string;
 }): Promise<{ ok: boolean; orderId?: string; orderNumber?: string; pdfUrl?: string; error?: string }> {
   let staff;
   try { staff = await requireStaff(); } catch { return { ok: false, error: "Not authorized." }; }
@@ -315,6 +317,14 @@ export async function submitExhibitionOrder(input: {
     const { data: numData, error: numErr } = await admin.rpc("next_order_number", { p_prefix: prefix, p_day: ymd });
     if (numErr || !numData) return { ok: false, error: numErr?.message ?? "Could not generate an order number." };
     const order_number = numData as string;
+    // "Taken by" must be a real active staff member; anything else falls back
+    // to the caller so an order never loses attribution.
+    let assistedBy = staff.id;
+    if (input.takenBy && input.takenBy !== staff.id) {
+      const { data: chosen } = await admin.from("staff_users").select("id").eq("id", input.takenBy).eq("active", true).maybeSingle();
+      if (chosen) assistedBy = chosen.id;
+    }
+
     const { data, error } = await admin
       .from("orders")
       .insert({
@@ -322,7 +332,7 @@ export async function submitExhibitionOrder(input: {
         buyer_id: input.buyerId,
         status: "submitted",
         source: sessionType,
-        assisted_by: staff.id,
+        assisted_by: assistedBy,
         exhibition_event: eventName,
         items,
         total_amount: total,

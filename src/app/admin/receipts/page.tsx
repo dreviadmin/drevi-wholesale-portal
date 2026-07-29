@@ -6,7 +6,7 @@ import { ReceiptsView, type ReceiptRow } from "./ReceiptsView";
 export const dynamic = "force-dynamic";
 
 // Goods Receipts list (admin-only): what came in, from whom, at what cost.
-export default async function ReceiptsPage() {
+export default async function ReceiptsPage({ searchParams }: { searchParams?: { q?: string } }) {
   await requireAdminOrRedirect();
   const admin = createAdminClient();
 
@@ -39,5 +39,5 @@ export default async function ReceiptsPage() {
     skusText: (agg.get(r.id)?.skus ?? []).join(" "),
   }));
 
-  return <ReceiptsView rows={rows} vendors={Array.from(new Set(rows.map((r) => r.vendor))).sort()} />;
+  return <ReceiptsView rows={rows} vendors={Array.from(new Set(rows.map((r) => r.vendor))).sort()} initialQuery={searchParams?.q ?? ""} />;
 }

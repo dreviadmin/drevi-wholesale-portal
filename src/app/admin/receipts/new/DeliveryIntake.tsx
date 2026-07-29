@@ -442,10 +442,21 @@ function GarmentSheet({
         </div>
 
         {g.baseSku && (
-          <div className="mt-2 p-2.5 flex items-center gap-2" style={{ background: "#DFF0E4", border: "1px solid #1F6B45" }}>
-            <Check size={14} color="#1F6B45" />
-            <span className="font-mono" style={{ fontSize: 12, fontWeight: 700, color: "#14532D" }}>{g.baseSku}·{g.color}</span>
-            <span className="font-body" style={{ fontSize: 10, color: "#1F6B45" }}>{g.isReorder ? "existing design" : "minted"}{g.variantSkus.length ? ` · ${g.variantSkus.length} variant SKU(s)` : ""}</span>
+          <div className="mt-2 p-2.5" style={{ background: "#DFF0E4", border: "1px solid #1F6B45" }}>
+            <div className="flex items-center gap-2">
+              <Check size={14} color="#1F6B45" />
+              <span className="font-mono" style={{ fontSize: 12, fontWeight: 700, color: "#14532D" }}>{g.baseSku}·{g.color}</span>
+              <span className="font-body" style={{ fontSize: 10, color: "#1F6B45" }}>{g.isReorder ? "existing design" : "minted"}{g.variantSkus.length ? ` · ${g.variantSkus.length} variant SKU(s)` : ""}</span>
+            </div>
+            {/* UX sprint — finish the record while in flow. New tabs so the
+                delivery draft stays open; it also autosaves regardless. */}
+            {g.designId && (
+              <div className="flex gap-3 mt-1.5">
+                <a href={`/admin/studio/master/${g.designId}`} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: "#1F6B45", textDecoration: "underline" }}>Product details</a>
+                <a href={`/admin/specs/${g.designId}`} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: "#1F6B45", textDecoration: "underline" }}>Specs</a>
+                <a href={`/admin/studio/${g.designId}`} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: "#1F6B45", textDecoration: "underline" }}>Studio</a>
+              </div>
+            )}
           </div>
         )}
 

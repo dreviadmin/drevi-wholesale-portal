@@ -51,10 +51,11 @@ export function defaultAnglePrompt(angle: Angle | string, engine: string | null,
 
   const garment = garmentPhrase(d);
 
-  // openai_bg means "normalise the background to neutral grey" — the useful job
-  // when a garment is shot on a mannequin against shop clutter. It is a
-  // background normalisation, NOT a scene.
-  if (engine === "openai_bg") {
+  // openai_bg and seedream are EDIT models: their job is "normalise the
+  // background to neutral grey", not a re-shoot. The pipeline learned this the
+  // hard way — photo-brief prompts made edit models redraw faces and
+  // embroidery (image_providers.PROMPT_STRICT).
+  if (engine === "openai_bg" || engine === "seedream") {
     return [
       `Replace the background of this photo with a ${STUDIO_BACKGROUND}.`,
       `Keep ${garment} exactly as photographed — same colour, drape, folds, embroidery and every detail.`,

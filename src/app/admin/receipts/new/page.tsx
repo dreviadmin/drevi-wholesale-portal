@@ -4,7 +4,8 @@ import { requireAdminOrRedirect } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { receiptIntakeV2, supplyStaleDays } from "@/lib/env";
-import { uploadsEnabled, UPLOADS_DISABLED_MESSAGE, warnIfUnconfigured } from "@/lib/drive-design";
+import { warnIfUnconfigured } from "@/lib/drive-design";
+import { captureEnabled, captureDestinationNote } from "@/lib/design-image-store";
 import { ReceiptEditor } from "../ReceiptEditor";
 import { DeliveryIntake } from "./DeliveryIntake";
 
@@ -81,7 +82,12 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: {
       <Link href="/admin/receipts" className="inline-flex items-center gap-1 font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.15em", color: "#998F7A" }}>
         <ChevronLeft size={14} /> Receipts
       </Link>
-      <h1 className="font-display mt-3" style={{ fontSize: 22, fontWeight: 600, color: "#1A1A1A" }}>Log delivery</h1>
+      <div className="mt-3 flex items-baseline justify-between gap-3 flex-wrap">
+        <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: "#1A1A1A" }}>Log delivery</h1>
+        <Link href="/admin/receipts" className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.16em", color: "#8a6d1a" }}>
+          Receipt history →
+        </Link>
+      </div>
       <p className="font-body mt-1" style={{ fontSize: 11.5, color: "#998F7A" }}>
         One garment at a time — mint, photograph, count, price and capture supply in a single motion.
       </p>
@@ -89,8 +95,8 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: {
         <DeliveryIntake
           vendors={vendorList}
           knownDesigns={knownDesigns}
-          uploadsOk={uploadsEnabled()}
-          uploadsMessage={UPLOADS_DISABLED_MESSAGE}
+          uploadsOk={captureEnabled()}
+          uploadsMessage={captureDestinationNote()}
           staleDays={supplyStaleDays()}
         />
       </div>

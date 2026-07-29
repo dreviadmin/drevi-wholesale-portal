@@ -63,7 +63,7 @@ export function OfflineSync() {
         if (!buyerId) { await updateQueued({ ...item, attempts: item.attempts + 1, lastError: "buyer not synced yet" }); continue; }
         const res = await submitExhibitionOrder({
           sessionId: o.sessionId, eventName: o.eventName, buyerId, items: o.items, clientRef: o.clientRef,
-          staffNote: o.staffNote, buyerNote: o.buyerNote,
+          staffNote: o.staffNote, buyerNote: o.buyerNote, takenBy: o.takenBy,
           taxMode: o.taxMode, taxRate: o.taxRate,
           discountType: o.discountType, discountValue: o.discountValue,
           advanceAmount: o.advanceAmount, paymentMethod: o.paymentMethod, paymentNotes: o.paymentNotes,

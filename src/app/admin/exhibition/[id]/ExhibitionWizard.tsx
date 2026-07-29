@@ -32,11 +32,15 @@ export function ExhibitionWizard({
   products,
   buyers,
   stockAsOf,
+  staffList,
+  meId,
 }: {
   session: { id: string; event_name: string; ended: boolean; type: SessionType };
   products: WholesaleProduct[];
   buyers: Buyer[];
   stockAsOf: string;
+  staffList: { id: string; name: string }[];
+  meId: string;
 }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("buyer");
@@ -104,6 +108,7 @@ export function ExhibitionWizard({
     } catch { /* storage full/blocked — non-fatal */ }
   }, [nb]);
   const [staffNote, setStaffNote] = useState("");
+  const [takenBy, setTakenBy] = useState(meId); // UX sprint — who is taking this order
   const [buyerNote, setBuyerNote] = useState("");
   // Tax + payment (recorded at finalise)
   const [taxMode, setTaxMode] = useState<TaxMode>("none");
@@ -599,12 +604,12 @@ export function ExhibitionWizard({
       let res;
       try {
         res = await submitExhibitionOrder({
-          sessionId: session.id, eventName: session.event_name, buyerId: buyer.id, items, staffNote, buyerNote, clientRef, ...taxPay,
+          sessionId: session.id, eventName: session.event_name, buyerId: buyer.id, items, staffNote, buyerNote, clientRef, takenBy, ...taxPay,
         });
       } catch {
         await enqueue("order", {
           sessionId: session.id, eventName: session.event_name, clientRef,
-          buyerId: buyer.id, items, staffNote, buyerNote, ...taxPay,
+          buyerId: buyer.id, items, staffNote, buyerNote, takenBy, ...taxPay,
         });
         setConfirmInfo({ orderId: "", orderNumber: "Network failed — order queued, will sync automatically" });
         setStep("confirm");
@@ -814,7 +819,9 @@ export function ExhibitionWizard({
             <ShoppingBag size={15} strokeWidth={2} /> Cart · {cartCount}
           </button>
         )}
-        <button type="button" onClick={endSessionConfirmed} className="font-body uppercase" style={{ border: "1px solid rgba(255,255,255,0.3)", padding: "5px 12px", fontSize: 9, letterSpacing: "0.18em" }}>End Session</button>
+        {session.type !== "in_store" && (
+          <button type="button" onClick={endSessionConfirmed} className="font-body uppercase" style={{ border: "1px solid rgba(255,255,255,0.3)", padding: "5px 12px", fontSize: 9, letterSpacing: "0.18em" }}>End Session</button>
+        )}
       </div>
     </div>
   );
@@ -1213,6 +1220,11 @@ export function ExhibitionWizard({
                 <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Payment note (optional)" className="w-full font-body bg-transparent outline-none mt-2" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "6px 8px", fontSize: 11 }} />
               </div>
 
+              <label className="flex flex-col gap-1 mt-2"><span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>Taken by</span>
+                <select value={takenBy} onChange={(e) => setTakenBy(e.target.value)} className="font-body bg-transparent outline-none" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "7px 9px", fontSize: 12, color: palette.black }}>
+                  {staffList.map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}
+                </select>
+              </label>
               <label className="flex flex-col gap-1 mt-2"><span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>Staff note</span><input value={staffNote} onChange={(e) => setStaffNote(e.target.value)} className="font-body bg-transparent outline-none" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "7px 9px", fontSize: 12 }} /></label>
               <label className="flex flex-col gap-1"><span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>Buyer note</span><input value={buyerNote} onChange={(e) => setBuyerNote(e.target.value)} className="font-body bg-transparent outline-none" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "7px 9px", fontSize: 12 }} /></label>
 
@@ -1289,7 +1301,9 @@ export function ExhibitionWizard({
           )}
           <div className="flex gap-2 justify-center mt-8">
             <button type="button" onClick={nextBuyer} className="font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.18em", padding: "11px 18px" }}>Next Buyer</button>
-            <button type="button" onClick={endSessionConfirmed} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, fontSize: 10, letterSpacing: "0.18em", padding: "11px 18px" }}>End Session</button>
+            {session.type !== "in_store" && (
+              <button type="button" onClick={endSessionConfirmed} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, fontSize: 10, letterSpacing: "0.18em", padding: "11px 18px" }}>End Session</button>
+            )}
           </div>
         </div>
       )}

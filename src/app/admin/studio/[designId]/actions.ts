@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import { defaultAnglePrompt } from "@/lib/studio/prompts";
+import { engineConfigured } from "@/lib/pipeline/engines";
 import { COPY_MODELS } from "@/lib/studio/copy-models";
 import { DETAIL_ANGLES } from "@/lib/studio/state";
 
@@ -149,7 +150,7 @@ export async function setAnglePrompt(angleId: string, prompt: string): Promise<R
   return error ? fail(error.message) : { ok: true };
 }
 
-export async function setAngleEngine(angleId: string, engine: "fashn" | "openai_bg" | "raw"): Promise<Res> {
+export async function setAngleEngine(angleId: string, engine: "fashn" | "seedream" | "openai_bg" | "raw"): Promise<Res> {
   try { await requireAdmin(); } catch { return fail("Not authorized"); }
   const admin = createAdminClient();
   const { data: angle } = await admin.from("design_angles").select("angle").eq("id", angleId).maybeSingle();
@@ -175,9 +176,10 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
   if (!angle) return fail("Angle not found");
   if ((DETAIL_ANGLES as readonly string[]).includes(angle.angle)) return fail("Detail angles are raw-only (D5)");
   if (angle.engine === "raw") return fail("Raw angles use Approve as-is — nothing to generate");
-  if (angle.engine === "seedream") return fail("Seedream is reserved (ANSH-10)");
-  if (angle.engine === "openai_bg" && (process.env.OPENAI_BG_ENABLED ?? "").toLowerCase() !== "true") {
-    return fail("Background engine is parked (ANSH-06)");
+  {
+    // UX sprint — engines run in-process now; the only gate is a key.
+    const conf = engineConfigured(angle.engine as "fashn" | "seedream" | "openai_bg");
+    if (!conf.ok) return fail(`${angle.engine} needs ${conf.missing} in the environment`);
   }
   if (!angle.source_ref) return fail("No source image on this angle yet");
 
@@ -195,13 +197,14 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
   const { data: job, error } = await admin
     .from("pipeline_jobs")
     .insert({
-      type: angle.engine === "openai_bg" ? "openai_bg" : "tryon",
+      type: angle.engine === "openai_bg" ? "openai_bg" : angle.engine === "seedream" ? "seedream" : "tryon",
       design_id: angle.design_id,
       angle_id: angle.id,
       // The runner needs the prompt the operator actually saw (§7.1).
-      params: { prompt: angle.prompt ?? defaultAnglePrompt(angle.angle, angle.engine, promptDesign), angle: angle.angle, engine: angle.engine },
+      // prompt defaults to '' (0016) — trim-check, or the engines get an empty prompt.
+      params: { prompt: angle.prompt?.trim() ? angle.prompt : defaultAnglePrompt(angle.angle, angle.engine, promptDesign), angle: angle.angle, engine: angle.engine },
       requested_by: staff.email,
-      log: dispatchConfigured ? "" : "No hosted runner yet (ANSH-04) — run locally: python3 pipeline/runner.py --job <this id>",
+      log: "",
     })
     .select("id")
     .single();

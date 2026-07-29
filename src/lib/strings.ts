@@ -20,7 +20,7 @@ const STRINGS = {
     "nav.sku_generator": "SKU Generator",
     "nav.receipts": "Receipts",
     "nav.log_delivery": "Log delivery",
-    "nav.stock_take": "Stock take",
+    "nav.stock_take": "Stock count",
     "nav.stock_check": "Stock check",
     "nav.specs": "Specs",
     "nav.vendors": "Vendors",

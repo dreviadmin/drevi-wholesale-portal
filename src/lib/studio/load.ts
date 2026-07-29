@@ -231,7 +231,8 @@ export async function loadDesignDetail(designId: string): Promise<{
         sourceRef: a.source_ref,
         // §7.1 — an unedited angle shows the uniform grey-studio default,
         // built from this design's own specs. Saved prompts always win.
-        prompt: a.prompt ?? defaultAnglePrompt(a.angle, a.engine, promptDesign),
+        // prompt defaults to '' in 0016 — ?? would keep the empty string.
+        prompt: a.prompt?.trim() ? a.prompt : defaultAnglePrompt(a.angle, a.engine, promptDesign),
         promptEditedByHuman: a.prompt_edited_by_human,
         engine: a.engine as AngleDetail["engine"],
         approvedImageId: a.approved_image_id,

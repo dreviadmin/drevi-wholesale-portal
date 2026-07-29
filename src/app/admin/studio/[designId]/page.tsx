@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireAdminOrRedirect } from "@/lib/staff";
 import { loadDesignDetail } from "@/lib/studio/load";
-import { uploadsEnabled, UPLOADS_DISABLED_MESSAGE } from "@/lib/drive-design";
+import { captureEnabled, captureDestinationNote } from "@/lib/design-image-store";
 import { Workbench } from "./Workbench";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,12 @@ export default async function WorkbenchPage({ params }: { params: { designId: st
   await requireAdminOrRedirect();
   const detail = await loadDesignDetail(params.designId);
   if (!detail) notFound();
-  const openaiEnabled = (process.env.OPENAI_BG_ENABLED ?? "").toLowerCase() === "true";
+  // Engine chips light up when their key is present (UX sprint).
+  const enginesEnabled = {
+    fashn: !!process.env.FASHN_API_KEY,
+    seedream: !!process.env.FAL_KEY,
+    openai_bg: !!process.env.OPENAI_API_KEY,
+  };
   return (
     <Workbench
       board={detail.board}
@@ -21,9 +26,9 @@ export default async function WorkbenchPage({ params }: { params: { designId: st
       copy={detail.copy}
       pool={detail.pool}
       activeJobs={detail.activeJobs}
-      openaiEnabled={openaiEnabled}
-      uploadsOk={uploadsEnabled()}
-      uploadsMessage={UPLOADS_DISABLED_MESSAGE}
+      enginesEnabled={enginesEnabled}
+      uploadsOk={captureEnabled()}
+      uploadsMessage={captureDestinationNote()}
     />
   );
 }

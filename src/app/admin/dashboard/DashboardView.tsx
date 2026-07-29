@@ -48,7 +48,8 @@ export interface VendorInfo {
 }
 
 type Tab = "products" | "vendors" | "customers" | "reorder";
-type Range = "today" | "7d" | "all";
+// UX sprint (29 Jul): month-to-date, 30 days and a custom span join the chips.
+type Range = "today" | "7d" | "30d" | "mtd" | "all" | "custom";
 
 // Row shapes for the four tables (also used by their sort accessors).
 interface ProductRow { sku: string; title: string; image: string | null; pieces: number; value: number; orders: Set<string> }
@@ -122,6 +123,8 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
 }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? "products");
   const [range, setRange] = useState<Range>("all");
+  const [customFrom, setCustomFrom] = useState(""); // IST dates, yyyy-mm-dd
+  const [customTo, setCustomTo] = useState("");
   const [query, setQuery] = useState("");
   const [vendorFilter, setVendorFilter] = useState<string>("All");
   const [scanning, setScanning] = useState(false);
@@ -135,14 +138,23 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
   // Cancelled orders carry no money; they're excluded from every aggregate.
   const live = useMemo(() => {
     const todayIst = istDay(new Date().toISOString());
-    const cutoff7 = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const cutoff = (days: number) => Date.now() - days * 24 * 60 * 60 * 1000;
     return orders.filter((o) => {
       if (o.status === "cancelled") return false;
       if (range === "today") return istDay(o.submitted_at) === todayIst;
-      if (range === "7d") return new Date(o.submitted_at).getTime() >= cutoff7;
+      if (range === "7d") return new Date(o.submitted_at).getTime() >= cutoff(7);
+      if (range === "30d") return new Date(o.submitted_at).getTime() >= cutoff(30);
+      if (range === "mtd") return istDay(o.submitted_at).slice(0, 7) === todayIst.slice(0, 7);
+      if (range === "custom") {
+        // Compare IST day strings — inclusive on both ends, timezone-safe.
+        const day = istDay(o.submitted_at);
+        if (customFrom && day < customFrom) return false;
+        if (customTo && day > customTo) return false;
+        return customFrom !== "" || customTo !== "";
+      }
       return true;
     });
-  }, [orders, range]);
+  }, [orders, range, customFrom, customTo]);
 
   const tiles = useMemo(() => {
     const revenue = live.reduce((s, o) => s + (o.total_amount || 0), 0);
@@ -291,13 +303,20 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
     <div className="px-4 md:px-6 py-5 max-w-6xl">
       <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>Dashboard</h1>
 
-      {/* Range chips */}
-      <div className="flex gap-1.5 mt-3">
-        {(["today", "7d", "all"] as Range[]).map((r) => (
+      {/* Range chips + custom span */}
+      <div className="flex gap-1.5 mt-3 flex-wrap items-center">
+        {(["today", "7d", "30d", "mtd", "all", "custom"] as Range[]).map((r) => (
           <button key={r} type="button" onClick={() => setRange(r)} className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.14em", padding: "6px 12px", background: range === r ? palette.goldDeep : "transparent", color: range === r ? palette.ivory : palette.softBlack, border: range === r ? "none" : "1px solid rgba(26,26,26,0.18)" }}>
-            {r === "today" ? "Today" : r === "7d" ? "7 Days" : "All Time"}
+            {r === "today" ? "Today" : r === "7d" ? "7 Days" : r === "30d" ? "30 Days" : r === "mtd" ? "This Month" : r === "all" ? "All Time" : "Custom"}
           </button>
         ))}
+        {range === "custom" && (
+          <span className="flex items-center gap-1.5 font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+            <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} aria-label="From date" style={{ border: "1px solid rgba(26,26,26,0.18)", padding: "4px 6px", fontSize: 11 }} />
+            –
+            <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} aria-label="To date" style={{ border: "1px solid rgba(26,26,26,0.18)", padding: "4px 6px", fontSize: 11 }} />
+          </span>
+        )}
       </div>
 
       {/* Money tiles */}

@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import { ALL_ANGLES } from "@/lib/studio/state";
 import { applyMovement } from "@/lib/stock-ledger";
-import { ensureDesignFolder, uploadDesignImage, uploadsEnabled, UPLOADS_DISABLED_MESSAGE } from "@/lib/drive-design";
+import { storeDesignImage } from "@/lib/design-image-store";
 
 // Retrofit R3 (§5) — "Log delivery": one screen, one motion per garment.
 //
@@ -141,7 +141,6 @@ export async function uploadIdentPhoto(
 ): Promise<{ ok: boolean; error?: string; imageId?: string; fileRef?: string }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
-  if (!uploadsEnabled()) return fail(UPLOADS_DISABLED_MESSAGE);
   const file = formData.get("photo");
   if (!(file instanceof File) || file.size === 0) return fail("No photo");
 
@@ -149,24 +148,31 @@ export async function uploadIdentPhoto(
   const { data: design } = await admin.from("designs").select("id, base_sku, color, drive_folder_id, ident_image_id").eq("id", designId).maybeSingle();
   if (!design) return fail("Design not found");
 
-  let folderId = design.drive_folder_id;
-  if (!folderId) {
-    const match = await ensureDesignFolder(design.base_sku, design.color);
-    if (!match.folderId) {
-      return fail(match.rule === "ambiguous" ? "Several Drive folders match this design — resolve in the folder audit." : UPLOADS_DISABLED_MESSAGE);
-    }
-    folderId = match.folderId;
-    await admin.from("designs").update({ drive_folder_id: folderId }).eq("id", designId);
+  // Dual backend (UX sprint): Drive when configured, portal storage otherwise.
+  let up;
+  try {
+    up = await storeDesignImage({
+      designId,
+      baseSku: design.base_sku,
+      color: design.color,
+      angle: "design",
+      kind: "ident",
+      bytes: Buffer.from(await file.arrayBuffer()),
+      contentType: file.type || "image/jpeg",
+      driveFolderId: design.drive_folder_id,
+    });
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : "Upload failed");
   }
-
-  const bytes = Buffer.from(await file.arrayBuffer());
-  const up = await uploadDesignImage(folderId, bytes, file.type || "image/jpeg", "ident.jpg", { archivePrevious: !!design.ident_image_id });
+  if (up.driveFolderId && !design.drive_folder_id) {
+    await admin.from("designs").update({ drive_folder_id: up.driveFolderId }).eq("id", designId);
+  }
   const { data: row, error } = await admin
     .from("design_images")
     .insert({
       design_id: designId,
       role: "ident",
-      file_ref: up.fileId,
+      file_ref: up.fileRef,
       file_name: up.fileName,
       status: "active",
       created_by: staff.email,
@@ -177,7 +183,7 @@ export async function uploadIdentPhoto(
   // Previous ident row is archived, never deleted (§4.5).
   if (design.ident_image_id) await admin.from("design_images").update({ status: "archived" }).eq("id", design.ident_image_id);
   await admin.from("designs").update({ ident_image_id: row.id }).eq("id", designId);
-  return { ok: true, imageId: row.id, fileRef: up.fileId };
+  return { ok: true, imageId: row.id, fileRef: up.fileRef };
 }
 
 /**

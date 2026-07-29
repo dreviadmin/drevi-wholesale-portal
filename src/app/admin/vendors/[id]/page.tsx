@@ -40,6 +40,8 @@ export default async function VendorDetailPage({ params }: { params: { id: strin
         vendor={{
           id: vendor.id, name: vendor.name, phone: vendor.phone, whatsapp: vendor.whatsapp,
           city: vendor.city, gstin: vendor.gstin, address: vendor.address, notes: vendor.notes,
+          contactName: vendor.contact_name ?? null, email: vendor.email ?? null,
+          cardImageRef: vendor.card_image_ref ?? null, personImageRef: vendor.person_image_ref ?? null,
           active: vendor.active, receipts: (receipts ?? []).length, lastReceipt: receipts?.[0]?.receipt_date ?? null,
           skus: [],
         }}

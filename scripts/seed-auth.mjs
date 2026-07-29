@@ -4,23 +4,45 @@
  *
  *   npm run db:seed-auth
  *
- * Idempotent — re-running resets the known dev passwords. Uses the service-role
- * key from .env.local. Requires the migration (npm run db:migrate) to have run
- * first so the buyers / staff_users rows exist.
+ * Idempotent — re-running RESETS the passwords of every account listed below.
+ * Requires the migration (npm run db:migrate) to have run first so the buyers /
+ * staff_users rows exist.
+ *
+ * TARGET: dev by default. This script rewrites real people's passwords, so
+ * production needs an explicit --prod and a typed confirmation. It used to load
+ * .env.local unconditionally — which is PRODUCTION — so a bare run would have
+ * silently overwritten the live staff credentials.
  *
  * These are DEV passwords for verification only. Real credentials are set by
  * Rakesh through the Phase 3 credential modal.
  */
+import { createInterface } from "node:readline/promises";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 
-dotenv.config({ path: ".env.local" });
+const target = process.argv.includes("--prod") || process.env.DB_TARGET === "prod" ? "prod" : "dev";
+const envFile = target === "prod" ? ".env.local" : ".env.development.local";
+dotenv.config({ path: envFile, override: true });
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!url || !serviceKey) {
-  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local");
+  console.error(`Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in ${envFile}`);
   process.exit(1);
+}
+const ref = url.match(/https:\/\/([a-z0-9]+)\.supabase\.co/)?.[1] ?? "unknown";
+console.log(`Target: ${target.toUpperCase()} (${envFile}, project ${ref})`);
+
+if (target === "prod") {
+  console.log("\n⚠  PRODUCTION — this will REPLACE the passwords of the accounts below.");
+  console.log("   Anyone currently using a different password will be locked out.\n");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await rl.question('Type "reset production passwords" to continue: ');
+  rl.close();
+  if (answer.trim() !== "reset production passwords") {
+    console.log("Aborted — nothing changed.");
+    process.exit(1);
+  }
 }
 
 const admin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });

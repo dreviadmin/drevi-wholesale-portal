@@ -20,19 +20,26 @@ import { ImagePicker, CropSheet, CompareSheet } from "./ImageTools";
 // prompt_edited_by_human), Approve · Reject · Regen (credit estimate inline,
 // D8), and the D1 "Previous attempts" history strip.
 
-const FASHN_ESTIMATE = "~2 credits · 1k balanced";
+const ENGINE_LABEL: Record<string, string> = { fashn: "fashn", seedream: "seedream", openai_bg: "OpenAI", raw: "raw" };
+const ENGINE_HINT: Record<string, string> = {
+  fashn: "Model-swap onto the brand model — keeps garment and pose",
+  seedream: "Seedream v4 edit via fal.ai — grey-studio background",
+  openai_bg: "OpenAI image edit — background normalisation",
+  raw: "No generation — approve the source as-is",
+};
+const ENGINE_ESTIMATE: Record<string, string> = { fashn: "~2 credits", seedream: "~$0.03", openai_bg: "~$0.22" };
 
 interface Job { angleId: string | null; type: string; status: string; progress: number }
 
 const drivePhoto = (id: string, s = 600) => `/api/drive-photo?id=${encodeURIComponent(id)}&s=${s}`;
 
-export function Workbench({ board, angles, copy, pool, activeJobs, openaiEnabled, uploadsOk, uploadsMessage }: {
+export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnabled, uploadsOk, uploadsMessage }: {
   board: BoardRow;
   angles: AngleDetail[];
   copy: CopyDetail;
   pool: DesignImage[];
   activeJobs: Job[];
-  openaiEnabled: boolean;
+  enginesEnabled: { fashn: boolean; seedream: boolean; openai_bg: boolean };
   uploadsOk: boolean;
   uploadsMessage: string;
 }) {
@@ -47,6 +54,30 @@ export function Workbench({ board, angles, copy, pool, activeJobs, openaiEnabled
   const [crop, setCrop] = useState<{ angleId: string | null; parentId: string; fileRef: string } | null>(null);
   const [compare, setCompare] = useState<{ left: string; right: string; leftLabel: string; rightLabel: string } | null>(null);
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  // Queue the job, then run it in-process (UX sprint — no hosted runner).
+  // The card shows "job in flight" from the refreshed activeJobs; a second
+  // refresh lands the candidate or the error.
+  function generate(angleId: string) {
+    startTransition(async () => {
+      const r = await regenAngle(angleId);
+      if (!r.ok || !r.jobId) { flash(r.error ?? "Could not queue the job"); return; }
+      flash("Generating…");
+      router.refresh();
+      try {
+        const res = await fetch("/api/pipeline/run", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jobId: r.jobId }),
+        });
+        const body = await res.json().catch(() => ({}));
+        flash(res.ok ? "Candidate ready — review below" : body.error ?? "Generation failed");
+      } catch {
+        flash("Generation failed — check the job strip");
+      }
+      router.refresh();
+    });
+  }
   const [copyPromptOpen, setCopyPromptOpen] = useState(false);
   const [copyPrompt, setCopyPrompt] = useState(copy.prompt);
 
@@ -149,23 +180,23 @@ export function Workbench({ board, angles, copy, pool, activeJobs, openaiEnabled
 
         {/* Engine chips (AI angles only — D5 keeps details raw) */}
         {!isDetail && (
-          <div className="flex gap-1 mt-2.5">
-            {(["fashn", "openai_bg", "raw"] as const).map((e) => (
-              <button
-                key={e}
-                type="button"
-                disabled={pending || (e === "openai_bg" && !openaiEnabled)}
-                title={e === "openai_bg" && !openaiEnabled ? "Background engine — parked (ANSH-06)" : undefined}
-                onClick={() => run(() => setAngleEngine(a.id, e), `Engine → ${e}`)}
-                className="font-body uppercase"
-                style={chipStyle(a.engine === e, e === "openai_bg" && !openaiEnabled)}
-              >
-                {e === "openai_bg" ? "BG swap" : e}
-              </button>
-            ))}
-            <button type="button" disabled title="Coming later (ANSH-10)" className="font-body uppercase" style={chipStyle(false, true)}>
-              seedream
-            </button>
+          <div className="flex gap-1 mt-2.5 flex-wrap">
+            {(["fashn", "seedream", "openai_bg", "raw"] as const).map((e) => {
+              const off = e !== "raw" && !enginesEnabled[e];
+              return (
+                <button
+                  key={e}
+                  type="button"
+                  disabled={pending || off}
+                  title={off ? `${ENGINE_LABEL[e]} — API key not configured` : ENGINE_HINT[e]}
+                  onClick={() => run(() => setAngleEngine(a.id, e), `Engine → ${ENGINE_LABEL[e]}`)}
+                  className="font-body uppercase"
+                  style={chipStyle(a.engine === e, off)}
+                >
+                  {ENGINE_LABEL[e]}
+                </button>
+              );
+            })}
           </div>
         )}
         {isDetail && (
@@ -263,8 +294,8 @@ export function Workbench({ board, angles, copy, pool, activeJobs, openaiEnabled
             </button>
           )}
           {!isDetail && a.engine !== "raw" && a.sourceRef && !jobFor(a.id) && (
-            <button type="button" disabled={pending} onClick={() => run(() => regenAngle(a.id), "Job queued")} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }} title={FASHN_ESTIMATE}>
-              <RefreshCw size={11} /> {current ? "Regen" : "Generate"} · {FASHN_ESTIMATE}
+            <button type="button" disabled={pending} onClick={() => generate(a.id)} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }} title={ENGINE_HINT[a.engine]}>
+              <RefreshCw size={11} /> {current ? "Regen" : "Generate"} · {ENGINE_ESTIMATE[a.engine] ?? ""}
             </button>
           )}
           {jobFor(a.id) && <span className="flex items-center gap-1 font-body" style={{ fontSize: 9.5, color: palette.goldDeep }}><Loader2 size={11} className="animate-spin" /> job in flight</span>}

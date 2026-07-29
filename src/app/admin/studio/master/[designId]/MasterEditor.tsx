@@ -137,6 +137,9 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp }: {
           <div className="font-body" style={{ fontSize: 11.5, color: palette.mutedGreige }}>No supplier data recorded.</div>
         )}
         <div className="flex items-center gap-3 mt-2">
+          <Link href={`/admin/receipts?q=${encodeURIComponent(board.baseSku)}`} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }}>
+            Receipts
+          </Link>
           <Link href={`/admin/specs/${board.id}`} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }}>
             Edit specs &amp; supply
           </Link>

@@ -99,7 +99,7 @@ export async function computeAttention(): Promise<AttentionItem[]> {
         sub: "The movement ledger and the cached quantity disagree",
         count: drift.length,
         severity: "medium",
-        href: "/admin/stock-check",
+        href: "/admin/stock-take?tab=check",
       });
     }
   } catch { /* ledger not migrated yet */ }

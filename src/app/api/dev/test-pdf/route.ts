@@ -57,6 +57,13 @@ export async function GET() {
     pdf_sent_at: null,
     submitted_at: new Date().toISOString(),
     confirmed_at: null,
+    packed_at: null,
+    out_for_delivery_at: null,
+    delivered_at: null,
+    courier: null,
+    tracking_number: null,
+    tracking_note: null,
+    tracking_image_ref: null,
   };
   const pdf = await renderOrderPdf(order, { business_name: "Sharma Boutique", owner_name: "Meera Sharma", phone: "+919812345678", city: "Pune" });
   return new NextResponse(pdf as unknown as BodyInit, {

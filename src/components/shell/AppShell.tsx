@@ -31,7 +31,6 @@ const ITEM_ICONS: Record<string, typeof Tag> = {
   "/admin/receipts": PackageCheck,
   "/admin/receipts/new": PackageCheck,
   "/admin/stock-take": Boxes,
-  "/admin/stock-check": RefreshCw,
   "/admin/vendors": Truck,
   "/admin/reorder": RefreshCw,
   "/admin/dashboard": BarChart3,

@@ -5,7 +5,7 @@ import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import { DETAIL_ANGLES } from "@/lib/studio/state";
-import { ensureDesignFolder, uploadDesignImage, nextFileName, archiveFile, uploadsEnabled, UPLOADS_DISABLED_MESSAGE } from "@/lib/drive-design";
+import { storeDesignImage, archiveImageFile, archivedRef, isStorageRef } from "@/lib/design-image-store";
 
 // Retrofit R5 (§7) — four input modes per angle.
 //
@@ -20,18 +20,30 @@ import { ensureDesignFolder, uploadDesignImage, nextFileName, archiveFile, uploa
 type Res = { ok: boolean; error?: string };
 const fail = (e: string): Res => ({ ok: false, error: e });
 
-async function designFolder(designId: string): Promise<{ folderId: string | null; error?: string; baseSku?: string; color?: string }> {
+async function designMeta(designId: string): Promise<{ ok: boolean; error?: string; baseSku: string; color: string; driveFolderId: string | null }> {
   const admin = createAdminClient();
   const { data: d } = await admin.from("designs").select("id, base_sku, color, drive_folder_id").eq("id", designId).maybeSingle();
-  if (!d) return { folderId: null, error: "Design not found" };
-  if (d.drive_folder_id) return { folderId: d.drive_folder_id, baseSku: d.base_sku, color: d.color };
-  if (!uploadsEnabled()) return { folderId: null, error: UPLOADS_DISABLED_MESSAGE };
-  const match = await ensureDesignFolder(d.base_sku, d.color);
-  if (!match.folderId) {
-    return { folderId: null, error: match.rule === "ambiguous" ? "Several Drive folders match this design — resolve the folder audit first." : UPLOADS_DISABLED_MESSAGE };
+  if (!d) return { ok: false, error: "Design not found", baseSku: "", color: "", driveFolderId: null };
+  return { ok: true, baseSku: d.base_sku, color: d.color, driveFolderId: d.drive_folder_id ?? null };
+}
+
+/** Store one photo for a design, remembering a newly-created Drive folder. */
+async function putImage(designId: string, meta: { baseSku: string; color: string; driveFolderId: string | null }, angle: string, kind: string, file: File) {
+  const stored = await storeDesignImage({
+    designId,
+    baseSku: meta.baseSku,
+    color: meta.color,
+    angle,
+    kind,
+    bytes: Buffer.from(await file.arrayBuffer()),
+    contentType: file.type || "image/jpeg",
+    driveFolderId: meta.driveFolderId,
+  });
+  if (stored.driveFolderId && !meta.driveFolderId) {
+    const admin = createAdminClient();
+    await admin.from("designs").update({ drive_folder_id: stored.driveFolderId }).eq("id", designId);
   }
-  await admin.from("designs").update({ drive_folder_id: match.folderId }).eq("id", designId);
-  return { folderId: match.folderId, baseSku: d.base_sku, color: d.color };
+  return stored;
 }
 
 // D3 — any change to a live design's approved set flips that portal.
@@ -44,22 +56,21 @@ async function flipLive(designId: string) {
 export async function uploadSource(angleId: string, formData: FormData): Promise<Res & { imageId?: string }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
-  if (!uploadsEnabled()) return fail(UPLOADS_DISABLED_MESSAGE);
   const file = formData.get("photo");
   if (!(file instanceof File) || file.size === 0) return fail("No image");
 
   const admin = createAdminClient();
   const { data: angle } = await admin.from("design_angles").select("id, design_id, angle").eq("id", angleId).maybeSingle();
   if (!angle) return fail("Angle not found");
-  const folder = await designFolder(angle.design_id);
-  if (!folder.folderId) return fail(folder.error ?? UPLOADS_DISABLED_MESSAGE);
+  const meta = await designMeta(angle.design_id);
+  if (!meta.ok) return fail(meta.error ?? "Design not found");
 
-  const ext = (file.type.includes("png") ? "png" : "jpg");
-  const name = await nextFileName(folder.folderId, angle.angle, "src", ext);
-  const up = await uploadDesignImage(folder.folderId, Buffer.from(await file.arrayBuffer()), file.type || "image/jpeg", name);
+  let up;
+  try { up = await putImage(angle.design_id, meta, angle.angle, "src", file); }
+  catch (e) { return fail(e instanceof Error ? e.message : "Upload failed"); }
   const { data: row, error } = await admin
     .from("design_images")
-    .insert({ design_id: angle.design_id, angle_id: angleId, role: "source", file_ref: up.fileId, file_name: up.fileName, status: "active", created_by: staff.email })
+    .insert({ design_id: angle.design_id, angle_id: angleId, role: "source", file_ref: up.fileRef, file_name: up.fileName, status: "active", created_by: staff.email })
     .select("id")
     .single();
   if (error) return fail(error.message);
@@ -72,22 +83,21 @@ export async function uploadSource(angleId: string, formData: FormData): Promise
 export async function importFinished(angleId: string, formData: FormData): Promise<Res & { imageId?: string }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
-  if (!uploadsEnabled()) return fail(UPLOADS_DISABLED_MESSAGE);
   const file = formData.get("photo");
   if (!(file instanceof File) || file.size === 0) return fail("No image");
 
   const admin = createAdminClient();
   const { data: angle } = await admin.from("design_angles").select("id, design_id, angle").eq("id", angleId).maybeSingle();
   if (!angle) return fail("Angle not found");
-  const folder = await designFolder(angle.design_id);
-  if (!folder.folderId) return fail(folder.error ?? UPLOADS_DISABLED_MESSAGE);
+  const meta = await designMeta(angle.design_id);
+  if (!meta.ok) return fail(meta.error ?? "Design not found");
 
-  const ext = (file.type.includes("png") ? "png" : "jpg");
-  const name = await nextFileName(folder.folderId, angle.angle, "import", ext);
-  const up = await uploadDesignImage(folder.folderId, Buffer.from(await file.arrayBuffer()), file.type || "image/jpeg", name);
+  let up;
+  try { up = await putImage(angle.design_id, meta, angle.angle, "import", file); }
+  catch (e) { return fail(e instanceof Error ? e.message : "Upload failed"); }
   const { data: row, error } = await admin
     .from("design_images")
-    .insert({ design_id: angle.design_id, angle_id: angleId, role: "import", file_ref: up.fileId, file_name: up.fileName, status: "active", engine: "raw", created_by: staff.email })
+    .insert({ design_id: angle.design_id, angle_id: angleId, role: "import", file_ref: up.fileRef, file_name: up.fileName, status: "active", engine: "raw", created_by: staff.email })
     .select("id")
     .single();
   if (error) return fail(error.message);
@@ -137,9 +147,10 @@ export async function approveImage(angleId: string, imageId: string): Promise<Re
   // Previous approval is archived — file moved to _archive/, row marked (§7.5).
   if (angle.approved_image_id && angle.approved_image_id !== imageId) {
     const { data: prev } = await admin.from("design_images").select("id, file_ref").eq("id", angle.approved_image_id).maybeSingle();
-    await admin.from("design_images").update({ status: "archived" }).eq("id", angle.approved_image_id);
-    if (prev?.file_ref && design?.drive_folder_id) {
-      try { await archiveFile(prev.file_ref, design.drive_folder_id); } catch { /* file may live elsewhere; row state is authoritative */ }
+    const moved = prev?.file_ref ? archivedRef(prev.file_ref) : null;
+    await admin.from("design_images").update({ status: "archived", ...(moved && moved !== prev!.file_ref ? { file_ref: moved } : {}) }).eq("id", angle.approved_image_id);
+    if (prev?.file_ref && (isStorageRef(prev.file_ref) || design?.drive_folder_id)) {
+      try { await archiveImageFile(prev.file_ref, design?.drive_folder_id); } catch { /* file may live elsewhere; row state is authoritative */ }
     }
   }
   await admin.from("design_images").update({ status: "active", angle_id: angleId }).eq("id", imageId);
@@ -168,8 +179,10 @@ export async function rejectImage(imageId: string): Promise<Res> {
     await flipLive(angle.design_id);
   }
   const { data: design } = await admin.from("designs").select("drive_folder_id").eq("id", img.design_id!).maybeSingle();
-  if (design?.drive_folder_id && img.file_ref) {
-    try { await archiveFile(img.file_ref, design.drive_folder_id); } catch { /* fine — row state is authoritative */ }
+  if (img.file_ref && (isStorageRef(img.file_ref) || design?.drive_folder_id)) {
+    const moved = archivedRef(img.file_ref);
+    if (moved !== img.file_ref) await admin.from("design_images").update({ file_ref: moved }).eq("id", imageId);
+    try { await archiveImageFile(img.file_ref, design?.drive_folder_id); } catch { /* fine — row state is authoritative */ }
   }
   await writeAuditEvent({ eventType: "studio_candidate_rejected", staffUserId: staff.id, notes: `image ${imageId} rejected` });
   revalidatePath(`/admin/studio/${img.design_id}`);
@@ -185,24 +198,19 @@ export async function saveCrop(
 ): Promise<Res & { imageId?: string }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
-  if (!uploadsEnabled()) return fail(UPLOADS_DISABLED_MESSAGE);
   const file = formData.get("photo");
   if (!(file instanceof File) || file.size === 0) return fail("No image");
 
   const admin = createAdminClient();
-  const folder = await designFolder(designId);
-  if (!folder.folderId) return fail(folder.error ?? UPLOADS_DISABLED_MESSAGE);
+  const meta = await designMeta(designId);
+  if (!meta.ok) return fail(meta.error ?? "Design not found");
   const { data: angle } = angleId
     ? await admin.from("design_angles").select("angle").eq("id", angleId).maybeSingle()
     : { data: null };
 
-  const { count } = await admin
-    .from("design_images")
-    .select("id", { count: "exact", head: true })
-    .eq("derived_from", parentImageId);
-  const cropIndex = (count ?? 0) + 1;
-  const name = await nextFileName(folder.folderId, angle?.angle ?? "design", "src", "jpg", `crop${cropIndex}`);
-  const up = await uploadDesignImage(folder.folderId, Buffer.from(await file.arrayBuffer()), "image/jpeg", name);
+  let up;
+  try { up = await putImage(designId, meta, angle?.angle ?? "design", "crop", file); }
+  catch (e) { return fail(e instanceof Error ? e.message : "Upload failed"); }
 
   const { data: row, error } = await admin
     .from("design_images")
@@ -211,7 +219,7 @@ export async function saveCrop(
       angle_id: angleId,
       role: "crop",
       derived_from: parentImageId,
-      file_ref: up.fileId,
+      file_ref: up.fileRef,
       file_name: up.fileName,
       status: "active",
       created_by: staff.email,

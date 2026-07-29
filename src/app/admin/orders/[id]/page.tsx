@@ -23,7 +23,12 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   const { data: order } = await admin.from("orders").select("*").eq("id", params.id).maybeSingle();
   if (!order) notFound();
   const o = order as Order;
-  const { data: buyer } = await admin.from("buyers").select("business_name, owner_name, phone").eq("id", o.buyer_id).maybeSingle<Pick<Buyer, "business_name" | "owner_name" | "phone">>();
+  const [{ data: buyer }, { data: takenBy }] = await Promise.all([
+    admin.from("buyers").select("business_name, owner_name, phone").eq("id", o.buyer_id).maybeSingle<Pick<Buyer, "business_name" | "owner_name" | "phone">>(),
+    o.assisted_by
+      ? admin.from("staff_users").select("name, email").eq("id", o.assisted_by).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
 
   // Catalog for the "add item" picker in the order editor (admins only).
   let pickerProducts: PickerProduct[] = [];
@@ -92,12 +97,13 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
             {[buyer?.business_name, buyer?.owner_name, buyer?.phone].filter(Boolean).join(" · ")}
           </div>
           <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige, letterSpacing: "0.04em" }}>
-            {fmt(o.submitted_at)} · Source: {SOURCE_LABEL[o.source] ?? o.source} · Status: {o.status}
+            {fmt(o.submitted_at)} · Source: {SOURCE_LABEL[o.source] ?? o.source} · Status: {o.status.replace(/_/g, " ")}
+            {takenBy ? ` · Taken by ${takenBy.name ?? takenBy.email}` : ""}
           </div>
         </div>
         {isAdminRole(staff.role) && (
           <div className="flex flex-col items-end gap-2">
-            <OrderActions orderId={o.id} status={o.status} pdfUrl={o.pdf_url} orderNumber={o.order_number} total={o.total_amount} buyerPhone={buyer?.phone ?? null} />
+            <OrderActions orderId={o.id} status={o.status} pdfUrl={o.pdf_url} orderNumber={o.order_number} total={o.total_amount} buyerPhone={buyer?.phone ?? null} courier={o.courier} trackingNumber={o.tracking_number} />
             <OrderEditor
               orderId={o.id}
               status={o.status}
@@ -114,6 +120,26 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
           </div>
         )}
       </div>
+
+      {/* UX sprint — logistics trail once the order moves past confirm. */}
+      {(o.courier || o.tracking_number || o.packed_at || o.out_for_delivery_at || o.delivered_at) && (
+        <div className="mt-4 p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
+          <div className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.mutedGreige }}>Delivery</div>
+          <div className="font-body mt-1" style={{ fontSize: 12, lineHeight: 1.7, color: palette.softBlack }}>
+            {o.packed_at && <>Packed {fmt(o.packed_at)}<br /></>}
+            {o.out_for_delivery_at && <>Out for delivery {fmt(o.out_for_delivery_at)}<br /></>}
+            {o.delivered_at && <>Delivered {fmt(o.delivered_at)}<br /></>}
+            {(o.courier || o.tracking_number) && (
+              <>{[o.courier, o.tracking_number].filter(Boolean).join(" · ")}<br /></>
+            )}
+            {o.tracking_note}
+          </div>
+          {o.tracking_image_ref && (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={`/api/drive-photo?id=${encodeURIComponent(o.tracking_image_ref)}&s=600`} alt="Tracking sheet" className="mt-2" style={{ maxWidth: 280, width: "100%", border: "1px solid rgba(26,26,26,0.1)" }} />
+          )}
+        </div>
+      )}
 
       <div className="mt-6" style={{ borderTop: "1px solid rgba(26,26,26,0.1)" }}>
         {(o.items ?? []).map((it, i) => (

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { setOrderStatus, sendInvoice } from "@/app/admin/orders/actions";
+import { setOrderStatus, sendInvoice, uploadTrackingSheet, type StageDetails } from "@/app/admin/orders/actions";
 import { sharePdfFile, invoiceFileName, waPhone } from "@/lib/share";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -15,6 +15,8 @@ export function OrderActions({
   orderNumber,
   total,
   buyerPhone,
+  courier,
+  trackingNumber,
 }: {
   orderId: string;
   status: OrderStatus;
@@ -22,20 +24,42 @@ export function OrderActions({
   orderNumber?: string;
   total?: number;
   buyerPhone?: string | null;
+  courier?: string | null;
+  trackingNumber?: string | null;
 }) {
   const router = useRouter();
   const [isPending, start] = useTransition();
   const [toast, setToast] = useState<string | null>(null);
+  const [dispatchOpen, setDispatchOpen] = useState(false);
+  const [form, setForm] = useState<StageDetails>({ courier: courier ?? "", trackingNumber: trackingNumber ?? "", trackingNote: "" });
+  const [sheet, setSheet] = useState<File | null>(null);
 
   function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 3500); }
 
-  function act(next: OrderStatus, opts?: { sendInvoice?: boolean; confirmMsg?: string }) {
+  function act(next: OrderStatus, opts?: { sendInvoice?: boolean; confirmMsg?: string; details?: StageDetails }) {
     if (opts?.confirmMsg && !window.confirm(opts.confirmMsg)) return;
     start(async () => {
-      const res = await setOrderStatus(orderId, next, { sendInvoice: opts?.sendInvoice });
+      const res = await setOrderStatus(orderId, next, { sendInvoice: opts?.sendInvoice, details: opts?.details });
       router.refresh();
       if (!res.ok) flash(res.error ?? "Failed");
       else if (opts?.sendInvoice) flash(res.invoiceSent ? "Invoice sent" : "PDF generated · Interakt not configured");
+    });
+  }
+
+  // UX sprint — out-for-delivery captures the courier, AWB and the tracking
+  // sheet in one motion. Photo upload is best-effort after the stage change.
+  function dispatchNow() {
+    start(async () => {
+      const res = await setOrderStatus(orderId, "out_for_delivery", { details: form });
+      if (!res.ok) { flash(res.error ?? "Failed"); return; }
+      if (sheet) {
+        const fd = new FormData();
+        fd.set("photo", sheet);
+        const up = await uploadTrackingSheet(orderId, fd);
+        if (!up.ok) flash(up.error ?? "Stage saved, but the tracking sheet failed to upload");
+      }
+      setDispatchOpen(false);
+      router.refresh();
     });
   }
   function fireInvoice() {
@@ -88,13 +112,48 @@ export function OrderActions({
             {btn("Confirm & Send Invoice", () => act("confirmed", { sendInvoice: true }))}
           </>
         )}
-        {status === "confirmed" && btn("Mark Fulfilled", () => act("fulfilled"), true)}
+        {status === "confirmed" && btn("Mark Packed", () => act("packed"), true)}
+        {(status === "confirmed" || status === "packed") && btn("Out for Delivery", () => setDispatchOpen(true), status === "packed")}
+        {(status === "confirmed" || status === "packed" || status === "out_for_delivery") && btn("Mark Delivered", () => act("delivered"), status === "out_for_delivery")}
         {(status === "submitted" || status === "confirmed") && btn("Send Invoice", fireInvoice)}
         {pdfUrl && btn("Share PDF", shareInvoice)}
         {pdfUrl && btn("WhatsApp Buyer", shareWhatsAppDirect)}
-        {status !== "cancelled" && status !== "fulfilled" && btn("Cancel", () => act("cancelled", { confirmMsg: "Cancel this order?" }))}
+        {(status === "submitted" || status === "confirmed" || status === "packed") && btn("Cancel", () => act("cancelled", { confirmMsg: "Cancel this order? Stock returns to the shelf if it had left." }))}
       </div>
       {toast && <span className="font-body" style={{ fontSize: 10, color: palette.goldDeep, letterSpacing: "0.04em" }}>{toast}</span>}
+
+      {dispatchOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(26,26,26,0.5)" }} onClick={() => !isPending && setDispatchOpen(false)}>
+          <div className="w-full sm:max-w-sm" style={{ background: palette.ivory, padding: "20px 18px" }} onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-display" style={{ fontSize: 15, fontWeight: 600, color: palette.black }}>Out for delivery</h3>
+            <div className="flex flex-col gap-2.5 mt-3">
+              <label className="flex flex-col gap-1"><span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.softBlack }}>Courier</span>
+                <input value={form.courier ?? ""} onChange={(e) => setForm((f) => ({ ...f, courier: e.target.value }))} className="font-body bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "6px 2px", fontSize: 13 }} />
+              </label>
+              <label className="flex flex-col gap-1"><span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.softBlack }}>Tracking / AWB number</span>
+                <input value={form.trackingNumber ?? ""} onChange={(e) => setForm((f) => ({ ...f, trackingNumber: e.target.value }))} className="font-mono bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "6px 2px", fontSize: 13 }} />
+              </label>
+              <label className="flex flex-col gap-1"><span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.softBlack }}>Note</span>
+                <input value={form.trackingNote ?? ""} onChange={(e) => setForm((f) => ({ ...f, trackingNote: e.target.value }))} className="font-body bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "6px 2px", fontSize: 13 }} />
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer" style={{ border: "1px dashed rgba(26,26,26,0.3)", padding: "9px 10px" }}>
+                <span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.14em", color: palette.softBlack }}>
+                  {sheet ? sheet.name : "Tracking sheet photo (optional)"}
+                </span>
+                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => setSheet(e.target.files?.[0] ?? null)} />
+              </label>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={dispatchNow} disabled={isPending} className="flex-1 font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.16em", padding: "12px 0" }}>
+                {isPending ? "Saving…" : "Dispatch"}
+              </button>
+              <button type="button" onClick={() => setDispatchOpen(false)} disabled={isPending} className="font-body uppercase px-5" style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 10, letterSpacing: "0.16em" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

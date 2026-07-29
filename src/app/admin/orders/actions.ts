@@ -6,12 +6,73 @@ import { requireAdmin } from "@/lib/staff";
 import { finalizeOrder } from "@/lib/order-finalize";
 import { postOrderMovements } from "@/lib/stock-ledger";
 import { getStockState } from "@/lib/stock";
+import { storeAuxPhoto } from "@/lib/design-image-store";
 import type { DiscountType, Order, OrderItem, OrderStatus, TaxMode, WholesaleProduct } from "@/lib/types";
+
+export interface StageDetails {
+  courier?: string;
+  trackingNumber?: string;
+  trackingNote?: string;
+}
+
+// UX sprint (29 Jul) — the full lifecycle. Stock still moves ONLY at confirm
+// (out) and at a post-confirm cancel (back); packed/out-for-delivery/delivered
+// are logistics stages, not inventory events. A cancelled / delivered /
+// fulfilled order is terminal — it must not be resurrected, which would re-arm
+// editing and re-fire the buyer's invoice for a dead order. Orders already
+// with the courier cannot be cancelled from here — deliver it or correct
+// stock via a movement.
+const ALLOWED: Record<OrderStatus, OrderStatus[]> = {
+  submitted: ["confirmed", "cancelled"],
+  confirmed: ["packed", "out_for_delivery", "delivered", "fulfilled", "cancelled"],
+  packed: ["out_for_delivery", "delivered", "cancelled"],
+  out_for_delivery: ["delivered"],
+  delivered: [],
+  fulfilled: [],
+  cancelled: [],
+};
+
+/** Post-confirm states where stock has already left the shelf. */
+const STOCK_OUT_STATES: OrderStatus[] = ["confirmed", "packed", "out_for_delivery"];
+
+async function applyStatus(
+  staffEmail: string,
+  orderId: string,
+  status: OrderStatus,
+  details?: StageDetails,
+): Promise<{ ok: boolean; error?: string }> {
+  const admin = createAdminClient();
+  const { data: current } = await admin.from("orders").select("status").eq("id", orderId).maybeSingle();
+  if (!current) return { ok: false, error: "Order not found." };
+  const from = current.status as OrderStatus;
+  if (from !== status && !(ALLOWED[from] ?? []).includes(status)) {
+    return { ok: false, error: `Cannot move a ${from.replace(/_/g, " ")} order to ${status.replace(/_/g, " ")}.` };
+  }
+
+  const now = new Date().toISOString();
+  const patch: Record<string, unknown> = { status };
+  if (status === "confirmed") patch.confirmed_at = now;
+  if (status === "packed") patch.packed_at = now;
+  if (status === "out_for_delivery") patch.out_for_delivery_at = now;
+  if (status === "delivered") patch.delivered_at = now;
+  if (details?.courier?.trim()) patch.courier = details.courier.trim();
+  if (details?.trackingNumber?.trim()) patch.tracking_number = details.trackingNumber.trim();
+  if (details?.trackingNote?.trim()) patch.tracking_note = details.trackingNote.trim();
+  const { error } = await admin.from("orders").update(patch).eq("id", orderId);
+  if (error) return { ok: false, error: error.message };
+
+  // §10.1 — movements only on a real TRANSITION, never on a re-save.
+  if (from !== status) {
+    if (status === "confirmed") await postOrderMovements(orderId, "out", staffEmail);
+    else if (status === "cancelled" && STOCK_OUT_STATES.includes(from)) await postOrderMovements(orderId, "back", staffEmail);
+  }
+  return { ok: true };
+}
 
 export async function setOrderStatus(
   orderId: string,
   status: OrderStatus,
-  options?: { sendInvoice?: boolean },
+  options?: { sendInvoice?: boolean; details?: StageDetails },
 ): Promise<{ ok: boolean; error?: string; invoiceSent?: boolean }> {
   let staff;
   try {
@@ -21,34 +82,8 @@ export async function setOrderStatus(
   }
   const admin = createAdminClient();
 
-  // Enforce a valid lifecycle server-side (the UI hides buttons, but the action
-  // is directly invokable). A cancelled or fulfilled order is terminal — it must
-  // not be resurrected to submitted/confirmed, which would re-arm editing and
-  // re-fire the buyer's invoice for a dead order.
-  const { data: current } = await admin.from("orders").select("status").eq("id", orderId).maybeSingle();
-  if (!current) return { ok: false, error: "Order not found." };
-  const from = current.status as OrderStatus;
-  const ALLOWED: Record<OrderStatus, OrderStatus[]> = {
-    submitted: ["confirmed", "cancelled"],
-    confirmed: ["fulfilled", "cancelled"],
-    fulfilled: [],
-    cancelled: [],
-  };
-  if (from !== status && !ALLOWED[from].includes(status)) {
-    return { ok: false, error: `Cannot move a ${from} order to ${status}.` };
-  }
-
-  const patch: Record<string, unknown> = { status };
-  if (status === "confirmed") patch.confirmed_at = new Date().toISOString();
-  const { error } = await admin.from("orders").update(patch).eq("id", orderId);
-  if (error) return { ok: false, error: error.message };
-
-  // §10.1 — stock leaves on confirmation and comes back if a confirmed order
-  // is cancelled. Only on a real TRANSITION, so re-saving never double-counts.
-  if (from !== status) {
-    if (status === "confirmed") await postOrderMovements(orderId, "out", staff.email);
-    else if (status === "cancelled" && from === "confirmed") await postOrderMovements(orderId, "back", staff.email);
-  }
+  const applied = await applyStatus(staff.email, orderId, status, options?.details);
+  if (!applied.ok) return applied;
 
   let invoiceSent = false;
   if (options?.sendInvoice) {
@@ -59,6 +94,70 @@ export async function setOrderStatus(
   revalidatePath("/admin/orders");
   revalidatePath(`/admin/orders/${orderId}`);
   return { ok: true, invoiceSent };
+}
+
+/**
+ * UX sprint — bulk stage change from the orders list. Each order goes through
+ * the same lifecycle gate as a single change; invalid transitions are skipped
+ * and reported, never forced.
+ */
+export async function bulkSetOrderStatus(
+  orderIds: string[],
+  status: OrderStatus,
+): Promise<{ ok: boolean; error?: string; done: number; skipped: { orderId: string; error: string }[] }> {
+  let staff;
+  try {
+    staff = await requireAdmin();
+  } catch {
+    return { ok: false, error: "Not authorized.", done: 0, skipped: [] };
+  }
+  const ids = [...new Set(orderIds)].slice(0, 200);
+  if (ids.length === 0) return { ok: false, error: "Nothing selected.", done: 0, skipped: [] };
+
+  let done = 0;
+  const skipped: { orderId: string; error: string }[] = [];
+  for (const id of ids) {
+    const r = await applyStatus(staff.email, id, status);
+    if (r.ok) done++;
+    else skipped.push({ orderId: id, error: r.error ?? "failed" });
+  }
+  revalidatePath("/admin/orders");
+  return { ok: true, done, skipped };
+}
+
+/** UX sprint — tracking-sheet photo for an out-for-delivery order. */
+export async function uploadTrackingSheet(
+  orderId: string,
+  formData: FormData,
+): Promise<{ ok: boolean; error?: string; ref?: string }> {
+  try {
+    await requireAdmin();
+  } catch {
+    return { ok: false, error: "Not authorized." };
+  }
+  const file = formData.get("photo");
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "No photo" };
+  if (file.size > 8 * 1024 * 1024) return { ok: false, error: "Photo too large (8 MB max)" };
+
+  const admin = createAdminClient();
+  const { data: order } = await admin.from("orders").select("id").eq("id", orderId).maybeSingle();
+  if (!order) return { ok: false, error: "Order not found" };
+
+  let ref;
+  try {
+    ref = await storeAuxPhoto({
+      bucket: "order-attachments",
+      path: `${orderId}/tracking-${Date.now()}.jpg`,
+      bytes: Buffer.from(await file.arrayBuffer()),
+      contentType: file.type || "image/jpeg",
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Upload failed" };
+  }
+  const { error } = await admin.from("orders").update({ tracking_image_ref: ref }).eq("id", orderId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/admin/orders/${orderId}`);
+  return { ok: true, ref };
 }
 
 // One line of an order amendment: "keep" edits an existing line (matched by

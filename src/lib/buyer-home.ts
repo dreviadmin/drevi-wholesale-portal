@@ -47,7 +47,7 @@ export async function loadBuyerHome(buyerId: string): Promise<BuyerHomeData> {
   const bySku = new Map((products ?? []).map((p) => [p.sku.toUpperCase(), p as WholesaleProduct]));
 
   // Latest order still moving → status strip.
-  const active = (orders ?? []).find((o) => o.status === "submitted" || o.status === "confirmed");
+  const active = (orders ?? []).find((o) => ["submitted", "confirmed", "packed", "out_for_delivery"].includes(o.status));
   const activeOrder = active
     ? {
         id: active.id,

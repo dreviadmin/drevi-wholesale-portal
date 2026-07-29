@@ -5,7 +5,9 @@ export type StockState = "ready" | "limited" | "made_to_order" | "sold_out";
 export type BuyerStatus = "pending" | "active" | "suspended" | "rejected";
 export type BuyerSource = "inquiry_form" | "exhibition" | "manual_admin";
 export type StaffRole = "super_admin" | "admin" | "staff";
-export type OrderStatus = "submitted" | "confirmed" | "fulfilled" | "cancelled";
+// UX sprint (29 Jul): full logistics lifecycle. 'fulfilled' is the legacy
+// terminal state on old rows; new flows end at 'delivered'.
+export type OrderStatus = "submitted" | "confirmed" | "packed" | "out_for_delivery" | "delivered" | "fulfilled" | "cancelled";
 export type OrderSource = "portal_self_service" | "exhibition" | "in_store";
 export type TaxMode = "none" | "inclusive" | "exclusive";
 export type SessionType = "exhibition" | "in_store";
@@ -134,4 +136,11 @@ export interface Order {
   pdf_sent_at: string | null;
   submitted_at: string;
   confirmed_at: string | null;
+  packed_at: string | null;
+  out_for_delivery_at: string | null;
+  delivered_at: string | null;
+  courier: string | null;
+  tracking_number: string | null;
+  tracking_note: string | null;
+  tracking_image_ref: string | null;
 }

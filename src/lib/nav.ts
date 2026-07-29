@@ -50,11 +50,11 @@ export const SPACES: Space[] = [
     // Retrofit §5.10 — "Log delivery" is the primary Stock entry; the SKU
     // generator is reframed labels-first and sits below it.
     items: [
+      // UX sprint (29 Jul): Receipts history lives behind Log delivery, and
+      // Stock check folded into Stock count — 5 items fit small screens.
       { label: "nav.log_delivery", href: "/admin/receipts/new" },
-      { label: "nav.receipts", href: "/admin/receipts" },
       { label: "nav.sku_generator", href: "/admin/sku-generator" },
       { label: "nav.stock_take", href: "/admin/stock-take" },
-      { label: "nav.stock_check", href: "/admin/stock-check" },
       { label: "nav.vendors", href: "/admin/vendors" },
       { label: "nav.reorder", href: "/admin/reorder" },
     ],
