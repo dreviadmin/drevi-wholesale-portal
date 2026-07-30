@@ -141,3 +141,15 @@ follow-up commit:
 29 of 40 verifier agents died on a session usage limit; their findings were
 triaged by hand — the ones above are the survivors that held up against the
 code. The rest were duplicates or could not actually occur.
+
+### Entity notes (30 Jul, Ansh)
+
+"Every entity must have an extra column for additional notes (along with
+photos) — for details we might forget." Implemented as ONE polymorphic log
+(`entity_notes`, migration 0033) rather than a column per table: notes are
+timestamped, authored, photo-carrying and never overwritten — a memory that
+can't be lost by editing a single field. `<NotesPanel>` mounts on vendor,
+order, buyer, design (product master) and receipt detail pages; `product` and
+`session` types are reserved in the check constraint for future surfaces.
+Photos live in the private `note-photos` bucket (backed up), served via
+/api/drive-photo. Any staff can add; only admins delete.

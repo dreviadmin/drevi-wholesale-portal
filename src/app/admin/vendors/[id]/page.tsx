@@ -3,6 +3,8 @@ import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { requireAdminOrRedirect } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { NotesPanel } from "@/components/admin/NotesPanel";
+import { listEntityNotes } from "@/lib/entity-notes";
 import { VendorDetail } from "./VendorDetail";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +56,7 @@ export default async function VendorDetailPage({ params }: { params: { id: strin
           value: totals.get(r.id)?.value ?? 0,
         }))}
       />
+      <NotesPanel entityType="vendor" entityId={vendor.id} notes={await listEntityNotes("vendor", vendor.id)} revalidate={`/admin/vendors/${vendor.id}`} />
     </div>
   );
 }

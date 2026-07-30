@@ -158,7 +158,7 @@ export async function fetchImageByRef(
   if (!isStorageRef(ref)) return fetchDriveImage(ref, size);
 
   const rest = ref.slice(SB_PREFIX.length);
-  const known = ["design-images", "vendor-photos", "order-attachments"];
+  const known = ["design-images", "vendor-photos", "order-attachments", "note-photos"];
   let bucket = BUCKET;
   let path = rest;
   const head = rest.split(":", 1)[0];
@@ -177,7 +177,7 @@ export async function fetchImageByRef(
 
 /** Store an arbitrary photo in one of the auxiliary buckets. Returns "sb:<bucket>:<path>". */
 export async function storeAuxPhoto(args: {
-  bucket: "vendor-photos" | "order-attachments";
+  bucket: "vendor-photos" | "order-attachments" | "note-photos";
   path: string; // caller-chosen, e.g. "<vendorId>/card.jpg"
   bytes: Buffer;
   contentType: string;

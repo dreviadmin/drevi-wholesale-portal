@@ -6,6 +6,8 @@ import { requireAdminOrRedirect, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { NotesPanel } from "@/components/admin/NotesPanel";
+import { listEntityNotes } from "@/lib/entity-notes";
 import { OrderActions } from "./OrderActions";
 import { OrderEditor, type PickerProduct } from "./OrderEditor";
 import type { Order, Buyer } from "@/lib/types";
@@ -211,6 +213,8 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
           <p className="font-body mt-1" style={{ fontSize: 12.5, color: palette.softBlack, lineHeight: 1.6 }}>{o.notes}</p>
         </div>
       )}
+
+      <NotesPanel entityType="order" entityId={o.id} notes={await listEntityNotes("order", o.id)} revalidate={`/admin/orders/${o.id}`} />
     </div>
   );
 }

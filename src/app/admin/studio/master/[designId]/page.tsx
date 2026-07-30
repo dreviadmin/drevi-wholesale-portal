@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { requireAdminOrRedirect } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadDesignDetail } from "@/lib/studio/load";
+import { NotesPanel } from "@/components/admin/NotesPanel";
+import { listEntityNotes } from "@/lib/entity-notes";
 import { MasterEditor } from "./MasterEditor";
 
 export const dynamic = "force-dynamic";
@@ -35,6 +37,7 @@ export default async function MasterPage({ params }: { params: { designId: strin
   const sheetMrp = Math.max(0, ...(pvi ?? []).map((p) => Number(p.retail_price) || 0));
 
   return (
+    <>
     <MasterEditor
       board={detail.board}
       design={{
@@ -61,5 +64,9 @@ export default async function MasterPage({ params }: { params: { designId: strin
       lastCost={lastCost}
       sheetMrp={sheetMrp}
     />
+    <div className="px-4 md:px-8 pb-10 max-w-2xl">
+      <NotesPanel entityType="design" entityId={params.designId} notes={await listEntityNotes("design", params.designId)} revalidate={`/admin/studio/master/${params.designId}`} />
+    </div>
+    </>
   );
 }
