@@ -66,6 +66,16 @@ Notes:
    list needs your sign-off first (it still holds the old `Drevi-*-2026`
    values; I was permission-blocked from editing the list).
 
+## HSN codes (live on prod as of 30 Jul)
+
+10. **Fill HSN values.** The plumbing is live on BOTH environments: add an
+    `HSN` column to the Wholesale Master sheet (next sync picks it up), or set
+    per-product HSN in Manage Catalog. Existing active orders pick the codes up
+    automatically at the next catalog sync, or per-order via "Refresh from
+    Catalog". Until values are filled, invoices simply omit the HSN suffix.
+    Typical codes: 6204 (women's suits/ensembles), 6211 (sarees as garments) —
+    confirm with your CA.
+
 ## Small choices whenever you look
 
 7. **Brand model for FASHN** defaults to the `Model-a` folder; set

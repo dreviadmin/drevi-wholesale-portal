@@ -153,3 +153,15 @@ order, buyer, design (product master) and receipt detail pages; `product` and
 `session` types are reserved in the check constraint for future surfaces.
 Photos live in the private `note-photos` bucket (backed up), served via
 /api/drive-photo. Any staff can add; only admins delete.
+
+### 30 Jul — crop/rotate, buyer edit on orders, HSN + resync (dev AND prod)
+
+Ansh explicitly authorized production for these — the first prod change since
+the dev-only rule began. Studio rotate is dev-only by nature (prod has no
+Studio). Buyer-edit / HSN / resync were ported to `main` as a minimal port
+(commit 1dd2dfb) — main's two-status lifecycle kept, no retrofit code dragged
+along — with migration 0034 applied to the prod DB (only 0034; the dev-only
+0028–0033 were NOT applied to prod). Resync updates descriptive fields only
+(title, photo, HSN): money on a placed order never changes outside the order
+editor. Auto-refresh covers ACTIVE orders at the end of each catalog sync;
+terminal orders are history and stay untouched.
