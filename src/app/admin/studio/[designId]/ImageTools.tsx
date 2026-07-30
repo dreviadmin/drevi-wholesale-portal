@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Crop as CropIcon, Columns2, MoveHorizontal } from "lucide-react";
+import { X, Crop as CropIcon, Columns2, MoveHorizontal, RotateCcw, RotateCw } from "lucide-react";
 import { palette } from "@/lib/palette";
 import type { DesignImage } from "@/lib/studio/load";
 
@@ -89,6 +89,9 @@ export function CropSheet({
   const [preset, setPreset] = useState(PRESETS[0]);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  // Rotation bakes a new bitmap and swaps the <img> src, so the pan/zoom and
+  // save math never need to know the image was turned (Ansh, 30 Jul).
+  const [srcOverride, setSrcOverride] = useState<string | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
@@ -100,6 +103,29 @@ export function CropSheet({
     setOffset({ x: e.clientX - drag.current.x, y: e.clientY - drag.current.y });
   }
   function onUp() { drag.current = null; }
+
+  function rotate(dir: 1 | -1) {
+    const img = imgRef.current;
+    if (!img || !img.naturalWidth) return;
+    const c = document.createElement("canvas");
+    c.width = img.naturalHeight;
+    c.height = img.naturalWidth;
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+    ctx.translate(c.width / 2, c.height / 2);
+    ctx.rotate((dir * Math.PI) / 2);
+    ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+    c.toBlob((b) => {
+      if (!b) return;
+      const url = URL.createObjectURL(b);
+      setSrcOverride((old) => {
+        if (old) URL.revokeObjectURL(old);
+        return url;
+      });
+      setZoom(1);
+      setOffset({ x: 0, y: 0 });
+    }, "image/png");
+  }
 
   // Draw exactly what the frame shows into a canvas — the original file on
   // Drive is never modified (§7.3).
@@ -130,12 +156,19 @@ export function CropSheet({
       <div className="w-full md:w-[460px] p-4" style={{ background: palette.ivory }}>
         <div className="flex items-center justify-between">
           <span className="font-body uppercase flex items-center gap-1.5" style={{ fontSize: 10, letterSpacing: "0.2em", color: palette.softBlack }}>
-            <CropIcon size={13} /> Crop
+            <CropIcon size={13} /> Crop &amp; rotate
           </span>
           <button type="button" onClick={onCancel} aria-label="Close"><X size={16} color={palette.softBlack} /></button>
         </div>
 
-        <div className="flex gap-1.5 mt-2">
+        <div className="flex gap-1.5 mt-2 items-center">
+          <button type="button" onClick={() => rotate(-1)} aria-label="Rotate left" className="font-body" style={{ padding: "6px 8px", border: "1px solid rgba(26,26,26,0.15)", color: palette.softBlack }}>
+            <RotateCcw size={13} />
+          </button>
+          <button type="button" onClick={() => rotate(1)} aria-label="Rotate right" className="font-body" style={{ padding: "6px 8px", border: "1px solid rgba(26,26,26,0.15)", color: palette.softBlack }}>
+            <RotateCw size={13} />
+          </button>
+          <span style={{ width: 1, alignSelf: "stretch", background: "rgba(26,26,26,0.12)" }} />
           {PRESETS.map((p) => (
             <button key={p.key} type="button" onClick={() => setPreset(p)} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.1em", padding: "6px 9px", border: `1px solid ${preset.key === p.key ? palette.black : "rgba(26,26,26,0.15)"}`, background: preset.key === p.key ? palette.black : "transparent", color: preset.key === p.key ? palette.ivory : palette.softBlack }}>
               {p.label}
@@ -155,7 +188,7 @@ export function CropSheet({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             ref={imgRef}
-            src={drivePhoto(fileRef, 1200)}
+            src={srcOverride ?? drivePhoto(fileRef, 1200)}
             alt="crop source"
             crossOrigin="anonymous"
             draggable={false}

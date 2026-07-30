@@ -9,8 +9,9 @@ import { palette } from "@/lib/palette";
 import { NotesPanel } from "@/components/admin/NotesPanel";
 import { listEntityNotes } from "@/lib/entity-notes";
 import { OrderActions } from "./OrderActions";
+import { EditBuyerButton } from "./EditBuyerButton";
 import { OrderEditor, type PickerProduct } from "./OrderEditor";
-import type { Order, Buyer } from "@/lib/types";
+import type { Order } from "@/lib/types";
 import { productionMoqFlag, supplyAge, type SupplyInput } from "@/lib/availability";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +27,7 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   if (!order) notFound();
   const o = order as Order;
   const [{ data: buyer }, { data: takenBy }] = await Promise.all([
-    admin.from("buyers").select("business_name, owner_name, phone").eq("id", o.buyer_id).maybeSingle<Pick<Buyer, "business_name" | "owner_name" | "phone">>(),
+    admin.from("buyers").select("business_name, owner_name, phone, city, gstin, address, transport_details, broker_details").eq("id", o.buyer_id).maybeSingle(),
     o.assisted_by
       ? admin.from("staff_users").select("name, email").eq("id", o.assisted_by).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -96,7 +97,22 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
         <div>
           <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>{o.order_number}</h1>
           <div className="font-body mt-1" style={{ fontSize: 12.5, color: palette.softBlack }}>
-            {[buyer?.business_name, buyer?.owner_name, buyer?.phone].filter(Boolean).join(" · ")}
+            {[buyer?.business_name, buyer?.owner_name, buyer?.phone].filter(Boolean).join(" · ")}{" "}
+            {buyer && (
+              <EditBuyerButton
+                buyerId={o.buyer_id}
+                initial={{
+                  business_name: buyer.business_name ?? "",
+                  owner_name: buyer.owner_name ?? "",
+                  phone: buyer.phone ?? "",
+                  city: buyer.city ?? "",
+                  gstin: buyer.gstin ?? "",
+                  address: buyer.address ?? "",
+                  transport_details: buyer.transport_details ?? "",
+                  broker_details: buyer.broker_details ?? "",
+                }}
+              />
+            )}
           </div>
           <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige, letterSpacing: "0.04em" }}>
             {fmt(o.submitted_at)} · Source: {SOURCE_LABEL[o.source] ?? o.source} · Status: {o.status.replace(/_/g, " ")}

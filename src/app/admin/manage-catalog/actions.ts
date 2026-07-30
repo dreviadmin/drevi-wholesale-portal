@@ -9,7 +9,7 @@ import { writeAuditEvent } from "@/lib/audit";
 // Fields an admin may edit by hand. Editing one LOCKS it, so the sheet sync
 // preserves the manual value until it is unlocked. `image_urls` is locked via
 // the photo upload, not this list.
-const EDITABLE = ["title", "description", "category", "sub_category", "color", "primary_fabric", "wholesale_price", "min_order_qty", "current_qty", "restockable", "restock_days"] as const;
+const EDITABLE = ["title", "description", "category", "sub_category", "color", "primary_fabric", "hsn", "wholesale_price", "min_order_qty", "current_qty", "restockable", "restock_days"] as const;
 type EditableField = (typeof EDITABLE)[number];
 
 function coerce(field: EditableField, raw: string): unknown {

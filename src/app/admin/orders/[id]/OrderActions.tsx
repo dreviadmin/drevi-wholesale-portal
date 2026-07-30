@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { setOrderStatus, sendInvoice, uploadTrackingSheet, type StageDetails } from "@/app/admin/orders/actions";
+import { setOrderStatus, sendInvoice, uploadTrackingSheet, syncOrderFromCatalog, type StageDetails } from "@/app/admin/orders/actions";
 import { sharePdfFile, invoiceFileName, waPhone } from "@/lib/share";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -62,6 +62,17 @@ export function OrderActions({
       router.refresh();
     });
   }
+  // Ansh (30 Jul) — pull catalog changes (photo added, title fixed, HSN
+  // filled after billing) into this order's lines. Prices never move.
+  function refreshFromCatalog() {
+    start(async () => {
+      const res = await syncOrderFromCatalog(orderId);
+      router.refresh();
+      if (!res.ok) flash(res.error ?? "Failed");
+      else flash(res.touched ? `${res.touched} line(s) updated from catalog` : "Already in sync with the catalog");
+    });
+  }
+
   function fireInvoice() {
     start(async () => {
       const res = await sendInvoice(orderId);
@@ -116,6 +127,7 @@ export function OrderActions({
         {(status === "confirmed" || status === "packed") && btn("Out for Delivery", () => setDispatchOpen(true), status === "packed")}
         {(status === "confirmed" || status === "packed" || status === "out_for_delivery") && btn("Mark Delivered", () => act("delivered"), status === "out_for_delivery")}
         {status !== "cancelled" && btn("Send Invoice", fireInvoice)}
+        {status !== "cancelled" && btn("Refresh from Catalog", refreshFromCatalog)}
         {pdfUrl && btn("Share PDF", shareInvoice)}
         {pdfUrl && btn("WhatsApp Buyer", shareWhatsAppDirect)}
         {(status === "submitted" || status === "confirmed" || status === "packed") && btn("Cancel", () => act("cancelled", { confirmMsg: "Cancel this order? Stock returns to the shelf if it had left." }))}

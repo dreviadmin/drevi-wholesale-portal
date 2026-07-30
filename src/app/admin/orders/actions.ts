@@ -7,6 +7,7 @@ import { finalizeOrder } from "@/lib/order-finalize";
 import { postOrderMovements } from "@/lib/stock-ledger";
 import { getStockState } from "@/lib/stock";
 import { storeAuxPhoto } from "@/lib/design-image-store";
+import { refreshOrderFromCatalog } from "@/lib/order-catalog-sync";
 import type { DiscountType, Order, OrderItem, OrderStatus, TaxMode, WholesaleProduct } from "@/lib/types";
 
 export interface StageDetails {
@@ -404,4 +405,17 @@ export async function sendInvoice(orderId: string): Promise<{ ok: boolean; sent?
   const { data } = await admin.from("orders").select("pdf_sent_at, pdf_url").eq("id", orderId).maybeSingle();
   revalidatePath(`/admin/orders/${orderId}`);
   return { ok: true, sent: !!data?.pdf_sent_at };
+}
+
+/**
+ * Ansh (30 Jul) — pull catalog changes (title, photo, HSN) into this order's
+ * lines. Never touches qty or prices; custom lines skipped.
+ */
+export async function syncOrderFromCatalog(orderId: string): Promise<{ ok: boolean; error?: string; touched?: number }> {
+  try { await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
+  const admin = createAdminClient();
+  const r = await refreshOrderFromCatalog(admin, orderId);
+  if (!r.ok) return { ok: false, error: r.error };
+  revalidatePath(`/admin/orders/${orderId}`);
+  return { ok: true, touched: r.touchedSkus?.length ?? 0 };
 }

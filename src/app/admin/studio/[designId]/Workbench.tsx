@@ -271,7 +271,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           )}
           {(current || a.sourceRef) && uploadsOk && (
             <button type="button" onClick={() => setCrop({ angleId: a.id, parentId: current?.id ?? a.sourceImageId ?? "", fileRef: current?.fileRef ?? a.sourceRef! })} className="flex items-center gap-1 font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }}>
-              <CropIcon size={11} /> Crop
+              <CropIcon size={11} /> Crop / Rotate
             </button>
           )}
         </div>

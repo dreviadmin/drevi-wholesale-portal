@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { refreshActiveOrders } from "@/lib/order-catalog-sync";
 import { readMaster } from "@/lib/sheets";
 import { fetchProductImageUrls } from "@/lib/shopify-auth";
 import { drivePhotosEnabled, fetchSkuImagesBytes } from "@/lib/drive";
@@ -36,6 +37,8 @@ const COLS: Record<string, string> = {
   last_cost: "Last Cost",
   last_receipt_date: "Last Receipt Date",
   retail_price: "Final MRP",
+  // GST classification — optional column; blank cells leave hsn untouched.
+  hsn: "HSN",
 };
 
 // Columns the sync cannot operate without (they drive the filter / pricing).
@@ -108,6 +111,7 @@ interface ProductRow {
   sub_category: string | null;
   color: string | null;
   primary_fabric: string | null;
+  hsn: string | null;
   wholesale_price: number;
   wholesale_visible: boolean;
   min_order_qty: number | null;
@@ -206,6 +210,7 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
       sub_category: row.sub_category || null,
       color: row.color || null,
       primary_fabric: row.primary_fabric || null,
+      hsn: row.hsn || null,
       wholesale_price: opts.price,
       wholesale_visible: true,
       min_order_qty: toInt(row.min_order_qty),
@@ -456,6 +461,16 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
       .in("sku", toHide);
     if (error) throw new Error(`Hide-missing update failed: ${error.message}`);
     hidden = toHide.length;
+  }
+
+  // Ansh (30 Jul): a SKU touched after billing (photo added, title fixed, HSN
+  // filled) must flow into ACTIVE orders. Descriptive fields only — money on a
+  // placed order never changes here.
+  try {
+    const refreshed = await refreshActiveOrders(supabase);
+    if (refreshed.updated > 0) warnings.push(`order refresh: ${refreshed.updated} active order(s) picked up catalog changes`);
+  } catch (e) {
+    warnings.push(`order refresh failed: ${e instanceof Error ? e.message : "unknown"}`);
   }
 
   return {

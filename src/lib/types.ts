@@ -31,6 +31,7 @@ export type AuditEventType =
   | "studio_published";
 
 export interface WholesaleProduct {
+  hsn?: string | null;
   sku: string;
   title: string | null;
   description: string | null;
@@ -92,6 +93,8 @@ export interface StaffUser {
 export interface OrderItem {
   sku: string;
   title: string;
+  /** GST classification, snapshotted from the product at billing (30 Jul). */
+  hsn?: string | null;
   unit_price: number;
   qty: number;
   stock_state: StockState;

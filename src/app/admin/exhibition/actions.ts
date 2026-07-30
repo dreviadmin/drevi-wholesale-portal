@@ -246,6 +246,7 @@ export async function submitExhibitionOrder(input: {
     items.push({
       sku: p.sku,
       title: p.title ?? p.sku,
+      hsn: p.hsn ?? null,
       unit_price: unitPrice,
       qty,
       stock_state: state,
