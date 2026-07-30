@@ -5,6 +5,7 @@ import { LogOut } from "lucide-react";
 import { logout } from "@/app/actions";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ORDER_STATUS_LABEL } from "@/lib/order-status";
 import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { Order, OrderItem } from "@/lib/types";
@@ -78,7 +79,7 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
             {o.order_number}
           </div>
           <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige, letterSpacing: "0.04em" }}>
-            {fmtDate(o.submitted_at)} · {o.status.charAt(0).toUpperCase() + o.status.slice(1)}
+            {fmtDate(o.submitted_at)} · {ORDER_STATUS_LABEL[o.status] ?? o.status}
           </div>
         </div>
 

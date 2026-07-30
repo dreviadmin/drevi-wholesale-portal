@@ -51,15 +51,29 @@ async function applyStatus(
 
   const now = new Date().toISOString();
   const patch: Record<string, unknown> = { status };
-  if (status === "confirmed") patch.confirmed_at = now;
-  if (status === "packed") patch.packed_at = now;
-  if (status === "out_for_delivery") patch.out_for_delivery_at = now;
-  if (status === "delivered") patch.delivered_at = now;
+  // Timestamps only on a real transition — a re-save must not rewrite history.
+  if (from !== status) {
+    if (status === "confirmed") patch.confirmed_at = now;
+    if (status === "packed") patch.packed_at = now;
+    if (status === "out_for_delivery") patch.out_for_delivery_at = now;
+    if (status === "delivered") patch.delivered_at = now;
+  }
   if (details?.courier?.trim()) patch.courier = details.courier.trim();
   if (details?.trackingNumber?.trim()) patch.tracking_number = details.trackingNumber.trim();
   if (details?.trackingNote?.trim()) patch.tracking_note = details.trackingNote.trim();
-  const { error } = await admin.from("orders").update(patch).eq("id", orderId);
+
+  // Compare-and-swap on the status we read: two concurrent confirms both pass
+  // the gate above, but only the one that wins this UPDATE posts movements —
+  // the loser matches zero rows. Without this, stock left the shelf twice.
+  const { data: won, error } = await admin
+    .from("orders")
+    .update(patch)
+    .eq("id", orderId)
+    .eq("status", from)
+    .select("id")
+    .maybeSingle();
   if (error) return { ok: false, error: error.message };
+  if (!won) return { ok: false, error: "The order changed under you — reload and retry." };
 
   // §10.1 — movements only on a real TRANSITION, never on a re-save.
   if (from !== status) {
@@ -199,7 +213,7 @@ export async function updateOrderItems(
   if (!orderRow) return { ok: false, error: "Order not found." };
   const order = orderRow as Order;
   if (order.status !== "submitted" && order.status !== "confirmed") {
-    return { ok: false, error: `A ${order.status} order can no longer be modified.` };
+    return { ok: false, error: `A ${String(order.status).replace(/_/g, " ")} order can no longer be modified.` };
   }
   if (lines.length === 0) return { ok: false, error: "An order needs at least one item — use Cancel instead." };
 
@@ -378,6 +392,12 @@ export async function sendInvoice(orderId: string): Promise<{ ok: boolean; sent?
     await requireAdmin();
   } catch {
     return { ok: false, error: "Not authorized." };
+  }
+  {
+    const admin = createAdminClient();
+    const { data } = await admin.from("orders").select("status").eq("id", orderId).maybeSingle();
+    if (!data) return { ok: false, error: "Order not found." };
+    if (data.status === "cancelled") return { ok: false, error: "Cancelled orders are not invoiced." };
   }
   await finalizeOrder(orderId);
   const admin = createAdminClient();

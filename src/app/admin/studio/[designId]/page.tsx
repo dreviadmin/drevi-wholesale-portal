@@ -15,7 +15,8 @@ export default async function WorkbenchPage({ params }: { params: { designId: st
   if (!detail) notFound();
   // Engine chips light up when their key is present (UX sprint).
   const enginesEnabled = {
-    fashn: !!process.env.FASHN_API_KEY,
+    // model-swap also needs the brand-model pose folder
+    fashn: !!process.env.FASHN_API_KEY && !!process.env.DREVI_BRAND_MODEL_FOLDER_ID,
     seedream: !!process.env.FAL_KEY,
     openai_bg: !!process.env.OPENAI_API_KEY,
   };

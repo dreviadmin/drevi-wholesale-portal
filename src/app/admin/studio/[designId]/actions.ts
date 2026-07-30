@@ -193,6 +193,14 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
     color: dRow?.color, fabric: dRow?.fabric, handwork: dRow?.handwork,
   };
 
+  // A server death mid-generation would strand the job in running forever
+  // and permanently hide the Generate button — sweep anything older than 15m.
+  await admin
+    .from("pipeline_jobs")
+    .update({ status: "error", log: "Timed out — the in-process run never finished (server restarted?)", finished_at: new Date().toISOString() })
+    .in("status", ["claimed", "running"])
+    .lt("started_at", new Date(Date.now() - 15 * 60_000).toISOString());
+
   const dispatchConfigured = !!(process.env.GITHUB_PAT && process.env.GITHUB_RUNNER_REPO);
   const { data: job, error } = await admin
     .from("pipeline_jobs")

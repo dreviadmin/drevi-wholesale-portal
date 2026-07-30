@@ -110,3 +110,34 @@ One line per deviation from the master build guide, with rationale. Phase 1 deci
 - **Drift report lives at `/admin/stock-check`** with the API at
   `/api/admin/stock-reconcile`, both in the Stock space. ANSH-20 (device/floor
   scope) is still parked, so both are admin-role gated.
+
+### UX sprint review (30 Jul) — confirmed findings fixed
+
+Five-dimension adversarial review of c97413b; confirmed findings fixed in the
+follow-up commit:
+
+- Invoice actions survive the new lifecycle: "Send Invoice" now renders for
+  every non-cancelled status (a bulk-confirmed order marked packed had NO way
+  to ever get an invoice), and `sendInvoice` refuses cancelled orders
+  server-side.
+- One `ORDER_STATUS_LABEL` map (src/lib/order-status.ts) — buyer order page,
+  buyer home strip and admin buyer detail all rendered raw `out_for_delivery`.
+- `applyStatus` is now compare-and-swap on the status it read: two concurrent
+  confirms could both pass the gate and post stock movements twice. The loser
+  now matches zero rows and reports "changed under you". Lifecycle timestamps
+  only stamp on real transitions.
+- Storage archives get a timestamp suffix and the DB ref updates only AFTER a
+  successful move (a failed move could leave a row pointing at a non-existent
+  _archive path; a re-used active name could alias two rows to one archive).
+- Walk-in counter creation races resolve via a partial unique index (0032) +
+  re-select.
+- Stale `running` pipeline jobs (server died mid-generation) sweep to error
+  after 15 min instead of hiding the Generate button forever.
+- fashn chip also requires DREVI_BRAND_MODEL_FOLDER_ID; exotic capture formats
+  (HEIC/WebP) transcode to JPEG at upload via sharp; wizard drafts carry
+  takenBy; backup list actually includes the three new buckets (the earlier
+  edit missed `as const` and silently didn't apply).
+
+29 of 40 verifier agents died on a session usage limit; their findings were
+triaged by hand — the ones above are the survivors that held up against the
+code. The rest were duplicates or could not actually occur.

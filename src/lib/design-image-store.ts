@@ -75,7 +75,18 @@ export async function storeDesignImage(args: {
   /** Drive folder id when the caller already resolved it (skips a lookup). */
   driveFolderId?: string | null;
 }): Promise<StoredImage & { driveFolderId?: string }> {
-  const ext = extFor(args.contentType);
+  // Some Androids hand the file input HEIC/WebP; the engines and OpenAI can't
+  // decode those, so normalise anything exotic to JPEG at the door.
+  let bytes = args.bytes;
+  let contentType = args.contentType;
+  if (!/png|jpe?g/.test(contentType)) {
+    try {
+      const sharp = (await import("sharp")).default;
+      bytes = await sharp(bytes).jpeg({ quality: 92 }).toBuffer();
+      contentType = "image/jpeg";
+    } catch { /* unknown format sharp can't read — store as-is */ }
+  }
+  const ext = extFor(contentType);
 
   if (driveConfigured()) {
     let folderId = args.driveFolderId ?? null;
@@ -91,15 +102,15 @@ export async function storeDesignImage(args: {
       folderId = match.folderId;
     }
     const name = await nextFileName(folderId, args.angle, args.kind, ext);
-    const up = await uploadDesignImage(folderId, args.bytes, args.contentType, name);
+    const up = await uploadDesignImage(folderId, bytes, contentType, name);
     return { fileRef: up.fileId, fileName: up.fileName, driveFolderId: folderId };
   }
 
   const admin = createAdminClient();
   const name = await nextStorageName(args.designId, args.angle, args.kind, ext);
   const path = `${args.designId}/${name}`;
-  const { error } = await admin.storage.from(BUCKET).upload(path, args.bytes, {
-    contentType: args.contentType,
+  const { error } = await admin.storage.from(BUCKET).upload(path, bytes, {
+    contentType,
     upsert: false,
   });
   if (error) throw new Error(`Storage upload failed: ${error.message}`);
@@ -108,31 +119,31 @@ export async function storeDesignImage(args: {
 
 /**
  * Archive a superseded photo (§7.5): Drive files move to the folder's
- * _archive/; storage files move under <designId>/_archive/. Never deletes.
+ * _archive/; storage files move under <designId>/_archive/ with a timestamp
+ * suffix so a re-used active name never collides with an earlier archive.
+ * Never deletes. Returns the ref the file lives at AFTER the call — callers
+ * update the DB row with this value only once the move has succeeded, so a
+ * failed move can never leave a row pointing at a path that does not exist.
  */
-export async function archiveImageFile(fileRef: string, driveFolderId?: string | null): Promise<void> {
+export async function archiveImageFile(fileRef: string, driveFolderId?: string | null): Promise<string> {
   if (isStorageRef(fileRef)) {
     const path = fileRef.slice(SB_PREFIX.length);
     const parts = path.split("/");
-    if (parts.length < 2 || parts[1] === "_archive") return;
+    if (parts.length < 2 || parts[1] === "_archive") return fileRef;
+    const name = parts.slice(1).join("/");
+    const dot = name.lastIndexOf(".");
+    const stamped = dot > 0 ? `${name.slice(0, dot)}-${Date.now()}${name.slice(dot)}` : `${name}-${Date.now()}`;
+    const dest = `${parts[0]}/_archive/${stamped}`;
     const admin = createAdminClient();
-    const dest = `${parts[0]}/_archive/${parts.slice(1).join("/")}`;
     const { error } = await admin.storage.from(BUCKET).move(path, dest);
-    if (error && !/not found/i.test(error.message)) {
+    if (error) {
+      if (/not found/i.test(error.message)) return fileRef; // object already gone — row state is authoritative
       throw new Error(`Storage archive failed: ${error.message}`);
     }
-    return;
+    return `${SB_PREFIX}${dest}`;
   }
   if (driveFolderId) await archiveFile(fileRef, driveFolderId);
-}
-
-/** After an archive move, the ref changes for storage files. */
-export function archivedRef(fileRef: string): string {
-  if (!isStorageRef(fileRef)) return fileRef;
-  const path = fileRef.slice(SB_PREFIX.length);
-  const parts = path.split("/");
-  if (parts.length < 2 || parts[1] === "_archive") return fileRef;
-  return `${SB_PREFIX}${parts[0]}/_archive/${parts.slice(1).join("/")}`;
+  return fileRef; // Drive archiving moves between folders; the file id is stable
 }
 
 /**

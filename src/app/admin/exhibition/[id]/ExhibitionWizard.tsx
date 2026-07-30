@@ -173,6 +173,7 @@ export function ExhibitionWizard({
     payNote: string;
     staffNote: string;
     buyerNote: string;
+    takenBy?: string;
     orderRef: string | null;
   }
   const [parked, setParked] = useState<ParkedOrder[]>([]);
@@ -187,6 +188,7 @@ export function ExhibitionWizard({
     setDiscountType(d.discountType ?? "none"); setDiscountValue(d.discountValue ?? "");
     setAdvance(d.advance ?? ""); setPayMethod(d.payMethod ?? "Cash"); setPayNote(d.payNote ?? "");
     setStaffNote(d.staffNote ?? ""); setBuyerNote(d.buyerNote ?? "");
+    if (d.takenBy) setTakenBy(d.takenBy);
     setConfirmInfo(null);
     orderRefRef.current = d.orderRef ?? null;
     // keep the custom-item id counter ahead of any restored keys
@@ -200,7 +202,7 @@ export function ExhibitionWizard({
       id: uuid(), parkedAt: Date.now(),
       buyer, buyerClientRef, cart, priceOverrides, splitFactors, customItems,
       taxMode, taxRate, customRate, discountType, discountValue,
-      advance, payMethod, payNote, staffNote, buyerNote,
+      advance, payMethod, payNote, staffNote, buyerNote, takenBy,
       orderRef: orderRefRef.current,
     };
   }
@@ -243,14 +245,14 @@ export function ExhibitionWizard({
         localStorage.setItem(CART_DRAFT_KEY, JSON.stringify({
           buyer, buyerClientRef, cart, priceOverrides, splitFactors, customItems,
           taxMode, taxRate, customRate, discountType, discountValue,
-          advance, payMethod, payNote, staffNote, buyerNote,
+          advance, payMethod, payNote, staffNote, buyerNote, takenBy,
           orderRef: orderRefRef.current, step, savedAt: Date.now(),
         }));
       } else {
         localStorage.removeItem(CART_DRAFT_KEY);
       }
     } catch { /* storage blocked — non-fatal */ }
-  }, [CART_DRAFT_KEY, buyer, buyerClientRef, cart, priceOverrides, splitFactors, customItems, taxMode, taxRate, customRate, discountType, discountValue, advance, payMethod, payNote, staffNote, buyerNote, step, confirmInfo]);
+  }, [CART_DRAFT_KEY, buyer, buyerClientRef, cart, priceOverrides, splitFactors, customItems, taxMode, taxRate, customRate, discountType, discountValue, advance, payMethod, payNote, staffNote, buyerNote, takenBy, step, confirmInfo]);
 
   // Warn before an accidental unload (refresh / edge-swipe back) with a live cart.
   useEffect(() => {

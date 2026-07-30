@@ -24,13 +24,26 @@ export default async function InStorePage() {
 
   let id = open?.id;
   if (!id) {
+    // Concurrent first visits race here; the partial unique index (0032) makes
+    // the loser's insert fail, and it re-selects the winner instead.
     const { data: created, error } = await admin
       .from("exhibition_sessions")
       .insert({ event_name: "Walk-in counter", session_type: "in_store" })
       .select("id")
       .single();
-    if (error) throw new Error(`Could not open the walk-in counter: ${error.message}`);
-    id = created.id;
+    if (created) id = created.id;
+    else if (error) {
+      const { data: winner } = await admin
+        .from("exhibition_sessions")
+        .select("id")
+        .eq("session_type", "in_store")
+        .is("ended_at", null)
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!winner) throw new Error(`Could not open the walk-in counter: ${error.message}`);
+      id = winner.id;
+    }
   }
   redirect(`/admin/in-store/${id}`);
 }

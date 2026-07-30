@@ -16,6 +16,10 @@ import { notifyMe, dismissNotify } from "./actions";
 // never a personalised discount, cost, or vendor field. Final pricing wording
 // stays on the cart.
 
+const STRIP_LABEL: Record<string, string> = {
+  submitted: "received", confirmed: "confirmed", packed: "being packed", out_for_delivery: "out for delivery",
+};
+
 export function BuyerHome({ businessName, city, cartCount, data }: {
   businessName: string;
   city: string | null;
@@ -81,7 +85,7 @@ export function BuyerHome({ businessName, city, cartCount, data }: {
           <Link href={`/order/${data.activeOrder.id}`} className="flex items-center gap-3 p-3.5 mb-4" style={{ background: "#fff", border: "1px solid #cfdae4", borderRadius: 12 }}>
             <span className="min-w-0 flex-1">
               <span className="font-body block" style={{ fontSize: 13, color: palette.black, fontWeight: 500 }}>
-                Order {data.activeOrder.orderNumber} {data.activeOrder.status === "confirmed" ? "confirmed" : "received"}
+                Order {data.activeOrder.orderNumber} {STRIP_LABEL[data.activeOrder.status] ?? "received"}
               </span>
               <span className="font-body block mt-0.5" style={{ fontSize: 11, color: palette.mutedGreige }}>
                 {data.activeOrder.pieces} pieces · view invoice

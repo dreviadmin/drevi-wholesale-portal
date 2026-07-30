@@ -115,7 +115,7 @@ export function OrderActions({
         {status === "confirmed" && btn("Mark Packed", () => act("packed"), true)}
         {(status === "confirmed" || status === "packed") && btn("Out for Delivery", () => setDispatchOpen(true), status === "packed")}
         {(status === "confirmed" || status === "packed" || status === "out_for_delivery") && btn("Mark Delivered", () => act("delivered"), status === "out_for_delivery")}
-        {(status === "submitted" || status === "confirmed") && btn("Send Invoice", fireInvoice)}
+        {status !== "cancelled" && btn("Send Invoice", fireInvoice)}
         {pdfUrl && btn("Share PDF", shareInvoice)}
         {pdfUrl && btn("WhatsApp Buyer", shareWhatsAppDirect)}
         {(status === "submitted" || status === "confirmed" || status === "packed") && btn("Cancel", () => act("cancelled", { confirmMsg: "Cancel this order? Stock returns to the shelf if it had left." }))}

@@ -5,7 +5,7 @@ import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import { DETAIL_ANGLES } from "@/lib/studio/state";
-import { storeDesignImage, archiveImageFile, archivedRef, isStorageRef } from "@/lib/design-image-store";
+import { storeDesignImage, archiveImageFile, isStorageRef } from "@/lib/design-image-store";
 
 // Retrofit R5 (§7) — four input modes per angle.
 //
@@ -147,10 +147,13 @@ export async function approveImage(angleId: string, imageId: string): Promise<Re
   // Previous approval is archived — file moved to _archive/, row marked (§7.5).
   if (angle.approved_image_id && angle.approved_image_id !== imageId) {
     const { data: prev } = await admin.from("design_images").select("id, file_ref").eq("id", angle.approved_image_id).maybeSingle();
-    const moved = prev?.file_ref ? archivedRef(prev.file_ref) : null;
-    await admin.from("design_images").update({ status: "archived", ...(moved && moved !== prev!.file_ref ? { file_ref: moved } : {}) }).eq("id", angle.approved_image_id);
+    await admin.from("design_images").update({ status: "archived" }).eq("id", angle.approved_image_id);
     if (prev?.file_ref && (isStorageRef(prev.file_ref) || design?.drive_folder_id)) {
-      try { await archiveImageFile(prev.file_ref, design?.drive_folder_id); } catch { /* file may live elsewhere; row state is authoritative */ }
+      // Move first, then point the row at wherever the file actually landed.
+      try {
+        const moved = await archiveImageFile(prev.file_ref, design?.drive_folder_id);
+        if (moved !== prev.file_ref) await admin.from("design_images").update({ file_ref: moved }).eq("id", angle.approved_image_id);
+      } catch { /* move failed — the row still points at the live object */ }
     }
   }
   await admin.from("design_images").update({ status: "active", angle_id: angleId }).eq("id", imageId);
@@ -180,9 +183,10 @@ export async function rejectImage(imageId: string): Promise<Res> {
   }
   const { data: design } = await admin.from("designs").select("drive_folder_id").eq("id", img.design_id!).maybeSingle();
   if (img.file_ref && (isStorageRef(img.file_ref) || design?.drive_folder_id)) {
-    const moved = archivedRef(img.file_ref);
-    if (moved !== img.file_ref) await admin.from("design_images").update({ file_ref: moved }).eq("id", imageId);
-    try { await archiveImageFile(img.file_ref, design?.drive_folder_id); } catch { /* fine — row state is authoritative */ }
+    try {
+      const moved = await archiveImageFile(img.file_ref, design?.drive_folder_id);
+      if (moved !== img.file_ref) await admin.from("design_images").update({ file_ref: moved }).eq("id", imageId);
+    } catch { /* move failed — the row still points at the live object */ }
   }
   await writeAuditEvent({ eventType: "studio_candidate_rejected", staffUserId: staff.id, notes: `image ${imageId} rejected` });
   revalidatePath(`/admin/studio/${img.design_id}`);
