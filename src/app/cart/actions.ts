@@ -166,6 +166,7 @@ export async function submitOrder(_prev: SubmitState, formData: FormData): Promi
   const items: OrderItem[] = cart.lines.map((l) => ({
     sku: l.product.sku,
     title: l.product.title ?? l.product.sku,
+    hsn: l.product.hsn ?? null,
     unit_price: l.product.wholesale_price,
     qty: l.qty,
     stock_state: l.stockState,

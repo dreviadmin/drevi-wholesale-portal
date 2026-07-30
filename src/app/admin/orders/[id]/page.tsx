@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { OrderActions } from "./OrderActions";
+import { EditBuyerButton } from "./EditBuyerButton";
 import { OrderEditor, type PickerProduct } from "./OrderEditor";
 import type { Order, Buyer } from "@/lib/types";
 
@@ -22,7 +23,7 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   const { data: order } = await admin.from("orders").select("*").eq("id", params.id).maybeSingle();
   if (!order) notFound();
   const o = order as Order;
-  const { data: buyer } = await admin.from("buyers").select("business_name, owner_name, phone").eq("id", o.buyer_id).maybeSingle<Pick<Buyer, "business_name" | "owner_name" | "phone">>();
+  const { data: buyer } = await admin.from("buyers").select("business_name, owner_name, phone, city, gstin, address, transport_details, broker_details").eq("id", o.buyer_id).maybeSingle<Pick<Buyer, "business_name" | "owner_name" | "phone" | "city" | "gstin" | "address" | "transport_details" | "broker_details">>();
 
   // Catalog for the "add item" picker in the order editor (admins only).
   let pickerProducts: PickerProduct[] = [];
@@ -50,7 +51,22 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
         <div>
           <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>{o.order_number}</h1>
           <div className="font-body mt-1" style={{ fontSize: 12.5, color: palette.softBlack }}>
-            {[buyer?.business_name, buyer?.owner_name, buyer?.phone].filter(Boolean).join(" · ")}
+            {[buyer?.business_name, buyer?.owner_name, buyer?.phone].filter(Boolean).join(" · ")}{" "}
+            {buyer && (
+              <EditBuyerButton
+                buyerId={o.buyer_id}
+                initial={{
+                  business_name: buyer.business_name ?? "",
+                  owner_name: buyer.owner_name ?? "",
+                  phone: buyer.phone ?? "",
+                  city: buyer.city ?? "",
+                  gstin: buyer.gstin ?? "",
+                  address: buyer.address ?? "",
+                  transport_details: buyer.transport_details ?? "",
+                  broker_details: buyer.broker_details ?? "",
+                }}
+              />
+            )}
           </div>
           <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige, letterSpacing: "0.04em" }}>
             {fmt(o.submitted_at)} · Source: {SOURCE_LABEL[o.source] ?? o.source} · Status: {o.status}

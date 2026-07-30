@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { setOrderStatus, sendInvoice } from "@/app/admin/orders/actions";
+import { setOrderStatus, sendInvoice, syncOrderFromCatalog } from "@/app/admin/orders/actions";
 import { sharePdfFile, invoiceFileName, waPhone } from "@/lib/share";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -38,6 +38,15 @@ export function OrderActions({
       else if (opts?.sendInvoice) flash(res.invoiceSent ? "Invoice sent" : "PDF generated · Interakt not configured");
     });
   }
+  function refreshFromCatalog() {
+    start(async () => {
+      const res = await syncOrderFromCatalog(orderId);
+      router.refresh();
+      if (!res.ok) flash(res.error ?? "Failed");
+      else flash(res.touched ? `${res.touched} line(s) updated from catalog` : "Already in sync with the catalog");
+    });
+  }
+
   function fireInvoice() {
     start(async () => {
       const res = await sendInvoice(orderId);
@@ -90,6 +99,7 @@ export function OrderActions({
         )}
         {status === "confirmed" && btn("Mark Fulfilled", () => act("fulfilled"), true)}
         {(status === "submitted" || status === "confirmed") && btn("Send Invoice", fireInvoice)}
+        {status !== "cancelled" && btn("Refresh from Catalog", refreshFromCatalog)}
         {pdfUrl && btn("Share PDF", shareInvoice)}
         {pdfUrl && btn("WhatsApp Buyer", shareWhatsAppDirect)}
         {status !== "cancelled" && status !== "fulfilled" && btn("Cancel", () => act("cancelled", { confirmMsg: "Cancel this order?" }))}

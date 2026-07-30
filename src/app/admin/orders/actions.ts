@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/staff";
 import { finalizeOrder } from "@/lib/order-finalize";
+import { refreshOrderFromCatalog } from "@/lib/order-catalog-sync";
 import { getStockState } from "@/lib/stock";
 import type { DiscountType, Order, OrderItem, OrderStatus, TaxMode, WholesaleProduct } from "@/lib/types";
 
@@ -275,4 +276,17 @@ export async function sendInvoice(orderId: string): Promise<{ ok: boolean; sent?
   const { data } = await admin.from("orders").select("pdf_sent_at, pdf_url").eq("id", orderId).maybeSingle();
   revalidatePath(`/admin/orders/${orderId}`);
   return { ok: true, sent: !!data?.pdf_sent_at };
+}
+
+/**
+ * Ansh (30 Jul) — pull catalog changes (title, photo, HSN) into this order's
+ * lines. Never touches qty or prices; custom lines skipped.
+ */
+export async function syncOrderFromCatalog(orderId: string): Promise<{ ok: boolean; error?: string; touched?: number }> {
+  try { await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
+  const admin = createAdminClient();
+  const r = await refreshOrderFromCatalog(admin, orderId);
+  if (!r.ok) return { ok: false, error: r.error };
+  revalidatePath(`/admin/orders/${orderId}`);
+  return { ok: true, touched: r.touchedSkus?.length ?? 0 };
 }

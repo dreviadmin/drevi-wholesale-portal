@@ -177,7 +177,7 @@ function OrderDoc({ order, buyer, images }: { order: Order; buyer: PdfBuyer; ima
               )}
               <View style={s.cItem}>
                 <Text style={s.itemTitle}>{it.title}</Text>
-                <Text style={s.sku}>{it.sku}{it.special_request ? "  ·  SPECIAL QTY REQUEST" : ""}</Text>
+                <Text style={s.sku}>{it.sku}{it.hsn ? `  ·  HSN ${it.hsn}` : ""}{it.special_request ? "  ·  SPECIAL QTY REQUEST" : ""}</Text>
               </View>
               <Text style={[s.state, s.cState]}>{stateLabel(it)}</Text>
               <Text style={[s.cQty, { fontSize: 9 }]}>
