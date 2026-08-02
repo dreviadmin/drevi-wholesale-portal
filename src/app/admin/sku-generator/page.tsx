@@ -1,5 +1,6 @@
 import { requireStaff, isAdminRole } from "@/lib/staff";
 import { SkuGeneratorClient } from "./SkuGeneratorClient";
+import { loadVocab } from "@/lib/sku/vocab-live";
 
 export const dynamic = "force-dynamic";
 
@@ -8,5 +9,5 @@ export const dynamic = "force-dynamic";
 // for admins only (receipts are admin-only).
 export default async function SkuGeneratorPage() {
   const staff = await requireStaff();
-  return <SkuGeneratorClient isAdmin={isAdminRole(staff.role)} />;
+  return <SkuGeneratorClient isAdmin={isAdminRole(staff.role)} vocab={await loadVocab()} />;
 }

@@ -10,7 +10,7 @@ import { DEFAULT_HSN } from "@/lib/hsn-default";
 import { palette } from "@/lib/palette";
 import { uuid } from "@/lib/uuid";
 import { formatINR } from "@/lib/format";
-import { CATEGORIES, SIZES, COLOR_GROUPS } from "@/lib/sku/vocab";
+import type { LiveVocab } from "@/lib/sku/vocab-live";
 import { TRAY_KEY, type TrayItem } from "@/app/admin/sku-generator/labels";
 import { resolveGarmentDesign, uploadIdentPhoto, saveDelivery, quickAddVendor, type SupplyBlock } from "./delivery-actions";
 
@@ -57,6 +57,7 @@ export function DeliveryIntake({
   uploadsMessage,
   staleDays,
   hsnOptions,
+  vocab,
 }: {
   vendors: Vendor[];
   knownDesigns: KnownDesign[];
@@ -64,6 +65,7 @@ export function DeliveryIntake({
   uploadsMessage: string;
   staleDays: number;
   hsnOptions: string[];
+  vocab: LiveVocab;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -331,6 +333,7 @@ export function DeliveryIntake({
           uploadsMessage={uploadsMessage}
           staleDays={staleDays}
           hsnOptions={hsnOptions}
+          vocab={vocab}
           onCancel={() => setSheet(null)}
           onDone={(g) => { upsertGarment(g); setSheet(null); setHeaderOpen(false); }}
           flash={flash}
@@ -350,7 +353,7 @@ export function DeliveryIntake({
 // §5.3 — the garment capture sheet: identify · photo · sizes+cost · supply
 // ---------------------------------------------------------------------------
 function GarmentSheet({
-  garment, knownDesigns, uploadsOk, uploadsMessage, staleDays, hsnOptions, onCancel, onDone, flash,
+  garment, knownDesigns, uploadsOk, uploadsMessage, staleDays, hsnOptions, vocab, onCancel, onDone, flash,
 }: {
   garment: Garment;
   knownDesigns: KnownDesign[];
@@ -358,6 +361,7 @@ function GarmentSheet({
   uploadsMessage: string;
   staleDays: number;
   hsnOptions: string[];
+  vocab: LiveVocab;
   onCancel: () => void;
   onDone: (g: Garment) => void;
   flash: (m: string) => void;
@@ -438,7 +442,7 @@ function GarmentSheet({
   const matches = query.trim()
     ? knownDesigns.filter((d) => `${d.baseSku} ${d.color} ${d.title ?? ""}`.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 8)
     : [];
-  const subs = g.cat ? Object.entries((CATEGORIES as Record<string, { subs: Record<string, string> }>)[g.cat]?.subs ?? {}) : [];
+  const subs = g.cat ? Object.entries((vocab.categories as Record<string, { subs: Record<string, string> }>)[g.cat]?.subs ?? {}) : [];
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto" style={{ background: palette.pageBg }}>
@@ -495,7 +499,7 @@ function GarmentSheet({
           <div className="mt-2 p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.12)" }}>
             {label("Category")}
             <div className="flex flex-wrap gap-1">
-              {Object.entries(CATEGORIES).map(([code, c]) => (
+              {Object.entries(vocab.categories).map(([code, c]) => (
                 <button key={code} type="button" onClick={() => setG((s) => ({ ...s, cat: code, sub: undefined }))} className="font-body" style={{ fontSize: 10, padding: "6px 9px", border: `1px solid ${g.cat === code ? palette.black : "rgba(26,26,26,0.15)"}`, background: g.cat === code ? palette.black : "transparent", color: g.cat === code ? palette.ivory : palette.softBlack }}>
                   {(c as { name: string }).name}
                 </button>
@@ -517,7 +521,7 @@ function GarmentSheet({
               <>
                 <div className="mt-2">{label("Colour")}</div>
                 <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
-                  {COLOR_GROUPS.flatMap((grp) => grp.items as readonly (readonly [string, string])[]).map(([code, name]) => (
+                  {vocab.colorGroups.flatMap((grp) => grp.items as readonly (readonly [string, string])[]).map(([code, name]) => (
                     <button key={code} type="button" onClick={() => setG((s) => ({ ...s, newColor: code }))} className="font-body" style={{ fontSize: 9.5, padding: "5px 8px", border: `1px solid ${g.newColor === code ? palette.black : "rgba(26,26,26,0.15)"}`, background: g.newColor === code ? palette.black : "transparent", color: g.newColor === code ? palette.ivory : palette.softBlack }}>
                       {code} · {name as string}
                     </button>
@@ -557,7 +561,7 @@ function GarmentSheet({
         {/* c. Sizes & cost */}
         <div className="font-body uppercase mt-5" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>Sizes &amp; cost</div>
         <div className="flex flex-wrap gap-1.5 mt-2">
-          {Object.keys(SIZES).map((size) => {
+          {Object.keys(vocab.sizes).map((size) => {
             const row = g.sizes.find((s) => s.size === size);
             return (
               <div key={size} className="flex items-center" style={{ border: `1px solid ${row ? palette.black : "rgba(26,26,26,0.15)"}`, background: row ? palette.black : "transparent" }}>

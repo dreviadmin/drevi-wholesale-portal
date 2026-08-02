@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isValidCatSub, ALL_COLOR_CODES, ALL_SIZE_CODES, BASE_SKU_RE } from "@/lib/sku/vocab";
+import { BASE_SKU_RE } from "@/lib/sku/vocab";
+import { validateCatSub, validCodes } from "@/lib/sku/vocab-live";
 import { dualMode, sheetNumberFloor, masterNumberFloor, knownSkuFloor, mirrorOne } from "@/lib/sku/registry-sheet";
 
 export const dynamic = "force-dynamic";
@@ -28,15 +29,16 @@ export async function POST(request: Request) {
 
   const color = (body.color ?? "").trim().toUpperCase();
   const size = (body.size ?? "").trim().toUpperCase();
-  if (!ALL_COLOR_CODES.has(color)) return NextResponse.json({ error: `Unknown color code "${color}"` }, { status: 400 });
-  if (!ALL_SIZE_CODES.has(size)) return NextResponse.json({ error: `Unknown size code "${size}"` }, { status: 400 });
+  const live = await validCodes();
+  if (!live.colors.has(color)) return NextResponse.json({ error: `Unknown color code "${color}"` }, { status: 400 });
+  if (!live.sizes.has(size)) return NextResponse.json({ error: `Unknown size code "${size}"` }, { status: 400 });
 
   let cat = (body.cat ?? "").trim().toUpperCase();
   let sub = (body.sub ?? "").trim().toUpperCase();
   const baseSku = (body.baseSku ?? "").trim().toUpperCase();
 
   if (mode === "new") {
-    if (!isValidCatSub(cat, sub)) return NextResponse.json({ error: `Unknown category/sub-category "${cat}-${sub}"` }, { status: 400 });
+    if (!(await validateCatSub(cat, sub))) return NextResponse.json({ error: `Unknown category/sub-category "${cat}-${sub}"` }, { status: 400 });
   } else {
     if (!BASE_SKU_RE.test(baseSku)) return NextResponse.json({ error: `"${baseSku}" is not a valid base SKU` }, { status: 400 });
     cat = baseSku.split("-")[1];

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Search, X, ScanLine, Copy, QrCode, Printer, Download, Share2, Plus } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
-import { CATEGORIES, COLOR_GROUPS, SIZES, type CategoryCode } from "@/lib/sku/vocab";
+import type { LiveVocab } from "@/lib/sku/vocab-live";
 import { qrPngDataUrl, shareQr, downloadDataUrl, buildRollPdf, printPdf, loadCal, PRINT_PAPER_HINT, TRAY_KEY, type TrayItem } from "./labels";
 import { PrintTab } from "./PrintTab";
 import { palette } from "@/lib/palette";
@@ -24,8 +24,8 @@ const istTime = (iso: string) =>
 
 // Color ranking from the reference: code exact → code prefix → name prefix →
 // code contains → name contains.
-function rankColors(q: string): [string, string][] {
-  const all = COLOR_GROUPS.flatMap((g) => g.items.map(([c, n]) => [c, n] as [string, string]));
+function rankColors(q: string, groups: { name: string; items: [string, string][] }[]): [string, string][] {
+  const all = groups.flatMap((g) => g.items.map(([c, n]) => [c, n] as [string, string]));
   const s = q.trim().toUpperCase();
   if (!s) return all;
   const score = ([code, name]: [string, string]) => {
@@ -40,7 +40,7 @@ function rankColors(q: string): [string, string][] {
   return all.filter((c) => score(c) < 9).sort((a, b) => score(a) - score(b));
 }
 
-export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
+export function SkuGeneratorClient({ isAdmin, vocab }: { isAdmin: boolean; vocab: LiveVocab }) {
   const [tab, setTab] = useState<"generate" | "print">("generate");
 
   // ---- shared state ----
@@ -54,7 +54,7 @@ export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
 
   // ---- generate form ----
   const [mode, setMode] = useState<"new" | "variant">("new");
-  const [cat, setCat] = useState<CategoryCode | "">("");
+  const [cat, setCat] = useState<string | "">("");
   const [sub, setSub] = useState("");
   const [peekNum, setPeekNum] = useState<number | null>(null);
   const [baseQuery, setBaseQuery] = useState("");
@@ -101,7 +101,7 @@ export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
           loadBases();
         } else {
           setMode("new");
-          setCat(parts[1] as CategoryCode);
+          setCat(parts[1] as string);
           setSub(parts[2]);
         }
         if (parts[4]) setSize(parts[4]);
@@ -242,10 +242,10 @@ export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
   });
   const selectStyle = { border: "1px solid rgba(26,26,26,0.2)", padding: "9px 10px", fontSize: 13, background: palette.ivory, width: "100%" } as const;
 
-  const colorList = useMemo(() => rankColors(colorQuery), [colorQuery]);
+  const colorList = useMemo(() => rankColors(colorQuery, vocab.colorGroups), [colorQuery, vocab.colorGroups]);
   const colorName = useMemo(
-    () => COLOR_GROUPS.flatMap((g) => g.items.map(([c, n]) => [c, n] as [string, string])).find(([c]) => c === color)?.[1],
-    [color],
+    () => vocab.colorGroups.flatMap((g) => g.items.map(([c, n]) => [c, n] as [string, string])).find(([c]) => c === color)?.[1],
+    [color, vocab.colorGroups],
   );
 
   const qrActions = (sku: string, extra?: boolean) => (
@@ -294,16 +294,16 @@ export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
               <div>
                 {label("Category")}
-                <select value={cat} onChange={(e) => { setCat(e.target.value as CategoryCode); setSub(""); }} className="font-body" style={selectStyle}>
+                <select value={cat} onChange={(e) => { setCat(e.target.value as string); setSub(""); }} className="font-body" style={selectStyle}>
                   <option value="">Select…</option>
-                  {Object.entries(CATEGORIES).map(([code, c]) => <option key={code} value={code}>{code} — {c.name}</option>)}
+                  {Object.entries(vocab.categories).map(([code, c]) => <option key={code} value={code}>{code} — {c.name}</option>)}
                 </select>
               </div>
               <div>
                 {label("Sub-Category")}
                 <select value={sub} onChange={(e) => setSub(e.target.value)} disabled={!cat} className="font-body disabled:opacity-50" style={selectStyle}>
                   <option value="">Select…</option>
-                  {cat && Object.entries(CATEGORIES[cat].subs).map(([code, name]) => <option key={code} value={code}>{code} — {name}</option>)}
+                  {cat && Object.entries(vocab.categories[cat].subs).map(([code, name]) => <option key={code} value={code}>{code} — {name}</option>)}
                 </select>
               </div>
               <div>
@@ -398,7 +398,7 @@ export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
               {colorOpen && !color && (
                 <div className="absolute z-20 w-full max-h-64 overflow-y-auto" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.15)", boxShadow: "0 8px 24px rgba(26,26,26,0.12)" }}>
                   {colorQuery.trim() === "" ? (
-                    COLOR_GROUPS.map((g) => (
+                    vocab.colorGroups.map((g) => (
                       <div key={g.name}>
                         <div className="font-body uppercase px-3 py-1.5" style={{ fontSize: 8, letterSpacing: "0.16em", color: palette.goldDeep, background: palette.ivoryDeep }}>{g.name}</div>
                         {g.items.map(([code, name]) => (
@@ -423,7 +423,7 @@ export function SkuGeneratorClient({ isAdmin }: { isAdmin: boolean }) {
               {label("Size")}
               <select value={size} onChange={(e) => setSize(e.target.value)} className="font-body" style={selectStyle}>
                 <option value="">Select…</option>
-                {Object.entries(SIZES).map(([code, name]) => <option key={code} value={code}>{code === name ? code : `${code} — ${name}`}</option>)}
+                {Object.entries(vocab.sizes).map(([code, name]) => <option key={code} value={code}>{code === name ? code : `${code} — ${name}`}</option>)}
               </select>
             </div>
           </div>

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isValidCatSub } from "@/lib/sku/vocab";
+import { validateCatSub } from "@/lib/sku/vocab-live";
 import { dualMode, sheetNumberFloor, knownSkuFloor } from "@/lib/sku/registry-sheet";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const cat = (url.searchParams.get("cat") ?? "").trim().toUpperCase();
   const sub = (url.searchParams.get("sub") ?? "").trim().toUpperCase();
-  if (!isValidCatSub(cat, sub)) return NextResponse.json({ error: "Unknown category/sub-category" }, { status: 400 });
+  if (!(await validateCatSub(cat, sub))) return NextResponse.json({ error: "Unknown category/sub-category" }, { status: 400 });
 
   const admin = createAdminClient();
   const { data } = await admin

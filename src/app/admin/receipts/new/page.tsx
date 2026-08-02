@@ -6,6 +6,7 @@ import { fetchAll } from "@/lib/supabase/fetch-all";
 import { receiptIntakeV2, supplyStaleDays } from "@/lib/env";
 import { warnIfUnconfigured } from "@/lib/drive-design";
 import { listKnownHsnCodes } from "@/lib/hsn";
+import { loadVocab } from "@/lib/sku/vocab-live";
 import { captureEnabled, captureDestinationNote } from "@/lib/design-image-store";
 import { ReceiptEditor } from "../ReceiptEditor";
 import { DeliveryIntake } from "./DeliveryIntake";
@@ -99,6 +100,7 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: {
           uploadsOk={captureEnabled()}
           uploadsMessage={captureDestinationNote()}
           hsnOptions={await listKnownHsnCodes()}
+          vocab={await loadVocab()}
           staleDays={supplyStaleDays()}
         />
       </div>
