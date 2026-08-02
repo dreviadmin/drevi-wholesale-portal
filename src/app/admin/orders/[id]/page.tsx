@@ -10,6 +10,8 @@ import { NotesPanel } from "@/components/admin/NotesPanel";
 import { listEntityNotes } from "@/lib/entity-notes";
 import { OrderActions } from "./OrderActions";
 import { EditBuyerButton } from "./EditBuyerButton";
+import { LineHsnEditor } from "./LineHsnEditor";
+import { listKnownHsnCodes } from "@/lib/hsn";
 import { OrderEditor, type PickerProduct } from "./OrderEditor";
 import type { Order } from "@/lib/types";
 import { productionMoqFlag, supplyAge, type SupplyInput } from "@/lib/availability";
@@ -23,6 +25,7 @@ function fmt(iso: string) { return new Date(iso).toLocaleString("en-IN", { day: 
 export default async function AdminOrderDetail({ params }: { params: { id: string } }) {
   const staff = await requireAdminOrRedirect();
   const admin = createAdminClient();
+  const hsnOptions = await listKnownHsnCodes();
   const { data: order } = await admin.from("orders").select("*").eq("id", params.id).maybeSingle();
   if (!order) notFound();
   const o = order as Order;
@@ -171,6 +174,7 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
               <div className="font-display" style={{ fontSize: 14, color: palette.black, fontWeight: 500 }}>{it.title}</div>
               <div className="font-body mt-0.5" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.1em" }}>
                 {it.custom ? "custom item · not on portal" : `${it.sku} · ${it.stock_state}${it.restock_days ? ` · ${it.restock_days}d` : ""}`}{it.special_request ? " · SPECIAL QTY REQUEST" : ""}
+                {!it.custom && <LineHsnEditor orderId={o.id} index={i} hsn={it.hsn ?? null} options={hsnOptions} />}
               </div>
               {moqFlags.get(it.sku) && (
                 <div className="font-body mt-1.5 p-2" style={{ fontSize: 10.5, lineHeight: 1.5, background: "#FBF3E2", color: "#8a6d1a", border: "1px solid rgba(196,163,90,0.4)" }}>

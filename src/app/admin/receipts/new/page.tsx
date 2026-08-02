@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { receiptIntakeV2, supplyStaleDays } from "@/lib/env";
 import { warnIfUnconfigured } from "@/lib/drive-design";
+import { listKnownHsnCodes } from "@/lib/hsn";
 import { captureEnabled, captureDestinationNote } from "@/lib/design-image-store";
 import { ReceiptEditor } from "../ReceiptEditor";
 import { DeliveryIntake } from "./DeliveryIntake";
@@ -97,6 +98,7 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: {
           knownDesigns={knownDesigns}
           uploadsOk={captureEnabled()}
           uploadsMessage={captureDestinationNote()}
+          hsnOptions={await listKnownHsnCodes()}
           staleDays={supplyStaleDays()}
         />
       </div>

@@ -1,6 +1,7 @@
 import { requireAdminOrRedirect } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ManageCatalogView } from "./ManageCatalogView";
+import { listKnownHsnCodes } from "@/lib/hsn";
 import type { WholesaleProduct } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -17,5 +18,5 @@ export default async function ManageCatalogPage() {
     .order("category", { nullsFirst: false })
     .order("title", { nullsFirst: false });
 
-  return <ManageCatalogView products={(products ?? []) as WholesaleProduct[]} />;
+  return <ManageCatalogView products={(products ?? []) as WholesaleProduct[]} hsnOptions={await listKnownHsnCodes()} />;
 }

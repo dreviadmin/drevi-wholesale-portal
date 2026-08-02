@@ -154,3 +154,20 @@ export async function setStockForSku(sku: string, countedQty: number, note: stri
   revalidatePath("/admin/studio");
   return { ok: true, stock: res.stock };
 }
+
+/** Ansh (31 Jul) — one HSN for every size of this design. */
+export async function saveDesignHsn(designId: string, baseSku: string, color: string, hsn: string): Promise<Res> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
+  const value = hsn.trim().slice(0, 12);
+  if (value && !/^[0-9]{2,8}$/.test(value)) return fail("HSN is 2\u20138 digits.");
+  const admin = createAdminClient();
+  const { data: variants } = await admin.from("wholesale_products").select("sku").like("sku", `${baseSku}-%`);
+  const mine = (variants ?? []).filter((v) => v.sku.toUpperCase().endsWith(`-${color.toUpperCase()}`)).map((v) => v.sku);
+  if (mine.length === 0) return fail("No portal variants for this design yet.");
+  const { error } = await admin.from("wholesale_products").update({ hsn: value || null }).in("sku", mine);
+  if (error) return fail(error.message);
+  await writeAuditEvent({ eventType: "catalog_edit", staffUserId: staff.id, notes: `hsn ${value || "(cleared)"} on ${mine.length} variant(s) of ${baseSku}-${color}` });
+  revalidatePath(`/admin/studio/master/${designId}`);
+  return { ok: true };
+}

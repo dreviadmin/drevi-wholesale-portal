@@ -38,6 +38,8 @@ export interface GarmentInput {
   description?: string;
   vendorSku?: string;
   unitCost: number;
+  /** GST classification, captured at goods-in (31 Jul). */
+  hsn?: string;
   sizes: SizeQty[];
   supply?: SupplyBlock;
   /** ident photo, already uploaded via uploadIdentPhoto → design_images id */
@@ -336,10 +338,12 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
       // An app-born design has no catalog row yet — create one so the garment
       // exists as a product. It stays HIDDEN until Rakesh sets specs + price
       // (§6.1: receipt-created designs land at "Awaiting specs").
+      const hsnValue = g.hsn?.trim() && /^[0-9]{2,8}$/.test(g.hsn.trim()) ? g.hsn.trim() : null;
       const { data: existingProduct } = await admin.from("wholesale_products").select("sku").eq("sku", sku).maybeSingle();
       if (!existingProduct) {
         await admin.from("wholesale_products").insert({
           sku,
+          hsn: hsnValue,
           title: g.description?.trim() || null,
           category: null,
           sub_category: null,
@@ -351,6 +355,10 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
           locked_fields: ["wholesale_visible"], // sheet sync must not flip it
           synced_at: new Date().toISOString(),
         });
+      } else if (hsnValue) {
+        // Reorder path: fill the code if the product has none; a differing
+        // existing value is Manage Catalog's to change.
+        await admin.from("wholesale_products").update({ hsn: hsnValue }).eq("sku", sku).is("hsn", null);
       }
 
       // §5.7 — receipts now set last_cost and INCREMENT stock, through the

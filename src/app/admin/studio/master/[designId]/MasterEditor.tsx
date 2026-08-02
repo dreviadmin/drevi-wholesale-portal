@@ -7,7 +7,8 @@ import { ChevronLeft, Check } from "lucide-react";
 import { palette } from "@/lib/palette";
 import { supplyAge } from "@/lib/availability";
 import type { BoardRow } from "@/lib/studio/load";
-import { saveSpecs, savePricing, saveVariant, setStockForSku, togglePortal } from "./actions";
+import { saveSpecs, savePricing, saveVariant, setStockForSku, saveDesignHsn, togglePortal } from "./actions";
+import { HsnInput } from "@/components/admin/HsnInput";
 
 // Master editor client (§12.1). Group-level fields save once per design;
 // size-level rows save per variant. Sheet-owned live prices keep flowing
@@ -21,14 +22,16 @@ interface DesignFields {
   supply?: { supplyMode?: string; vendorStockQty?: number | null; makingDays?: number | null; makingMoq?: number | null; deliveryDays?: number | null; supplyNote?: string };
   supplyUpdatedAt?: string | null;
 }
-interface VariantRow { sku: string; current_qty: number; wholesale_price: number; wholesale_visible: boolean }
+interface VariantRow { sku: string; current_qty: number; wholesale_price: number; wholesale_visible: boolean; hsn?: string | null }
 
-export function MasterEditor({ board, design, variants, lastCost, sheetMrp }: {
+export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn, hsnOptions }: {
   board: BoardRow;
   design: DesignFields;
   variants: VariantRow[];
   lastCost: number;
   sheetMrp: number;
+  hsn: string;
+  hsnOptions: string[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -39,6 +42,7 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp }: {
   const [toast, setToast] = useState<string | null>(null);
   const [specs, setSpecs] = useState({ fabric: design.fabric, handwork: design.handwork, origin: design.origin, specsVerified: design.specsVerified });
   const [pricing, setPricing] = useState({ markupMultiplier: design.markupMultiplier, mrpOverride: design.mrpOverride?.toString() ?? "" });
+  const [hsnValue, setHsnValue] = useState(hsn);
   const [rows, setRows] = useState(variants.map((v) => ({ ...v, qty: String(v.current_qty), ws: String(v.wholesale_price), savedQty: Number(v.current_qty) || 0 })));
 
   function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2400); }
@@ -112,6 +116,17 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp }: {
         <button type="button" disabled={pending} onClick={() => run(() => savePricing(board.id, { markupMultiplier: Number(pricing.markupMultiplier), mrpOverride: pricing.mrpOverride ? Number(pricing.mrpOverride) : null }), "Pricing saved")} className="mt-2 font-body uppercase disabled:opacity-40" style={{ fontSize: 9, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "8px 12px" }}>
           Save pricing
         </button>
+
+        {/* Ansh (31 Jul): one HSN across every size of the design. */}
+        <div className="flex items-end gap-2 mt-3 flex-wrap">
+          <label className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+            <span className="uppercase" style={{ letterSpacing: "0.14em" }}>HSN (all sizes)</span>
+            <div><HsnInput value={hsnValue} onChange={setHsnValue} options={hsnOptions} style={{ width: 110 }} /></div>
+          </label>
+          <button type="button" disabled={pending || hsnValue === hsn} onClick={() => run(() => saveDesignHsn(board.id, board.baseSku, board.color, hsnValue), "HSN saved on all sizes")} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 9, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, padding: "8px 12px" }}>
+            Save HSN
+          </button>
+        </div>
       </div>
 
       {/* Supplier availability — read-only summary; edited on the cost-free

@@ -5,6 +5,7 @@ import { loadDesignDetail } from "@/lib/studio/load";
 import { NotesPanel } from "@/components/admin/NotesPanel";
 import { listEntityNotes } from "@/lib/entity-notes";
 import { MasterEditor } from "./MasterEditor";
+import { listKnownHsnCodes } from "@/lib/hsn";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ export default async function MasterPage({ params }: { params: { designId: strin
     .single();
   const { data: allVariants } = await admin
     .from("wholesale_products")
-    .select("sku, current_qty, wholesale_price, wholesale_visible")
+    .select("sku, current_qty, wholesale_price, wholesale_visible, hsn")
     .like("sku", `${detail.board.baseSku}-%`)
     .order("sku");
   const variants = (allVariants ?? []).filter((v) => v.sku.toUpperCase().endsWith(`-${detail.board.color}`));
@@ -61,6 +62,8 @@ export default async function MasterPage({ params }: { params: { designId: strin
         supplyUpdatedAt: design?.supply_updated_at ?? null,
       }}
       variants={variants}
+      hsn={variants.find((v) => v.hsn)?.hsn ?? ""}
+      hsnOptions={await listKnownHsnCodes()}
       lastCost={lastCost}
       sheetMrp={sheetMrp}
     />

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Search, X, ScanLine, Plus, Minus, Camera, Trash2, ChevronDown, Check, Package, AlertTriangle } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { KeyboardInset } from "@/components/KeyboardInset";
+import { HsnInput } from "@/components/admin/HsnInput";
 import { palette } from "@/lib/palette";
 import { uuid } from "@/lib/uuid";
 import { formatINR } from "@/lib/format";
@@ -34,6 +35,7 @@ interface Garment {
   description: string;
   vendorSku: string;
   unitCost: string;
+  hsn: string;
   sizes: { size: string; qty: number }[];
   supply: SupplyBlock;
   identRef?: string | null;
@@ -44,7 +46,7 @@ interface Garment {
 }
 
 const emptyGarment = (): Garment => ({
-  key: uuid(), description: "", vendorSku: "", unitCost: "", sizes: [], supply: {}, variantSkus: [], isReorder: false,
+  key: uuid(), description: "", vendorSku: "", unitCost: "", hsn: "", sizes: [], supply: {}, variantSkus: [], isReorder: false,
 });
 
 export function DeliveryIntake({
@@ -53,12 +55,14 @@ export function DeliveryIntake({
   uploadsOk,
   uploadsMessage,
   staleDays,
+  hsnOptions,
 }: {
   vendors: Vendor[];
   knownDesigns: KnownDesign[];
   uploadsOk: boolean;
   uploadsMessage: string;
   staleDays: number;
+  hsnOptions: string[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -139,6 +143,7 @@ export function DeliveryIntake({
           description: g.description,
           vendorSku: g.vendorSku,
           unitCost: Number(g.unitCost) || 0,
+          hsn: g.hsn?.trim() || undefined,
           sizes: g.sizes,
           supply: g.supply,
           identImageId: g.identImageId,
@@ -301,6 +306,7 @@ export function DeliveryIntake({
           uploadsOk={uploadsOk}
           uploadsMessage={uploadsMessage}
           staleDays={staleDays}
+          hsnOptions={hsnOptions}
           onCancel={() => setSheet(null)}
           onDone={(g) => { upsertGarment(g); setSheet(null); setHeaderOpen(false); }}
           flash={flash}
@@ -320,13 +326,14 @@ export function DeliveryIntake({
 // §5.3 — the garment capture sheet: identify · photo · sizes+cost · supply
 // ---------------------------------------------------------------------------
 function GarmentSheet({
-  garment, knownDesigns, uploadsOk, uploadsMessage, staleDays, onCancel, onDone, flash,
+  garment, knownDesigns, uploadsOk, uploadsMessage, staleDays, hsnOptions, onCancel, onDone, flash,
 }: {
   garment: Garment;
   knownDesigns: KnownDesign[];
   uploadsOk: boolean;
   uploadsMessage: string;
   staleDays: number;
+  hsnOptions: string[];
   onCancel: () => void;
   onDone: (g: Garment) => void;
   flash: (m: string) => void;
@@ -546,6 +553,7 @@ function GarmentSheet({
         </div>
         <div className="grid grid-cols-2 gap-2 mt-3">
           <div>{label("Unit cost")}<input type="number" min="0" value={g.unitCost} onChange={(e) => setG((s) => ({ ...s, unitCost: e.target.value }))} className="font-body" style={input} /></div>
+          <div>{label("HSN (optional)")}<HsnInput value={g.hsn} onChange={(v) => setG((s) => ({ ...s, hsn: v }))} options={hsnOptions} style={{ ...input, borderBottom: undefined }} /></div>
           <div>{label("Vendor SKU")}<input value={g.vendorSku} onChange={(e) => setG((s) => ({ ...s, vendorSku: e.target.value }))} className="font-body" style={input} /></div>
         </div>
         <div className="mt-2">{label("Name / description")}<input value={g.description} onChange={(e) => setG((s) => ({ ...s, description: e.target.value }))} className="font-body" style={input} /></div>
