@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setOrderStatus, sendInvoice, uploadTrackingSheet, syncOrderFromCatalog, type StageDetails } from "@/app/admin/orders/actions";
-import { sharePdfFile, invoiceFileName, waPhone } from "@/lib/share";
+import { sharePdfFile, downloadPdfFile, invoiceFileName, waPhone } from "@/lib/share";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { OrderStatus } from "@/lib/types";
@@ -82,6 +82,12 @@ export function OrderActions({
     });
   }
 
+  async function downloadInvoice() {
+    if (!pdfUrl) { flash("Generate the invoice first (Send Invoice)"); return; }
+    const r = await downloadPdfFile({ url: pdfUrl, filename: invoiceFileName(orderNumber ?? "order") });
+    flash(r === "saved" ? "Invoice downloaded" : "Download failed — Send Invoice refreshes the file");
+  }
+
   function shareText() {
     return `Drevi order ${orderNumber ?? ""} — total ${total != null ? formatINR(total) : ""}. Invoice PDF: ${pdfUrl}`;
   }
@@ -128,6 +134,7 @@ export function OrderActions({
         {(status === "confirmed" || status === "packed" || status === "out_for_delivery") && btn("Mark Delivered", () => act("delivered"), status === "out_for_delivery")}
         {status !== "cancelled" && btn("Send Invoice", fireInvoice)}
         {status !== "cancelled" && btn("Refresh from Catalog", refreshFromCatalog)}
+        {pdfUrl && btn("Download PDF", downloadInvoice)}
         {pdfUrl && btn("Share PDF", shareInvoice)}
         {pdfUrl && btn("WhatsApp Buyer", shareWhatsAppDirect)}
         {(status === "submitted" || status === "confirmed" || status === "packed") && btn("Cancel", () => act("cancelled", { confirmMsg: "Cancel this order? Stock returns to the shelf if it had left." }))}
