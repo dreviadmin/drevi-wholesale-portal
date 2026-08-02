@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { DEFAULT_HSN } from "@/lib/hsn-default";
 import { getRawCart, getDetailedCart, type RawCartItem } from "@/lib/cart";
 import { getStockState, qtyCap } from "@/lib/stock";
 import { finalizeOrder } from "@/lib/order-finalize";
@@ -166,7 +167,7 @@ export async function submitOrder(_prev: SubmitState, formData: FormData): Promi
   const items: OrderItem[] = cart.lines.map((l) => ({
     sku: l.product.sku,
     title: l.product.title ?? l.product.sku,
-    hsn: l.product.hsn ?? null,
+    hsn: l.product.hsn ?? DEFAULT_HSN,
     unit_price: l.product.wholesale_price,
     qty: l.qty,
     stock_state: l.stockState,

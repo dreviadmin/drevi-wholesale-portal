@@ -110,7 +110,7 @@ interface ProductRow {
   sub_category: string | null;
   color: string | null;
   primary_fabric: string | null;
-  hsn: string | null;
+  hsn?: string;
   wholesale_price: number;
   wholesale_visible: boolean;
   min_order_qty: number | null;
@@ -192,7 +192,9 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
       sub_category: row.sub_category || null,
       color: row.color || null,
       primary_fabric: row.primary_fabric || null,
-      hsn: row.hsn || null,
+      // Only SET hsn when the sheet provides one — no HSN column exists yet,
+      // and `|| null` would wipe every code nightly (31 Jul).
+      ...(row.hsn ? { hsn: row.hsn } : {}),
       wholesale_price: opts.price,
       wholesale_visible: true,
       min_order_qty: toInt(row.min_order_qty),
