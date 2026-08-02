@@ -77,6 +77,7 @@ export const SPACES: Space[] = [
       { label: "nav.orders", href: "/admin/orders" },
       { label: "nav.buyers", href: "/admin/buyers" },
       { label: "nav.manage_catalog", href: "/admin/manage-catalog" },
+      { label: "nav.lovs", href: "/admin/lovs" },
       { label: "nav.audit", href: "/admin/audit" },
       { label: "nav.staff", href: "/admin/staff", roles: SUPER_ONLY },
     ],

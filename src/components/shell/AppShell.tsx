@@ -37,6 +37,7 @@ const ITEM_ICONS: Record<string, typeof Tag> = {
   "/admin/orders": ShoppingBag,
   "/admin/buyers": Users,
   "/admin/manage-catalog": SlidersHorizontal,
+  "/admin/lovs": SlidersHorizontal,
   "/admin/audit": ScrollText,
   "/admin/staff": Shield,
   "/admin/home": House,

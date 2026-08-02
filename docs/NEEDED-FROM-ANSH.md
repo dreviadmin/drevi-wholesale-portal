@@ -75,6 +75,24 @@ Notes:
     button — each entered code joins the shared dropdown. Worth a CA sanity
     check that 6204 fits everything (sarees are sometimes classified 6211).
 
+## Productionization (2 Aug — in progress)
+
+11. **wholesale_photos folder id** — the one remaining input for the photo
+    side: a Shared Drive folder (not My Drive), BASE-COLOR subfolders, shared
+    to `drevi-pipeline-sa@drevi-pipeline.iam.gserviceaccount.com` as Content
+    Manager. The moment you send the id: `DRIVE_DESIGN_FOLDER_ID` gets set,
+    `npm run retrofit:folder-audit` validates the merge, and
+    `node scripts/migrate-photos-to-drive.mjs --write` moves the portal-storage
+    photos in. docs/DRIVE-MAP.md (sent to you) says which file belongs where.
+12. **Cutover imports to prod** run with the same scripts you can preview any
+    time: `node scripts/import-sheet-data.mjs all` (dry-run) — add
+    `--write --prod` on cutover day. Already rehearsed end-to-end on dev:
+    25 vendors, 162 list values, 30 historical receipts (171 lines, no stock
+    movements — history only), pricing provenance on 169 SKUs, spec fields +
+    120 copy drafts on designs. Occasion hints / meta title / meta description
+    columns are empty in the sheet — the importer picks them up whenever
+    Rakesh fills them.
+
 ## Small choices whenever you look
 
 7. **Brand model for FASHN** defaults to the `Model-a` folder; set

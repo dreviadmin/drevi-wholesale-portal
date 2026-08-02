@@ -29,6 +29,7 @@ const STRINGS = {
     "nav.orders": "Orders",
     "nav.buyers": "Buyers",
     "nav.manage_catalog": "Manage Catalog",
+    "nav.lovs": "Lists",
     "nav.audit": "Audit Log",
     "nav.staff": "Staff",
     // home cockpit
