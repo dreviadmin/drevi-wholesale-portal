@@ -98,8 +98,10 @@ async function importLovs() {
 // ── receipts (Receipts!A3+) — history only, NO ledger writes ─────────────
 async function importReceipts() {
   const rows = await readRange("Receipts!A3:O2000");
+  const dropped = [];
   const lines = rows
-    .map((r) => ({
+    .map((r, i) => ({
+      row: i + 3,
       sku: String(r[0] ?? "").trim().toUpperCase(),
       date: ddmmyyyy(r[1]),
       type: String(r[2] ?? "").trim(),
@@ -112,7 +114,12 @@ async function importReceipts() {
       enteredBy: String(r[13] ?? "").trim(),
       gstRate: money(r[14]) || null,
     }))
-    .filter((l) => l.sku && l.qty > 0);
+    .filter((l) => {
+      if (!l.sku) return false; // truly empty row
+      if (l.qty <= 0) { dropped.push(`row ${l.row} ${l.sku}: blank/zero qty`); return false; }
+      if (!l.supplier) { dropped.push(`row ${l.row} ${l.sku}: no supplier`); return false; }
+      return true;
+    });
 
   // Group into one receipt per supplier + date + invoice number.
   const groups = new Map();
@@ -165,6 +172,10 @@ async function importReceipts() {
     if (lErr) console.log(`  ${key} lines FAILED ${lErr.message}`);
   }
   console.log(`receipts: ${lines.length} line(s) in ${groups.size} group(s) · to create ${create} · already imported ${skip}`);
+  if (dropped.length) {
+    console.log(`  ⚠ ${dropped.length} sheet row(s) SKIPPED — fix the cells and re-run (idempotent):`);
+    for (const d of dropped) console.log(`    ${d}`);
+  }
   if (noVendor.size) console.log(`  ⚠ suppliers not in vendors table (run vendors first): ${[...noVendor].join(", ")}`);
   console.log("  NOTE: no stock movements written — history only; current stock already includes these.");
 }
