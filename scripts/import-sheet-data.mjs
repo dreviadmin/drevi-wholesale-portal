@@ -56,10 +56,17 @@ async function importVendors() {
   // The sheet list carries case-duplicates ("Pravni"/"pravni") — first spelling wins.
   const seen = new Set();
   const col = raw.filter((n) => { const k = n.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+  // Master's per-SKU Vendor Name is the canonical vendor source (Ansh, 2 Aug)
+  // — already synced into product_vendor_info, so read it from there.
+  const { data: pvi } = await db.from("product_vendor_info").select("vendor_name").not("vendor_name", "is", null);
+  for (const r of pvi ?? []) {
+    const n = String(r.vendor_name).trim();
+    if (n && !seen.has(n.toLowerCase())) { seen.add(n.toLowerCase()); col.push(n); }
+  }
   const { data: existing } = await db.from("vendors").select("id, name");
   const have = new Set((existing ?? []).map((v) => v.name.trim().toLowerCase()));
   const missing = col.filter((n) => !have.has(n.toLowerCase()));
-  console.log(`vendors: sheet ${col.length} · portal ${have.size} · to create ${missing.length}${missing.length ? " → " + missing.join(", ") : ""}`);
+  console.log(`vendors: sheet+master ${col.length} · portal ${have.size} · to create ${missing.length}${missing.length ? " → " + missing.join(", ") : ""}`);
   if (!WRITE) return;
   for (const name of missing) {
     const { error } = await db.from("vendors").insert({ name });
@@ -97,6 +104,11 @@ async function importLovs() {
 
 // ── receipts (Receipts!A3+) — history only, NO ledger writes ─────────────
 async function importReceipts() {
+  // Vendor fallback: Master's per-SKU Vendor Name (synced into
+  // product_vendor_info). A Receipts row's own supplier wins when present.
+  const { data: pvi } = await db.from("product_vendor_info").select("sku, vendor_name");
+  const vendorBySku = new Map((pvi ?? []).filter((r) => r.vendor_name?.trim()).map((r) => [r.sku.toUpperCase(), r.vendor_name.trim()]));
+
   const rows = await readRange("Receipts!A3:O2000");
   const dropped = [];
   const lines = rows
@@ -114,10 +126,11 @@ async function importReceipts() {
       enteredBy: String(r[13] ?? "").trim(),
       gstRate: money(r[14]) || null,
     }))
+    .map((l) => (l.supplier ? l : { ...l, supplier: vendorBySku.get(l.sku) ?? "", supplierFromMaster: true }))
     .filter((l) => {
       if (!l.sku) return false; // truly empty row
       if (l.qty <= 0) { dropped.push(`row ${l.row} ${l.sku}: blank/zero qty`); return false; }
-      if (!l.supplier) { dropped.push(`row ${l.row} ${l.sku}: no supplier`); return false; }
+      if (!l.supplier) { dropped.push(`row ${l.row} ${l.sku}: no supplier on the row AND no Vendor Name in Master`); return false; }
       return true;
     });
 
@@ -140,10 +153,31 @@ async function importReceipts() {
     return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
   };
 
-  let create = 0, skip = 0, noVendor = new Set();
+  let create = 0, skip = 0, topped = 0;
+  const noVendor = new Set();
   for (const [key, ls] of groups) {
     const ref = refFor(key);
-    if (haveRefs.has(ref)) { skip++; continue; }
+    if (haveRefs.has(ref)) {
+      // Group already imported — but rows recovered later (e.g. supplier now
+      // resolved from Master) must still JOIN their receipt, not vanish.
+      const { data: rec } = await db.from("goods_receipts").select("id").eq("client_ref", ref).maybeSingle();
+      if (rec) {
+        const { data: haveLines } = await db.from("goods_receipt_lines").select("sku").eq("receipt_id", rec.id);
+        const present = new Set((haveLines ?? []).map((l) => l.sku.toUpperCase()));
+        const add = ls.filter((l) => !present.has(l.sku));
+        if (add.length) {
+          topped += add.length;
+          if (WRITE) {
+            const { error } = await db.from("goods_receipt_lines").insert(
+              add.map((l) => ({ receipt_id: rec.id, sku: l.sku, description: l.notes || l.type, qty: l.qty, unit_cost: l.cost })),
+            );
+            if (error) console.log(`  top-up ${key} FAILED ${error.message}`);
+          }
+        }
+      }
+      skip++;
+      continue;
+    }
     const vId = vByName.get(ls[0].supplier.toLowerCase());
     if (!vId) { noVendor.add(ls[0].supplier); continue; }
     create++;
@@ -152,7 +186,7 @@ async function importReceipts() {
     const { data: rec, error } = await db
       .from("goods_receipts")
       .insert({
-        receipt_number: `GR-IMP-${String(create).padStart(4, "0")}`,
+        receipt_number: `GR-IMP-${ref.slice(0, 8).toUpperCase()}`,
         vendor_id: vId,
         receipt_date: ls[0].date ?? "2026-07-01",
         bill_amount: null,
@@ -171,7 +205,7 @@ async function importReceipts() {
     );
     if (lErr) console.log(`  ${key} lines FAILED ${lErr.message}`);
   }
-  console.log(`receipts: ${lines.length} line(s) in ${groups.size} group(s) · to create ${create} · already imported ${skip}`);
+  console.log(`receipts: ${lines.length} line(s) in ${groups.size} group(s) · to create ${create} · already imported ${skip} · lines topped up into existing receipts ${topped}`);
   if (dropped.length) {
     console.log(`  ⚠ ${dropped.length} sheet row(s) SKIPPED — fix the cells and re-run (idempotent):`);
     for (const d of dropped) console.log(`    ${d}`);
