@@ -290,3 +290,36 @@ export async function syncOrderFromCatalog(orderId: string): Promise<{ ok: boole
   revalidatePath(`/admin/orders/${orderId}`);
   return { ok: true, touched: r.touchedSkus?.length ?? 0 };
 }
+
+/**
+ * Ansh (31 Jul) — add/modify the HSN on ONE line of a placed order. Also
+ * fills the product's HSN when the product has none (never overwrites a
+ * differing product value — Manage Catalog owns that). Empty value clears.
+ */
+export async function setOrderLineHsn(
+  orderId: string,
+  index: number,
+  hsn: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try { await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
+  const value = hsn.trim().slice(0, 12);
+  if (value && !/^[0-9]{2,8}$/.test(value)) return { ok: false, error: "HSN is 2–8 digits." };
+
+  const admin = createAdminClient();
+  const { data: order } = await admin.from("orders").select("id, status, items").eq("id", orderId).maybeSingle();
+  if (!order) return { ok: false, error: "Order not found." };
+  if (order.status === "cancelled") return { ok: false, error: "Cancelled orders are history." };
+  const items = [...((order.items ?? []) as OrderItem[])];
+  if (index < 0 || index >= items.length) return { ok: false, error: "Line not found — reload the page." };
+
+  items[index] = { ...items[index], hsn: value || null };
+  const { error } = await admin.from("orders").update({ items }).eq("id", orderId);
+  if (error) return { ok: false, error: error.message };
+
+  const sku = items[index].sku;
+  if (value && sku && !(items[index] as { custom?: boolean }).custom) {
+    await admin.from("wholesale_products").update({ hsn: value }).eq("sku", sku).is("hsn", null);
+  }
+  revalidatePath(`/admin/orders/${orderId}`);
+  return { ok: true };
+}

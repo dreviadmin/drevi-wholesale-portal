@@ -10,15 +10,17 @@ import {
 } from "./actions";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { HsnInput } from "@/components/admin/HsnInput";
 import type { WholesaleProduct } from "@/lib/types";
 
-const FIELDS: { key: string; label: string; type?: "number" | "textarea" | "bool" }[] = [
+const FIELDS: { key: string; label: string; type?: "number" | "textarea" | "bool" | "hsn" }[] = [
   { key: "title", label: "Title" },
   { key: "wholesale_price", label: "Wholesale price ₹", type: "number" },
   { key: "category", label: "Category" },
   { key: "sub_category", label: "Sub-category" },
   { key: "color", label: "Colour" },
   { key: "primary_fabric", label: "Fabric" },
+  { key: "hsn", label: "HSN code", type: "hsn" },
   { key: "min_order_qty", label: "MOQ", type: "number" },
   { key: "current_qty", label: "Stock qty", type: "number" },
   { key: "restockable", label: "Restockable", type: "bool" },
@@ -26,7 +28,7 @@ const FIELDS: { key: string; label: string; type?: "number" | "textarea" | "bool
   { key: "description", label: "Description", type: "textarea" },
 ];
 
-export function ManageCatalogView({ products }: { products: WholesaleProduct[] }) {
+export function ManageCatalogView({ products, hsnOptions }: { products: WholesaleProduct[]; hsnOptions: string[] }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<WholesaleProduct | null>(null);
@@ -119,8 +121,7 @@ export function ManageCatalogView({ products }: { products: WholesaleProduct[] }
       {scanning && <QrScanner title="Scan a tag to edit" onScan={handleScan} onClose={() => setScanning(false)} />}
 
       {editing && (
-        <EditModal
-          product={editing}
+        <EditModal hsnOptions={hsnOptions} product={editing}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); router.refresh(); }}
         />
@@ -129,7 +130,7 @@ export function ManageCatalogView({ products }: { products: WholesaleProduct[] }
   );
 }
 
-function EditModal({ product, onClose, onSaved }: { product: WholesaleProduct; onClose: () => void; onSaved: () => void }) {
+function EditModal({ product, hsnOptions, onClose, onSaved }: { product: WholesaleProduct; hsnOptions: string[]; onClose: () => void; onSaved: () => void }) {
   const router = useRouter();
   const [locked, setLocked] = useState<Set<string>>(() => new Set(product.locked_fields ?? []));
   const [values, setValues] = useState<Record<string, string>>(() => {
@@ -260,7 +261,9 @@ function EditModal({ product, onClose, onSaved }: { product: WholesaleProduct; o
                 <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", color: palette.softBlack }}>{f.label}</span>
                 {lockBadge(f.key)}
               </span>
-              {f.type === "textarea" ? (
+              {f.type === "hsn" ? (
+                <HsnInput value={values[f.key] ?? ""} onChange={(v) => setValues((cur) => ({ ...cur, [f.key]: v }))} options={hsnOptions} />
+              ) : f.type === "textarea" ? (
                 <textarea value={values[f.key]} onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))} rows={2} className="font-body bg-transparent outline-none resize-none" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "7px 9px", fontSize: 12.5 }} />
               ) : f.type === "bool" ? (
                 <select value={values[f.key]} onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))} className="font-body" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "7px 9px", fontSize: 12.5, background: palette.ivory }}>
