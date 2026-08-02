@@ -109,6 +109,11 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
                 {it.custom ? "custom item · not on portal" : `${it.sku} · ${it.stock_state}${it.restock_days ? ` · ${it.restock_days}d` : ""}`}{it.special_request ? " · SPECIAL QTY REQUEST" : ""}
                 {!it.custom && <LineHsnEditor orderId={o.id} index={i} hsn={it.hsn ?? null} options={hsnOptions} />}
               </div>
+              {it.original_price != null && it.original_price !== it.unit_price && (
+                <div className="font-body mt-0.5" style={{ fontSize: 9.5, color: palette.mutedGreige }}>
+                  Price override — list {formatINR(it.original_price)}, billed {formatUnitINR(it.unit_price)} (internal note, not on the invoice)
+                </div>
+              )}
               {it.actual_qty != null && (
                 <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep, fontWeight: 600 }}>
                   GST split — actual: {it.actual_qty} pc @ {formatINR((it.qty * it.unit_price) / it.actual_qty)} (billed as {it.qty} × {formatUnitINR(it.unit_price)})
