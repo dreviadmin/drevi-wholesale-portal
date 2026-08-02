@@ -122,3 +122,26 @@ export function downloadVCard(vcard: string, filename: string): void {
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Ansh (31 Jul) — download the invoice as a properly named file. Fetches the
+ * signed URL into a blob so the browser saves "Drevi-Invoice-….pdf" instead of
+ * opening a URL it can't name (cross-origin `download` attrs are ignored).
+ */
+export async function downloadPdfFile(opts: { url: string; filename: string }): Promise<"saved" | "failed"> {
+  try {
+    const res = await fetch(opts.url);
+    if (!res.ok) return "failed";
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = opts.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
+    return "saved";
+  } catch {
+    return "failed";
+  }
+}
