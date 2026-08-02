@@ -164,7 +164,7 @@ export function StockTake() {
                 <div className="min-w-0 flex-1">
                   <div className="font-mono" style={{ fontSize: 11, color: palette.black }}>{l.sku}</div>
                   <div className="font-body truncate" style={{ fontSize: 10, color: palette.mutedGreige }}>
-                    {l.title ?? "—"} · system {l.systemQty}
+                    {l.title ?? "—"} · system {l.systemQty}{l.location ? ` · kept at ${l.location}` : ""}
                   </div>
                 </div>
                 <input

@@ -26,7 +26,7 @@ export default async function MasterPage({ params }: { params: { designId: strin
     .single();
   const { data: allVariants } = await admin
     .from("wholesale_products")
-    .select("sku, current_qty, wholesale_price, wholesale_visible, hsn")
+    .select("sku, current_qty, wholesale_price, wholesale_visible, hsn, location")
     .like("sku", `${detail.board.baseSku}-%`)
     .order("sku");
   const variants = (allVariants ?? []).filter((v) => v.sku.toUpperCase().endsWith(`-${detail.board.color}`));

@@ -21,6 +21,7 @@ const FIELDS: { key: string; label: string; type?: "number" | "textarea" | "bool
   { key: "color", label: "Colour" },
   { key: "primary_fabric", label: "Fabric" },
   { key: "hsn", label: "HSN code", type: "hsn" },
+  { key: "location", label: "Kept at (physical location)" },
   { key: "min_order_qty", label: "MOQ", type: "number" },
   { key: "current_qty", label: "Stock qty", type: "number" },
   { key: "restockable", label: "Restockable", type: "bool" },

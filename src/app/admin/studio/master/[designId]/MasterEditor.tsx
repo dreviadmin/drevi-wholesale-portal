@@ -22,7 +22,7 @@ interface DesignFields {
   supply?: { supplyMode?: string; vendorStockQty?: number | null; makingDays?: number | null; makingMoq?: number | null; deliveryDays?: number | null; supplyNote?: string };
   supplyUpdatedAt?: string | null;
 }
-interface VariantRow { sku: string; current_qty: number; wholesale_price: number; wholesale_visible: boolean; hsn?: string | null }
+interface VariantRow { sku: string; current_qty: number; wholesale_price: number; wholesale_visible: boolean; hsn?: string | null; location?: string | null }
 
 export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn, hsnOptions }: {
   board: BoardRow;
@@ -43,7 +43,7 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
   const [specs, setSpecs] = useState({ fabric: design.fabric, handwork: design.handwork, origin: design.origin, specsVerified: design.specsVerified });
   const [pricing, setPricing] = useState({ markupMultiplier: design.markupMultiplier, mrpOverride: design.mrpOverride?.toString() ?? "" });
   const [hsnValue, setHsnValue] = useState(hsn);
-  const [rows, setRows] = useState(variants.map((v) => ({ ...v, qty: String(v.current_qty), ws: String(v.wholesale_price), savedQty: Number(v.current_qty) || 0 })));
+  const [rows, setRows] = useState(variants.map((v) => ({ ...v, qty: String(v.current_qty), ws: String(v.wholesale_price), savedQty: Number(v.current_qty) || 0, loc: v.location ?? "" })));
 
   function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2400); }
   function run(fn: () => Promise<{ ok: boolean; error?: string }>, done: string) {
@@ -196,7 +196,10 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
             <label className="font-body" style={{ fontSize: 9, color: palette.mutedGreige }}>
               ₹ <input type="number" min="0" value={v.ws} onChange={(e) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ws: e.target.value } : r)))} className="font-body ml-1" style={{ ...inputStyle, width: 84, padding: "5px 7px" }} />
             </label>
-            <button type="button" disabled={pending} onClick={() => run(() => saveVariant(v.sku, { currentQty: Number(v.qty) || 0, wholesalePrice: Number(v.ws) || 0, stockNote: stockNote[v.sku] }), `${v.sku} saved`)} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "6px 9px" }}>
+            <label className="font-body" style={{ fontSize: 9, color: palette.mutedGreige }}>
+              kept at <input value={v.loc} placeholder="Rack B2…" onChange={(e) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, loc: e.target.value } : r)))} className="font-body ml-1" style={{ ...inputStyle, width: 96, padding: "5px 7px" }} />
+            </label>
+            <button type="button" disabled={pending} onClick={() => run(() => saveVariant(v.sku, { currentQty: Number(v.qty) || 0, wholesalePrice: Number(v.ws) || 0, stockNote: stockNote[v.sku], location: v.loc }), `${v.sku} saved`)} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "6px 9px" }}>
               Save
             </button>
             <button type="button" onClick={() => setResetFor((cur) => (cur === v.sku ? null : v.sku))} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.1em", color: palette.mutedGreige, padding: "6px 4px" }} title="Declare a counted quantity">

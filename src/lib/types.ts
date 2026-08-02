@@ -30,6 +30,12 @@ export type AuditEventType =
   | "studio_candidate_rejected"
   | "studio_published";
 
+// Every column a BUYER surface may select. select("*") on buyer pages ships
+// internal fields (location, cost provenance) into the page payload — caught
+// live on 2 Aug when "Rack B2" appeared in the product page's RSC stream.
+export const BUYER_PRODUCT_COLUMNS =
+  "sku, title, description, category, sub_category, color, primary_fabric, wholesale_price, wholesale_visible, min_order_qty, current_qty, restockable, restock_days, image_urls, hsn";
+
 export interface WholesaleProduct {
   hsn?: string | null;
   sku: string;

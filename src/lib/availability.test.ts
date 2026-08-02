@@ -138,7 +138,7 @@ describe("buyer firewall (§9.2)", () => {
     const json = JSON.stringify(
       toBuyerAvailability(computeAvailability({ ...base, ourStock: 0, supply: { ...secret, supplyMode: "made_to_order" } })),
     );
-    for (const forbidden of ["vendorStockQty", "vendor_stock_qty", "makingMoq", "making_moq", "makingDays", "making_days", "deliveryDays", "delivery_days", "supplyNote", "supply_note", "vendor", "cost"]) {
+    for (const forbidden of ["vendorStockQty", "vendor_stock_qty", "makingMoq", "making_moq", "makingDays", "making_days", "deliveryDays", "delivery_days", "supplyNote", "supply_note", "vendor", "cost", "location"]) {
       expect(json).not.toContain(forbidden);
     }
     // The separate components must not be derivable either: only the SUM ships.

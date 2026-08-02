@@ -18,6 +18,7 @@ export interface ScannedSku {
   title: string | null;
   systemQty: number;
   thumb: string | null;
+  location: string | null;
 }
 
 /** Resolve a scanned tag to the SKU and the quantity the system currently believes. */
@@ -28,7 +29,7 @@ export async function lookupSku(raw: string): Promise<{ ok: boolean; error?: str
   const admin = createAdminClient();
   const { data } = await admin
     .from("wholesale_products")
-    .select("sku, title, current_qty, image_urls")
+    .select("sku, title, current_qty, image_urls, location")
     .eq("sku", sku)
     .maybeSingle();
   if (!data) return { ok: false, error: `${sku} is not in the catalog` };
@@ -39,6 +40,7 @@ export async function lookupSku(raw: string): Promise<{ ok: boolean; error?: str
       title: data.title,
       systemQty: Number(data.current_qty) || 0,
       thumb: (data.image_urls as string[] | null)?.[0] ?? null,
+      location: data.location ?? null,
     },
   };
 }

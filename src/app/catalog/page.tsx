@@ -4,6 +4,7 @@ import { getDetailedCart } from "@/lib/cart";
 import { availabilityForSkus } from "@/lib/availability-load";
 import { CatalogView } from "./CatalogView";
 import type { WholesaleProduct } from "@/lib/types";
+import { BUYER_PRODUCT_COLUMNS } from "@/lib/types";
 import type { Availability } from "@/lib/availability";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +23,7 @@ export default async function CatalogPage() {
     supabase.from("buyers").select("id, business_name").eq("email", user.email ?? "").maybeSingle(),
     supabase
       .from("wholesale_products")
-      .select("*")
+      .select(BUYER_PRODUCT_COLUMNS)
       .eq("wholesale_visible", true)
       .order("category", { nullsFirst: false })
       .order("title", { nullsFirst: false }),

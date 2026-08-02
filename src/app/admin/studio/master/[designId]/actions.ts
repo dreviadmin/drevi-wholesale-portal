@@ -83,7 +83,7 @@ export async function savePricing(
 // each save LOCKS the field (existing manual-edit machinery).
 export async function saveVariant(
   sku: string,
-  patch: { currentQty: number; wholesalePrice: number; stockNote?: string },
+  patch: { currentQty: number; wholesalePrice: number; stockNote?: string; location?: string },
 ): Promise<Res> {
   let staff;
   try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
@@ -107,6 +107,8 @@ export async function saveVariant(
     .from("wholesale_products")
     .update({
       wholesale_price: Math.max(0, patch.wholesalePrice),
+      // Physical location (2 Aug) — free text, portal-owned, never locked.
+      location: patch.location?.trim() || null,
       locked_fields: [...locks],
     })
     .eq("sku", sku);
