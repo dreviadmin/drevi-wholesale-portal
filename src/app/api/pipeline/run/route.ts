@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { fetchImageByRef, storeDesignImage } from "@/lib/design-image-store";
-import { runEngine, seedFor, ENGINE_COST, type EngineKind } from "@/lib/pipeline/engines";
+import { fetchImageByRef } from "@/lib/design-image-store";
+import { runEngine, submitFashn, seedFor, type EngineKind } from "@/lib/pipeline/engines";
+import { finishGenerationJob } from "@/lib/pipeline/finish";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// Generation is slow (FASHN polls up to ~4 min). Vercel clamps to the plan's
-// ceiling; localhost runs unclamped.
-export const maxDuration = 300;
+// FASHN submits and returns immediately (poll route finishes it); seedream and
+// openai fit comfortably. Hobby's 60s ceiling is fine for all of them.
+export const maxDuration = 60;
 
 const TYPE_TO_ENGINE: Record<string, EngineKind> = {
   tryon: "fashn",
@@ -91,53 +92,47 @@ export async function POST(request: Request) {
     if (!source) return await failJob("Could not fetch the source image");
     await admin.from("pipeline_jobs").update({ progress: 20 }).eq("id", jobId);
 
-    const prompt = String((claimed.params as Record<string, unknown>)?.prompt ?? "");
+    const params = (claimed.params as Record<string, unknown>) ?? {};
+    const prompt = String(params.prompt ?? "");
+    const seed = seedFor(`${design.base_sku}-${design.color}`);
+
+    // FASHN runs 2–4 min — beyond Vercel Hobby's 60s. Submit here, poll from
+    // /api/pipeline/poll in short separate requests (Ansh's decision, 2 Aug).
+    if (engine === "fashn") {
+      const predictionId = await submitFashn({
+        source: Buffer.from(source.body),
+        contentType: source.contentType,
+        angle: angle.angle,
+        prompt,
+        seed,
+        brandModel: (params.brandModel as string | undefined) ?? null,
+      });
+      await admin
+        .from("pipeline_jobs")
+        .update({ progress: 30, params: { ...params, fashnId: predictionId } })
+        .eq("id", jobId);
+      return NextResponse.json({ ok: true, pending: true, jobId });
+    }
+
     const out = await runEngine({
       engine,
       source: Buffer.from(source.body),
       contentType: source.contentType,
       angle: angle.angle,
       prompt,
-      seed: seedFor(`${design.base_sku}-${design.color}`),
+      seed,
     });
     await admin.from("pipeline_jobs").update({ progress: 80 }).eq("id", jobId);
 
-    const stored = await storeDesignImage({
-      designId: design.id,
-      baseSku: design.base_sku,
-      color: design.color,
-      angle: angle.angle,
-      kind: "gen",
+    const fin = await finishGenerationJob({
+      admin, jobId, engine,
+      design: { id: design.id, base_sku: design.base_sku, color: design.color, drive_folder_id: design.drive_folder_id },
+      angle: { id: angle.id, angle: angle.angle },
       bytes: out,
-      contentType: "image/png",
-      driveFolderId: design.drive_folder_id,
+      createdBy: staff.email,
     });
-    if (stored.driveFolderId && !design.drive_folder_id) {
-      await admin.from("designs").update({ drive_folder_id: stored.driveFolderId }).eq("id", design.id);
-    }
-
-    const { data: row, error } = await admin
-      .from("design_images")
-      .insert({
-        design_id: design.id,
-        angle_id: angle.id,
-        role: "candidate",
-        engine,
-        file_ref: stored.fileRef,
-        file_name: stored.fileName,
-        status: "active",
-        cost_credits: ENGINE_COST[engine] ?? 0,
-        created_by: staff.email,
-      })
-      .select("id")
-      .single();
-    if (error) return await failJob(`Candidate insert failed: ${error.message}`);
-
-    await admin
-      .from("pipeline_jobs")
-      .update({ status: "done", progress: 100, cost_credits: ENGINE_COST[engine] ?? 0, finished_at: new Date().toISOString() })
-      .eq("id", jobId);
-    return NextResponse.json({ ok: true, imageId: row.id });
+    if (!fin.ok) return await failJob(fin.error ?? "Finish failed");
+    return NextResponse.json({ ok: true, imageId: fin.imageId });
   } catch (e) {
     return await failJob(e instanceof Error ? e.message : "Generation failed");
   }

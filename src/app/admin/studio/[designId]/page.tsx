@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { requireAdminOrRedirect } from "@/lib/staff";
 import { loadDesignDetail } from "@/lib/studio/load";
 import { captureEnabled, captureDestinationNote } from "@/lib/design-image-store";
+import { listBrandModels } from "@/lib/pipeline/engines";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { Workbench } from "./Workbench";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +22,9 @@ export default async function WorkbenchPage({ params }: { params: { designId: st
     seedream: !!process.env.FAL_KEY,
     openai_bg: !!process.env.OPENAI_API_KEY,
   };
+  const brandModels = await listBrandModels();
+  const { data: designRow } = await createAdminClient().from("designs").select("brand_model").eq("id", params.designId).maybeSingle();
+
   return (
     <Workbench
       board={detail.board}
@@ -28,6 +33,8 @@ export default async function WorkbenchPage({ params }: { params: { designId: st
       pool={detail.pool}
       activeJobs={detail.activeJobs}
       enginesEnabled={enginesEnabled}
+      brandModels={brandModels}
+      brandModel={designRow?.brand_model ?? ""}
       uploadsOk={captureEnabled()}
       uploadsMessage={captureDestinationNote()}
     />

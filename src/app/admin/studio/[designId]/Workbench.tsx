@@ -10,7 +10,7 @@ import { COPY_MODELS, estimateLabel } from "@/lib/studio/copy-models";
 import type { BoardRow, AngleDetail, CopyDetail, DesignImage } from "@/lib/studio/load";
 import { AI_ANGLES } from "@/lib/studio/state";
 import { JobsTicker } from "../JobsTicker";
-import { setCopyPrompt as setCopyPromptAction, setCopyModel, approveAsIs, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, approveCopy, pushWholesale, pushShopify } from "./actions";
+import { setBrandModel, setCopyPrompt as setCopyPromptAction, setCopyModel, approveAsIs, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, approveCopy, pushWholesale, pushShopify } from "./actions";
 import { uploadSource, importFinished, applyImageDirectly, approveImage, rejectImage, saveCrop, setAngleSource } from "./image-actions";
 import { ImagePicker, CropSheet, CompareSheet } from "./ImageTools";
 
@@ -33,13 +33,15 @@ interface Job { angleId: string | null; type: string; status: string; progress: 
 
 const drivePhoto = (id: string, s = 600) => `/api/drive-photo?id=${encodeURIComponent(id)}&s=${s}`;
 
-export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnabled, uploadsOk, uploadsMessage }: {
+export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnabled, brandModels, brandModel, uploadsOk, uploadsMessage }: {
   board: BoardRow;
   angles: AngleDetail[];
   copy: CopyDetail;
   pool: DesignImage[];
   activeJobs: Job[];
   enginesEnabled: { fashn: boolean; seedream: boolean; openai_bg: boolean };
+  brandModels: string[];
+  brandModel: string;
   uploadsOk: boolean;
   uploadsMessage: string;
 }) {
@@ -71,7 +73,26 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           body: JSON.stringify({ jobId: r.jobId }),
         });
         const body = await res.json().catch(() => ({}));
-        flash(res.ok ? "Candidate ready — review below" : body.error ?? "Generation failed");
+        if (res.ok && body.pending) {
+          // FASHN split flow (2 Aug): short polls until the render lands —
+          // each server call stays well under Vercel's function ceiling.
+          flash("FASHN rendering — usually 2–4 minutes…");
+          const deadline = Date.now() + 6 * 60_000;
+          for (;;) {
+            if (Date.now() > deadline) { flash("Still rendering — check the job strip later"); break; }
+            await new Promise((ok) => setTimeout(ok, 4000));
+            const p = await fetch("/api/pipeline/poll", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ jobId: r.jobId }),
+            });
+            const pb = await p.json().catch(() => ({}));
+            if (pb.done) { flash("Candidate ready — review below"); break; }
+            if (!p.ok) { flash(pb.error ?? "Generation failed"); break; }
+          }
+        } else {
+          flash(res.ok ? "Candidate ready — review below" : body.error ?? "Generation failed");
+        }
       } catch {
         flash("Generation failed — check the job strip");
       }
@@ -197,6 +218,21 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
                 </button>
               );
             })}
+          </div>
+        )}
+        {!isDetail && a.engine === "fashn" && brandModels.length > 0 && (
+          <div className="flex items-center gap-1.5 mt-1.5">
+            <span className="font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.14em", color: palette.mutedGreige }}>Model</span>
+            <select
+              value={brandModel}
+              disabled={pending}
+              onChange={(e) => run(() => setBrandModel(board.id, e.target.value), `Model → ${e.target.value || "default"}`)}
+              className="font-body"
+              style={{ fontSize: 10, border: "1px solid rgba(26,26,26,0.15)", background: "#fff", color: palette.black, padding: "3px 6px" }}
+            >
+              <option value="">Default ({"Model-a"})</option>
+              {brandModels.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
           </div>
         )}
         {isDetail && (

@@ -73,6 +73,7 @@ export function DeliveryIntake({
   const [newVendor, setNewVendor] = useState<{ name: string; phone: string } | null>(null);
   const [receiptDate, setReceiptDate] = useState(() => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }));
   const [billAmount, setBillAmount] = useState("");
+  const [gst, setGst] = useState<{ mode: "kaccha" | "pakka" | null; rate: number | null; inclusive: boolean | null }>({ mode: null, rate: 5, inclusive: true });
   const [notes, setNotes] = useState("");
   const [headerOpen, setHeaderOpen] = useState(true);
   const [garments, setGarments] = useState<Garment[]>([]);
@@ -92,6 +93,7 @@ export function DeliveryIntake({
         if (d.vendorId) setVendorId(d.vendorId);
         if (d.receiptDate) setReceiptDate(d.receiptDate);
         if (d.billAmount) setBillAmount(d.billAmount);
+        if (d.gst) setGst(d.gst);
         if (d.notes) setNotes(d.notes);
         if (Array.isArray(d.garments) && d.garments.length) { setGarments(d.garments); setHeaderOpen(false); }
         if (d.clientRef) clientRef.current = d.clientRef;
@@ -101,10 +103,10 @@ export function DeliveryIntake({
   useEffect(() => {
     try {
       const hasContent = vendorId || garments.length > 0;
-      if (hasContent) localStorage.setItem(DRAFT_KEY, JSON.stringify({ vendorId, receiptDate, billAmount, notes, garments, clientRef: clientRef.current }));
+      if (hasContent) localStorage.setItem(DRAFT_KEY, JSON.stringify({ vendorId, receiptDate, billAmount, notes, gst, garments, clientRef: clientRef.current }));
       else localStorage.removeItem(DRAFT_KEY);
     } catch { /* storage full — non-fatal */ }
-  }, [vendorId, receiptDate, billAmount, notes, garments]);
+  }, [vendorId, receiptDate, billAmount, notes, gst, garments]);
 
   const vendor = vendors.find((v) => v.id === vendorId);
   const totals = useMemo(() => {
@@ -136,6 +138,7 @@ export function DeliveryIntake({
         vendorId,
         receiptDate,
         billAmount: billNum || null,
+        gst: { mode: gst.mode, rate: gst.rate, inclusive: gst.inclusive },
         notes,
         clientRef: clientRef.current,
         garments: garments.map((g) => ({
@@ -216,6 +219,26 @@ export function DeliveryIntake({
             <div>{label("Receipt date (vendor's bill)")}<input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} className="font-body" style={input} /></div>
             <div>{label("Entry date")}<div className="font-body" style={{ ...input, background: palette.ivoryDeep, color: palette.mutedGreige }}>{entryDate}</div></div>
             <div>{label("Bill amount (optional)")}<input type="number" min="0" value={billAmount} onChange={(e) => setBillAmount(e.target.value)} className="font-body" style={input} /></div>
+            <div className="col-span-2 flex flex-wrap items-center gap-1.5">
+              {(["kaccha", "pakka"] as const).map((m) => (
+                <button key={m} type="button" onClick={() => setGst((g) => ({ ...g, mode: g.mode === m ? null : m }))} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", padding: "6px 10px", background: gst.mode === m ? palette.black : "transparent", color: gst.mode === m ? palette.ivory : palette.black, border: gst.mode === m ? "none" : "1px solid rgba(26,26,26,0.2)" }}>
+                  {m === "kaccha" ? "Kaccha" : "Pakka (GST)"}
+                </button>
+              ))}
+              {gst.mode === "pakka" && (
+                <>
+                  {[5, 18].map((r) => (
+                    <button key={r} type="button" onClick={() => setGst((g) => ({ ...g, rate: r }))} className="font-body" style={{ fontSize: 9.5, padding: "6px 9px", background: gst.rate === r ? palette.goldDeep : "transparent", color: gst.rate === r ? palette.ivory : palette.black, border: gst.rate === r ? "none" : "1px solid rgba(26,26,26,0.2)" }}>
+                      {r}%
+                    </button>
+                  ))}
+                  <select value={gst.inclusive === false ? "excl" : "incl"} onChange={(e) => setGst((g) => ({ ...g, inclusive: e.target.value === "incl" }))} className="font-body" style={{ fontSize: 10, border: "1px solid rgba(26,26,26,0.2)", padding: "6px 7px", background: "transparent", color: palette.black }}>
+                    <option value="incl">Incl. GST</option>
+                    <option value="excl">GST on top</option>
+                  </select>
+                </>
+              )}
+            </div>
             <div>{label("Notes")}<input value={notes} onChange={(e) => setNotes(e.target.value)} className="font-body" style={input} /></div>
           </div>
           {vendorId && (

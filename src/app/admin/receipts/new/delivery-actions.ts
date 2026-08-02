@@ -7,6 +7,7 @@ import { writeAuditEvent } from "@/lib/audit";
 import { ALL_ANGLES } from "@/lib/studio/state";
 import { applyMovement } from "@/lib/stock-ledger";
 import { storeDesignImage } from "@/lib/design-image-store";
+import { exGstCost } from "@/lib/gst";
 
 // Retrofit R3 (§5) — "Log delivery": one screen, one motion per garment.
 //
@@ -46,12 +47,19 @@ export interface GarmentInput {
   identImageId?: string;
 }
 
+export interface GstInput {
+  mode: "kaccha" | "pakka" | null;
+  rate?: number | null; // 5 | 18
+  inclusive?: boolean | null;
+}
+
 export interface DeliveryInput {
   vendorId: string;
   receiptDate?: string;
   billAmount?: number | null;
   notes?: string;
   clientRef?: string;
+  gst?: GstInput;
   garments: GarmentInput[];
 }
 
@@ -285,6 +293,9 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
       receipt_date: receiptDate,
       entry_date: today, // §3.3 immutable after insert — never patched later
       bill_amount: input.billAmount ?? null,
+      gst_mode: input.gst?.mode ?? null,
+      gst_rate: input.gst?.mode === "pakka" ? input.gst?.rate ?? null : null,
+      gst_inclusive: input.gst?.mode === "pakka" ? input.gst?.inclusive ?? null : null,
       notes: input.notes?.trim() || null,
       client_ref: clientRef,
       created_by: staff.email,
@@ -373,7 +384,8 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
         createdBy: staff.email,
       });
       await admin.from("product_vendor_info").upsert(
-        { sku, last_cost: Math.round((Number(g.unitCost) || 0) * 100) / 100, last_receipt_date: receiptDate, updated_at: new Date().toISOString() },
+        // Pricing runs on the EX-GST cost (2 Aug) — input credit is claimed.
+        { sku, last_cost: exGstCost(Number(g.unitCost) || 0, { mode: input.gst?.mode ?? null, rate: input.gst?.rate ?? null, inclusive: input.gst?.inclusive ?? null }), last_receipt_date: receiptDate, updated_at: new Date().toISOString() },
         { onConflict: "sku" },
       );
     }

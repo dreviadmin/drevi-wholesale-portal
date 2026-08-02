@@ -185,7 +185,7 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
 
   const { data: dRow } = await admin
     .from("designs")
-    .select("title, category, sub_category, color, fabric, handwork")
+    .select("title, category, sub_category, color, fabric, handwork, brand_model")
     .eq("id", angle.design_id)
     .maybeSingle();
   const promptDesign = {
@@ -210,7 +210,7 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
       angle_id: angle.id,
       // The runner needs the prompt the operator actually saw (§7.1).
       // prompt defaults to '' (0016) — trim-check, or the engines get an empty prompt.
-      params: { prompt: angle.prompt?.trim() ? angle.prompt : defaultAnglePrompt(angle.angle, angle.engine, promptDesign), angle: angle.angle, engine: angle.engine },
+      params: { prompt: angle.prompt?.trim() ? angle.prompt : defaultAnglePrompt(angle.angle, angle.engine, promptDesign), angle: angle.angle, engine: angle.engine, brandModel: dRow?.brand_model ?? null },
       requested_by: staff.email,
       log: "",
     })
@@ -340,6 +340,18 @@ export async function setCopyModel(designId: string, model: string): Promise<Res
     .from("design_copy")
     .upsert({ design_id: designId, model_override: model || null }, { onConflict: "design_id" });
   if (error) return fail(error.message);
+  revalidatePath(`/admin/studio/${designId}`);
+  return { ok: true };
+}
+
+/** Ansh's plan §3 — which brand model fronts this design's FASHN try-ons. */
+export async function setBrandModel(designId: string, model: string): Promise<Res> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
+  const admin = createAdminClient();
+  const { error } = await admin.from("designs").update({ brand_model: model || null }).eq("id", designId);
+  if (error) return fail(error.message);
+  await writeAuditEvent({ eventType: "catalog_edit", staffUserId: staff.id, notes: `brand model → ${model || "(default)"} on design ${designId}` });
   revalidatePath(`/admin/studio/${designId}`);
   return { ok: true };
 }

@@ -103,20 +103,35 @@ async function runSeedream(source: Buffer, contentType: string, prompt: string):
  * Brand-model face reference: a pose image from DREVI_BRAND_MODEL_FOLDER_ID.
  * Prefer a file whose name mentions the angle; else the first image.
  */
-async function brandModelRef(angle: string): Promise<{ bytes: Buffer; contentType: string }> {
+/** Model subfolders available for the per-design selector (Ansh's plan §3). */
+export async function listBrandModels(): Promise<string[]> {
+  const folder = process.env.DREVI_BRAND_MODEL_FOLDER_ID;
+  if (!folder) return [];
+  try {
+    const subs = await listSubfolders(folder);
+    return subs.map((s) => s.name).sort();
+  } catch {
+    return [];
+  }
+}
+
+async function brandModelRef(angle: string, model?: string | null): Promise<{ bytes: Buffer; contentType: string }> {
   const folder = process.env.DREVI_BRAND_MODEL_FOLDER_ID;
   if (!folder) throw new Error("DREVI_BRAND_MODEL_FOLDER_ID not set — needed for FASHN model-swap");
 
-  // The folder holds one subfolder per model ("Model-a", "model-b", …), poses
-  // inside. DREVI_BRAND_MODEL picks which model (default "a"); within it a
-  // pose named for the angle wins, else the first image.
+  // One subfolder per model ("Model-a", "model-b", …), poses inside. The
+  // design's own choice wins, then DREVI_BRAND_MODEL, then the first folder.
+  // Within a model, a pose named for the angle wins, else the first image.
   let files = await listFolderImages(folder);
   if (!files.length) {
     const subs = await listSubfolders(folder);
     if (!subs.length) throw new Error("Brand-model folder has no images or model subfolders");
-    const wanted = (process.env.DREVI_BRAND_MODEL ?? "a").toLowerCase();
+    const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const wanted = norm(model || process.env.DREVI_BRAND_MODEL || "a");
     const sub =
-      subs.find((f) => f.name.toLowerCase().replace(/[^a-z0-9]/g, "").endsWith(wanted)) ?? subs[0];
+      subs.find((f) => norm(f.name) === wanted) ??
+      subs.find((f) => norm(f.name).endsWith(wanted)) ??
+      subs[0];
     files = await listFolderImages(sub.id);
     if (!files.length) throw new Error(`Brand-model subfolder "${sub.name}" has no images`);
   }
@@ -127,9 +142,57 @@ async function brandModelRef(angle: string): Promise<{ bytes: Buffer; contentTyp
   return { bytes: Buffer.from(img.body), contentType: img.contentType };
 }
 
-async function runFashn(source: Buffer, contentType: string, angle: string, prompt: string, seed: number): Promise<Buffer> {
+/**
+ * Submit-only half (Vercel Hobby caps functions at 60s; FASHN runs 2–4 min).
+ * Returns the prediction id; poll with pollFashn from a separate request.
+ */
+export async function submitFashn(args: {
+  source: Buffer; contentType: string; angle: string; prompt: string; seed: number; brandModel?: string | null;
+}): Promise<string> {
   const key = process.env.FASHN_API_KEY!;
-  const face = await brandModelRef(angle);
+  const face = await brandModelRef(args.angle, args.brandModel);
+  const inputs: Record<string, unknown> = {
+    model_image: dataUri(args.source, args.contentType),
+    face_reference: dataUri(face.bytes, face.contentType),
+    face_reference_mode: "match_base",
+    resolution: "2k",
+    generation_mode: "quality",
+    seed: args.seed >>> 0,
+    num_images: 1,
+    output_format: "png",
+  };
+  if (args.prompt) inputs.prompt = args.prompt;
+  const submit = await fetch(`${FASHN_BASE}/run`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model_name: "model-swap", inputs }),
+  });
+  if (!submit.ok) throw new Error(`FASHN /run HTTP ${submit.status}: ${(await submit.text()).slice(0, 300)}`);
+  const { id } = await submit.json();
+  if (!id) throw new Error("FASHN /run returned no prediction id");
+  return id;
+}
+
+/** One status check. status: running | completed | failed. */
+export async function pollFashn(predictionId: string): Promise<{ status: "running" | "completed" | "failed"; bytes?: Buffer; error?: string }> {
+  const key = process.env.FASHN_API_KEY!;
+  const st = await fetch(`${FASHN_BASE}/status/${predictionId}`, { headers: { Authorization: `Bearer ${key}` } });
+  if (!st.ok) return { status: "running" }; // transient — caller retries
+  const body = await st.json();
+  if (body.status === "completed") {
+    const url = body.output?.[0];
+    if (!url) return { status: "failed", error: "FASHN completed with no output" };
+    return { status: "completed", bytes: await download(url) };
+  }
+  if (body.status === "failed" || body.status === "canceled") {
+    return { status: "failed", error: `FASHN ${body.status}: ${JSON.stringify(body.error ?? {}).slice(0, 200)}` };
+  }
+  return { status: "running" };
+}
+
+async function runFashn(source: Buffer, contentType: string, angle: string, prompt: string, seed: number, brandModel?: string | null): Promise<Buffer> {
+  const key = process.env.FASHN_API_KEY!;
+  const face = await brandModelRef(angle, brandModel);
   const inputs: Record<string, unknown> = {
     model_image: dataUri(source, contentType), // source of outfit + pose
     face_reference: dataUri(face.bytes, face.contentType),
@@ -183,10 +246,11 @@ export async function runEngine(args: {
   angle: string;
   prompt: string;
   seed: number;
+  brandModel?: string | null;
 }): Promise<Buffer> {
   const conf = engineConfigured(args.engine);
   if (!conf.ok) throw new Error(`${args.engine} is not configured — ${conf.missing} missing`);
   if (args.engine === "openai_bg") return runOpenAi(args.source, args.contentType, args.prompt);
   if (args.engine === "seedream") return runSeedream(args.source, args.contentType, args.prompt);
-  return runFashn(args.source, args.contentType, args.angle, args.prompt, args.seed);
+  return runFashn(args.source, args.contentType, args.angle, args.prompt, args.seed, args.brandModel);
 }

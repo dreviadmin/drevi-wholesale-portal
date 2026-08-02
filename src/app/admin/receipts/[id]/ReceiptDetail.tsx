@@ -13,6 +13,7 @@ import { palette } from "@/lib/palette";
 interface ReceiptHeader {
   id: string; number: string; vendorId: string; vendorName: string; vendorCity: string | null;
   date: string; billAmount: number | null; notes: string; billUrl: string | null;
+  gstMode: "kaccha" | "pakka" | null; gstRate: number | null; gstInclusive: boolean | null;
   createdBy: string; createdAt: string;
 }
 interface Line { id: string; sku: string; description: string; qty: number; unitCost: number }
@@ -55,6 +56,9 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus }: {
             billAmount: receipt.billAmount != null ? String(receipt.billAmount) : "",
             notes: receipt.notes,
             billPhotoUrl: receipt.billUrl,
+            gstMode: receipt.gstMode,
+            gstRate: receipt.gstRate,
+            gstInclusive: receipt.gstInclusive,
             lines: initialLines,
           }}
         />
@@ -75,6 +79,7 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus }: {
           </div>
           <div className="font-body mt-0.5" style={{ fontSize: 11, color: palette.mutedGreige }}>
             {fmtDate(receipt.date)} · logged by {receipt.createdBy.split("@")[0]}
+            {receipt.gstMode ? ` · ${receipt.gstMode === "pakka" ? `Pakka · GST ${receipt.gstRate ?? "—"}% ${receipt.gstInclusive ? "(incl.)" : "(on top)"}` : "Kaccha"}` : ""}
           </div>
         </div>
         <div className="flex gap-2">

@@ -1,10 +1,10 @@
 # Drive map — where each design's registered files currently live
 
-Generated 2026-07-28T14:52:34.706Z
+Generated 2026-08-02T13:03:19.379Z
 
 The app never moves files. Ids stay valid wherever a file is moved by hand,
 so this is a consolidation aid: it says which scattered file belongs to which SKU.
-Designs with registered files: **118** · files resolved: **382** · unreachable: **0**
+Designs with registered files: **118** · files resolved: **383** · unreachable: **3**
 
 
 ## DD-IWS-DHT-014 · WHT
@@ -122,6 +122,13 @@ Designs with registered files: **118** · files resolved: **382** · unreachable
 | source | front | — | `front.HEIC` | `DD-LEH-FLR-044-L-BLK` |
 | source | side | — | `side.HEIC` | `DD-LEH-FLR-044-L-BLK` |
 
+## DD-LEH-FLR-046 · PBL
+
+| Role | Angle | Engine | File | Current folder |
+|---|---|---|---|---|
+| candidate | front | raw | `front.png` | `DD-LEH-FLR-046-L-PBL` |
+| source | front | — | `IMG_4493.HEIC` | `DD-LEH-FLR-046-L-PBL` |
+
 ## DD-LEH-FLR-046 · PNK
 
 | Role | Angle | Engine | File | Current folder |
@@ -130,13 +137,6 @@ Designs with registered files: **118** · files resolved: **382** · unreachable
 | source | side | — | `side.HEIC` | `DD-LEH-FLR-046-L-PNK` |
 | source | front | — | `front.HEIC` | `DD-LEH-FLR-046-L-PNK` |
 | source | back | — | `back.HEIC` | `DD-LEH-FLR-046-L-PNK` |
-
-## DD-LEH-FLR-046 · PBL
-
-| Role | Angle | Engine | File | Current folder |
-|---|---|---|---|---|
-| candidate | front | raw | `front.png` | `DD-LEH-FLR-046-L-PBL` |
-| source | front | — | `IMG_4493.HEIC` | `DD-LEH-FLR-046-L-PBL` |
 
 ## DD-LEH-FLR-047 · RST
 
@@ -650,10 +650,11 @@ Designs with registered files: **118** · files resolved: **382** · unreachable
 
 | Role | Angle | Engine | File | Current folder |
 |---|---|---|---|---|
+| source | front | — | `side.HEIC` | `DD-SAR-PRD-047-L-GLD` |
 | candidate | front | raw | `front.png` | `DD-SAR-PRD-047-L-GLD` |
+| source | side | — | `side.HEIC` | `DD-SAR-PRD-047-L-GLD` |
 | source | back | — | `back.HEIC` | `DD-SAR-PRD-047-L-GLD` |
 | source | front | — | `front.HEIC` | `DD-SAR-PRD-047-L-GLD` |
-| source | side | — | `side.HEIC` | `DD-SAR-PRD-047-L-GLD` |
 
 ## DD-SAR-PRD-048 · PBL
 
@@ -679,12 +680,6 @@ Designs with registered files: **118** · files resolved: **382** · unreachable
 | source | front | — | `front.HEIC` | `DD-SAR-PRD-050-L-RBL` |
 | source | side | — | `side.HEIC` | `DD-SAR-PRD-050-L-RBL` |
 
-## DD-SAR-PRD-051 · BRN
-
-| Role | Angle | Engine | File | Current folder |
-|---|---|---|---|---|
-| candidate | front | raw | `front.png` | `DD-SAR-PRD-051-L-BRN` |
-
 ## DD-SAR-PRD-051 · PCH
 
 | Role | Angle | Engine | File | Current folder |
@@ -693,6 +688,12 @@ Designs with registered files: **118** · files resolved: **382** · unreachable
 | source | back | — | `back.HEIC` | `DD-SAR-PRD-051-L-PCH` |
 | source | front | — | `front.HEIC` | `DD-SAR-PRD-051-L-PCH` |
 | source | side | — | `side.HEIC` | `DD-SAR-PRD-051-L-PCH` |
+
+## DD-SAR-PRD-051 · BRN
+
+| Role | Angle | Engine | File | Current folder |
+|---|---|---|---|---|
+| candidate | front | raw | `front.png` | `DD-SAR-PRD-051-L-BRN` |
 
 ## DD-SAR-PRD-055 · RBL
 
@@ -947,9 +948,12 @@ Designs with registered files: **118** · files resolved: **382** · unreachable
 
 | Role | Angle | Engine | File | Current folder |
 |---|---|---|---|---|
+| source | front | — | `front.HEIC` | `DD-SUT-PLZ-034-L-FST` |
+| source | front | — | `(unreachable)` | `—` |
+| candidate | side | seedream | `(unreachable)` | `—` |
+| candidate | back | openai_bg | `(unreachable)` | `—` |
 | source | side | — | `side.HEIC` | `DD-SUT-PLZ-034-L-FST` |
 | source | back | — | `back.HEIC` | `DD-SUT-PLZ-034-L-FST` |
-| source | front | — | `front.HEIC` | `DD-SUT-PLZ-034-L-FST` |
 
 ## DD-SUT-PLZ-036 · LIL
 

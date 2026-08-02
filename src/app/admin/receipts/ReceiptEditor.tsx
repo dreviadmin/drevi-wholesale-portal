@@ -21,6 +21,9 @@ export interface ReceiptEditorInitial {
   notes?: string;
   billPhotoUrl?: string | null;
   lines?: EditorLine[];
+  gstMode?: "kaccha" | "pakka" | null;
+  gstRate?: number | null;
+  gstInclusive?: boolean | null;
 }
 
 const DRAFT_KEY = "drevi_receipt_draft_v1";
@@ -44,6 +47,9 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku }: {
   const [newVendor, setNewVendor] = useState({ name: "", phone: "" });
   const [vendorList, setVendorList] = useState(vendors);
   const [receiptDate, setReceiptDate] = useState(initial?.receiptDate ?? istToday());
+  const [gst, setGst] = useState<{ mode: "kaccha" | "pakka" | null; rate: number | null; inclusive: boolean | null }>({
+    mode: initial?.gstMode ?? null, rate: initial?.gstRate ?? 5, inclusive: initial?.gstInclusive ?? true,
+  });
   const [billAmount, setBillAmount] = useState(initial?.billAmount ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [billFile, setBillFile] = useState<File | null>(null);
@@ -163,6 +169,7 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku }: {
       receiptDate,
       billAmount: billAmount.trim() === "" ? null : num(billAmount),
       notes,
+      gst: { mode: gst.mode, rate: gst.rate, inclusive: gst.inclusive },
       lines: lines.map((l) => ({ sku: l.sku, description: l.description, qty: l.qty, unitCost: num(l.unitCost) })),
     };
     setBusy(true);
@@ -243,6 +250,29 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku }: {
 
       {/* 2. Date + bill photo + amount */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+        {/* GST terms (Ansh, 2 Aug) — kaccha/pakka, rate, and whether the
+            entered prices already contain GST. All editable later. */}
+        <div className="sm:col-span-3 flex flex-wrap items-center gap-2 mt-1">
+          {(["kaccha", "pakka"] as const).map((m) => (
+            <button key={m} type="button" onClick={() => setGst((g) => ({ ...g, mode: g.mode === m ? null : m }))} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", padding: "6px 12px", background: gst.mode === m ? "#1A1A1A" : "transparent", color: gst.mode === m ? "#F4EFE6" : "#1A1A1A", border: gst.mode === m ? "none" : "1px solid rgba(26,26,26,0.2)" }}>
+              {m === "kaccha" ? "Kaccha (no bill)" : "Pakka (GST bill)"}
+            </button>
+          ))}
+          {gst.mode === "pakka" && (
+            <>
+              {[5, 18].map((r) => (
+                <button key={r} type="button" onClick={() => setGst((g) => ({ ...g, rate: r }))} className="font-body" style={{ fontSize: 10, padding: "6px 10px", background: gst.rate === r ? "#8a6d1a" : "transparent", color: gst.rate === r ? "#F4EFE6" : "#1A1A1A", border: gst.rate === r ? "none" : "1px solid rgba(26,26,26,0.2)" }}>
+                  {r}%
+                </button>
+              ))}
+              <select value={gst.inclusive === false ? "excl" : "incl"} onChange={(e) => setGst((g) => ({ ...g, inclusive: e.target.value === "incl" }))} className="font-body" style={{ fontSize: 10.5, border: "1px solid rgba(26,26,26,0.2)", padding: "6px 8px", background: "transparent" }}>
+                <option value="incl">Prices include GST</option>
+                <option value="excl">GST paid on top</option>
+              </select>
+            </>
+          )}
+        </div>
+
         <div>
           {label("Receipt date")}
           <input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} className="font-body w-full" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "8px 10px", fontSize: 12.5, background: palette.ivory }} />
