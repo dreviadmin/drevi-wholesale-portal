@@ -66,15 +66,14 @@ Notes:
    list needs your sign-off first (it still holds the old `Drevi-*-2026`
    values; I was permission-blocked from editing the list).
 
-## HSN codes (live on prod as of 30 Jul)
+## HSN codes — DONE (31 Jul)
 
-10. **Fill HSN values.** The plumbing is live on BOTH environments: add an
-    `HSN` column to the Wholesale Master sheet (next sync picks it up), or set
-    per-product HSN in Manage Catalog. Existing active orders pick the codes up
-    automatically at the next catalog sync, or per-order via "Refresh from
-    Catalog". Until values are filled, invoices simply omit the HSN suffix.
-    Typical codes: 6204 (women's suits/ensembles), 6211 (sarees as garments) —
-    confirm with your CA.
+10. ~~Fill HSN values~~ — **6204 is the house default** (your call: women's
+    garments only). Every product, every order line and every stored bill on
+    BOTH environments now carries a code. Override any product in Manage
+    Catalog / the master editor / goods-in, or any order line via its HSN
+    button — each entered code joins the shared dropdown. Worth a CA sanity
+    check that 6204 fits everything (sarees are sometimes classified 6211).
 
 ## Small choices whenever you look
 
