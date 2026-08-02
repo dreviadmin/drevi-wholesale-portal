@@ -6,6 +6,7 @@ import { Search, X, ScanLine, Plus, Minus, Camera, Trash2, ChevronDown, Check, P
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { KeyboardInset } from "@/components/KeyboardInset";
 import { HsnInput } from "@/components/admin/HsnInput";
+import { DEFAULT_HSN } from "@/lib/hsn-default";
 import { palette } from "@/lib/palette";
 import { uuid } from "@/lib/uuid";
 import { formatINR } from "@/lib/format";
@@ -46,7 +47,7 @@ interface Garment {
 }
 
 const emptyGarment = (): Garment => ({
-  key: uuid(), description: "", vendorSku: "", unitCost: "", hsn: "", sizes: [], supply: {}, variantSkus: [], isReorder: false,
+  key: uuid(), description: "", vendorSku: "", unitCost: "", hsn: DEFAULT_HSN, sizes: [], supply: {}, variantSkus: [], isReorder: false,
 });
 
 export function DeliveryIntake({

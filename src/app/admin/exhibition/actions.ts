@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { DEFAULT_HSN } from "@/lib/hsn-default";
 import { requireStaff } from "@/lib/staff";
 import { getStockState } from "@/lib/stock";
 import { finalizeOrder } from "@/lib/order-finalize";
@@ -246,7 +247,7 @@ export async function submitExhibitionOrder(input: {
     items.push({
       sku: p.sku,
       title: p.title ?? p.sku,
-      hsn: p.hsn ?? null,
+      hsn: p.hsn ?? DEFAULT_HSN,
       unit_price: unitPrice,
       qty,
       stock_state: state,
