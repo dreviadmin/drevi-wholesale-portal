@@ -173,7 +173,7 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
             <div className="min-w-0 flex-1">
               <div className="font-display" style={{ fontSize: 14, color: palette.black, fontWeight: 500 }}>{it.title}</div>
               <div className="font-body mt-0.5" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.1em" }}>
-                {it.custom ? "custom item · not on portal" : `${it.sku} · ${it.stock_state}${it.restock_days ? ` · ${it.restock_days}d` : ""}`}{it.special_request ? " · SPECIAL QTY REQUEST" : ""}
+                {it.custom ? "custom item · not on portal" : `${it.sku} · ${(it.stock_state ?? "").replace(/_/g, " ")}${it.restock_days ? ` · ${it.restock_days}d` : ""}`}{it.special_request ? " · SPECIAL QTY REQUEST" : ""}
                 {!it.custom && <LineHsnEditor orderId={o.id} index={i} hsn={it.hsn ?? null} options={hsnOptions} />}
               </div>
               {moqFlags.get(it.sku) && (
