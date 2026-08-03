@@ -77,13 +77,13 @@ Notes:
 
 ## Productionization (2 Aug — in progress)
 
-11. **wholesale_photos folder id** — the one remaining input for the photo
-    side: a Shared Drive folder (not My Drive), BASE-COLOR subfolders, shared
-    to `drevi-pipeline-sa@drevi-pipeline.iam.gserviceaccount.com` as Content
-    Manager. The moment you send the id: `DRIVE_DESIGN_FOLDER_ID` gets set,
-    `npm run retrofit:folder-audit` validates the merge, and
-    `node scripts/migrate-photos-to-drive.mjs --write` moves the portal-storage
-    photos in. docs/DRIVE-MAP.md (sent to you) says which file belongs where.
+11. ~~wholesale_photos folder id~~ — **DONE (3 Aug)**. Folder
+    `1Diepjf1hL1_4MlKAsTBti3ujMqkdLQqr` wired on local + the dev site; audit
+    ran clean (136 matched, 0 ambiguous); portal-storage photos migrated to
+    Drive and verified serving. ANSH-19 is closed on dev. Two folder tidy-ups
+    whenever convenient: rename `DD-GWNBLL-001-PNK` → `DD-GWN-BLL-001-PNK`,
+    and file/remove the loose root file + the `Heavy offwhite- P001` folder.
+    At cutover, the same env var + migration run applies to prod.
 12. **Cutover imports to prod** run with the same scripts you can preview any
     time: `node scripts/import-sheet-data.mjs all` (dry-run) — add
     `--write --prod` on cutover day. Already rehearsed end-to-end on dev:

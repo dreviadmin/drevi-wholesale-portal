@@ -117,7 +117,9 @@ async function importReceipts() {
       sku: String(r[0] ?? "").trim().toUpperCase(),
       date: ddmmyyyy(r[1]),
       type: String(r[2] ?? "").trim(),
-      qty: parseInt(String(r[3] ?? "0").replace(/[^\d]/g, ""), 10) || 0,
+      // Blank qty means "no mention" → 1 piece (Ansh, 3 Aug). An explicit 0
+      // stays 0 and is still reported as a gap.
+      qty: String(r[3] ?? "").trim() === "" ? 1 : parseInt(String(r[3]).replace(/[^\d]/g, ""), 10) || 0,
       cost: money(r[4]),
       gstType: String(r[5] ?? "").trim(),
       supplier: String(r[6] ?? "").trim(),
