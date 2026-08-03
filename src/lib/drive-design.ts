@@ -1,6 +1,7 @@
 import "server-only";
 
 import { readFileSync } from "node:fs";
+import { Readable } from "node:stream";
 import { google, type drive_v3 } from "googleapis";
 import { driveDesignFolderId } from "@/lib/env";
 
@@ -200,7 +201,6 @@ export async function uploadDesignImage(
       });
     }
   }
-  const { Readable } = await import("node:stream");
   const created = await drive.files.create({
     requestBody: { name, parents: [folderId] },
     media: { mimeType: contentType, body: Readable.from(bytes) },

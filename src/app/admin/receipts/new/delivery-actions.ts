@@ -385,7 +385,7 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
       });
       await admin.from("product_vendor_info").upsert(
         // Pricing runs on the EX-GST cost (2 Aug) — input credit is claimed.
-        { sku, last_cost: exGstCost(Number(g.unitCost) || 0, { mode: input.gst?.mode ?? null, rate: input.gst?.rate ?? null, inclusive: input.gst?.inclusive ?? null }), last_receipt_date: receiptDate, updated_at: new Date().toISOString() },
+        { sku, vendor_id: input.vendorId, last_cost: exGstCost(Number(g.unitCost) || 0, { mode: input.gst?.mode ?? null, rate: input.gst?.rate ?? null, inclusive: input.gst?.inclusive ?? null }), last_receipt_date: receiptDate, updated_at: new Date().toISOString() },
         { onConflict: "sku" },
       );
     }

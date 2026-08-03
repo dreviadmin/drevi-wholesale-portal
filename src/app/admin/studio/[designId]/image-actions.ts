@@ -74,7 +74,9 @@ export async function uploadSource(angleId: string, formData: FormData): Promise
     .select("id")
     .single();
   if (error) return fail(error.message);
-  await admin.from("design_angles").update({ source_image_id: row.id, updated_at: new Date().toISOString() }).eq("id", angleId);
+  // source_ref is what the Workbench renders and generators read — keep it in
+  // lockstep with source_image_id (historically only the sheet sync wrote it).
+  await admin.from("design_angles").update({ source_image_id: row.id, source_ref: up.fileRef, updated_at: new Date().toISOString() }).eq("id", angleId);
   revalidatePath(`/admin/studio/${angle.design_id}`);
   return { ok: true, imageId: row.id };
 }
@@ -123,7 +125,7 @@ export async function applyImageDirectly(angleId: string, imageId: string): Prom
   await admin.from("design_images").update({ angle_id: angleId, status: "active" }).eq("id", imageId);
   await admin
     .from("design_angles")
-    .update({ source_image_id: imageId, approved_image_id: imageId, engine: "raw", updated_at: new Date().toISOString() })
+    .update({ source_image_id: imageId, source_ref: img.file_ref, approved_image_id: imageId, engine: "raw", updated_at: new Date().toISOString() })
     .eq("id", angleId);
   if (angle.approved_image_id && angle.approved_image_id !== imageId) {
     await admin.from("design_images").update({ status: "archived" }).eq("id", angle.approved_image_id);
@@ -252,8 +254,10 @@ export async function setAngleSource(angleId: string, imageId: string): Promise<
   const admin = createAdminClient();
   const { data: angle } = await admin.from("design_angles").select("design_id").eq("id", angleId).maybeSingle();
   if (!angle) return fail("Angle not found");
+  const { data: img } = await admin.from("design_images").select("file_ref").eq("id", imageId).maybeSingle();
+  if (!img) return fail("Image not found");
   await admin.from("design_images").update({ angle_id: angleId }).eq("id", imageId);
-  const { error } = await admin.from("design_angles").update({ source_image_id: imageId, updated_at: new Date().toISOString() }).eq("id", angleId);
+  const { error } = await admin.from("design_angles").update({ source_image_id: imageId, source_ref: img.file_ref, updated_at: new Date().toISOString() }).eq("id", angleId);
   if (error) return fail(error.message);
   revalidatePath(`/admin/studio/${angle.design_id}`);
   return { ok: true };
