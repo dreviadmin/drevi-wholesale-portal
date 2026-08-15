@@ -262,3 +262,13 @@ export async function setAngleSource(angleId: string, imageId: string): Promise<
   revalidatePath(`/admin/studio/${angle.design_id}`);
   return { ok: true };
 }
+
+/** Ansh (4 Aug) — pull photos dropped straight into the Drive folder into the picker pool. */
+export async function syncDrivePhotos(designId: string): Promise<Res & { added?: number }> {
+  try { await requireAdmin(); } catch { return fail("Not authorized"); }
+  const { ingestDriveFolder } = await import("@/lib/design-image-store");
+  const res = await ingestDriveFolder(designId);
+  if (!res.ok) return fail(res.error ?? "Sync failed");
+  revalidatePath(`/admin/studio/${designId}`);
+  return { ok: true, added: res.added };
+}

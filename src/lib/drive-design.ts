@@ -111,6 +111,30 @@ export async function listDesignParentFolders(): Promise<{ id: string; name: str
 }
 
 /**
+ * Image files sitting directly in a design's folder (the _archive subfolder is
+ * a separate child folder, so its contents never appear here). Used to pull
+ * photos Ansh drops into wholesale_photos by hand into the picker pool.
+ */
+export async function listFolderImages(folderId: string): Promise<{ id: string; name: string; mimeType: string }[]> {
+  const drive = await getDriveClient();
+  const out: { id: string; name: string; mimeType: string }[] = [];
+  let pageToken: string | undefined;
+  do {
+    const res = await drive.files.list({
+      q: `'${q(folderId)}' in parents and mimeType contains 'image/' and trashed = false`,
+      fields: "nextPageToken, files(id, name, mimeType)",
+      pageSize: 1000,
+      pageToken,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+    for (const f of res.data.files ?? []) if (f.id && f.name) out.push({ id: f.id, name: f.name, mimeType: f.mimeType ?? "image/jpeg" });
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+  return out;
+}
+
+/**
  * Resolve (and only when necessary, create) the folder for a design group.
  * Returns null when DRIVE_DESIGN_FOLDER_ID is empty or the match is ambiguous —
  * callers must treat null as "uploads unavailable", never as "make one up".

@@ -120,7 +120,9 @@ export async function generateCopyForDesign(designId: string, requestedBy: strin
     headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify({
       model,
-      max_tokens: 700,
+      // Opus 5 spends part of this budget on its thinking block before the
+      // JSON — 700 could truncate mid-object, so leave generous headroom.
+      max_tokens: 2000,
       messages: [{ role: "user", content: [...images, { type: "text", text: prompt }] }],
     }),
   });
@@ -129,7 +131,12 @@ export async function generateCopyForDesign(designId: string, requestedBy: strin
     return { ok: false, error: `Anthropic ${res.status}: ${detail.slice(0, 160)}` };
   }
   const body = await res.json();
-  const text: string = body.content?.[0]?.text ?? "";
+  // Opus 5 prepends a `thinking` block — the copy JSON is in the text block(s),
+  // not necessarily content[0].
+  const text: string = ((body.content ?? []) as { type: string; text?: string }[])
+    .filter((c) => c.type === "text")
+    .map((c) => c.text ?? "")
+    .join("");
   let parsed: { title?: string; description?: string; tags?: Record<string, string> };
   try {
     parsed = JSON.parse(text.replace(/^```(json)?|```$/g, "").trim());

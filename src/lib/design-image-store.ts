@@ -5,6 +5,7 @@ import { fetchDriveImage } from "@/lib/drive";
 import {
   uploadsEnabled as driveConfigured,
   ensureDesignFolder,
+  listFolderImages,
   nextFileName,
   uploadDesignImage,
   archiveFile,
@@ -189,4 +190,59 @@ export async function storeAuxPhoto(args: {
   });
   if (error) throw new Error(`Storage upload failed: ${error.message}`);
   return `${SB_PREFIX}${args.bucket}:${args.path}`;
+}
+
+/**
+ * Ansh (4 Aug): photos dropped straight into a design's wholesale_photos
+ * folder never became picker options — the pool reads design_images, and only
+ * uploads made THROUGH the portal wrote rows. This walks the design's Drive
+ * folder and registers every image the DB doesn't know yet (role 'source',
+ * angle-less), so the picker shows what Drive actually holds.
+ */
+export async function ingestDriveFolder(
+  designId: string,
+  opts: { cachedFolders?: { id: string; name: string }[] } = {},
+): Promise<{ ok: boolean; error?: string; added: number; folderId?: string }> {
+  const admin = createAdminClient();
+  const { data: design } = await admin
+    .from("designs")
+    .select("id, base_sku, color, drive_folder_id")
+    .eq("id", designId)
+    .maybeSingle();
+  if (!design) return { ok: false, error: "Design not found", added: 0 };
+
+  let folderId = design.drive_folder_id as string | null;
+  if (!folderId) {
+    const match = await ensureDesignFolder(design.base_sku, design.color, { create: false, cachedFolders: opts.cachedFolders });
+    folderId = match.folderId;
+    if (!folderId) {
+      return { ok: false, added: 0, error: match.rule === "ambiguous" ? "More than one Drive folder matches this design — tidy the folder names first" : "No Drive folder found for this design yet" };
+    }
+    await admin.from("designs").update({ drive_folder_id: folderId }).eq("id", designId);
+  }
+
+  const files = await listFolderImages(folderId);
+  const { data: existing } = await admin.from("design_images").select("file_ref").eq("design_id", designId);
+  const known = new Set((existing ?? []).map((r) => r.file_ref));
+  const fresh = files.filter((f) => !known.has(f.id));
+  if (fresh.length === 0) return { ok: true, added: 0, folderId };
+  // Upsert-ignore + the 0040 unique index make this safe against a concurrent
+  // portal upload or a second sync; select() returns only the rows actually
+  // written, so `added` never overcounts.
+  const { data: written, error } = await admin
+    .from("design_images")
+    .upsert(
+      fresh.map((f) => ({
+        design_id: designId,
+        role: "source",
+        file_ref: f.id,
+        file_name: f.name,
+        status: "active",
+        created_by: "drive-sync",
+      })),
+      { onConflict: "design_id,file_ref", ignoreDuplicates: true },
+    )
+    .select("id");
+  if (error) return { ok: false, added: 0, error: error.message, folderId };
+  return { ok: true, added: (written ?? []).length, folderId };
 }

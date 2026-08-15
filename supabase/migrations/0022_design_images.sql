@@ -50,11 +50,17 @@ alter table design_images alter column role set not null;
 -- still always carry one — the API sets it).
 alter table design_images alter column engine drop not null;
 alter table design_angles add column if not exists source_image_id uuid references design_images(id);
+-- (design_id, file_ref) is unique from 0040 on; two angles sharing one
+-- source_ref must yield ONE row (distinct on + the second not-exists), and a
+-- replay must skip pairs that already exist however they got there.
 insert into design_images (design_id, angle_id, role, file_ref, status, created_by, created_at)
-select da.design_id, da.id, 'source', da.source_ref, 'active', 'retrofit', now()
+select distinct on (da.design_id, da.source_ref)
+       da.design_id, da.id, 'source', da.source_ref, 'active', 'retrofit', now()
   from design_angles da
  where coalesce(da.source_ref, '') <> ''
-   and not exists (select 1 from design_images d where d.angle_id = da.id and d.role = 'source');
+   and not exists (select 1 from design_images d where d.angle_id = da.id and d.role = 'source')
+   and not exists (select 1 from design_images d2 where d2.design_id = da.design_id and d2.file_ref = da.source_ref)
+ order by da.design_id, da.source_ref, da.id;
 update design_angles da set source_image_id = d.id
   from design_images d
  where d.angle_id = da.id and d.role = 'source' and da.source_image_id is null;

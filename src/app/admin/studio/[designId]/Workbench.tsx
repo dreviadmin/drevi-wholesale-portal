@@ -11,7 +11,7 @@ import type { BoardRow, AngleDetail, CopyDetail, DesignImage } from "@/lib/studi
 import { AI_ANGLES } from "@/lib/studio/state";
 import { JobsTicker } from "../JobsTicker";
 import { setBrandModel, setCopyPrompt as setCopyPromptAction, setCopyModel, approveAsIs, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, approveCopy, pushWholesale, pushShopify } from "./actions";
-import { uploadSource, importFinished, applyImageDirectly, approveImage, rejectImage, saveCrop, setAngleSource } from "./image-actions";
+import { uploadSource, importFinished, applyImageDirectly, approveImage, rejectImage, saveCrop, setAngleSource, syncDrivePhotos } from "./image-actions";
 import { ImagePicker, CropSheet, CompareSheet } from "./ImageTools";
 
 // Workbench client (§9). Card per angle: source vs current candidate (both
@@ -379,6 +379,20 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           </div>
         </div>
         <span className="flex items-center gap-3">
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => startTransition(async () => {
+              const r = await syncDrivePhotos(board.id);
+              flash(r.ok ? (r.added ? `${r.added} photo(s) pulled from Drive` : "Drive folder already in sync") : r.error ?? "Sync failed");
+              if (r.ok) router.refresh();
+            })}
+            className="font-body uppercase disabled:opacity-40"
+            style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }}
+            title="Register photos added straight to the design's Drive folder so they appear in the picker"
+          >
+            Sync Drive
+          </button>
           <Link href={`/admin/specs/${board.id}`} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }} title="Specs & supply (no pricing — counter-device safe)">
             Specs
           </Link>
@@ -538,11 +552,23 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
                   <RefreshCw size={11} /> Regen · {estimateLabel(copy.effectiveModel)}
                 </button>
               </div>
+              {!board.specsVerified && (
+                <div className="font-body mt-1.5" style={{ fontSize: 9.5, lineHeight: 1.5, color: "#9C3A31" }}>
+                  Blocked until specs are confirmed — open <Link href={`/admin/studio/master/${board.id}`} style={{ textDecoration: "underline" }}>Product Master</Link> and tick &ldquo;Confirmed by Rakesh&rdquo; under Specs.
+                </div>
+              )}
             </div>
           ) : (
-            <button type="button" disabled={pending || !board.specsVerified} onClick={() => run(() => generateCopy(board.id), "Copy generated")} className="mt-2 flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: palette.black, color: palette.ivory, padding: "8px 11px" }} title={`One vision call · ${estimateLabel(copy.effectiveModel)}`}>
-              Generate copy · {estimateLabel(copy.effectiveModel)}
-            </button>
+            <>
+              <button type="button" disabled={pending || !board.specsVerified} onClick={() => run(() => generateCopy(board.id), "Copy generated")} className="mt-2 flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: palette.black, color: palette.ivory, padding: "8px 11px" }} title={`One vision call · ${estimateLabel(copy.effectiveModel)}`}>
+                Generate copy · {estimateLabel(copy.effectiveModel)}
+              </button>
+              {!board.specsVerified && (
+                <div className="font-body mt-1.5" style={{ fontSize: 9.5, lineHeight: 1.5, color: "#9C3A31" }}>
+                  Blocked until specs are confirmed — open <Link href={`/admin/studio/master/${board.id}`} style={{ textDecoration: "underline" }}>Product Master</Link> and tick &ldquo;Confirmed by Rakesh&rdquo; under Specs.
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

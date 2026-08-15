@@ -15,8 +15,9 @@ export interface CopyModel {
 }
 
 export const COPY_MODELS: CopyModel[] = [
-  { id: "claude-sonnet-4-6", label: "Sonnet 4.6", note: "Default — fast, accurate on specs", estimateInr: 0.6 },
-  { id: "claude-opus-4-8", label: "Opus 4.8", note: "Hero tier — richest description", estimateInr: 3.0 },
+  { id: "claude-opus-5", label: "Opus 5", note: "Default — richest description (Ansh, 4 Aug)", estimateInr: 3.0 },
+  { id: "claude-opus-4-8", label: "Opus 4.8", note: "Previous hero tier", estimateInr: 3.0 },
+  { id: "claude-sonnet-4-6", label: "Sonnet 4.6", note: "Faster, cheaper", estimateInr: 0.6 },
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", note: "Cheapest — batch backfills", estimateInr: 0.15 },
 ];
 
@@ -29,8 +30,7 @@ export function estimateLabel(id: string | null | undefined): string {
   return m.estimateInr < 1 ? `~${Math.round(m.estimateInr * 100)} paise` : `~₹${m.estimateInr.toFixed(2)}`;
 }
 
-/** Tier is a copy-model hint and nothing else (§7.1). */
-export function defaultCopyModel(tier: string | null | undefined): string {
-  if (tier === "hero") return process.env.COPY_MODEL_HERO ?? "claude-opus-4-8";
-  return process.env.COPY_MODEL ?? "claude-sonnet-4-6";
+/** Ansh (4 Aug): copy always defaults to Opus, whatever the tier. */
+export function defaultCopyModel(_tier: string | null | undefined): string {
+  return process.env.COPY_MODEL ?? "claude-opus-5";
 }
