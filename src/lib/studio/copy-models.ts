@@ -31,6 +31,7 @@ export function estimateLabel(id: string | null | undefined): string {
 }
 
 /** Ansh (4 Aug): copy always defaults to Opus, whatever the tier. */
-export function defaultCopyModel(_tier: string | null | undefined): string {
+export function defaultCopyModel(tier: string | null | undefined): string {
+  void tier; // callers still pass it; the tier no longer picks the model
   return process.env.COPY_MODEL ?? "claude-opus-5";
 }
