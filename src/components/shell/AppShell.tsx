@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -45,7 +45,10 @@ const ITEM_ICONS: Record<string, typeof Tag> = {
 
 const ROLE_LABEL: Record<StaffRole, string> = { super_admin: "Super Admin", admin: "Admin", staff: "Staff" };
 
-const MAX_TABS = 4; // + the scan FAB (guide: overflow spaces live as Home tiles)
+// All five spaces fit beside the FAB at 375px (5 × ~61px + 68px FAB). Slicing
+// at 4 used to drop Office from phones entirely — the whole back office was
+// desktop-only the moment everyone became admin (Ansh, 18 Aug).
+const MAX_TABS = 5;
 
 export function AppShell({
   staff,
@@ -59,6 +62,13 @@ export function AppShell({
   const spaces = spacesForRole(staff.role);
   const activeSpace = spaceForPath(pathname, spaces) ?? (pathname === "/admin" || pathname === "/admin/home" ? "home" : null);
   const tabSpaces = spaces.slice(0, MAX_TABS);
+  const subTabs = spaces.find((s) => s.key === activeSpace)?.items ?? [];
+
+  // Keep the active sub-tab in view when the strip overflows (Office has six).
+  const activeSubTabRef = useRef<HTMLAnchorElement | null>(null);
+  useEffect(() => {
+    activeSubTabRef.current?.scrollIntoView({ inline: "center", block: "nearest" });
+  }, [pathname]);
 
   function spaceHome(s: Space): string {
     return s.items[0]?.href ?? "/admin/home";
@@ -128,7 +138,10 @@ export function AppShell({
         </div>
       </aside>
 
-      {/* Mobile brand bar */}
+      {/* Mobile brand bar + the active space's sub-tabs (one sticky block, so
+          the strip never detaches from the bar). Phones used to land on a
+          space's first page with its sibling pages invisible — desktop's rail
+          showed them all. Same nav config now renders on both (Ansh, 18 Aug). */}
       <div className="md:hidden sticky top-0 z-40" style={{ background: palette.black }}>
         <div className="flex items-center justify-between px-4 py-3">
           <Link href="/admin/home" className="font-display" style={{ fontSize: 14, letterSpacing: "0.3em", color: palette.ivory, fontWeight: 600 }}>
@@ -140,6 +153,32 @@ export function AppShell({
             </button>
           </form>
         </div>
+        {subTabs.length > 1 && (
+          <div
+            className="flex overflow-x-auto"
+            style={{ borderTop: "1px solid rgba(196,163,90,0.18)", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}
+          >
+            {subTabs.map((i) => {
+              const active = pathname === i.href || pathname.startsWith(i.href + "/");
+              return (
+                <Link
+                  key={i.href}
+                  href={i.href}
+                  ref={active ? activeSubTabRef : undefined}
+                  className="flex-none font-body uppercase whitespace-nowrap"
+                  style={{
+                    fontSize: 9.5, letterSpacing: "0.14em",
+                    color: active ? palette.ivory : palette.champagne,
+                    borderBottom: `2px solid ${active ? palette.gold : "transparent"}`,
+                    padding: "10px 14px 8px",
+                  }}
+                >
+                  {t(i.label)}
+                </Link>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Body — bottom padding clears the mobile tab bar */}
