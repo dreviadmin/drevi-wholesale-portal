@@ -30,9 +30,9 @@ Living operational docs are in [`docs/`](./docs) — see
 
 | Role | Who | Sees |
 |---|---|---|
-| `super_admin` | Ansh | Everything |
-| `admin` | Arushi, Rakesh | Everything except super-admin staff management |
-| `staff` | Jyoti, Grishma, Riddhi | Shop-floor tools: price checks, catalog, billing wizards |
+| `super_admin` | Ansh | Everything, including user management (`/admin/staff`) |
+| `admin` | Arushi, Rakesh, Grishma, Jyoti, Riddhi | Everything **except** user management (Ansh, 4 Aug: full access for the whole team for now) |
+| `staff` | — (role kept for future hires) | Shop-floor tools: price checks, catalog, billing wizards |
 | buyer | Approved retailers | Buyer catalog, cart, own orders |
 
 Staff log in with a **shortname** (`ansh` → `ansh@drevifashion.com`) or full

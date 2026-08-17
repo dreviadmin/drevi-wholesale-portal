@@ -8,12 +8,12 @@ import { requireAdmin, type StaffCtx } from "@/lib/staff";
 import { generateMemorablePassword } from "@/lib/password";
 import type { AuditEventType, StaffRole } from "@/lib/types";
 
-// Hierarchy (spec + Ansh 2026-05-29): super_admin manages admins + staff;
-// admin manages staff only; nobody manages super_admin accounts from the UI.
+// Hierarchy (Ansh 4 Aug, superseding 2026-05-29): user management is
+// super_admin-only — every other role has the full portal EXCEPT this.
+// Nobody manages super_admin accounts from the UI.
 function canManage(actor: StaffCtx, targetRole: StaffRole): boolean {
   if (targetRole === "super_admin") return false;
-  if (actor.role === "super_admin") return true;
-  return actor.role === "admin" && targetRole === "staff";
+  return actor.role === "super_admin";
 }
 
 async function findAuthUserId(admin: SupabaseClient, email: string): Promise<string | null> {

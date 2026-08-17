@@ -33,7 +33,7 @@ const NAV: NavItem[] = [
   { href: "/admin/orders", label: "Orders", icon: "ShoppingBag", adminOnly: true },
   { href: "/admin/manage-catalog", label: "Manage Catalog", icon: "SlidersHorizontal", adminOnly: true },
   { href: "/admin/audit", label: "Audit Log", icon: "ScrollText", adminOnly: true },
-  { href: "/admin/staff", label: "Staff", icon: "Shield", adminOnly: true },
+  { href: "/admin/staff", label: "Staff", icon: "Shield", superOnly: true },
 ];
 
 const ROLE_LABEL: Record<StaffRole, string> = {
