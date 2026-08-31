@@ -6,6 +6,7 @@ import { DEFAULT_HSN } from "@/lib/hsn-default";
 import { requireStaff } from "@/lib/staff";
 import { getStockState } from "@/lib/stock";
 import { finalizeOrder } from "@/lib/order-finalize";
+import { validateBillDate, billDateToIso } from "@/lib/order-lines-core";
 import { uploadCustomItemImage } from "@/lib/storage";
 import { sendPendingReviewAlert } from "@/lib/interakt";
 import { writeAuditEvent } from "@/lib/audit";
@@ -160,6 +161,9 @@ export async function submitExhibitionOrder(input: {
   clientRef?: string;
   /** UX sprint — staff member taking the order; defaults to the caller. */
   takenBy?: string;
+  /** Past-dated billing (18 Aug) — YYYY-MM-DD, today or earlier. Drives the
+   * order number's day AND submitted_at, so dashboards bucket it correctly. */
+  billDate?: string;
 }): Promise<{ ok: boolean; orderId?: string; orderNumber?: string; pdfUrl?: string; error?: string }> {
   let staff;
   try { staff = await requireStaff(); } catch { return { ok: false, error: "Not authorized." }; }
@@ -307,8 +311,16 @@ export async function submitExhibitionOrder(input: {
   const note = [input.staffNote?.trim() ? `Staff: ${input.staffNote.trim()}` : "", input.buyerNote?.trim() ? `Buyer: ${input.buyerNote.trim()}` : ""].filter(Boolean).join(" | ") || null;
 
   // Day string in IST — Vercel runs UTC, and a post-midnight order must carry
-  // today's Indian date in its number (audit fix).
-  const ymd = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }).replace(/-/g, "");
+  // today's Indian date in its number (audit fix). Past-dated billing (18 Aug):
+  // an explicit bill date (validated, never future) replaces today in both the
+  // number and submitted_at.
+  const todayIst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  let billDate: string | null = null;
+  if (input.billDate?.trim()) {
+    billDate = validateBillDate(input.billDate, todayIst);
+    if (!billDate) return { ok: false, error: "Bill date must be a valid date, today or earlier." };
+  }
+  const ymd = (billDate ?? todayIst).replace(/-/g, "");
 
   // Gapless, race-safe numbering: next_order_number() reserves each number
   // atomically (see migration 0008). A 23505 can now only mean a genuine
@@ -349,6 +361,7 @@ export async function submitExhibitionOrder(input: {
         payment_notes: input.paymentNotes?.trim() || null,
         notes: note,
         client_ref: clientRef,
+        ...(billDate && billDate !== todayIst ? { submitted_at: billDateToIso(billDate) } : {}),
       })
       .select("id")
       .single();

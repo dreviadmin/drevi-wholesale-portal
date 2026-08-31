@@ -178,6 +178,21 @@ copy. Everything is per-design, review-gated, and audited.
   on-screen totals line. Rows are multi-selectable for **bulk actions**
   (Confirm · Mark packed · Mark delivered), each gated to eligible statuses
   with a done/skipped report.
+  - **Line-level confirmation + split billing** (18 Aug) — for wholesale
+    carts, every line carries its own state: **Confirm** (reserves stock for
+    that line immediately), **Hold** (with an availability note the customer
+    sees on their order page), or Pending. **Generate bill** invoices the
+    confirmed-and-unbilled lines as `<order>-B1`, `-B2`, … (snapshotted in
+    `order_bills`, each with its own PDF) — so one order can be billed in
+    batches as held items arrive. A billed line is immutable. Percent
+    discounts apply to every bill; a ₹ discount and the order's advance
+    apply to the first bill only. Held lines are skipped by a whole-order
+    Confirm, and per-line stock flags make double-moves impossible whichever
+    path confirms.
+  - **Past-dated billing** (18 Aug) — the cart's "Bill date" field (and the
+    per-order Generate-bill sheet) accept any past date, never a future one:
+    the order number's day, `submitted_at` and dashboard bucketing all follow
+    the chosen date.
   - **Lifecycle** — `submitted → confirmed → packed → out_for_delivery →
     delivered` (plus `cancelled`; legacy `fulfilled` still recognised).
     Transitions are compare-and-swap guarded server-side so a double-tap can

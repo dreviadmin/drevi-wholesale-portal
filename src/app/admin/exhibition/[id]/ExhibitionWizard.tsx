@@ -109,6 +109,10 @@ export function ExhibitionWizard({
   }, [nb]);
   const [staffNote, setStaffNote] = useState("");
   const [takenBy, setTakenBy] = useState(meId); // UX sprint — who is taking this order
+  // Past-dated billing (18 Aug): empty = today; a chosen past date drives the
+  // order number's day and submitted_at.
+  const todayIst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const [billDate, setBillDate] = useState<string>("");
   const [buyerNote, setBuyerNote] = useState("");
   // Tax + payment (recorded at finalise)
   const [taxMode, setTaxMode] = useState<TaxMode>("none");
@@ -581,6 +585,7 @@ export function ExhibitionWizard({
       discountType: discountType === "none" ? undefined : discountType,
       discountValue: discountType === "none" ? undefined : discountNum,
       advanceAmount: advanceNum, paymentMethod: advanceNum > 0 ? payMethod : undefined, paymentNotes: payNote || undefined,
+      ...(billDate && billDate !== todayIst ? { billDate } : {}),
     };
     // One key for this order across every retry / offline replay (idempotency).
     const clientRef = orderRefRef.current ?? (orderRefRef.current = uuid());
@@ -1226,6 +1231,14 @@ export function ExhibitionWizard({
                 <select value={takenBy} onChange={(e) => setTakenBy(e.target.value)} className="font-body bg-transparent outline-none" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "7px 9px", fontSize: 12, color: palette.black }}>
                   {staffList.map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}
                 </select>
+              </label>
+              <label className="flex flex-col gap-1 mt-2"><span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>Bill date — leave empty for today</span>
+                <input type="date" value={billDate} max={todayIst} onChange={(e) => setBillDate(e.target.value)} className="font-body bg-transparent outline-none" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "7px 9px", fontSize: 12, color: palette.black }} />
+                {billDate && billDate !== todayIst && (
+                  <span className="font-body" style={{ fontSize: 10, color: palette.goldDeep }}>
+                    Past-dated: the order number and reports will use {new Date(billDate + "T12:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}.
+                  </span>
+                )}
               </label>
               <label className="flex flex-col gap-1 mt-2"><span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>Staff note</span><input value={staffNote} onChange={(e) => setStaffNote(e.target.value)} className="font-body bg-transparent outline-none" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "7px 9px", fontSize: 12 }} /></label>
               <label className="flex flex-col gap-1"><span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>Buyer note</span><input value={buyerNote} onChange={(e) => setBuyerNote(e.target.value)} className="font-body bg-transparent outline-none" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "7px 9px", fontSize: 12 }} /></label>

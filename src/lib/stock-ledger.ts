@@ -116,16 +116,32 @@ export async function postOrderMovements(
   actor: string | null,
 ): Promise<{ ok: boolean; lines: number; error?: string }> {
   const admin = createAdminClient();
-  const { data: order } = await admin.from("orders").select("id, order_number, items").eq("id", orderId).maybeSingle();
+  const { data: order } = await admin.from("orders").select("id, order_number, items, lines_rev").eq("id", orderId).maybeSingle();
   if (!order) return { ok: false, lines: 0, error: "Order not found" };
 
-  const items = (order.items ?? []) as { sku?: string; qty?: number; custom?: boolean }[];
+  // Line-level billing (18 Aug): stock_moved marks a line whose stock is
+  // already OUT for this order — set by whichever path moved it (a line
+  // confirm or this whole-order confirm), cleared when it returns. Keying both
+  // paths off the same flag means they can never double-move a line. Lines
+  // explicitly on hold stay on the shelf through a whole-order confirm.
+  const items = (order.items ?? []) as {
+    sku?: string; qty?: number; custom?: boolean;
+    line_state?: string | null; stock_moved?: boolean;
+  }[];
   let lines = 0;
-  for (const it of items) {
+  const movedIdx: number[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
     // Custom items are not catalog SKUs and hold no stock.
     if (!it.sku || it.custom) continue;
     const qty = Math.trunc(Number(it.qty) || 0);
     if (qty <= 0) continue;
+    if (direction === "out") {
+      if (it.stock_moved) continue;            // already left at line confirm
+      if (it.line_state === "hold") continue;  // held lines don't ship
+    } else {
+      if (!it.stock_moved) continue;           // never left — nothing to return
+    }
     const res = await applyMovement({
       sku: it.sku,
       delta: direction === "out" ? -qty : qty,
@@ -135,7 +151,29 @@ export async function postOrderMovements(
       note: direction === "out" ? `Order ${order.order_number} confirmed` : `Order ${order.order_number} cancelled — stock returned`,
       createdBy: actor ?? undefined,
     });
-    if (res.ok) lines++;
+    if (res.ok) { lines++; movedIdx.push(i); }
+  }
+  if (movedIdx.length > 0) {
+    // Merge the flags onto a FRESH read, CAS-guarded on lines_rev so a
+    // concurrent line-state write isn't clobbered. The movements are already
+    // posted, so the flags MUST land — after three lost races, write anyway
+    // (a lost hold note is recoverable; a lost stock flag corrupts inventory).
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const { data: fresh } = await admin.from("orders").select("items, lines_rev").eq("id", orderId).maybeSingle();
+      const freshItems = ((fresh?.items ?? items) as typeof items);
+      for (const i of movedIdx) {
+        if (!freshItems[i]) continue;
+        freshItems[i].stock_moved = direction === "out";
+        // A whole-order confirm absorbs explicitly-pending lines (holds were
+        // skipped above) — clear the marker so the chip reads confirmed.
+        if (direction === "out" && freshItems[i].line_state === "pending") freshItems[i].line_state = null;
+      }
+      const rev = Number(fresh?.lines_rev) || 0;
+      let q = admin.from("orders").update({ items: freshItems, lines_rev: rev + 1 }).eq("id", orderId);
+      if (attempt < 3) q = q.eq("lines_rev", rev);
+      const { data: won } = await q.select("id").maybeSingle();
+      if (won) break;
+    }
   }
   return { ok: true, lines };
 }

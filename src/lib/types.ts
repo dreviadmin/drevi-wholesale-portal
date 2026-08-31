@@ -116,6 +116,40 @@ export interface OrderItem {
   // Free-typed line for a piece not (yet) in the portal catalog — never
   // validated against wholesale_products.
   custom?: boolean;
+  // Line-level confirmation (Ansh, 18 Aug). Absent = legacy line that follows
+  // the order status; 'hold' carries an availability note for the customer;
+  // 'pending' is EXPLICIT un-confirmation (a null on a confirmed order would
+  // derive straight back to confirmed).
+  line_state?: "confirmed" | "hold" | "pending" | null;
+  hold_note?: string | null;
+  // Bill id once this line has been billed (order_bills.id) — a billed line is
+  // immutable from the line-state actions.
+  billed_in?: string | null;
+  // True while this line's stock is OUT because of this order — set by
+  // whichever path moved it (line confirm or whole-order confirm), cleared
+  // when it comes back. postOrderMovements keys off it, so the two paths can
+  // never double-move a line.
+  stock_moved?: boolean;
+}
+
+/** One generated bill against an order (0041) — lines are snapshotted. */
+export interface OrderBill {
+  id: string;
+  order_id: string;
+  bill_number: string;
+  seq: number;
+  items: OrderItem[];
+  subtotal: number;
+  discount_amount: number;
+  tax_mode: TaxMode;
+  tax_rate: number | null;
+  tax_amount: number;
+  total: number;
+  advance_applied: number;
+  bill_date: string;
+  pdf_url: string | null;
+  created_by: string | null;
+  created_at: string;
 }
 
 export type DiscountType = "percent" | "absolute";

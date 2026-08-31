@@ -8,6 +8,7 @@ import { ZoomImage } from "@/components/Lightbox";
 import { useSort, SortTh, type SortAccessor } from "@/components/sortable";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { effectiveLineState } from "@/lib/order-lines-core";
 import type { OrderItem, OrderStatus } from "@/lib/types";
 
 export interface DashOrder {
@@ -47,7 +48,7 @@ export interface VendorInfo {
   last_receipt_date: string | null;
 }
 
-type Tab = "products" | "vendors" | "customers" | "reorder";
+type Tab = "products" | "vendors" | "customers" | "reorder" | "pending";
 // UX sprint (29 Jul): month-to-date, 30 days and a custom span join the chips.
 type Range = "today" | "7d" | "30d" | "mtd" | "all" | "custom";
 
@@ -214,6 +215,49 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
   }, [live, buyerById]);
 
+  // ---- Pending lines (18 Aug) ----------------------------------------------
+  // What customers are still owed: every hold/unconfirmed line on an open
+  // order. A "now" view — deliberately independent of the date-range chips.
+  const pendingRows = useMemo(() => {
+    const rows: { order: DashOrder; buyer: DashBuyer | null; item: OrderItem; state: "hold" | "pending"; index: number }[] = [];
+    for (const o of orders) {
+      if (["cancelled", "delivered", "fulfilled"].includes(o.status)) continue;
+      (o.items ?? []).forEach((item, index) => {
+        const st = effectiveLineState(item, o.status);
+        if (st === "hold" || st === "pending") {
+          rows.push({ order: o, buyer: buyerById.get(o.buyer_id) ?? null, item, state: st, index });
+        }
+      });
+    }
+    return rows;
+  }, [orders, buyerById]);
+  const [pendingGroup, setPendingGroup] = useState<"customer" | "product">("customer");
+  const pendingByCustomer = useMemo(() => {
+    const map = new Map<string, { buyer: DashBuyer | null; rows: typeof pendingRows }>();
+    for (const r of pendingRows) {
+      const e = map.get(r.order.buyer_id) ?? { buyer: r.buyer, rows: [] as typeof pendingRows };
+      e.rows.push(r);
+      map.set(r.order.buyer_id, e);
+    }
+    return Array.from(map.values()).sort((a, b) => b.rows.length - a.rows.length);
+  }, [pendingRows]);
+  const pendingByProduct = useMemo(() => {
+    const map = new Map<string, { sku: string; title: string; image: string | null; qty: number; rows: typeof pendingRows }>();
+    for (const r of pendingRows) {
+      const key = (r.item.sku || r.item.title).trim().toUpperCase();
+      const p = productBySku.get(key);
+      const e = map.get(key) ?? {
+        sku: r.item.sku, title: p?.title ?? r.item.title ?? r.item.sku,
+        image: p?.image_urls?.[0] ?? r.item.image_url ?? null,
+        qty: 0, rows: [] as typeof pendingRows,
+      };
+      e.qty += piecesOf(r.item);
+      e.rows.push(r);
+      map.set(key, e);
+    }
+    return Array.from(map.values()).sort((a, b) => b.qty - a.qty);
+  }, [pendingRows, productBySku]);
+
   // ---- Reorder table (Rakesh) ----------------------------------------------
   const soldBySku = useMemo(() => new Map(byProduct.map((r) => [r.sku.trim().toUpperCase(), r])), [byProduct]);
   const vendorNames = useMemo(() => {
@@ -334,6 +378,7 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
         {tabBtn("vendors", "By Vendor")}
         {tabBtn("customers", "By Customer")}
         {tabBtn("reorder", "Reorder")}
+        {tabBtn("pending", pendingRows.length > 0 ? `Pending · ${pendingRows.length}` : "Pending")}
       </div>
 
       {/* Reorder-only controls: search + scan + vendor chips */}
@@ -398,6 +443,71 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
                 ))}
               </tbody>
             </table>
+          )
+        )}
+
+        {tab === "pending" && (
+          pendingRows.length === 0 ? <Empty label="Nothing pending — every open line is confirmed or billed." /> : (
+            <div>
+              <div className="flex items-center gap-1.5 mb-3">
+                {(["customer", "product"] as const).map((g) => (
+                  <button key={g} type="button" onClick={() => setPendingGroup(g)} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", padding: "6px 12px", background: pendingGroup === g ? palette.goldDeep : "transparent", color: pendingGroup === g ? palette.ivory : palette.softBlack, border: pendingGroup === g ? "none" : "1px solid rgba(26,26,26,0.18)" }}>
+                    By {g}
+                  </button>
+                ))}
+                <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>current backlog — not affected by the date chips</span>
+              </div>
+
+              {pendingGroup === "customer" && pendingByCustomer.map((g) => (
+                <div key={g.rows[0].order.buyer_id} className="mb-4">
+                  <div className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>
+                    {g.buyer?.business_name ?? "(unknown buyer)"}
+                    <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige, marginLeft: 8 }}>{g.rows.length} line{g.rows.length === 1 ? "" : "s"} pending</span>
+                  </div>
+                  {g.rows.map((r, i) => (
+                    <div key={`${r.order.id}-${r.index}-${i}`} className="flex items-start justify-between gap-2 py-1.5 pl-2" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
+                      <div className="min-w-0">
+                        <span className="font-body" style={{ fontSize: 12, color: palette.black }}>{r.item.title}</span>
+                        <span className="font-body" style={{ fontSize: 9.5, color: palette.mutedGreige, marginLeft: 6 }}>{r.item.sku}</span>
+                        {r.state === "hold" && (
+                          <div className="font-body" style={{ fontSize: 10.5, color: "#9C3A31" }}>On hold{r.item.hold_note ? ` — ${r.item.hold_note}` : ""}</div>
+                        )}
+                      </div>
+                      <div className="text-right whitespace-nowrap">
+                        <span className="font-body" style={{ fontSize: 11.5, color: palette.softBlack }}>{piecesOf(r.item)} pc</span>
+                        <Link href={`/admin/orders/${r.order.id}`} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.1em", color: palette.goldDeep, marginLeft: 10, textDecoration: "underline" }}>{r.order.order_number}</Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+
+              {pendingGroup === "product" && pendingByProduct.map((g) => (
+                <div key={g.sku + g.title} className="mb-4">
+                  <div className="flex items-center gap-2">
+                    {g.image ? <ZoomImage src={g.image} alt={g.title} width={32} height={40} /> : <div style={{ width: 32, height: 40, background: palette.ivoryDeep }} />}
+                    <div className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>
+                      {g.title}
+                      <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige, marginLeft: 8 }}>{g.qty} pc pending · {g.sku}</span>
+                    </div>
+                  </div>
+                  {g.rows.map((r, i) => (
+                    <div key={`${r.order.id}-${r.index}-${i}`} className="flex items-start justify-between gap-2 py-1.5 pl-2" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
+                      <div className="min-w-0">
+                        <span className="font-body" style={{ fontSize: 12, color: palette.black }}>{r.buyer?.business_name ?? "(unknown buyer)"}</span>
+                        {r.state === "hold" && (
+                          <div className="font-body" style={{ fontSize: 10.5, color: "#9C3A31" }}>On hold{r.item.hold_note ? ` — ${r.item.hold_note}` : ""}</div>
+                        )}
+                      </div>
+                      <div className="text-right whitespace-nowrap">
+                        <span className="font-body" style={{ fontSize: 11.5, color: palette.softBlack }}>{piecesOf(r.item)} pc</span>
+                        <Link href={`/admin/orders/${r.order.id}`} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.1em", color: palette.goldDeep, marginLeft: 10, textDecoration: "underline" }}>{r.order.order_number}</Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
           )
         )}
 

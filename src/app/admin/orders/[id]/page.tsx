@@ -13,7 +13,9 @@ import { EditBuyerButton } from "./EditBuyerButton";
 import { LineHsnEditor } from "./LineHsnEditor";
 import { listKnownHsnCodes } from "@/lib/hsn";
 import { OrderEditor, type PickerProduct } from "./OrderEditor";
-import type { Order } from "@/lib/types";
+import { LineStateControls, GenerateBillBar } from "./LineBilling";
+import { effectiveLineState, billableLines, computeBillTotals } from "@/lib/order-lines-core";
+import type { Order, OrderBill } from "@/lib/types";
 import { productionMoqFlag, supplyAge, type SupplyInput } from "@/lib/availability";
 
 export const dynamic = "force-dynamic";
@@ -29,12 +31,21 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   const { data: order } = await admin.from("orders").select("*").eq("id", params.id).maybeSingle();
   if (!order) notFound();
   const o = order as Order;
-  const [{ data: buyer }, { data: takenBy }] = await Promise.all([
+  const [{ data: buyer }, { data: takenBy }, { data: billRows }] = await Promise.all([
     admin.from("buyers").select("business_name, owner_name, phone, city, gstin, address, transport_details, broker_details").eq("id", o.buyer_id).maybeSingle(),
     o.assisted_by
       ? admin.from("staff_users").select("name, email").eq("id", o.assisted_by).maybeSingle()
       : Promise.resolve({ data: null }),
+    admin.from("order_bills").select("*").eq("order_id", o.id).order("seq"),
   ]);
+  const bills = (billRows ?? []) as OrderBill[];
+  const billNumberById = new Map(bills.map((b) => [b.id, b.bill_number]));
+  const lineFlowLocked = ["cancelled", "delivered", "fulfilled"].includes(o.status);
+  const billable = billableLines(o);
+  const billableTotals = computeBillTotals(billable.map((b) => b.item), o, {
+    discountApplied: bills.reduce((s, b) => s + (Number(b.discount_amount) || 0), 0),
+    advanceApplied: bills.reduce((s, b) => s + (Number(b.advance_applied) || 0), 0),
+  });
 
   // Catalog for the "add item" picker in the order editor (admins only).
   let pickerProducts: PickerProduct[] = [];
@@ -194,6 +205,14 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
                   GST split — actual: {it.actual_qty} pc @ {formatINR((it.qty * it.unit_price) / it.actual_qty)} (billed as {it.qty} × {formatUnitINR(it.unit_price)})
                 </div>
               )}
+              <LineStateControls
+                orderId={o.id}
+                index={i}
+                state={effectiveLineState(it, o.status)}
+                holdNote={it.hold_note ?? null}
+                billNumber={it.billed_in ? billNumberById.get(it.billed_in) ?? null : null}
+                locked={lineFlowLocked}
+              />
             </div>
             <div className="text-right">
               <div className="font-body" style={{ fontSize: 12, color: palette.softBlack }}>{it.qty} × {formatUnitINR(it.unit_price)}</div>
@@ -229,6 +248,36 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
             <span>Balance due</span><span>{formatINR(Math.max(0, o.total_amount - o.advance_amount))}</span>
           </div>
           {o.payment_notes && <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige }}>{o.payment_notes}</div>}
+        </div>
+      )}
+
+      {/* Split billing (18 Aug) — bill the confirmed lines; hold the rest. */}
+      {!lineFlowLocked && billable.length > 0 && (
+        <GenerateBillBar orderId={o.id} billableCount={billable.length} billableTotal={formatINR(billableTotals.total)} />
+      )}
+      {bills.length > 0 && (
+        <div className="mt-5">
+          <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}>Bills against this order</div>
+          {bills.map((b) => (
+            <div key={b.id} className="flex items-center justify-between gap-2 py-2.5" style={{ borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
+              <div className="min-w-0">
+                <div className="font-body" style={{ fontSize: 12.5, fontWeight: 600, color: palette.black }}>{b.bill_number}</div>
+                <div className="font-body" style={{ fontSize: 10.5, color: palette.mutedGreige }}>
+                  {new Date(b.bill_date + "T12:00:00+05:30").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                  {" · "}{(b.items ?? []).length} line{(b.items ?? []).length === 1 ? "" : "s"}
+                  {b.advance_applied > 0 ? ` · advance ${formatINR(b.advance_applied)} applied` : ""}
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>{formatINR(b.total)}</span>
+                {b.pdf_url && (
+                  <a href={b.pdf_url} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.goldDeep, textDecoration: "underline" }}>
+                    PDF
+                  </a>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
