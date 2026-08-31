@@ -62,3 +62,31 @@ Dev data also carries deliberate test artefacts from this verification: order
 `DX-20260717-022` is now cancelled (its stock movements went out and came back),
 `DD-LEH-FLR-050-L-GRN` holds a stock-take reset of 9, and a few designs have
 supply blocks set to exercise the availability states.
+
+## 31 Aug 2026 — full cutover executed (autonomous run, Ansh away)
+
+1. **Backup** — `.local/backups/backup-2026-08-31.json.gz` (1,172 rows + buckets).
+2. **Schema** — `DB_TARGET=prod npm run db:migrate`: full 0001–0042 chain green
+   (incl. 0040 unique design-image index, 0041 order_bills + lines_rev,
+   0042 stock_moved backfill with replay guard).
+3. **Imports** (`--prod --write`) — vendors 24 · LoVs 162 · receipts 32
+   groups / 233 lines (history only, no movements) · master pricing on 192
+   SKUs. 3 sheet rows skipped (no supplier — rows 96/154/198, unchanged ask).
+4. **Code** — dev merged to main (`da14344`, tree identical to dev), pushed;
+   prod redeployed after env so keys are baked.
+5. **Env** — added to prod project: RECEIPT_INTAKE_V2, FASHN/FAL/OPENAI/
+   ANTHROPIC keys, DREVI_BRAND_MODEL_FOLDER_ID, DRIVE_DESIGN_FOLDER_ID,
+   COPY_MODEL=claude-opus-5.
+6. **Studio scaffold** — first post-deploy sheet sync created 215 designs /
+   1,290 angles; master importer re-run patched design fields on 119 designs;
+   Drive ingest linked 140 wholesale_photos folders and registered 875 photos
+   (idempotent re-run: 0/0). 75 designs have no Drive folder yet (photo-gap).
+7. **Regression** — 12 admin routes 200; order page shows line-state chips /
+   HSN / Download; dashboard has the Pending tab; fresh invoice PDF: HSN
+   present, no override leak; Studio engine chips all enabled; Drive photo
+   serving 200. Sheet sync healthy post-deploy (229 synced, HSN-column guard
+   warning as designed). SHEET_SYNC stays ON for ~a month per the 2 Aug plan.
+
+New with this deploy: line-level confirmation + split billing (order_bills),
+past-dated billing, dashboard Pending tab — tested end-to-end on dev the same
+day (see the 18 Aug commit message for the review-fix list).
