@@ -25,7 +25,14 @@ type EnvKey =
   | "DRIVE_INPUT_FOLDER_ID"
   | "SKU_REGISTRY_SHEET_ID"
   | "SKU_REGISTRY_TAB"
-  | "SKU_DUAL_MODE";
+  | "SKU_DUAL_MODE"
+  // Retrofit v1.3 (§3.6) — all optional with in-code defaults:
+  | "RECEIPT_INTAKE_V2"          // 'false' until R9 flips it
+  | "DRIVE_DESIGN_FOLDER_ID"     // EMPTY until ANSH-19; uploads stay disabled
+  | "HANDLING_DAYS"              // 2
+  | "AVAILABILITY_BUFFER_DAYS"   // 3
+  | "LIMITED_THRESHOLD"          // 5
+  | "SUPPLY_STALE_DAYS";         // 60
 
 // Vars Phase 1 needs to run. Interakt (Phase 4) is intentionally excluded.
 const REQUIRED_PHASE_1: EnvKey[] = [
@@ -73,3 +80,16 @@ export const PUBLIC_ENV = {
   supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
   supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
 };
+
+// --- Retrofit v1.3 config (§3.6) -------------------------------------------
+// Optional, with the spec's defaults baked in so nothing breaks unset.
+export const receiptIntakeV2 = () => (process.env.RECEIPT_INTAKE_V2 ?? "false").toLowerCase() === "true";
+export const driveDesignFolderId = () => (process.env.DRIVE_DESIGN_FOLDER_ID ?? "").trim();
+const num = (v: string | undefined, d: number) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : d;
+};
+export const handlingDays = () => num(process.env.HANDLING_DAYS, 2);
+export const availabilityBufferDays = () => num(process.env.AVAILABILITY_BUFFER_DAYS, 3);
+export const limitedThreshold = () => num(process.env.LIMITED_THRESHOLD, 5);
+export const supplyStaleDays = () => num(process.env.SUPPLY_STALE_DAYS, 60);

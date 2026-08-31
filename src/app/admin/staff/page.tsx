@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { requireAdminOrRedirect } from "@/lib/staff";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -6,10 +7,12 @@ import type { StaffUser } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-// Staff management. super_admin manages admins + staff; admin manages staff
-// only. super_admin rows are shown but immutable from the UI.
+// Staff management. Ansh (4 Aug): user management is super_admin-only now —
+// every other role gets the full portal EXCEPT this page. super_admin rows
+// stay immutable from the UI.
 export default async function StaffPage() {
   const actor = await requireAdminOrRedirect();
+  if (actor.role !== "super_admin") redirect("/admin/home");
   const admin = createAdminClient();
   const { data } = await admin.from("staff_users").select("*").order("created_at");
 

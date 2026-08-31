@@ -23,7 +23,12 @@ export function VendorDetail({ vendor, receipts }: { vendor: VendorRow; receipts
   return (
     <>
       <div className="mt-4 flex items-start justify-between gap-3 flex-wrap">
-        <div>
+        <div className="flex items-start gap-3">
+          {vendor.personImageRef && (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={`/api/drive-photo?id=${encodeURIComponent(vendor.personImageRef)}&s=300`} alt={vendor.contactName ?? vendor.name} style={{ width: 64, height: 64, borderRadius: 64, objectFit: "cover", background: palette.ivoryDeep }} />
+          )}
+          <div>
           <h1 className="font-display" style={{ fontSize: 24, fontWeight: 600, color: palette.black }}>
             {vendor.name}
             {!vendor.active && <span className="font-body uppercase ml-2" style={{ fontSize: 9, letterSpacing: "0.14em", color: palette.mutedGreige }}>Inactive</span>}
@@ -33,7 +38,9 @@ export function VendorDetail({ vendor, receipts }: { vendor: VendorRow; receipts
             {waUrl && <a href={waUrl} target="_blank" rel="noreferrer" aria-label="WhatsApp"><MessageCircle size={14} strokeWidth={1.7} color={palette.goldDeep} /></a>}
           </div>
           {vendor.gstin && <div className="font-body mt-0.5" style={{ fontSize: 11.5, color: palette.mutedGreige }}>GSTIN {vendor.gstin}</div>}
+          {vendor.contactName && <div className="font-body mt-0.5" style={{ fontSize: 11.5, color: palette.softBlack }}>Contact · {vendor.contactName}{vendor.email ? ` · ${vendor.email}` : ""}</div>}
           {vendor.address && <div className="font-body mt-0.5" style={{ fontSize: 11.5, color: palette.mutedGreige }}>{vendor.address}</div>}
+          </div>
         </div>
         <button type="button" onClick={() => setEditing(true)} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
           <Pencil size={12} /> Edit
@@ -42,6 +49,14 @@ export function VendorDetail({ vendor, receipts }: { vendor: VendorRow; receipts
 
       {vendor.notes && (
         <div className="mt-4 p-3 font-body" style={{ background: palette.ivoryDeep, fontSize: 12, color: palette.softBlack }}>{vendor.notes}</div>
+      )}
+
+      {vendor.cardImageRef && (
+        <div className="mt-4">
+          <div className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.mutedGreige }}>Business card</div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={`/api/drive-photo?id=${encodeURIComponent(vendor.cardImageRef)}&s=600`} alt="Business card" className="mt-1.5" style={{ maxWidth: 320, width: "100%", border: "1px solid rgba(26,26,26,0.1)" }} />
+        </div>
       )}
 
       <div className="mt-6">

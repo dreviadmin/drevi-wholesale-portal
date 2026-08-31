@@ -5,6 +5,8 @@ import { requireAdminOrRedirect } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { signedReceiptPhotoUrl } from "@/lib/storage";
 import { fetchAll } from "@/lib/supabase/fetch-all";
+import { NotesPanel } from "@/components/admin/NotesPanel";
+import { listEntityNotes } from "@/lib/entity-notes";
 import { ReceiptDetail } from "./ReceiptDetail";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +43,9 @@ export default async function ReceiptDetailPage({ params }: { params: { id: stri
           vendorName: vendor?.name ?? "—",
           vendorCity: vendor?.city ?? null,
           date: rec.receipt_date,
+          gstMode: rec.gst_mode ?? null,
+          gstRate: rec.gst_rate != null ? Number(rec.gst_rate) : null,
+          gstInclusive: rec.gst_inclusive ?? null,
           billAmount: rec.bill_amount != null ? Number(rec.bill_amount) : null,
           notes: rec.notes ?? "",
           billUrl,
@@ -53,6 +58,7 @@ export default async function ReceiptDetailPage({ params }: { params: { id: stri
         vendors={vendors.map((v) => ({ id: v.id, name: v.name, city: v.city }))}
         registrySkus={skus.map((s) => s.variant_sku)}
       />
+      <NotesPanel entityType="receipt" entityId={params.id} notes={await listEntityNotes("receipt", params.id)} revalidate={`/admin/receipts/${params.id}`} />
     </div>
   );
 }

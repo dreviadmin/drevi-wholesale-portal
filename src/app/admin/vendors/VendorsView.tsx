@@ -3,10 +3,10 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, X, ScanLine, Plus, MessageCircle } from "lucide-react";
+import { Search, X, ScanLine, Plus, MessageCircle, Camera } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { useSort, SortTh, type SortAccessor } from "@/components/sortable";
-import { createVendor, updateVendor, type VendorForm } from "./actions";
+import { createVendor, updateVendor, uploadVendorPhoto, type VendorForm } from "./actions";
 import { palette } from "@/lib/palette";
 
 export interface VendorRow {
@@ -18,6 +18,10 @@ export interface VendorRow {
   gstin: string | null;
   address: string | null;
   notes: string | null;
+  contactName: string | null;
+  email: string | null;
+  cardImageRef: string | null;
+  personImageRef: string | null;
   active: boolean;
   receipts: number;
   lastReceipt: string | null;
@@ -54,7 +58,7 @@ export function VendorsView({ rows, sheetVendorBySku }: { rows: VendorRow[]; she
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return rows;
-    return rows.filter((r) => [r.name, r.city, r.phone, r.gstin].some((v) => v?.toLowerCase().includes(q)));
+    return rows.filter((r) => [r.name, r.city, r.phone, r.gstin, r.contactName, r.email, r.whatsapp].some((v) => v?.toLowerCase().includes(q)));
   }, [rows, query]);
 
   const { sorted, sort, toggle } = useSort(filtered, ACCESSORS, { key: "name", dir: "asc" });
@@ -91,7 +95,7 @@ export function VendorsView({ rows, sheetVendorBySku }: { rows: VendorRow[]; she
 
       <div className="mt-4 flex items-center gap-2 max-w-md" style={{ border: "1px solid rgba(26,26,26,0.18)", padding: "7px 10px" }}>
         <Search size={15} color={palette.mutedGreige} strokeWidth={1.7} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, city, phone, GSTIN" className="font-body bg-transparent outline-none w-full" style={{ fontSize: 12.5, color: palette.black }} />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, person, city, phone, email, GSTIN" className="font-body bg-transparent outline-none w-full" style={{ fontSize: 12.5, color: palette.black }} />
         {query && <button type="button" onClick={() => setQuery("")} aria-label="Clear search"><X size={14} color={palette.mutedGreige} /></button>}
         <button type="button" onClick={() => setScanning(true)} aria-label="Scan a tag to find its vendor" className="flex items-center gap-1.5 font-body uppercase flex-shrink-0" style={{ fontSize: 9, letterSpacing: "0.12em", padding: "6px 10px", background: palette.black, color: palette.ivory }}>
           <ScanLine size={13} strokeWidth={1.7} /> Scan
@@ -116,7 +120,16 @@ export function VendorsView({ rows, sheetVendorBySku }: { rows: VendorRow[]; she
               return (
                 <tr key={r.id} style={{ borderBottom: "1px solid rgba(26,26,26,0.06)", opacity: r.active ? 1 : 0.55 }}>
                   <td style={{ padding: "10px" }}>
-                    <Link href={`/admin/vendors/${r.id}`} className="font-display" style={{ fontSize: 13, fontWeight: 600, color: palette.black, borderBottom: `1px solid ${palette.gold}` }}>{r.name}</Link>
+                    <span className="inline-flex items-center gap-2">
+                      {r.personImageRef && (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img src={`/api/drive-photo?id=${encodeURIComponent(r.personImageRef)}&s=100`} alt="" style={{ width: 26, height: 26, borderRadius: 26, objectFit: "cover", background: palette.ivoryDeep }} />
+                      )}
+                      <span>
+                        <Link href={`/admin/vendors/${r.id}`} className="font-display" style={{ fontSize: 13, fontWeight: 600, color: palette.black, borderBottom: `1px solid ${palette.gold}` }}>{r.name}</Link>
+                        {r.contactName && <span className="font-body block" style={{ fontSize: 10, color: palette.mutedGreige }}>{r.contactName}</span>}
+                      </span>
+                    </span>
                   </td>
                   <td className="font-body" style={{ fontSize: 12, color: palette.softBlack, padding: "10px" }}>{r.city ?? "—"}</td>
                   <td className="font-body" style={{ fontSize: 12, color: palette.softBlack, padding: "10px" }}>
@@ -164,7 +177,13 @@ export function VendorModal({ vendor, onClose, onSaved }: {
     address: vendor?.address ?? "",
     gstin: vendor?.gstin ?? "",
     notes: vendor?.notes ?? "",
+    contactName: vendor?.contactName ?? "",
+    email: vendor?.email ?? "",
     active: vendor?.active ?? true,
+  });
+  const [photos, setPhotos] = useState<{ card: string | null; person: string | null }>({
+    card: vendor?.cardImageRef ?? null,
+    person: vendor?.personImageRef ?? null,
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -183,9 +202,24 @@ export function VendorModal({ vendor, onClose, onSaved }: {
   }
 
   const FIELDS: [keyof VendorForm, string][] = [
-    ["name", "Name"], ["phone", "Phone"], ["whatsapp", "WhatsApp (if different)"],
-    ["city", "City"], ["address", "Address"], ["gstin", "GSTIN"], ["notes", "Notes"],
+    ["name", "Name"], ["contactName", "Contact person"], ["phone", "Phone"], ["whatsapp", "WhatsApp (if different)"],
+    ["email", "Email"], ["city", "City"], ["address", "Address"], ["gstin", "GSTIN"], ["notes", "Notes"],
   ];
+
+  async function attachPhoto(kind: "card" | "person", file: File) {
+    if (!vendor) { setError("Save the vendor first, then attach photos."); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.set("photo", file);
+      const res = await uploadVendorPhoto(vendor.id, kind, fd);
+      if (!res.ok) setError(res.error ?? "Upload failed");
+      else setPhotos((p) => ({ ...p, [kind]: res.ref ?? null }));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(26,26,26,0.5)" }} onClick={() => !busy && onClose()}>
@@ -203,6 +237,25 @@ export function VendorModal({ vendor, onClose, onSaved }: {
               />
             </label>
           ))}
+          {/* UX sprint — the business card and the person, captured in place. */}
+          <div className="flex gap-3">
+            {(["card", "person"] as const).map((kind) => (
+              <label key={kind} className="flex-1 flex flex-col items-center gap-1.5 cursor-pointer" style={{ border: "1px dashed rgba(26,26,26,0.3)", padding: "10px 6px" }}>
+                {photos[kind] ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={`/api/drive-photo?id=${encodeURIComponent(photos[kind]!)}&s=300`} alt={kind} style={{ width: "100%", maxHeight: 110, objectFit: "contain" }} />
+                ) : (
+                  <Camera size={18} color={palette.mutedGreige} />
+                )}
+                <span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.14em", color: palette.softBlack }}>
+                  {kind === "card" ? (photos.card ? "Replace business card" : "Business card") : photos.person ? "Replace person photo" : "Person photo"}
+                </span>
+                {!vendor && <span className="font-body" style={{ fontSize: 8.5, color: palette.mutedGreige }}>save first</span>}
+                <input type="file" accept="image/*" capture="environment" className="hidden" disabled={busy || !vendor}
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) attachPhoto(kind, f); e.currentTarget.value = ""; }} />
+              </label>
+            ))}
+          </div>
           {vendor && (
             <label className="flex items-center gap-2 font-body" style={{ fontSize: 12 }}>
               <input type="checkbox" checked={form.active} onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))} />

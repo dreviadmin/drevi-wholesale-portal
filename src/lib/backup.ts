@@ -55,7 +55,7 @@ export async function exportAllTables(): Promise<BackupPayload> {
 // business records that lived ONLY in Supabase Storage — a project loss would
 // have destroyed them all. Included once daily (the cron route gates on the
 // IST hour) to keep free-tier egress sane; tables stay hourly.
-const STORAGE_BUCKETS = ["buyer-cards", "custom-items", "receipt-photos"] as const;
+const STORAGE_BUCKETS = ["buyer-cards", "custom-items", "receipt-photos", "design-images", "vendor-photos", "order-attachments", "note-photos"] as const;
 
 export interface StorageBackup {
   bucket: string;

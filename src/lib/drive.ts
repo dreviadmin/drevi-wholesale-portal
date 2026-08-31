@@ -24,6 +24,10 @@ function loadServiceAccount(): { client_email: string; private_key: string } {
 }
 
 let driveClient: drive_v3.Drive | null = null;
+export async function getDriveClient(): Promise<drive_v3.Drive> {
+  return getDrive();
+}
+
 async function getDrive(): Promise<drive_v3.Drive> {
   if (driveClient) return driveClient;
   driveAuth = new google.auth.JWT({
@@ -267,4 +271,30 @@ export async function fetchDriveImage(fileId: string, size?: number): Promise<{ 
   } catch {
     return null;
   }
+}
+
+/** All image files directly inside a folder (UX sprint — brand-model poses). */
+export async function listFolderImages(folderId: string): Promise<{ id: string; name: string }[]> {
+  const drive = await getDriveClient();
+  const res = await drive.files.list({
+    q: `'${folderId}' in parents and mimeType contains 'image/' and trashed = false`,
+    fields: "files(id, name)",
+    pageSize: 100,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+  return (res.data.files ?? []).flatMap((f) => (f.id && f.name ? [{ id: f.id, name: f.name }] : []));
+}
+
+/** Direct child folders of a folder (UX sprint — brand-model subfolders). */
+export async function listSubfolders(folderId: string): Promise<{ id: string; name: string }[]> {
+  const drive = await getDriveClient();
+  const res = await drive.files.list({
+    q: `'${folderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+    fields: "files(id, name)",
+    pageSize: 100,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+  return (res.data.files ?? []).flatMap((f) => (f.id && f.name ? [{ id: f.id, name: f.name }] : []));
 }

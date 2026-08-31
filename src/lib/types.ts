@@ -5,7 +5,9 @@ export type StockState = "ready" | "limited" | "made_to_order" | "sold_out";
 export type BuyerStatus = "pending" | "active" | "suspended" | "rejected";
 export type BuyerSource = "inquiry_form" | "exhibition" | "manual_admin";
 export type StaffRole = "super_admin" | "admin" | "staff";
-export type OrderStatus = "submitted" | "confirmed" | "fulfilled" | "cancelled";
+// UX sprint (29 Jul): full logistics lifecycle. 'fulfilled' is the legacy
+// terminal state on old rows; new flows end at 'delivered'.
+export type OrderStatus = "submitted" | "confirmed" | "packed" | "out_for_delivery" | "delivered" | "fulfilled" | "cancelled";
 export type OrderSource = "portal_self_service" | "exhibition" | "in_store";
 export type TaxMode = "none" | "inclusive" | "exclusive";
 export type SessionType = "exhibition" | "in_store";
@@ -21,7 +23,18 @@ export type AuditEventType =
   | "account_suspended"
   | "account_reactivated"
   | "account_rejected"
-  | "catalog_edit";
+  | "catalog_edit"
+  | "studio_tier_set"
+  | "studio_portal_toggled"
+  | "studio_candidate_approved"
+  | "studio_candidate_rejected"
+  | "studio_published";
+
+// Every column a BUYER surface may select. select("*") on buyer pages ships
+// internal fields (location, cost provenance) into the page payload — caught
+// live on 2 Aug when "Rack B2" appeared in the product page's RSC stream.
+export const BUYER_PRODUCT_COLUMNS =
+  "sku, title, description, category, sub_category, color, primary_fabric, wholesale_price, wholesale_visible, min_order_qty, current_qty, restockable, restock_days, image_urls, hsn";
 
 export interface WholesaleProduct {
   hsn?: string | null;
@@ -103,6 +116,40 @@ export interface OrderItem {
   // Free-typed line for a piece not (yet) in the portal catalog — never
   // validated against wholesale_products.
   custom?: boolean;
+  // Line-level confirmation (Ansh, 18 Aug). Absent = legacy line that follows
+  // the order status; 'hold' carries an availability note for the customer;
+  // 'pending' is EXPLICIT un-confirmation (a null on a confirmed order would
+  // derive straight back to confirmed).
+  line_state?: "confirmed" | "hold" | "pending" | null;
+  hold_note?: string | null;
+  // Bill id once this line has been billed (order_bills.id) — a billed line is
+  // immutable from the line-state actions.
+  billed_in?: string | null;
+  // True while this line's stock is OUT because of this order — set by
+  // whichever path moved it (line confirm or whole-order confirm), cleared
+  // when it comes back. postOrderMovements keys off it, so the two paths can
+  // never double-move a line.
+  stock_moved?: boolean;
+}
+
+/** One generated bill against an order (0041) — lines are snapshotted. */
+export interface OrderBill {
+  id: string;
+  order_id: string;
+  bill_number: string;
+  seq: number;
+  items: OrderItem[];
+  subtotal: number;
+  discount_amount: number;
+  tax_mode: TaxMode;
+  tax_rate: number | null;
+  tax_amount: number;
+  total: number;
+  advance_applied: number;
+  bill_date: string;
+  pdf_url: string | null;
+  created_by: string | null;
+  created_at: string;
 }
 
 export type DiscountType = "percent" | "absolute";
@@ -132,4 +179,11 @@ export interface Order {
   pdf_sent_at: string | null;
   submitted_at: string;
   confirmed_at: string | null;
+  packed_at: string | null;
+  out_for_delivery_at: string | null;
+  delivered_at: string | null;
+  courier: string | null;
+  tracking_number: string | null;
+  tracking_note: string | null;
+  tracking_image_ref: string | null;
 }

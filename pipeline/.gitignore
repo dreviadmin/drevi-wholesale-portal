@@ -1,0 +1,19 @@
+# Drevi pipeline — never commit secrets or credentials
+.env
+.env.*
+!.env.example
+
+# Service-account JSON (live keys to Sheets + Drive)
+drevi-pipeline-sa.json
+*-sa.json
+*.serviceaccount.json
+
+# Local working dirs (kept on macOS by default at ~/drevi)
+files/
+.venv/
+
+# OS / editor cruft
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo

@@ -6,12 +6,17 @@ import { requireAdminOrRedirect, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { NotesPanel } from "@/components/admin/NotesPanel";
+import { listEntityNotes } from "@/lib/entity-notes";
 import { OrderActions } from "./OrderActions";
 import { EditBuyerButton } from "./EditBuyerButton";
 import { LineHsnEditor } from "./LineHsnEditor";
 import { listKnownHsnCodes } from "@/lib/hsn";
 import { OrderEditor, type PickerProduct } from "./OrderEditor";
-import type { Order, Buyer } from "@/lib/types";
+import { LineStateControls, GenerateBillBar } from "./LineBilling";
+import { effectiveLineState, billableLines, computeBillTotals } from "@/lib/order-lines-core";
+import type { Order, OrderBill } from "@/lib/types";
+import { productionMoqFlag, supplyAge, type SupplyInput } from "@/lib/availability";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +31,21 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   const { data: order } = await admin.from("orders").select("*").eq("id", params.id).maybeSingle();
   if (!order) notFound();
   const o = order as Order;
-  const { data: buyer } = await admin.from("buyers").select("business_name, owner_name, phone, city, gstin, address, transport_details, broker_details").eq("id", o.buyer_id).maybeSingle<Pick<Buyer, "business_name" | "owner_name" | "phone" | "city" | "gstin" | "address" | "transport_details" | "broker_details">>();
+  const [{ data: buyer }, { data: takenBy }, { data: billRows }] = await Promise.all([
+    admin.from("buyers").select("business_name, owner_name, phone, city, gstin, address, transport_details, broker_details").eq("id", o.buyer_id).maybeSingle(),
+    o.assisted_by
+      ? admin.from("staff_users").select("name, email").eq("id", o.assisted_by).maybeSingle()
+      : Promise.resolve({ data: null }),
+    admin.from("order_bills").select("*").eq("order_id", o.id).order("seq"),
+  ]);
+  const bills = (billRows ?? []) as OrderBill[];
+  const billNumberById = new Map(bills.map((b) => [b.id, b.bill_number]));
+  const lineFlowLocked = ["cancelled", "delivered", "fulfilled"].includes(o.status);
+  const billable = billableLines(o);
+  const billableTotals = computeBillTotals(billable.map((b) => b.item), o, {
+    discountApplied: bills.reduce((s, b) => s + (Number(b.discount_amount) || 0), 0),
+    advanceApplied: bills.reduce((s, b) => s + (Number(b.advance_applied) || 0), 0),
+  });
 
   // Catalog for the "add item" picker in the order editor (admins only).
   let pickerProducts: PickerProduct[] = [];
@@ -42,6 +61,44 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
       wholesale_price: p.wholesale_price,
       image_url: (p.image_urls as string[] | null)?.[0] ?? null,
     }));
+  }
+
+  // R7 §9.3 — production-MOQ flags. Admin only, decision support only: it
+  // never blocks confirmation, and none of this reaches the buyer's copy.
+  const lineSkus = (o.items ?? []).map((it) => it.sku).filter(Boolean);
+  const moqFlags = new Map<string, { message: string; age: string | null }>();
+  if (lineSkus.length) {
+    const bases = [...new Set(lineSkus.map((sku) => sku.split("-").slice(0, 4).join("-")))];
+    const [{ data: designs }, { data: stockRows }] = await Promise.all([
+      admin
+        .from("designs")
+        .select("base_sku, color, supply_mode, vendor_stock_qty, making_days, making_moq, delivery_days, supply_updated_at")
+        .in("base_sku", bases),
+      admin.from("wholesale_products").select("sku, current_qty").in("sku", lineSkus),
+    ]);
+    const stockBySku = new Map((stockRows ?? []).map((r) => [r.sku, Number(r.current_qty) || 0]));
+    const supplyByKey = new Map<string, SupplyInput>(
+      (designs ?? []).map((d) => [
+        `${d.base_sku}|${String(d.color).toUpperCase()}`,
+        {
+          supplyMode: d.supply_mode ?? "",
+          vendorStockQty: d.vendor_stock_qty ?? null,
+          makingDays: d.making_days ?? null,
+          deliveryDays: d.delivery_days ?? null,
+          makingMoq: d.making_moq ?? null,
+          supplyUpdatedAt: d.supply_updated_at ?? null,
+        },
+      ]),
+    );
+    for (const it of o.items ?? []) {
+      if (!it.sku) continue;
+      const parts = it.sku.split("-");
+      if (parts.length < 6) continue;
+      const supply = supplyByKey.get(`${parts.slice(0, 4).join("-")}|${parts[parts.length - 1].toUpperCase()}`);
+      if (!supply) continue;
+      const flag = productionMoqFlag({ ourStock: stockBySku.get(it.sku) ?? 0, qty: it.qty, supply });
+      if (flag) moqFlags.set(it.sku, { message: flag.message, age: supplyAge(supply.supplyUpdatedAt)?.label ?? null });
+    }
   }
 
   return (
@@ -72,12 +129,13 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
             )}
           </div>
           <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige, letterSpacing: "0.04em" }}>
-            {fmt(o.submitted_at)} · Source: {SOURCE_LABEL[o.source] ?? o.source} · Status: {o.status}
+            {fmt(o.submitted_at)} · Source: {SOURCE_LABEL[o.source] ?? o.source} · Status: {o.status.replace(/_/g, " ")}
+            {takenBy ? ` · Taken by ${takenBy.name ?? takenBy.email}` : ""}
           </div>
         </div>
         {isAdminRole(staff.role) && (
           <div className="flex flex-col items-end gap-2">
-            <OrderActions orderId={o.id} status={o.status} pdfUrl={o.pdf_url} orderNumber={o.order_number} total={o.total_amount} buyerPhone={buyer?.phone ?? null} />
+            <OrderActions orderId={o.id} status={o.status} pdfUrl={o.pdf_url} orderNumber={o.order_number} total={o.total_amount} buyerPhone={buyer?.phone ?? null} courier={o.courier} trackingNumber={o.tracking_number} />
             <OrderEditor
               orderId={o.id}
               status={o.status}
@@ -95,6 +153,26 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
         )}
       </div>
 
+      {/* UX sprint — logistics trail once the order moves past confirm. */}
+      {(o.courier || o.tracking_number || o.packed_at || o.out_for_delivery_at || o.delivered_at) && (
+        <div className="mt-4 p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
+          <div className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.mutedGreige }}>Delivery</div>
+          <div className="font-body mt-1" style={{ fontSize: 12, lineHeight: 1.7, color: palette.softBlack }}>
+            {o.packed_at && <>Packed {fmt(o.packed_at)}<br /></>}
+            {o.out_for_delivery_at && <>Out for delivery {fmt(o.out_for_delivery_at)}<br /></>}
+            {o.delivered_at && <>Delivered {fmt(o.delivered_at)}<br /></>}
+            {(o.courier || o.tracking_number) && (
+              <>{[o.courier, o.tracking_number].filter(Boolean).join(" · ")}<br /></>
+            )}
+            {o.tracking_note}
+          </div>
+          {o.tracking_image_ref && (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={`/api/drive-photo?id=${encodeURIComponent(o.tracking_image_ref)}&s=600`} alt="Tracking sheet" className="mt-2" style={{ maxWidth: 280, width: "100%", border: "1px solid rgba(26,26,26,0.1)" }} />
+          )}
+        </div>
+      )}
+
       <div className="mt-6" style={{ borderTop: "1px solid rgba(26,26,26,0.1)" }}>
         {(o.items ?? []).map((it, i) => (
           <div key={`${it.sku}-${i}`} className="flex items-start gap-3 py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
@@ -106,9 +184,17 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
             <div className="min-w-0 flex-1">
               <div className="font-display" style={{ fontSize: 14, color: palette.black, fontWeight: 500 }}>{it.title}</div>
               <div className="font-body mt-0.5" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.1em" }}>
-                {it.custom ? "custom item · not on portal" : `${it.sku} · ${it.stock_state}${it.restock_days ? ` · ${it.restock_days}d` : ""}`}{it.special_request ? " · SPECIAL QTY REQUEST" : ""}
+                {it.custom ? "custom item · not on portal" : `${it.sku} · ${(it.stock_state ?? "").replace(/_/g, " ")}${it.restock_days ? ` · ${it.restock_days}d` : ""}`}{it.special_request ? " · SPECIAL QTY REQUEST" : ""}
                 {!it.custom && <LineHsnEditor orderId={o.id} index={i} hsn={it.hsn ?? null} options={hsnOptions} />}
               </div>
+              {moqFlags.get(it.sku) && (
+                <div className="font-body mt-1.5 p-2" style={{ fontSize: 10.5, lineHeight: 1.5, background: "#FBF3E2", color: "#8a6d1a", border: "1px solid rgba(196,163,90,0.4)" }}>
+                  <b>Below vendor production minimum</b> — {moqFlags.get(it.sku)!.message.replace("Below vendor production minimum — ", "")}
+                  {moqFlags.get(it.sku)!.age && (
+                    <span style={{ color: palette.mutedGreige }}> · supply {moqFlags.get(it.sku)!.age}</span>
+                  )}
+                </div>
+              )}
               {it.original_price != null && it.original_price !== it.unit_price && (
                 <div className="font-body mt-0.5" style={{ fontSize: 9.5, color: palette.mutedGreige }}>
                   Price override — list {formatINR(it.original_price)}, billed {formatUnitINR(it.unit_price)} (internal note, not on the invoice)
@@ -119,6 +205,14 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
                   GST split — actual: {it.actual_qty} pc @ {formatINR((it.qty * it.unit_price) / it.actual_qty)} (billed as {it.qty} × {formatUnitINR(it.unit_price)})
                 </div>
               )}
+              <LineStateControls
+                orderId={o.id}
+                index={i}
+                state={effectiveLineState(it, o.status)}
+                holdNote={it.hold_note ?? null}
+                billNumber={it.billed_in ? billNumberById.get(it.billed_in) ?? null : null}
+                locked={lineFlowLocked}
+              />
             </div>
             <div className="text-right">
               <div className="font-body" style={{ fontSize: 12, color: palette.softBlack }}>{it.qty} × {formatUnitINR(it.unit_price)}</div>
@@ -157,12 +251,44 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
         </div>
       )}
 
+      {/* Split billing (18 Aug) — bill the confirmed lines; hold the rest. */}
+      {!lineFlowLocked && billable.length > 0 && (
+        <GenerateBillBar orderId={o.id} billableCount={billable.length} billableTotal={formatINR(billableTotals.total)} />
+      )}
+      {bills.length > 0 && (
+        <div className="mt-5">
+          <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}>Bills against this order</div>
+          {bills.map((b) => (
+            <div key={b.id} className="flex items-center justify-between gap-2 py-2.5" style={{ borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
+              <div className="min-w-0">
+                <div className="font-body" style={{ fontSize: 12.5, fontWeight: 600, color: palette.black }}>{b.bill_number}</div>
+                <div className="font-body" style={{ fontSize: 10.5, color: palette.mutedGreige }}>
+                  {new Date(b.bill_date + "T12:00:00+05:30").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                  {" · "}{(b.items ?? []).length} line{(b.items ?? []).length === 1 ? "" : "s"}
+                  {b.advance_applied > 0 ? ` · advance ${formatINR(b.advance_applied)} applied` : ""}
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>{formatINR(b.total)}</span>
+                {b.pdf_url && (
+                  <a href={b.pdf_url} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.goldDeep, textDecoration: "underline" }}>
+                    PDF
+                  </a>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {o.notes && (
         <div className="mt-5 p-3" style={{ background: palette.ivoryDeep }}>
           <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}>Buyer note</div>
           <p className="font-body mt-1" style={{ fontSize: 12.5, color: palette.softBlack, lineHeight: 1.6 }}>{o.notes}</p>
         </div>
       )}
+
+      <NotesPanel entityType="order" entityId={o.id} notes={await listEntityNotes("order", o.id)} revalidate={`/admin/orders/${o.id}`} />
     </div>
   );
 }

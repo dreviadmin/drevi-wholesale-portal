@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { requireAdminOrRedirect, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { signedCardUrl } from "@/lib/storage";
+import { NotesPanel } from "@/components/admin/NotesPanel";
+import { listEntityNotes } from "@/lib/entity-notes";
 import { BuyerDetail } from "./BuyerDetail";
 import type { Buyer, Order } from "@/lib/types";
 
@@ -25,6 +27,7 @@ export default async function BuyerDetailPage({ params }: { params: { id: string
   const cardUrl = b.card_image_path ? await signedCardUrl(b.card_image_path) : null;
 
   return (
+    <>
     <BuyerDetail
       isAdmin={isAdminRole(staff.role)}
       buyer={{
@@ -56,5 +59,9 @@ export default async function BuyerDetailPage({ params }: { params: { id: string
         staffName: a.staff_user_id ? staffName.get(a.staff_user_id) ?? "Staff" : null,
       }))}
     />
+    <div className="px-4 md:px-8 pb-10 max-w-2xl">
+      <NotesPanel entityType="buyer" entityId={b.id} notes={await listEntityNotes("buyer", b.id)} revalidate={`/admin/buyers/${b.id}`} />
+    </div>
+    </>
   );
 }

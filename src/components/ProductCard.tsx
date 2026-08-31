@@ -5,6 +5,7 @@ import { Plus, Minus } from "lucide-react";
 import { StockPill } from "@/components/StockPill";
 import { ProductImage } from "@/components/ProductImage";
 import { getStockState, qtyCap } from "@/lib/stock";
+import type { Availability } from "@/lib/availability";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
@@ -23,6 +24,7 @@ export function ProductCard({
   onGoToCart,
   variantBar,
   onOpenDetail,
+  availability,
   readOnly = false,
 }: {
   product: WholesaleProduct;
@@ -38,6 +40,8 @@ export function ProductCard({
   onOpenDetail?: (product: WholesaleProduct) => void;
   // Browse-only surfaces (View Catalog): no Add button, no stepper.
   readOnly?: boolean;
+  /** R7 §9 — computed server-side, already stripped to the five buyer-safe keys. */
+  availability?: Availability;
 }) {
   const state = getStockState(product);
   const canAdd = state !== "sold_out";
@@ -58,6 +62,11 @@ export function ProductCard({
         <div className="font-body mt-0.5" style={{ color: palette.mutedGreige, fontSize: 9, letterSpacing: "0.1em" }}>
           {product.sku}
         </div>
+        {availability && (
+          <div className="font-body mt-1" style={{ fontSize: 9, letterSpacing: "0.06em", color: availability.orderable ? palette.goldDeep : palette.mutedGreige }}>
+            {availability.label}
+          </div>
+        )}
       </div>
     </>
   );

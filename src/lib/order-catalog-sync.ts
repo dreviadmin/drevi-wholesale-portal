@@ -75,8 +75,7 @@ export async function refreshOrderFromCatalog(
 }
 
 /** States whose orders auto-refresh after a catalog sync. Terminal orders are history — left alone. */
-// main has the original two active statuses only.
-export const AUTO_REFRESH_STATUSES = ["submitted", "confirmed"];
+export const AUTO_REFRESH_STATUSES = ["submitted", "confirmed", "packed", "out_for_delivery"];
 
 /**
  * Auto pass for the catalog sync: refresh every ACTIVE order. Returns how many

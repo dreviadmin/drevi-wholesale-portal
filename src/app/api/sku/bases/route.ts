@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { CATEGORIES } from "@/lib/sku/vocab";
+import { loadVocab } from "@/lib/sku/vocab-live";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +27,7 @@ export async function GET() {
   }
   const byBase = new Map<string, BaseEntry>();
   for (const r of data ?? []) {
-    const cats = CATEGORIES as Record<string, { name: string; subs: Record<string, string> }>;
+    const cats = (await loadVocab()).categories;
     const e: BaseEntry = byBase.get(r.base_sku) ?? {
       base: r.base_sku,
       cat: r.category,

@@ -17,7 +17,28 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 
+// TARGET SELECTION — dev is the default, prod needs an explicit flag.
+//
+// This script used to load .env.local unconditionally, which is PRODUCTION.
+// While the retrofit is dev-only, a bare `npm run db:migrate` must never be
+// able to reach prod by accident. Pass --prod (or DB_TARGET=prod) to opt in.
+const target = process.argv.includes("--prod") || process.env.DB_TARGET === "prod" ? "prod" : "dev";
+const envFile = target === "prod" ? ".env.local" : ".env.development.local";
+
+// The Personal Access Token is account-level and lives in .env.local, so load
+// that first for credentials — then let the target file win on WHICH project.
 dotenv.config({ path: ".env.local" });
+dotenv.config({ path: envFile, override: true });
+
+// SUPABASE_DB_URL is project-specific. Only trust it when the target's own env
+// file supplied it, else fall through to the Management API + project ref.
+const targetEnv = dotenv.config({ path: envFile, processEnv: {} }).parsed ?? {};
+if (!targetEnv.SUPABASE_DB_URL) delete process.env.SUPABASE_DB_URL;
+
+console.log(`Target: ${target.toUpperCase()} (${envFile})`);
+if (target === "prod") {
+  console.log("⚠  PRODUCTION — this is the live portal. Ctrl-C now if that is not what you meant.");
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(__dirname, "..", "supabase", "migrations");

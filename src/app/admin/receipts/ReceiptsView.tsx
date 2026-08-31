@@ -33,8 +33,8 @@ const ACCESSORS: Record<string, SortAccessor<ReceiptRow>> = {
   by: (r) => r.createdBy,
 };
 
-export function ReceiptsView({ rows, vendors }: { rows: ReceiptRow[]; vendors: string[] }) {
-  const [query, setQuery] = useState("");
+export function ReceiptsView({ rows, vendors, initialQuery = "" }: { rows: ReceiptRow[]; vendors: string[]; initialQuery?: string }) {
+  const [query, setQuery] = useState(initialQuery);
   const [vendorFilter, setVendorFilter] = useState("All");
   const [range, setRange] = useState<"today" | "7d" | "all">("all");
   const [from, setFrom] = useState("");

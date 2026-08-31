@@ -6,6 +6,7 @@ import { readMaster } from "@/lib/sheets";
 import { fetchProductImageUrls } from "@/lib/shopify-auth";
 import { drivePhotosEnabled, fetchSkuImagesBytes } from "@/lib/drive";
 import { uploadProductPhoto } from "@/lib/storage";
+import { ingestDesigns } from "@/lib/studio/ingest";
 
 // Logical key -> Master Sheet display header (matched by suffix). Descriptive
 // fields come from the pipeline's known columns; the wholesale-specific columns
@@ -169,6 +170,23 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
   if (ignoredErr) throw new Error(`Sync aborted — ignored-SKU read failed: ${ignoredErr.message}`);
   const ignored = new Set((ignoredRows ?? []).map((r) => r.sku.toUpperCase()));
 
+  // Retrofit §3.7 interim guard (applies while SHEET_SYNC_ENABLED is still on):
+  // designs born in the app have NO sheet row by definition. The sync must
+  // never hide, overwrite or delete their variants. Delete this block when the
+  // ANSH-07 cutover flips the flag.
+  const appOwned = new Set<string>();
+  try {
+    const { data: appDesigns } = await supabase.from("designs").select("base_sku, color").eq("origin_source", "app");
+    const { data: allProducts } = await supabase.from("wholesale_products").select("sku");
+    const groups = new Set((appDesigns ?? []).map((d) => `${d.base_sku.toUpperCase()}|${d.color.toUpperCase()}`));
+    for (const p of allProducts ?? []) {
+      const parts = p.sku.toUpperCase().split("-");
+      if (parts.length < 5 || !/^\d{2,4}$/.test(parts[3])) continue;
+      if (groups.has(`${parts.slice(0, 4).join("-")}|${parts[parts.length - 1]}`)) appOwned.add(p.sku.toUpperCase());
+    }
+    if (appOwned.size > 0) warnings.push(`Sync skipped ${appOwned.size} app-created SKU(s) — they have no sheet row (retrofit §3.7).`);
+  } catch { /* designs table absent — nothing to protect */ }
+
   // Filter + map.
   let skipped = 0;
   const products: ProductRow[] = [];
@@ -192,8 +210,8 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
       sub_category: row.sub_category || null,
       color: row.color || null,
       primary_fabric: row.primary_fabric || null,
-      // Only SET hsn when the sheet provides one — no HSN column exists yet,
-      // and `|| null` would wipe every code nightly (31 Jul).
+      // Only SET hsn when the sheet actually provides one — the sheet has no
+      // HSN column yet, and `|| null` would wipe every code nightly (31 Jul).
       ...(row.hsn ? { hsn: row.hsn } : {}),
       wholesale_price: opts.price,
       wholesale_visible: true,
@@ -214,6 +232,7 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
     const sku = row.sku?.trim();
     if (!sku || included.has(sku.toUpperCase())) continue;
     if (ignored.has(sku.toUpperCase())) { skipped++; continue; }
+    if (appOwned.has(sku.toUpperCase())) { skipped++; continue; } // §3.7
     // Vendor/retail info covers EVERY sheet row — a garment hidden from the
     // wholesale portal still hangs in the retail shop, and Retail Price Check
     // must resolve its tag.
@@ -396,6 +415,14 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
     if (error) warnings.push(`Vendor-info upsert failed: ${error.message}`);
   }
 
+  // Studio ingest (Stage 3, §7.3): keep the designs board scaffolded for every
+  // catalog SKU. Best-effort and additive — product sync must never fail on it.
+  try {
+    await ingestDesigns(supabase, products, warnings);
+  } catch (err) {
+    warnings.push(`Studio ingest failed: ${(err as Error).message}`);
+  }
+
   // Hide SKUs previously visible but no longer qualifying (preserve order history).
   //
   // Guardrail: a transiently bad sheet (formula errors, a cleared column, a
@@ -417,7 +444,7 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
   // Catalog (its new SKU isn't in the sheet, but it's not gone — it's ours now).
   const adminOwned = (lf: unknown) => Array.isArray(lf) && (lf.includes("wholesale_visible") || lf.includes("sku"));
   const toHide = (visibleRows ?? [])
-    .filter((r) => !qualifying.has(r.sku) && !adminOwned(r.locked_fields))
+    .filter((r) => !qualifying.has(r.sku) && !adminOwned(r.locked_fields) && !appOwned.has(r.sku.toUpperCase()))
     .map((r) => r.sku);
 
   const wouldHideAll = qualifying.size === 0 && toHide.length > 0;
@@ -438,8 +465,9 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
     hidden = toHide.length;
   }
 
-  // Ansh (30 Jul): catalog changes (photo added, title fixed, HSN filled)
-  // flow into ACTIVE orders. Descriptive fields only — never money.
+  // Ansh (30 Jul): a SKU touched after billing (photo added, title fixed, HSN
+  // filled) must flow into ACTIVE orders. Descriptive fields only — money on a
+  // placed order never changes here.
   try {
     const refreshed = await refreshActiveOrders(supabase);
     if (refreshed.updated > 0) warnings.push(`order refresh: ${refreshed.updated} active order(s) picked up catalog changes`);

@@ -3,6 +3,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStockState, qtyCap } from "@/lib/stock";
 import type { WholesaleProduct, StockState } from "@/lib/types";
+import { BUYER_PRODUCT_COLUMNS } from "@/lib/types";
 
 export interface RawCartItem {
   sku: string;
@@ -50,7 +51,7 @@ export async function getDetailedCart(buyerId: string): Promise<DetailedCart> {
   const supabase = createAdminClient();
   const { data: prods } = await supabase
     .from("wholesale_products")
-    .select("*")
+    .select(BUYER_PRODUCT_COLUMNS)
     .in("sku", items.map((i) => i.sku));
   const bySku = new Map<string, WholesaleProduct>((prods ?? []).map((p) => [p.sku, p as WholesaleProduct]));
 

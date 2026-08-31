@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getStaff } from "@/lib/staff";
-import { fetchDriveImage } from "@/lib/drive";
+import { fetchImageByRef } from "@/lib/design-image-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +18,8 @@ export async function GET(req: Request) {
   const sizeRaw = Number(params.get("s"));
   const size = Number.isFinite(sizeRaw) && sizeRaw >= 100 && sizeRaw <= 2000 ? Math.floor(sizeRaw) : undefined;
 
-  const img = await fetchDriveImage(id, size);
+  // Handles Drive ids and the portal-storage "sb:" refs alike.
+  const img = await fetchImageByRef(id, size);
   if (!img) return new NextResponse("Not found", { status: 404 });
 
   return new NextResponse(img.body, {

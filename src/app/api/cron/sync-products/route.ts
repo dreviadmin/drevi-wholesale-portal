@@ -14,6 +14,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Stage 8 cutover switch (§12.4): once Supabase is source of truth this
+  // becomes a no-op — the flip is gated on ANSH-07 and stays ON until then.
+  if ((process.env.SHEET_SYNC_ENABLED ?? "true").toLowerCase() === "false") {
+    return NextResponse.json({ skipped: true, reason: "SHEET_SYNC_ENABLED=false (post-cutover)" });
+  }
   try {
     const result = await syncProducts();
     return NextResponse.json(result);

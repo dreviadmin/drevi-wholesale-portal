@@ -116,14 +116,22 @@ const SOURCE_LABEL: Record<string, string> = {
   in_store: "In-store order",
 };
 
-function OrderDoc({ order, buyer, images }: { order: Order; buyer: PdfBuyer; images: ImgMap }) {
+/** Split billing (18 Aug): a bill is one slice of an order. */
+export interface BillMeta {
+  seq: number;
+  orderNumber: string;
+  pendingCount: number;
+}
+
+function OrderDoc({ order, buyer, images, billMeta }: { order: Order; buyer: PdfBuyer; images: ImgMap; billMeta?: BillMeta }) {
   const items = order.items ?? [];
   const maxLead = items.filter((i) => i.stock_state === "made_to_order").reduce((m, i) => Math.max(m, i.restock_days ?? 0), 0);
-  const date = new Date(order.submitted_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
+  const date = new Date(order.submitted_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" });
 
   // Staff-assisted orders produce an INVOICE (tax + payment recorded on the
   // spot); client self-service stays an ORDER REQUEST pending confirmation.
-  const isInvoice = order.source !== "portal_self_service";
+  // A generated BILL is always an invoice, whatever the order's source.
+  const isInvoice = !!billMeta || order.source !== "portal_self_service";
   const subtotal = items.reduce((sum, i) => sum + i.qty * i.unit_price, 0);
   const taxed = order.tax_mode === "inclusive" || order.tax_mode === "exclusive";
   const discount = order.discount_amount ?? 0;
@@ -148,7 +156,7 @@ function OrderDoc({ order, buyer, images }: { order: Order; buyer: PdfBuyer; ima
           <View style={{ alignItems: "flex-end" }}>
             <Text style={s.orderNo}>{order.order_number}</Text>
             <Text style={s.meta}>{date}</Text>
-            <Text style={s.meta}>{SOURCE_LABEL[order.source] ?? "Order"}</Text>
+            <Text style={s.meta}>{billMeta ? `Bill ${billMeta.seq} against order ${billMeta.orderNumber}` : SOURCE_LABEL[order.source] ?? "Order"}</Text>
           </View>
         </View>
 
@@ -244,7 +252,12 @@ function OrderDoc({ order, buyer, images }: { order: Order; buyer: PdfBuyer; ima
           </View>
         )}
 
-        {maxLead > 0 && <Text style={s.lead}>Estimated availability: {maxLead} days</Text>}
+        {maxLead > 0 && !billMeta && <Text style={s.lead}>Estimated availability: {maxLead} days</Text>}
+        {billMeta && billMeta.pendingCount > 0 && (
+          <Text style={s.lead}>
+            {billMeta.pendingCount} item{billMeta.pendingCount === 1 ? "" : "s"} from this order await availability and will be billed separately.
+          </Text>
+        )}
 
         {order.notes && (
           <View style={s.note}>
@@ -264,7 +277,7 @@ function OrderDoc({ order, buyer, images }: { order: Order; buyer: PdfBuyer; ima
   );
 }
 
-export async function renderOrderPdf(order: Order, buyer: PdfBuyer): Promise<Buffer> {
+export async function renderOrderPdf(order: Order, buyer: PdfBuyer, billMeta?: BillMeta): Promise<Buffer> {
   const images = await fetchItemImages(order.items ?? []);
-  return renderToBuffer(<OrderDoc order={order} buyer={buyer} images={images} />);
+  return renderToBuffer(<OrderDoc order={order} buyer={buyer} images={images} billMeta={billMeta} />);
 }

@@ -32,11 +32,15 @@ export function ExhibitionWizard({
   products,
   buyers,
   stockAsOf,
+  staffList,
+  meId,
 }: {
   session: { id: string; event_name: string; ended: boolean; type: SessionType };
   products: WholesaleProduct[];
   buyers: Buyer[];
   stockAsOf: string;
+  staffList: { id: string; name: string }[];
+  meId: string;
 }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("buyer");
@@ -68,6 +72,24 @@ export function ExhibitionWizard({
   const [nb, setNb] = useState(NB_EMPTY);
   const [cardFile, setCardFile] = useState<File | null>(null);
 
+  // Global scan sheet hand-off (build guide §6.5): ?add=SKU appends one piece
+  // to the current bill, then strips the param so refreshes don't re-add.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const addSku = (p.get("add") ?? "").trim().toUpperCase();
+    if (!addSku) return;
+    const prod = products.find((x) => x.sku.toUpperCase() === addSku);
+    if (prod) {
+      setCart((c) => ({ ...c, [prod.sku]: (c[prod.sku] ?? 0) + 1 }));
+      flash(`${prod.sku} added to the bill`);
+    } else {
+      flash(`${addSku} is not in the catalog`);
+    }
+    p.delete("add");
+    window.history.replaceState(null, "", window.location.pathname + (p.toString() ? `?${p}` : ""));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Draft autosave — a half-captured buyer survives closing the tablet app
   // mid-conversation. Cleared once the capture succeeds.
   const NB_DRAFT_KEY = "drevi:draft:exh-buyer";
@@ -86,6 +108,11 @@ export function ExhibitionWizard({
     } catch { /* storage full/blocked — non-fatal */ }
   }, [nb]);
   const [staffNote, setStaffNote] = useState("");
+  const [takenBy, setTakenBy] = useState(meId); // UX sprint — who is taking this order
+  // Past-dated billing (18 Aug): empty = today; a chosen past date drives the
+  // order number's day and submitted_at.
+  const todayIst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const [billDate, setBillDate] = useState<string>("");
   const [buyerNote, setBuyerNote] = useState("");
   // Tax + payment (recorded at finalise)
   const [taxMode, setTaxMode] = useState<TaxMode>("none");
@@ -150,6 +177,7 @@ export function ExhibitionWizard({
     payNote: string;
     staffNote: string;
     buyerNote: string;
+    takenBy?: string;
     orderRef: string | null;
   }
   const [parked, setParked] = useState<ParkedOrder[]>([]);
@@ -164,6 +192,7 @@ export function ExhibitionWizard({
     setDiscountType(d.discountType ?? "none"); setDiscountValue(d.discountValue ?? "");
     setAdvance(d.advance ?? ""); setPayMethod(d.payMethod ?? "Cash"); setPayNote(d.payNote ?? "");
     setStaffNote(d.staffNote ?? ""); setBuyerNote(d.buyerNote ?? "");
+    if (d.takenBy) setTakenBy(d.takenBy);
     setConfirmInfo(null);
     orderRefRef.current = d.orderRef ?? null;
     // keep the custom-item id counter ahead of any restored keys
@@ -177,7 +206,7 @@ export function ExhibitionWizard({
       id: uuid(), parkedAt: Date.now(),
       buyer, buyerClientRef, cart, priceOverrides, splitFactors, customItems,
       taxMode, taxRate, customRate, discountType, discountValue,
-      advance, payMethod, payNote, staffNote, buyerNote,
+      advance, payMethod, payNote, staffNote, buyerNote, takenBy,
       orderRef: orderRefRef.current,
     };
   }
@@ -220,14 +249,14 @@ export function ExhibitionWizard({
         localStorage.setItem(CART_DRAFT_KEY, JSON.stringify({
           buyer, buyerClientRef, cart, priceOverrides, splitFactors, customItems,
           taxMode, taxRate, customRate, discountType, discountValue,
-          advance, payMethod, payNote, staffNote, buyerNote,
+          advance, payMethod, payNote, staffNote, buyerNote, takenBy,
           orderRef: orderRefRef.current, step, savedAt: Date.now(),
         }));
       } else {
         localStorage.removeItem(CART_DRAFT_KEY);
       }
     } catch { /* storage blocked — non-fatal */ }
-  }, [CART_DRAFT_KEY, buyer, buyerClientRef, cart, priceOverrides, splitFactors, customItems, taxMode, taxRate, customRate, discountType, discountValue, advance, payMethod, payNote, staffNote, buyerNote, step, confirmInfo]);
+  }, [CART_DRAFT_KEY, buyer, buyerClientRef, cart, priceOverrides, splitFactors, customItems, taxMode, taxRate, customRate, discountType, discountValue, advance, payMethod, payNote, staffNote, buyerNote, takenBy, step, confirmInfo]);
 
   // Warn before an accidental unload (refresh / edge-swipe back) with a live cart.
   useEffect(() => {
@@ -556,6 +585,7 @@ export function ExhibitionWizard({
       discountType: discountType === "none" ? undefined : discountType,
       discountValue: discountType === "none" ? undefined : discountNum,
       advanceAmount: advanceNum, paymentMethod: advanceNum > 0 ? payMethod : undefined, paymentNotes: payNote || undefined,
+      ...(billDate && billDate !== todayIst ? { billDate } : {}),
     };
     // One key for this order across every retry / offline replay (idempotency).
     const clientRef = orderRefRef.current ?? (orderRefRef.current = uuid());
@@ -581,12 +611,12 @@ export function ExhibitionWizard({
       let res;
       try {
         res = await submitExhibitionOrder({
-          sessionId: session.id, eventName: session.event_name, buyerId: buyer.id, items, staffNote, buyerNote, clientRef, ...taxPay,
+          sessionId: session.id, eventName: session.event_name, buyerId: buyer.id, items, staffNote, buyerNote, clientRef, takenBy, ...taxPay,
         });
       } catch {
         await enqueue("order", {
           sessionId: session.id, eventName: session.event_name, clientRef,
-          buyerId: buyer.id, items, staffNote, buyerNote, ...taxPay,
+          buyerId: buyer.id, items, staffNote, buyerNote, takenBy, ...taxPay,
         });
         setConfirmInfo({ orderId: "", orderNumber: "Network failed — order queued, will sync automatically" });
         setStep("confirm");
@@ -796,7 +826,9 @@ export function ExhibitionWizard({
             <ShoppingBag size={15} strokeWidth={2} /> Cart · {cartCount}
           </button>
         )}
-        <button type="button" onClick={endSessionConfirmed} className="font-body uppercase" style={{ border: "1px solid rgba(255,255,255,0.3)", padding: "5px 12px", fontSize: 9, letterSpacing: "0.18em" }}>End Session</button>
+        {session.type !== "in_store" && (
+          <button type="button" onClick={endSessionConfirmed} className="font-body uppercase" style={{ border: "1px solid rgba(255,255,255,0.3)", padding: "5px 12px", fontSize: 9, letterSpacing: "0.18em" }}>End Session</button>
+        )}
       </div>
     </div>
   );
@@ -1195,6 +1227,19 @@ export function ExhibitionWizard({
                 <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Payment note (optional)" className="w-full font-body bg-transparent outline-none mt-2" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "6px 8px", fontSize: 11 }} />
               </div>
 
+              <label className="flex flex-col gap-1 mt-2"><span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>Taken by</span>
+                <select value={takenBy} onChange={(e) => setTakenBy(e.target.value)} className="font-body bg-transparent outline-none" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "7px 9px", fontSize: 12, color: palette.black }}>
+                  {staffList.map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 mt-2"><span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>Bill date — leave empty for today</span>
+                <input type="date" value={billDate} max={todayIst} onChange={(e) => setBillDate(e.target.value)} className="font-body bg-transparent outline-none" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "7px 9px", fontSize: 12, color: palette.black }} />
+                {billDate && billDate !== todayIst && (
+                  <span className="font-body" style={{ fontSize: 10, color: palette.goldDeep }}>
+                    Past-dated: the order number and reports will use {new Date(billDate + "T12:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}.
+                  </span>
+                )}
+              </label>
               <label className="flex flex-col gap-1 mt-2"><span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>Staff note</span><input value={staffNote} onChange={(e) => setStaffNote(e.target.value)} className="font-body bg-transparent outline-none" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "7px 9px", fontSize: 12 }} /></label>
               <label className="flex flex-col gap-1"><span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>Buyer note</span><input value={buyerNote} onChange={(e) => setBuyerNote(e.target.value)} className="font-body bg-transparent outline-none" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "7px 9px", fontSize: 12 }} /></label>
 
@@ -1271,7 +1316,9 @@ export function ExhibitionWizard({
           )}
           <div className="flex gap-2 justify-center mt-8">
             <button type="button" onClick={nextBuyer} className="font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.18em", padding: "11px 18px" }}>Next Buyer</button>
-            <button type="button" onClick={endSessionConfirmed} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, fontSize: 10, letterSpacing: "0.18em", padding: "11px 18px" }}>End Session</button>
+            {session.type !== "in_store" && (
+              <button type="button" onClick={endSessionConfirmed} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, fontSize: 10, letterSpacing: "0.18em", padding: "11px 18px" }}>End Session</button>
+            )}
           </div>
         </div>
       )}

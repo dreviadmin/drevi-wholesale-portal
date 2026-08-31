@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Search, QrCode } from "lucide-react";
 import { DreviHeader } from "@/components/DreviHeader";
 import { FilterChips } from "@/components/FilterChips";
 import { GroupedProductCard } from "@/components/GroupedProductCard";
+import type { Availability } from "@/lib/availability";
 import { QrScanner } from "@/components/QrScanner";
 import { setQty as setCartQty } from "@/app/cart/actions";
 import { qtyCap } from "@/lib/stock";
@@ -27,13 +28,21 @@ export function CatalogView({
   businessName,
   products,
   initialCartBySku,
+  availabilityBySku,
 }: {
   businessName: string;
   products: WholesaleProduct[];
   initialCartBySku: Record<string, number>;
+  availabilityBySku: Record<string, Availability>;
 }) {
   const router = useRouter();
   const [category, setCategory] = useState("All");
+  // Buyer-home category chips deep-link /catalog?cat=…
+  useEffect(() => {
+    const c = new URLSearchParams(window.location.search).get("cat");
+    if (c) setCategory(c);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [query, setQuery] = useState("");
   const [cart, setCart] = useState<Record<string, number>>(initialCartBySku);
   const [scanning, setScanning] = useState(false);
@@ -148,6 +157,7 @@ export function CatalogView({
                 onChangeQty={changeQty}
                 detailHrefFor={(sku) => `/product/${encodeURIComponent(sku)}`}
                 onGoToCart={() => router.push("/cart")}
+                availabilityBySku={availabilityBySku}
               />
             ))}
           </div>

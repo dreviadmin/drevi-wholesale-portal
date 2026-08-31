@@ -5,9 +5,11 @@ import { LogOut } from "lucide-react";
 import { logout } from "@/app/actions";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ORDER_STATUS_LABEL } from "@/lib/order-status";
 import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
-import type { Order, OrderItem } from "@/lib/types";
+import { effectiveLineState } from "@/lib/order-lines-core";
+import type { Order, OrderBill, OrderItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +43,11 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
 
   const o = order as Order;
   const items = Array.isArray(o.items) ? o.items : [];
+  // Bills (18 Aug): RLS proved ownership on the order read above; the bills
+  // themselves are fetched with the admin client (order_bills has no buyer
+  // policies) — scoped strictly to this order's id.
+  const { data: billRows } = await createAdminClient().from("order_bills").select("*").eq("order_id", o.id).order("seq");
+  const bills = (billRows ?? []) as OrderBill[];
   const maxLead = items
     .filter((i) => i.stock_state === "made_to_order")
     .reduce((m, i) => Math.max(m, i.restock_days ?? 0), 0);
@@ -78,7 +85,7 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
             {o.order_number}
           </div>
           <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige, letterSpacing: "0.04em" }}>
-            {fmtDate(o.submitted_at)} · {o.status.charAt(0).toUpperCase() + o.status.slice(1)}
+            {fmtDate(o.submitted_at)} · {ORDER_STATUS_LABEL[o.status] ?? o.status}
           </div>
         </div>
 
@@ -96,6 +103,20 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
                   <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep, letterSpacing: "0.04em" }}>
                     {itemStateLabel(it)}{it.special_request ? " · Special qty request" : ""}
                   </div>
+                  {/* Line-level confirmation (18 Aug): the customer sees where
+                      each piece stands — billed, confirmed, or on hold with
+                      Rakesh's availability note. */}
+                  {(() => {
+                    const st = effectiveLineState(it, o.status);
+                    if (st === "billed") return <div className="font-body mt-1" style={{ fontSize: 10, color: "#1F6B45", fontWeight: 600 }}>Billed ✓</div>;
+                    if (st === "confirmed") return <div className="font-body mt-1" style={{ fontSize: 10, color: palette.goldDeep, fontWeight: 600 }}>Confirmed — billing shortly</div>;
+                    if (st === "hold") return (
+                      <div className="font-body mt-1" style={{ fontSize: 10.5, color: "#9C3A31" }}>
+                        Awaiting availability{it.hold_note ? ` — ${it.hold_note}` : ""}
+                      </div>
+                    );
+                    return null;
+                  })()}
                 </div>
                 <div className="text-right flex-shrink-0">
                   <div className="font-body" style={{ fontSize: 12, color: palette.softBlack }}>{it.qty} × {formatUnitINR(it.unit_price)}</div>
@@ -143,6 +164,28 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
         {maxLead > 0 && (
           <div className="font-body mt-1 text-right" style={{ fontSize: 11, color: palette.goldDeep, letterSpacing: "0.04em" }}>
             Estimated availability: {maxLead} days
+          </div>
+        )}
+
+        {bills.length > 0 && (
+          <div className="mt-6">
+            <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}>Bills for this order</div>
+            {bills.map((b) => (
+              <div key={b.id} className="flex items-center justify-between gap-2 py-2.5" style={{ borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
+                <div>
+                  <div className="font-body" style={{ fontSize: 12.5, fontWeight: 600, color: palette.black }}>{b.bill_number}</div>
+                  <div className="font-body" style={{ fontSize: 10.5, color: palette.mutedGreige }}>
+                    {fmtDate(b.bill_date + "T12:00:00+05:30")} · {(b.items ?? []).length} item{(b.items ?? []).length === 1 ? "" : "s"}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>{formatINR(b.total)}</span>
+                  {b.pdf_url && (
+                    <a href={b.pdf_url} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.goldDeep, textDecoration: "underline" }}>PDF</a>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
 

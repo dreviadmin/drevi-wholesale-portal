@@ -17,6 +17,8 @@ export interface OrderPayload {
   items: { sku: string; qty: number; unitPrice?: number; actualQty?: number; customTitle?: string; customImageUrl?: string }[];
   staffNote?: string;
   buyerNote?: string;
+  /** UX sprint — staff member taking the order (drains through to assisted_by). */
+  takenBy?: string;
   taxMode?: "none" | "inclusive" | "exclusive";
   taxRate?: number;
   discountType?: "percent" | "absolute";

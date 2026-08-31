@@ -23,6 +23,7 @@ export interface ReceiptInput {
   billAmount?: number | null;
   notes?: string;
   clientRef?: string;
+  gst?: { mode: "kaccha" | "pakka" | null; rate?: number | null; inclusive?: boolean | null };
   lines: ReceiptLineInput[];
 }
 
@@ -82,6 +83,9 @@ export async function createReceipt(input: ReceiptInput): Promise<{ ok: boolean;
         vendor_id: input.vendorId,
         receipt_date: receiptDate,
         bill_amount: input.billAmount != null && Number.isFinite(Number(input.billAmount)) ? Number(input.billAmount) : null,
+        gst_mode: input.gst?.mode ?? null,
+        gst_rate: input.gst?.mode === "pakka" ? input.gst?.rate ?? null : null,
+        gst_inclusive: input.gst?.mode === "pakka" ? input.gst?.inclusive ?? null : null,
         notes: (input.notes ?? "").trim(),
         client_ref: clientRef,
         created_by: staff.email,
@@ -129,6 +133,9 @@ export async function updateReceipt(
       vendor_id: input.vendorId,
       ...(receiptDate ? { receipt_date: receiptDate } : {}),
       bill_amount: input.billAmount != null && Number.isFinite(Number(input.billAmount)) ? Number(input.billAmount) : null,
+      gst_mode: input.gst?.mode ?? null,
+      gst_rate: input.gst?.mode === "pakka" ? input.gst?.rate ?? null : null,
+      gst_inclusive: input.gst?.mode === "pakka" ? input.gst?.inclusive ?? null : null,
       notes: (input.notes ?? "").trim(),
       updated_at: new Date().toISOString(),
     })

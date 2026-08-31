@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Search, X, Lock, Unlock, Eye, EyeOff, Pencil, ImageOff, ScanLine } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
@@ -21,6 +21,7 @@ const FIELDS: { key: string; label: string; type?: "number" | "textarea" | "bool
   { key: "color", label: "Colour" },
   { key: "primary_fabric", label: "Fabric" },
   { key: "hsn", label: "HSN code", type: "hsn" },
+  { key: "location", label: "Kept at (physical location)" },
   { key: "min_order_qty", label: "MOQ", type: "number" },
   { key: "current_qty", label: "Stock qty", type: "number" },
   { key: "restockable", label: "Restockable", type: "bool" },
@@ -31,6 +32,15 @@ const FIELDS: { key: string; label: string; type?: "number" | "textarea" | "bool
 export function ManageCatalogView({ products, hsnOptions }: { products: WholesaleProduct[]; hsnOptions: string[] }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
+
+  // Deep-link from the global scan sheet: ?sku=… opens with the search
+  // pre-filtered to that product.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const sku = (p.get("sku") ?? "").trim();
+    if (sku) setQuery(sku);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [editing, setEditing] = useState<WholesaleProduct | null>(null);
   const [scanning, setScanning] = useState(false);
 

@@ -121,3 +121,27 @@ export async function signedReceiptPhotoUrl(path: string, expiresSec = 60 * 60):
   const { data } = await admin.storage.from(RECEIPT_BUCKET).createSignedUrl(path, expiresSec);
   return data?.signedUrl ?? null;
 }
+
+// Published product images (Stage 7): the canonical buyer-facing set, one
+// public bucket mirroring how product-photos is provisioned. Deterministic
+// paths (<BASE>-<COLOR>/<angle>-<w>.jpg) make Re-push an idempotent overwrite.
+const PUBLISHED_BUCKET = "product-images";
+
+export async function uploadPublishedImage(
+  skuBase: string,
+  color: string,
+  angle: string,
+  width: number,
+  bytes: Buffer,
+  contentType: string,
+): Promise<{ url: string; path: string }> {
+  await ensureBucket(PUBLISHED_BUCKET, { public: true });
+  const admin = createAdminClient();
+  const safe = (s: string) => s.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
+  const ext = contentType.includes("png") ? "png" : "jpg";
+  const path = `${safe(skuBase)}-${safe(color)}/${angle}-${width}.${ext}`;
+  const { error } = await admin.storage.from(PUBLISHED_BUCKET).upload(path, bytes, { contentType, upsert: true });
+  if (error) throw new Error(`Published image upload failed: ${error.message}`);
+  const { data } = admin.storage.from(PUBLISHED_BUCKET).getPublicUrl(path);
+  return { url: data.publicUrl, path };
+}

@@ -9,6 +9,7 @@ import { getRawCart, getDetailedCart, type RawCartItem } from "@/lib/cart";
 import { getStockState, qtyCap } from "@/lib/stock";
 import { finalizeOrder } from "@/lib/order-finalize";
 import type { WholesaleProduct, OrderItem } from "@/lib/types";
+import { BUYER_PRODUCT_COLUMNS } from "@/lib/types";
 
 async function resolveActiveBuyer(): Promise<{ id: string }> {
   const supabase = createServerSupabase();
@@ -53,7 +54,7 @@ function clampQty(product: WholesaleProduct | undefined, qty: number): number | 
 
 async function loadProduct(sku: string): Promise<WholesaleProduct | undefined> {
   const admin = createAdminClient();
-  const { data } = await admin.from("wholesale_products").select("*").eq("sku", sku).maybeSingle();
+  const { data } = await admin.from("wholesale_products").select(BUYER_PRODUCT_COLUMNS).eq("sku", sku).maybeSingle();
   return (data as WholesaleProduct) ?? undefined;
 }
 

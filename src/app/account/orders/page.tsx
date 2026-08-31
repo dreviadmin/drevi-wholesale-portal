@@ -16,7 +16,10 @@ function fmtDate(iso: string): string {
 const STATUS_LABEL: Record<string, string> = {
   submitted: "Submitted",
   confirmed: "Confirmed",
-  fulfilled: "Fulfilled",
+  packed: "Being packed",
+  out_for_delivery: "Out for delivery",
+  delivered: "Delivered",
+  fulfilled: "Delivered",
   cancelled: "Cancelled",
 };
 

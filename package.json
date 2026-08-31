@@ -10,7 +10,12 @@
     "db:migrate": "node scripts/apply-migration.mjs",
     "db:seed-auth": "node scripts/seed-auth.mjs",
     "db:backup": "node scripts/backup.mjs",
-    "build:local": "NEXT_BUILD_DIR=.next-build next build"
+    "build:local": "NEXT_BUILD_DIR=.next-build next build",
+    "test": "vitest run",
+    "retrofit:baseline": "node scripts/verify-retrofit-state.mjs",
+    "retrofit:folder-audit": "node scripts/drive-folder-audit.mjs",
+    "retrofit:drive-map": "node scripts/drive-map-report.mjs",
+    "retrofit:reconcile": "node scripts/retrofit-reconciliation.mjs"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",
@@ -25,7 +30,8 @@
     "qrcode": "^1.5.4",
     "react": "^18",
     "react-dom": "^18",
-    "server-only": "^0.0.1"
+    "server-only": "^0.0.1",
+    "sharp": "^0.35.3"
   },
   "devDependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",
@@ -37,9 +43,11 @@
     "dotenv": "^17.4.2",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
+    "pdf-parse": "^2.4.5",
     "pg": "^8.21.0",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }

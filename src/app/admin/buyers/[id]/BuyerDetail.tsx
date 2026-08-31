@@ -20,6 +20,7 @@ import {
 import { buildWhatsAppMessage, shareWhatsApp, buildVCard, downloadVCard } from "@/lib/share";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { ORDER_STATUS_LABEL } from "@/lib/order-status";
 import type { BuyerStatus, BuyerSource, OrderStatus, AuditEventType } from "@/lib/types";
 
 interface BuyerDTO {
@@ -303,7 +304,7 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
           ) : orders.map((o) => (
             <Link key={o.id} href={`/admin/orders/${o.id}`} className="flex items-center justify-between py-2" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
               <span className="font-body" style={{ fontSize: 12.5, color: palette.black }}>{o.order_number} · {fmt(o.submitted_at)}</span>
-              <span className="font-body" style={{ fontSize: 12.5, color: palette.softBlack }}>{formatINR(o.total_amount)} · {o.status}</span>
+              <span className="font-body" style={{ fontSize: 12.5, color: palette.softBlack }}>{formatINR(o.total_amount)} · {ORDER_STATUS_LABEL[o.status]}</span>
             </Link>
           ))}
         </div>
