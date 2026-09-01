@@ -50,6 +50,13 @@ export function isAdminRole(role: StaffRole): boolean {
   return role === "admin" || role === "super_admin";
 }
 
+// Page-level gate: any active staff (retail billing, price checks).
+export async function requireStaffOrRedirect(): Promise<StaffCtx> {
+  const staff = await getStaff();
+  if (!staff) redirect("/login");
+  return staff;
+}
+
 // Page-level gate: admin/super_admin only (spec §5 — Buyers/Orders/Audit tabs).
 // Non-admin staff are sent to the staff home (price check).
 export async function requireAdminOrRedirect(): Promise<StaffCtx> {
