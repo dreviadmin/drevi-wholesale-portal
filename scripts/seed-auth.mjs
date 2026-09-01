@@ -70,10 +70,15 @@ async function ensureAuthUser(email, password) {
   return { id: data.user.id, created: true };
 }
 
+// Ansh (31 Aug): the whole team logs in with <name>/<name>123 on BOTH
+// environments for now. Ansh's own account is deliberately NOT in this list —
+// resetting the super-admin's real password from a script would lock him out.
 const STAFF = [
-  { email: "ansh@drevifashion.com", password: "Drevi-Super-2026" },
-  { email: "rakesh@drevifashion.com", password: "Drevi-Admin-2026" },
-  { email: "grishma@drevifashion.com", password: "Drevi-Staff-2026" },
+  { email: "arushi@drevifashion.com", password: "arushi123" },
+  { email: "rakesh@drevifashion.com", password: "rakesh123" },
+  { email: "grishma@drevifashion.com", password: "grishma123" },
+  { email: "jyoti@drevifashion.com", password: "jyoti123" },
+  { email: "riddhi@drevifashion.com", password: "riddhi123" },
 ];
 
 const TEST_BUYER = {
@@ -93,7 +98,12 @@ async function main() {
     console.log(`  staff   ${s.email}  →  ${s.password}  (${created ? "created" : "updated"})`);
   }
 
-  // Test buyer: auth user + active buyers row.
+  // Test buyer: auth user + active buyers row — DEV ONLY. Production must
+  // never grow an example.com buyer account.
+  if (target === "prod") {
+    console.log("\nDone. Log in at /login with any of the above. (Test buyer skipped on prod.)");
+    return;
+  }
   const { created } = await ensureAuthUser(TEST_BUYER.email, TEST_BUYER.password);
   const { error: upsertErr } = await admin.from("buyers").upsert(
     {

@@ -31,14 +31,18 @@ Living operational docs are in [`docs/`](./docs) — see
 | Role | Who | Sees |
 |---|---|---|
 | `super_admin` | Ansh | Everything, including user management (`/admin/staff`) |
-| `admin` | Arushi, Rakesh, Grishma, Jyoti, Riddhi | Everything **except** user management (Ansh, 4 Aug: full access for the whole team for now) |
+| `admin` | Arushi, Rakesh, Grishma, Jyoti, Riddhi | Everything **except** user management (full team access on BOTH environments — Ansh, 31 Aug) |
 | `staff` | — (role kept for future hires) | Shop-floor tools: price checks, catalog, billing wizards |
 | buyer | Approved retailers | Buyer catalog, cart, own orders |
 
 Staff log in with a **shortname** (`ansh` → `ansh@drevifashion.com`) or full
-email. Buyers use the credentials staff share via WhatsApp. Middleware gates
-every route by role and account status on each request. The staff app is
-organised around a four-item bottom nav: **Home · Sell · Stock · Studio**.
+email. Team logins currently use the `<name>` / `<name>123` convention on
+**both dev and production** (Ansh, 31 Aug — set via `npm run db:seed-auth`,
+which never touches the super-admin account and seeds its test buyer on dev
+only; rotate through `/admin/staff` before any outside exposure). Buyers use
+the credentials staff share via WhatsApp. Middleware gates every route by
+role and account status on each request. The staff app is organised around a
+five-space nav: **Home · Sell · Stock · Studio · Office**.
 
 ### Shop floor (all staff roles)
 
