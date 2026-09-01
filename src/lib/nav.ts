@@ -33,6 +33,7 @@ export const SPACES: Space[] = [
     roles: STAFF_PLUS,
     items: [
       { label: "nav.retail_check", href: "/admin/retail-check" },
+      { label: "nav.retail_bill", href: "/admin/retail-bill" },
       { label: "nav.price_check", href: "/admin/price-check" },
       { label: "nav.catalog", href: "/admin/catalog" },
       { label: "nav.exhibition", href: "/admin/exhibition" },

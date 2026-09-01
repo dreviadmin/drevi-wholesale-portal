@@ -54,6 +54,18 @@ five-space nav: **Home · Sell · Stock · Studio · Office**.
   HH:MM" stamp. Wholesale prices are **never rendered** on this page (the
   screen faces retail customers). Covers every sheet row, including garments
   hidden from the wholesale portal.
+- **Retail Billing** (`/admin/retail-bill`, 31 Aug) — actually SELL at the
+  retail price: scan tags or search (every sheet row is billable, including
+  wholesale-hidden garments), retail price prefilled per line and editable
+  when negotiated (the list MRP is kept on record), optional customer
+  name/phone, discount (%/₹), GST (none / 5 / 12 / 18, included or on top),
+  payment method, and a **bill date that may be in the past** — the
+  `RB-YYYYMMDD-NNN` number carries the chosen day. Saving posts the stock
+  movements and renders a Royal Noir **RETAIL — INVOICE** PDF (permanent
+  address at `/api/retail-bills/[id]/pdf`, regenerated from the bill's own
+  snapshot). Bills can be **voided** (two-tap confirm): stock returns, the
+  row stays on record flagged VOIDED. Retail bills are their own stream —
+  they never mix into the wholesale dashboards.
 - **Wholesale Price** (`/admin/price-check`) — the same scan-first lookup for
   wholesale prices. Every scan auto-copies the SKU, unknown SKUs still show
   their Drive photo for the tagging workflow, and "price not set" items prompt

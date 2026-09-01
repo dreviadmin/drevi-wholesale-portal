@@ -123,7 +123,13 @@ export interface BillMeta {
   pendingCount: number;
 }
 
-function OrderDoc({ order, buyer, images, billMeta }: { order: Order; buyer: PdfBuyer; images: ImgMap; billMeta?: BillMeta }) {
+/** Retail billing (31 Aug): same layout, its own header identity. */
+export interface DocVariant {
+  tagline?: string; // e.g. "RETAIL - INVOICE" (default: wholesale wording)
+  metaLine?: string; // replaces the source line under the number
+}
+
+function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; buyer: PdfBuyer; images: ImgMap; billMeta?: BillMeta; variant?: DocVariant }) {
   const items = order.items ?? [];
   const maxLead = items.filter((i) => i.stock_state === "made_to_order").reduce((m, i) => Math.max(m, i.restock_days ?? 0), 0);
   const date = new Date(order.submitted_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" });
@@ -151,12 +157,12 @@ function OrderDoc({ order, buyer, images, billMeta }: { order: Order; buyer: Pdf
         <View style={s.headerRow}>
           <View>
             <Text style={s.wordmark}>DREVI</Text>
-            <Text style={s.tagline}>{isInvoice ? "WHOLESALE - INVOICE" : "WHOLESALE"}</Text>
+            <Text style={s.tagline}>{variant?.tagline ?? (isInvoice ? "WHOLESALE - INVOICE" : "WHOLESALE")}</Text>
           </View>
           <View style={{ alignItems: "flex-end" }}>
             <Text style={s.orderNo}>{order.order_number}</Text>
             <Text style={s.meta}>{date}</Text>
-            <Text style={s.meta}>{billMeta ? `Bill ${billMeta.seq} against order ${billMeta.orderNumber}` : SOURCE_LABEL[order.source] ?? "Order"}</Text>
+            <Text style={s.meta}>{variant?.metaLine ?? (billMeta ? `Bill ${billMeta.seq} against order ${billMeta.orderNumber}` : SOURCE_LABEL[order.source] ?? "Order")}</Text>
           </View>
         </View>
 
@@ -277,7 +283,7 @@ function OrderDoc({ order, buyer, images, billMeta }: { order: Order; buyer: Pdf
   );
 }
 
-export async function renderOrderPdf(order: Order, buyer: PdfBuyer, billMeta?: BillMeta): Promise<Buffer> {
+export async function renderOrderPdf(order: Order, buyer: PdfBuyer, billMeta?: BillMeta, variant?: DocVariant): Promise<Buffer> {
   const images = await fetchItemImages(order.items ?? []);
-  return renderToBuffer(<OrderDoc order={order} buyer={buyer} images={images} billMeta={billMeta} />);
+  return renderToBuffer(<OrderDoc order={order} buyer={buyer} images={images} billMeta={billMeta} variant={variant} />);
 }

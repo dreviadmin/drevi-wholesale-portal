@@ -13,6 +13,7 @@ const STRINGS = {
     "nav.scan": "Scan",
     // nav — items
     "nav.retail_check": "Retail Price",
+    "nav.retail_bill": "Retail Billing",
     "nav.price_check": "Wholesale Price",
     "nav.catalog": "Catalog",
     "nav.exhibition": "Exhibitions",

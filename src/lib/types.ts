@@ -132,6 +132,30 @@ export interface OrderItem {
   stock_moved?: boolean;
 }
 
+/** A retail (MRP) sale to a walk-in customer (0043) — its own stream. */
+export interface RetailBill {
+  id: string;
+  bill_number: string;
+  customer_name: string | null;
+  customer_phone: string | null;
+  items: OrderItem[];
+  subtotal: number;
+  discount_type: DiscountType | null;
+  discount_value: number | null;
+  discount_amount: number;
+  tax_mode: TaxMode;
+  tax_rate: number | null;
+  tax_amount: number;
+  total: number;
+  payment_method: string | null;
+  bill_date: string;
+  pdf_url: string | null;
+  voided_at: string | null;
+  voided_by: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
 /** One generated bill against an order (0041) — lines are snapshotted. */
 export interface OrderBill {
   id: string;

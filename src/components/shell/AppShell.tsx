@@ -23,6 +23,7 @@ import type { StaffRole } from "@/lib/types";
 const SPACE_ICONS = { House, Store, Boxes, Palette, Briefcase } as const;
 const ITEM_ICONS: Record<string, typeof Tag> = {
   "/admin/retail-check": Tag,
+  "/admin/retail-bill": Store,
   "/admin/price-check": ScanLine,
   "/admin/catalog": LayoutGrid,
   "/admin/exhibition": Tent,
