@@ -155,8 +155,10 @@ export async function setAngleEngine(angleId: string, engine: "fashn" | "seedrea
   const admin = createAdminClient();
   const { data: angle } = await admin.from("design_angles").select("angle").eq("id", angleId).maybeSingle();
   if (!angle) return fail("Angle not found");
-  if ((DETAIL_ANGLES as readonly string[]).includes(angle.angle) && engine !== "raw") {
-    return fail("Detail angles are raw-only (D5)");
+  // Ansh (3 Sep): detail shots may be background-cleaned by the EDIT engines.
+  // Model swap stays banned — it would re-synthesise the embroidery.
+  if ((DETAIL_ANGLES as readonly string[]).includes(angle.angle) && engine === "fashn") {
+    return fail("Model swap never runs on detail shots — embroidery must stay real.");
   }
   const { error } = await admin.from("design_angles").update({ engine, updated_at: new Date().toISOString() }).eq("id", angleId);
   return error ? fail(error.message) : { ok: true };
@@ -174,7 +176,9 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
     .eq("id", angleId)
     .maybeSingle();
   if (!angle) return fail("Angle not found");
-  if ((DETAIL_ANGLES as readonly string[]).includes(angle.angle)) return fail("Detail angles are raw-only (D5)");
+  if ((DETAIL_ANGLES as readonly string[]).includes(angle.angle) && angle.engine === "fashn") {
+    return fail("Model swap never runs on detail shots — embroidery must stay real.");
+  }
   if (angle.engine === "raw") return fail("Raw angles use Approve as-is — nothing to generate");
   {
     // UX sprint — engines run in-process now; the only gate is a key.
@@ -185,12 +189,13 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
 
   const { data: dRow } = await admin
     .from("designs")
-    .select("title, category, sub_category, color, fabric, handwork, brand_model")
+    .select("title, category, sub_category, color, color_name, fabric, handwork, brand_model, bg_style, base_sku")
     .eq("id", angle.design_id)
     .maybeSingle();
   const promptDesign = {
     title: dRow?.title, category: dRow?.category, subCategory: dRow?.sub_category,
-    color: dRow?.color, fabric: dRow?.fabric, handwork: dRow?.handwork,
+    color: dRow?.color, colorName: dRow?.color_name, fabric: dRow?.fabric, handwork: dRow?.handwork,
+    bgStyle: dRow?.bg_style, bgSeed: `${dRow?.base_sku ?? ""}|${dRow?.color ?? ""}`,
   };
 
   // A server death mid-generation would strand the job in running forever
@@ -284,7 +289,9 @@ export async function approveCopy(designId: string): Promise<Res> {
   if (!row || row.status === "none") return fail("No copy draft to approve");
   const { error } = await admin
     .from("design_copy")
-    .update({ status: "active", approved_by: staff.email, approved_at: new Date().toISOString() })
+    // 'approved' — the only terminal value the 0016 check (and every gate)
+    // knows. 'active' was a slip that made Approve die on the constraint.
+    .update({ status: "approved", approved_by: staff.email, approved_at: new Date().toISOString() })
     .eq("design_id", designId);
   if (error) return fail(error.message);
   revalidatePath(`/admin/studio/${designId}`);
@@ -352,6 +359,20 @@ export async function setBrandModel(designId: string, model: string): Promise<Re
   const { error } = await admin.from("designs").update({ brand_model: model || null }).eq("id", designId);
   if (error) return fail(error.message);
   await writeAuditEvent({ eventType: "catalog_edit", staffUserId: staff.id, notes: `brand model → ${model || "(default)"} on design ${designId}` });
+  revalidatePath(`/admin/studio/${designId}`);
+  return { ok: true };
+}
+
+/** Ansh (3 Sep) — one background per design: 'auto' (deterministic) or a preset key. */
+export async function setBgStyle(designId: string, style: string): Promise<Res> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
+  const admin = createAdminClient();
+  const allowed = ["auto", "grey", "ivory", "champagne", "taupe", "charcoal"];
+  if (!allowed.includes(style)) return fail("Unknown background style");
+  const { error } = await admin.from("designs").update({ bg_style: style }).eq("id", designId);
+  if (error) return fail(error.message);
+  await writeAuditEvent({ eventType: "catalog_edit", staffUserId: staff.id, notes: `background → ${style} on design ${designId}` });
   revalidatePath(`/admin/studio/${designId}`);
   return { ok: true };
 }

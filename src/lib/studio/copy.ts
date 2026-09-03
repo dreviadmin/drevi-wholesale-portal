@@ -37,7 +37,7 @@ From the photos and the facts below, return STRICT JSON only (no markdown fence)
 
 export interface PromptFacts {
   title?: string | null; category?: string | null; subCategory?: string | null;
-  color?: string | null; fabric?: string | null; handwork?: string | null;
+  color?: string | null; colorName?: string | null; fabric?: string | null; handwork?: string | null;
   origin?: string | null; tier?: string | null;
 }
 
@@ -46,7 +46,7 @@ export function defaultCopyPrompt(d: PromptFacts): string {
   const facts = [
     d.title && `Working name: ${d.title}`,
     d.category && `Category: ${d.category} / ${d.subCategory ?? ""}`,
-    d.color && `Colour code: ${d.color}`,
+    d.colorName ? `Colour: ${d.colorName} (code ${d.color ?? "?"})` : d.color && `Colour code: ${d.color}`,
     d.fabric && `Fabric (verified): ${d.fabric}`,
     d.handwork && `Handwork (verified): ${d.handwork}`,
     d.origin && `Origin: ${d.origin}`,
@@ -68,7 +68,7 @@ export async function generateCopyForDesign(designId: string, requestedBy: strin
 
   const { data: design } = await admin
     .from("designs")
-    .select("id, base_sku, color, title, category, sub_category, tier, fabric, handwork, origin, specs_verified")
+    .select("id, base_sku, color, color_name, title, category, sub_category, tier, fabric, handwork, origin, specs_verified")
     .eq("id", designId)
     .maybeSingle();
   if (!design) return { ok: false, error: "Design not found" };
@@ -111,7 +111,7 @@ export async function generateCopyForDesign(designId: string, requestedBy: strin
     ? saved.prompt
     : defaultCopyPrompt({
         title: design.title, category: design.category, subCategory: design.sub_category,
-        color: design.color, fabric: design.fabric, handwork: design.handwork,
+        color: design.color, colorName: design.color_name, fabric: design.fabric, handwork: design.handwork,
         origin: design.origin, tier: design.tier,
       });
   const model = saved?.model_override || defaultCopyModel(design.tier);
