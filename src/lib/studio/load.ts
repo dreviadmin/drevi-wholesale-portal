@@ -186,12 +186,13 @@ export async function loadDesignDetail(designId: string): Promise<{
       .select("id, role, angle_id, engine, file_ref, file_name, status, created_at, derived_from")
       .eq("design_id", designId)
       .order("created_at", { ascending: false }),
-    admin.from("designs").select("ident_image_id, drive_folder_id, title, category, sub_category, color, fabric, handwork, origin, tier").eq("id", designId).maybeSingle(),
+    admin.from("designs").select("ident_image_id, drive_folder_id, title, category, sub_category, color, color_name, fabric, handwork, origin, tier, bg_style, base_sku").eq("id", designId).maybeSingle(),
   ]);
   const promptDesign = {
     title: designRow?.title, category: designRow?.category, subCategory: designRow?.sub_category,
-    color: designRow?.color, fabric: designRow?.fabric, handwork: designRow?.handwork,
+    color: designRow?.color, colorName: designRow?.color_name, fabric: designRow?.fabric, handwork: designRow?.handwork,
     origin: designRow?.origin, tier: designRow?.tier,
+    bgStyle: designRow?.bg_style, bgSeed: `${designRow?.base_sku ?? ""}|${designRow?.color ?? ""}`,
   };
   const order: Record<string, number> = { front: 0, back: 1, side: 2, lifestyle: 3, detail_1: 4, detail_2: 5 };
   const angleNameById = new Map((angles ?? []).map((a) => [a.id, a.angle as string]));

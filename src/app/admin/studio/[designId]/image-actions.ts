@@ -242,8 +242,11 @@ export async function assertGenerable(angleId: string): Promise<Res> {
   const admin = createAdminClient();
   const { data: angle } = await admin.from("design_angles").select("angle").eq("id", angleId).maybeSingle();
   if (!angle) return fail("Angle not found");
+  // Ansh (3 Sep): edit engines may clean detail backgrounds; only model swap
+  // stays banned on macros.
   if ((DETAIL_ANGLES as readonly string[]).includes(angle.angle)) {
-    return fail("Detail angles are macro shots — they are never AI-generated (§7.1).");
+    const { data: full } = await admin.from("design_angles").select("engine").eq("id", angleId).maybeSingle();
+    if (full?.engine === "fashn") return fail("Model swap never runs on detail shots — embroidery must stay real.");
   }
   return { ok: true };
 }

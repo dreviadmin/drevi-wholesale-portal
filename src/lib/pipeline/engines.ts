@@ -61,7 +61,10 @@ async function runOpenAi(source: Buffer, contentType: string, prompt: string): P
   form.set("model", process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-2");
   form.set("prompt", prompt);
   form.set("size", "auto");
-  form.set("quality", process.env.OPENAI_IMAGE_QUALITY ?? "high");
+  // 'medium' halves the render time vs 'high' with no visible loss on a
+  // background swap (the garment pixels are preserved, not re-drawn) — the
+  // slowness Ansh flagged was mostly this knob (3 Sep). Env overrides.
+  form.set("quality", process.env.OPENAI_IMAGE_QUALITY ?? "medium");
   form.set("n", "1");
   const r = await fetch("https://api.openai.com/v1/images/edits", {
     method: "POST",

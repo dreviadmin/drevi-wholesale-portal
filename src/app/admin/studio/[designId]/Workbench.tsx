@@ -10,7 +10,8 @@ import { COPY_MODELS, estimateLabel } from "@/lib/studio/copy-models";
 import type { BoardRow, AngleDetail, CopyDetail, DesignImage } from "@/lib/studio/load";
 import { AI_ANGLES } from "@/lib/studio/state";
 import { JobsTicker } from "../JobsTicker";
-import { setBrandModel, setCopyPrompt as setCopyPromptAction, setCopyModel, approveAsIs, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, approveCopy, pushWholesale, pushShopify } from "./actions";
+import { setBrandModel, setBgStyle, setCopyPrompt as setCopyPromptAction, setCopyModel, approveAsIs, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, approveCopy, pushWholesale, pushShopify } from "./actions";
+import { BG_PRESETS, resolveBgPreset } from "@/lib/studio/backgrounds";
 import { uploadSource, importFinished, applyImageDirectly, approveImage, rejectImage, saveCrop, setAngleSource, syncDrivePhotos } from "./image-actions";
 import { ImagePicker, CropSheet, CompareSheet } from "./ImageTools";
 
@@ -33,7 +34,7 @@ interface Job { angleId: string | null; type: string; status: string; progress: 
 
 const drivePhoto = (id: string, s = 600) => `/api/drive-photo?id=${encodeURIComponent(id)}&s=${s}`;
 
-export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnabled, brandModels, brandModel, uploadsOk, uploadsMessage }: {
+export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnabled, brandModels, brandModel, bgStyle, bgSeed, driveFolderId, uploadsOk, uploadsMessage }: {
   board: BoardRow;
   angles: AngleDetail[];
   copy: CopyDetail;
@@ -42,6 +43,9 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
   enginesEnabled: { fashn: boolean; seedream: boolean; openai_bg: boolean };
   brandModels: string[];
   brandModel: string;
+  bgStyle: string;
+  bgSeed: string;
+  driveFolderId: string | null;
   uploadsOk: boolean;
   uploadsMessage: string;
 }) {
@@ -199,10 +203,11 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           </div>
         </div>
 
-        {/* Engine chips (AI angles only — D5 keeps details raw) */}
-        {!isDetail && (
+        {/* Engine chips — details get the EDIT engines only (Ansh, 3 Sep):
+            background clean-up is allowed, model swap never (embroidery). */}
+        {(
           <div className="flex gap-1 mt-2.5 flex-wrap">
-            {(["fashn", "seedream", "openai_bg", "raw"] as const).map((e) => {
+            {(isDetail ? (["seedream", "openai_bg", "raw"] as const) : (["fashn", "seedream", "openai_bg", "raw"] as const)).map((e) => {
               const off = e !== "raw" && !enginesEnabled[e];
               return (
                 <button
@@ -237,12 +242,12 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
         )}
         {isDetail && (
           <div className="font-body mt-2" style={{ fontSize: 9.5, color: palette.mutedGreige }}>
-            Macro fidelity — embroidery is never AI-generated. Raw only.
+            Macro fidelity — the edit engines only replace the background; embroidery is never re-generated. Model swap stays off.
           </div>
         )}
 
         {/* Prompt (hidden for raw) */}
-        {!isDetail && a.engine !== "raw" && (
+        {a.engine !== "raw" && (
           <div className="mt-2">
             <button type="button" onClick={() => setPromptOpen((s) => ({ ...s, [a.id]: !s[a.id] }))} className="flex items-center gap-1 font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.mutedGreige }}>
               <ChevronDown size={11} style={{ transform: promptOpen[a.id] ? "rotate(180deg)" : "none" }} />
@@ -393,6 +398,18 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           >
             Sync Drive
           </button>
+          {driveFolderId && (
+            <a
+              href={`https://drive.google.com/drive/folders/${driveFolderId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="font-body uppercase"
+              style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.mutedGreige, textDecoration: "underline" }}
+              title="The exact Drive folder this design's photos live in — every shoot, import and generation lands here"
+            >
+              Folder
+            </a>
+          )}
           <Link href={`/admin/specs/${board.id}`} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }} title="Specs & supply (no pricing — counter-device safe)">
             Specs
           </Link>
@@ -440,6 +457,26 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
             </details>
           );
         })}
+      </div>
+
+      {/* Background style (Ansh, 3 Sep) — ONE look per design. Auto picks
+          deterministically from the design itself, so every angle and every
+          regeneration match; the presets pin an explicit look. */}
+      <div className="mt-3 p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.mutedGreige }}>Background</span>
+          <button type="button" disabled={pending} onClick={() => run(() => setBgStyle(board.id, "auto"), "Background → auto")} className="font-body uppercase" style={chipStyle(bgStyle === "auto")}>
+            Auto · {resolveBgPreset("auto", bgSeed).label}
+          </button>
+          {BG_PRESETS.map((p) => (
+            <button key={p.key} type="button" disabled={pending} onClick={() => run(() => setBgStyle(board.id, p.key), `Background → ${p.label}`)} className="font-body uppercase" style={chipStyle(bgStyle === p.key)}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <div className="font-body mt-1" style={{ fontSize: 9.5, color: palette.mutedGreige, lineHeight: 1.5 }}>
+          Applies to every AI-processed angle of this design — with a soft floor shadow, gradient toward the floor, catalogue-style. Changing it affects NEW generations; approved images stay as they are.
+        </div>
       </div>
 
       <JobsTicker />

@@ -23,7 +23,7 @@ export default async function WorkbenchPage({ params }: { params: { designId: st
     openai_bg: !!process.env.OPENAI_API_KEY,
   };
   const brandModels = await listBrandModels();
-  const { data: designRow } = await createAdminClient().from("designs").select("brand_model").eq("id", params.designId).maybeSingle();
+  const { data: designRow } = await createAdminClient().from("designs").select("brand_model, bg_style, base_sku, color").eq("id", params.designId).maybeSingle();
 
   return (
     <Workbench
@@ -35,6 +35,9 @@ export default async function WorkbenchPage({ params }: { params: { designId: st
       enginesEnabled={enginesEnabled}
       brandModels={brandModels}
       brandModel={designRow?.brand_model ?? ""}
+      bgStyle={designRow?.bg_style ?? "auto"}
+      bgSeed={`${designRow?.base_sku ?? ""}|${designRow?.color ?? ""}`}
+      driveFolderId={detail.driveFolderId}
       uploadsOk={captureEnabled()}
       uploadsMessage={captureDestinationNote()}
     />

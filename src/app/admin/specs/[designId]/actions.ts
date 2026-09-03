@@ -11,7 +11,7 @@ import type { SupplyBlock } from "@/app/admin/receipts/new/delivery-actions";
 
 export async function saveSpecsAndSupply(
   designId: string,
-  input: { fabric: string; handwork: string; origin: string; specsVerified: boolean; supply: SupplyBlock },
+  input: { fabric: string; handwork: string; origin: string; colorName?: string; specsVerified: boolean; supply: SupplyBlock },
 ): Promise<{ ok: boolean; error?: string }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized" }; }
@@ -21,6 +21,9 @@ export async function saveSpecsAndSupply(
     fabric: input.fabric.trim() || null,
     handwork: input.handwork.trim() || null,
     origin: input.origin.trim() || null,
+    // The human colour ("Champagne Gold") beside the SKU code — copy and
+    // generation prompts read it (Ansh, 3 Sep).
+    color_name: input.colorName?.trim() || null,
     specs_verified: input.specsVerified,
     updated_at: new Date().toISOString(),
   };

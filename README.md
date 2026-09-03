@@ -131,6 +131,15 @@ copy. Everything is per-design, review-gated, and audited.
     engine `raw`, no cost), *Import* (an externally finished image,
     immediately approvable), *Generate* (queue a pipeline job). Detail angles
     are macro shots — never AI-generated, enforced server-side.
+  - **Backgrounds** (3 Sep) — one background style per design, applied to
+    every AI-processed angle: **Auto** (a deterministic pick from the design's
+    own identity, so all angles and regenerations of one outfit match) or an
+    explicit preset (Studio Grey · Warm Ivory · Champagne · Taupe ·
+    Charcoal), all with catalogue-style floor gradients and a realistic soft
+    contact shadow. Changing the style affects new generations only.
+  - **Detail angles** (3 Sep) — the edit engines (Seedream/OpenAI) may now
+    clean detail-shot backgrounds with a macro-safe prompt (embroidery kept
+    pixel-exact); model swap remains banned on macros.
   - **Engines** (chips light up when their key is configured):
     **FASHN** model-swap (garment + pose kept, swapped onto a Drevi brand
     model; split **submit → poll** so Vercel's function limits never kill a
@@ -175,7 +184,9 @@ copy. Everything is per-design, review-gated, and audited.
   rows with stock, wholesale price and the **"kept at" physical location**
   field.
 - **Specs page** (`/admin/specs/[designId]`) — a price-free spec + supply
-  editor, safe for counter devices.
+  editor, safe for counter devices. Fields (3 Sep): Fabric, Handwork, Origin
+  and **Colour** (the human name beside the SKU code — it feeds the AI copy
+  and photo prompts), each with an ⓘ info button explaining what to enter.
 
 ### Back office (admins)
 
