@@ -7,6 +7,7 @@ import { requireStaff } from "@/lib/staff";
 import { getStockState } from "@/lib/stock";
 import { finalizeOrder } from "@/lib/order-finalize";
 import { validateBillDate, billDateToIso } from "@/lib/order-lines-core";
+import { syncCustomToCatalog } from "@/lib/custom-catalog";
 import { uploadCustomItemImage } from "@/lib/storage";
 import { sendPendingReviewAlert } from "@/lib/interakt";
 import { writeAuditEvent } from "@/lib/audit";
@@ -147,7 +148,7 @@ export async function submitExhibitionOrder(input: {
   // qty/unitPrice are the BILLED figures; actualQty (GST bill-split) keeps the
   // real piece count on record. customTitle marks a free-typed piece that is
   // not on the portal — never validated against wholesale_products.
-  items: { sku: string; qty: number; unitPrice?: number; actualQty?: number; customTitle?: string; customImageUrl?: string }[];
+  items: { sku: string; qty: number; unitPrice?: number; actualQty?: number; customTitle?: string; customImageUrl?: string; syncToCatalog?: boolean; catalogSku?: string }[];
   staffNote?: string;
   buyerNote?: string;
   taxMode?: TaxMode;
@@ -209,6 +210,15 @@ export async function submitExhibitionOrder(input: {
   let subtotal = 0;
   for (const it of input.items) {
     if (it.customTitle?.trim()) {
+      // Ansh (4 Sep): a custom line may opt into the catalog (unchecked by
+      // default) — lands hidden with the billed price as wholesale_price.
+      if (it.syncToCatalog) {
+        const sc = await syncCustomToCatalog({
+          sku: (it.catalogSku ?? "").trim(), title: it.customTitle, unitPrice: Number(it.unitPrice) || 0,
+          kind: "wholesale", createdBy: staff.email,
+        });
+        if (!sc.ok) return { ok: false, error: sc.error };
+      }
       const qty = Math.max(1, Math.floor(it.qty));
       const unitPrice =
         it.unitPrice != null && Number.isFinite(it.unitPrice) && it.unitPrice >= 0 ? Math.round(it.unitPrice * 100) / 100 : 0;

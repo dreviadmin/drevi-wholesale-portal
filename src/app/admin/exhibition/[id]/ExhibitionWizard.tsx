@@ -130,8 +130,8 @@ export function ExhibitionWizard({
   const [splitFactors, setSplitFactors] = useState<Record<string, number>>({});
   // Pieces not (yet) on the portal, keyed by a synthetic CUSTOM-n sku. Qty,
   // price overrides and GST splits reuse the normal per-sku machinery.
-  const [customItems, setCustomItems] = useState<Record<string, { title: string; price: number; image?: string | null }>>({});
-  const [customForm, setCustomForm] = useState<{ open: boolean; name: string; price: string; file: File | null }>({ open: false, name: "", price: "", file: null });
+  const [customItems, setCustomItems] = useState<Record<string, { title: string; price: number; image?: string | null; catalogSku?: string; sync?: boolean }>>({});
+  const [customForm, setCustomForm] = useState<{ open: boolean; name: string; price: string; file: File | null; sku: string; sync: boolean }>({ open: false, name: "", price: "", file: null, sku: "", sync: false });
   const [customUploading, setCustomUploading] = useState(false);
   // Full-screen photo zoom for cart lines that have no product detail to open
   // (custom items) — golden rule: every photo is clickable.
@@ -166,7 +166,7 @@ export function ExhibitionWizard({
     cart: Record<string, number>;
     priceOverrides: Record<string, string>;
     splitFactors: Record<string, number>;
-    customItems: Record<string, { title: string; price: number; image?: string | null }>;
+    customItems: Record<string, { title: string; price: number; image?: string | null; catalogSku?: string; sync?: boolean }>;
     taxMode: TaxMode;
     taxRate: number;
     customRate: string;
@@ -430,16 +430,16 @@ export function ExhibitionWizard({
       }
     }
     const sku = `CUSTOM-${++customSeqRef.current}`;
-    setCustomItems((m) => ({ ...m, [sku]: { title: name, price, image } }));
+    setCustomItems((m) => ({ ...m, [sku]: { title: name, price, image, catalogSku: customForm.sku.trim().toUpperCase() || undefined, sync: customForm.sync } }));
     setQty(sku, 1);
-    setCustomForm({ open: false, name: "", price: "", file: null });
+    setCustomForm({ open: false, name: "", price: "", file: null, sku: "", sync: false });
     flash(`${name} added to cart`);
   }
 
   const customItemForm = !customForm.open ? (
     <button
       type="button"
-      onClick={() => setCustomForm({ open: true, name: "", price: "", file: null })}
+      onClick={() => setCustomForm({ open: true, name: "", price: "", file: null, sku: "", sync: false })}
       className="flex items-center gap-1.5 font-body mt-3"
       style={{ fontSize: 10.5, color: palette.goldDeep, letterSpacing: "0.06em" }}
     >
@@ -476,12 +476,31 @@ export function ExhibitionWizard({
         </button>
         <button
           type="button"
-          onClick={() => setCustomForm({ open: false, name: "", price: "", file: null })}
+          onClick={() => setCustomForm({ open: false, name: "", price: "", file: null, sku: "", sync: false })}
           aria-label="Close custom item form"
           className="p-1"
         >
           <X size={14} color={palette.mutedGreige} />
         </button>
+      </div>
+      {/* Catalog sync (Ansh, 4 Sep) — unchecked by default; needs a real SKU. */}
+      <div className="flex gap-2 mt-2 flex-wrap items-center">
+        <label className="flex items-center gap-2 font-body" style={{ fontSize: 11, color: palette.softBlack }}>
+          <input type="checkbox" checked={customForm.sync} onChange={(e) => setCustomForm((f) => ({ ...f, sync: e.target.checked }))} style={{ accentColor: palette.goldDeep, width: 15, height: 15 }} />
+          Also add to catalog
+        </label>
+        {customForm.sync && (
+          <input
+            value={customForm.sku}
+            onChange={(e) => setCustomForm((f) => ({ ...f, sku: e.target.value.toUpperCase() }))}
+            placeholder="SKU for the catalog"
+            className="font-mono bg-transparent outline-none"
+            style={{ width: 180, border: "1px solid rgba(26,26,26,0.2)", padding: "6px 8px", fontSize: 11 }}
+          />
+        )}
+        {customForm.sync && (
+          <span className="font-body" style={{ fontSize: 9.5, color: palette.mutedGreige }}>lands hidden — complete it in Manage Catalog</span>
+        )}
       </div>
       {/* Photo — camera or gallery (no capture attr, so the phone offers both) */}
       <label className="flex items-center gap-2 mt-2 font-body" style={{ fontSize: 11, color: palette.softBlack }}>
@@ -576,7 +595,7 @@ export function ExhibitionWizard({
         // (audit finding). The server still stamps original_price only when
         // the pinned price genuinely differs from the live catalog.
         unitPrice: billedPrice,
-        ...(cust ? { customTitle: cust.title, ...(cust.image ? { customImageUrl: cust.image } : {}) } : {}),
+        ...(cust ? { customTitle: cust.title, ...(cust.image ? { customImageUrl: cust.image } : {}), ...(cust.sync && cust.catalogSku ? { syncToCatalog: true, catalogSku: cust.catalogSku } : {}) } : {}),
         ...(f > 1 ? { actualQty: l.qty } : {}),
       };
     });
@@ -679,7 +698,7 @@ export function ExhibitionWizard({
     // Also clear everything that would otherwise bleed into the next buyer:
     // the previous buyer's visiting-card photo (a cross-buyer data leak), their
     // GST mode/rate, payment method, and any custom items.
-    setCardFile(null); setCustomItems({}); setCustomForm({ open: false, name: "", price: "", file: null });
+    setCardFile(null); setCustomItems({}); setCustomForm({ open: false, name: "", price: "", file: null, sku: "", sync: false });
     setTaxMode("none"); setTaxRate(5); setCustomRate(""); setPayMethod("Cash");
     orderRefRef.current = null; // fresh idempotency key for the next order
     setStep("buyer");
@@ -758,7 +777,7 @@ export function ExhibitionWizard({
     });
     loadSnapshot(snap);
     setQuery(""); setCatalogQuery(""); setNewBuyer(false); setCardFile(null);
-    setCustomForm({ open: false, name: "", price: "", file: null });
+    setCustomForm({ open: false, name: "", price: "", file: null, sku: "", sync: false });
     setStep("cart");
     flash(`Resumed ${snap.buyer.business_name || snap.buyer.owner_name || "order"}`);
   }
@@ -1001,7 +1020,7 @@ export function ExhibitionWizard({
           <button
             type="button"
             onClick={() => {
-              setCustomForm({ open: true, name: catalogGroups.length === 0 ? catalogQuery.trim() : "", price: "", file: null });
+              setCustomForm({ open: true, name: catalogGroups.length === 0 ? catalogQuery.trim() : "", price: "", file: null, sku: "", sync: false });
               setStep("cart");
             }}
             className="flex items-center gap-1.5 font-body mt-4"

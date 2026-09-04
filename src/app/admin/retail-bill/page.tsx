@@ -12,9 +12,16 @@ export const dynamic = "force-dynamic";
 // walk-in customers. Every sheet row is billable, including garments hidden
 // from the wholesale portal (they still hang in the shop, same rule as the
 // retail price check). Past-dated bills carry the chosen day in their number.
-export default async function RetailBillPage() {
+export default async function RetailBillPage({ searchParams }: { searchParams?: { edit?: string } }) {
   await requireStaffOrRedirect();
   const admin = createAdminClient();
+  // Edit mode (Ansh, 4 Sep): ?edit=<id> loads a bill into the form — lines,
+  // terms and customer prefilled; saving applies stock deltas.
+  let editBill: RetailBill | null = null;
+  if (searchParams?.edit && /^[0-9a-f-]{36}$/i.test(searchParams.edit)) {
+    const { data } = await admin.from("retail_bills").select("*").eq("id", searchParams.edit).maybeSingle();
+    if (data && !data.voided_at) editBill = data as RetailBill;
+  }
   const [{ data: products }, { data: retail }, { data: bills }] = await Promise.all([
     admin
       .from("wholesale_products")
@@ -44,7 +51,7 @@ export default async function RetailBillPage() {
         pick a bill date (past dates allowed), save — the bill PDF is ready to share and stock updates immediately.
       </p>
 
-      <RetailBillForm catalog={catalog} />
+      <RetailBillForm key={editBill?.id ?? "new"} catalog={catalog} editBill={editBill} />
 
       {recent.length > 0 && (
         <div className="mt-8">
@@ -66,6 +73,9 @@ export default async function RetailBillPage() {
               <div className="flex items-center gap-3">
                 <span className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>{formatINR(b.total)}</span>
                 <a href={`/api/retail-bills/${b.id}/pdf`} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.goldDeep, textDecoration: "underline" }}>PDF</a>
+                {!b.voided_at && (
+                  <a href={`/admin/retail-bill?edit=${b.id}`} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.goldDeep, textDecoration: "underline" }}>Edit</a>
+                )}
                 {!b.voided_at && <VoidBillButton billId={b.id} billNumber={b.bill_number} />}
               </div>
             </div>
