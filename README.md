@@ -64,8 +64,17 @@ five-space nav: **Home · Sell · Stock · Studio · Office**.
   movements and renders a Royal Noir **RETAIL — INVOICE** PDF (permanent
   address at `/api/retail-bills/[id]/pdf`, regenerated from the bill's own
   snapshot). Bills can be **voided** (two-tap confirm): stock returns, the
-  row stays on record flagged VOIDED. Retail bills are their own stream —
-  they never mix into the wholesale dashboards.
+  row stays on record flagged VOIDED. Bills can also be **edited** after
+  saving (4 Sep, via Orders → Retail → Edit): lines, prices, discount and GST
+  change, money recomputes, and only the per-SKU stock DELTA moves; the PDF
+  regenerates as "Retail sale (amended)". **Custom items** (4 Sep) join a
+  retail bill like the wholesale cart — name + price, ₹0 freebies allowed, no
+  stock tracking — and a custom line can opt into the catalog via an "Also
+  add to the catalog" checkbox (unchecked by default; the product lands
+  hidden with a locked SKU/title, finish it in Manage Catalog). The Orders
+  page bifurcates into **Wholesale | Retail** tabs — the retail tab lists
+  every bill with search (bill no. / customer / phone), PDF, Edit and Void.
+  Retail bills never mix into the wholesale dashboards.
 - **Wholesale Price** (`/admin/price-check`) — the same scan-first lookup for
   wholesale prices. Every scan auto-copies the SKU, unknown SKUs still show
   their Drive photo for the tagging workflow, and "price not set" items prompt
@@ -101,8 +110,9 @@ five-space nav: **Home · Sell · Stock · Studio · Office**.
   (`DX-YYYYMMDD-NNN`, gapless and race-safe via an atomic
   `next_order_number()` RPC), buyer capture with visiting-card photo, offline
   IndexedDB queues with idempotency keys, continuous QR scanning into the
-  cart, price-visibility toggle, hold/resume, custom items, and finalise →
-  invoice PDF via WhatsApp.
+  cart, price-visibility toggle, hold/resume, custom items (which can opt
+  into the catalog — "Also add to catalog" + SKU, unchecked by default, lands
+  hidden), and finalise → invoice PDF via WhatsApp.
 - **In-store billing** (`/admin/in-store`) — the same cart machinery,
   **without sessions**: it opens on "Who is this order for?" (buyer search,
   recents, New Buyer), then catalog → cart → finalise, numbering
