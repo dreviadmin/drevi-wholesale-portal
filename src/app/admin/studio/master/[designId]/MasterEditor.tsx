@@ -189,7 +189,10 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
       <div className="mt-2 flex flex-col gap-1.5">
         {rows.map((v, i) => (
           <div key={v.sku} className="flex items-center gap-2 p-2.5 flex-wrap" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
-            <span className="font-mono flex-1 min-w-0 truncate" style={{ fontSize: 11, fontWeight: 600, color: palette.black }}>{v.sku}</span>
+            {/* w-full on phones: the fixed-width inputs used to squeeze the
+                SKU to nothing in the flex-wrap (Ansh, 4 Sep) — give it its own
+                line below sm and let it share the row on wider screens. */}
+            <span className="font-mono w-full sm:w-auto sm:flex-1 sm:min-w-0 truncate" style={{ fontSize: 11, fontWeight: 600, color: palette.black }}>{v.sku}</span>
             <label className="font-body" style={{ fontSize: 9, color: palette.mutedGreige }}>
               qty <input type="number" min="0" value={v.qty} onChange={(e) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, qty: e.target.value } : r)))} className="font-body ml-1" style={{ ...inputStyle, width: 64, padding: "5px 7px" }} />
             </label>

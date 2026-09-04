@@ -8,6 +8,7 @@ import { computeBillTotals, validateBillDate, billDateToIso } from "@/lib/order-
 import { renderOrderPdf } from "@/lib/order-pdf";
 import { uploadOrderPdf } from "@/lib/storage";
 import { DEFAULT_HSN } from "@/lib/hsn-default";
+import { syncCustomToCatalog } from "@/lib/custom-catalog";
 import type { DiscountType, Order, OrderItem, TaxMode } from "@/lib/types";
 
 // Retail billing (Ansh, 31 Aug) — sell at the RETAIL price (sheet Final MRP)
@@ -20,7 +21,10 @@ import type { DiscountType, Order, OrderItem, TaxMode } from "@/lib/types";
 type Res = { ok: boolean; error?: string };
 
 export interface RetailBillInput {
-  items: { sku: string; qty: number; unitPrice?: number }[];
+  /** Catalog lines carry a sku; custom lines carry customTitle (sku optional).
+   *  syncToCatalog (custom only, unchecked by default) also creates a hidden
+   *  catalog product under the given sku. */
+  items: { sku?: string; qty: number; unitPrice?: number; customTitle?: string; syncToCatalog?: boolean }[];
   customerName?: string;
   customerPhone?: string;
   discountType?: DiscountType;
@@ -32,6 +36,68 @@ export interface RetailBillInput {
   billDate?: string;
   /** Idempotency key minted by the form — a retry resolves to the same bill. */
   clientRef?: string;
+}
+
+/** Build validated OrderItems from the mixed catalog/custom line input. */
+async function buildRetailItems(
+  lines: RetailBillInput["items"],
+): Promise<{ ok: boolean; error?: string; items?: OrderItem[] }> {
+  const admin = createAdminClient();
+  const skus = [...new Set(lines.filter((l) => !l.customTitle && l.sku).map((l) => l.sku!.trim().toUpperCase()))];
+  const [{ data: prods }, { data: retail }] = skus.length
+    ? await Promise.all([
+        admin.from("wholesale_products").select("sku, title, hsn, image_urls").in("sku", skus),
+        admin.from("product_vendor_info").select("sku, retail_price").in("sku", skus),
+      ])
+    : [{ data: [] }, { data: [] }];
+  const prodBySku = new Map((prods ?? []).map((p) => [p.sku.toUpperCase(), p]));
+  const retailBySku = new Map((retail ?? []).map((r) => [r.sku.toUpperCase(), Number(r.retail_price) || 0]));
+
+  const items: OrderItem[] = [];
+  for (const line of lines) {
+    const qty = Math.max(1, Math.floor(Number(line.qty) || 1));
+    if (qty > 999) return { ok: false, error: `Quantity ${qty} looks like a typo (max 999 per line).` };
+
+    if (line.customTitle?.trim()) {
+      // Custom line — free-typed, never validated against the catalog, holds
+      // no stock. ₹0 is a legitimate freebie (same rule as wholesale).
+      const unitPrice = Math.max(0, Math.round((Number(line.unitPrice) || 0) * 100) / 100);
+      items.push({
+        sku: (line.sku ?? "").trim().toUpperCase() || "CUSTOM",
+        title: line.customTitle.trim(),
+        hsn: DEFAULT_HSN,
+        unit_price: unitPrice,
+        qty,
+        stock_state: "ready",
+        restock_days: null,
+        image_url: null,
+        custom: true,
+      });
+      continue;
+    }
+
+    const sku = (line.sku ?? "").trim().toUpperCase();
+    const p = prodBySku.get(sku);
+    if (!p) return { ok: false, error: `${sku || "(blank)"} is not in the catalog.` };
+    const listPrice = retailBySku.get(sku) ?? 0;
+    const unitPrice =
+      line.unitPrice != null && Number.isFinite(line.unitPrice)
+        ? Math.max(0, Math.round(Number(line.unitPrice) * 100) / 100)
+        : listPrice;
+    if (unitPrice <= 0) return { ok: false, error: `${p.title ?? sku} has no retail price — set a ₹/pc on the line.` };
+    items.push({
+      sku,
+      title: p.title ?? sku,
+      hsn: p.hsn ?? DEFAULT_HSN,
+      unit_price: unitPrice,
+      qty,
+      stock_state: "ready",
+      restock_days: null,
+      image_url: (p.image_urls as string[] | null)?.[0] ?? null,
+      ...(listPrice > 0 && unitPrice !== listPrice ? { original_price: listPrice } : {}),
+    });
+  }
+  return { ok: true, items };
 }
 
 export async function createRetailBill(
@@ -60,40 +126,20 @@ export async function createRetailBill(
   const billDate = input.billDate?.trim() ? validateBillDate(input.billDate, todayIst) : todayIst;
   if (!billDate) return { ok: false, error: "Bill date must be a valid date, today or earlier." };
 
-  // Server-side pricing: the retail price is the floor of trust — a client
-  // price only overrides it when explicitly set (staff negotiation).
-  const skus = [...new Set(input.items.map((i) => i.sku.trim().toUpperCase()))];
-  const [{ data: prods }, { data: retail }] = await Promise.all([
-    admin.from("wholesale_products").select("sku, title, hsn, image_urls").in("sku", skus),
-    admin.from("product_vendor_info").select("sku, retail_price").in("sku", skus),
-  ]);
-  const prodBySku = new Map((prods ?? []).map((p) => [p.sku.toUpperCase(), p]));
-  const retailBySku = new Map((retail ?? []).map((r) => [r.sku.toUpperCase(), Number(r.retail_price) || 0]));
+  const built = await buildRetailItems(input.items);
+  if (!built.ok) return { ok: false, error: built.error };
+  const items = built.items!;
 
-  const items: OrderItem[] = [];
+  // Catalog sync for flagged customs — BEFORE the bill, so a bad SKU aborts
+  // cleanly (nothing half-created). Unchecked by default in the UI.
   for (const line of input.items) {
-    const sku = line.sku.trim().toUpperCase();
-    const p = prodBySku.get(sku);
-    if (!p) return { ok: false, error: `${sku} is not in the catalog.` };
-    const qty = Math.max(1, Math.floor(Number(line.qty) || 1));
-    if (qty > 999) return { ok: false, error: `${sku}: quantity ${qty} looks like a typo (max 999 per line).` };
-    const listPrice = retailBySku.get(sku) ?? 0;
-    const unitPrice =
-      line.unitPrice != null && Number.isFinite(line.unitPrice)
-        ? Math.max(0, Math.round(Number(line.unitPrice) * 100) / 100)
-        : listPrice;
-    if (unitPrice <= 0) return { ok: false, error: `${p.title ?? sku} has no retail price — set a ₹/pc on the line.` };
-    items.push({
-      sku,
-      title: p.title ?? sku,
-      hsn: p.hsn ?? DEFAULT_HSN,
-      unit_price: unitPrice,
-      qty,
-      stock_state: "ready",
-      restock_days: null,
-      image_url: (p.image_urls as string[] | null)?.[0] ?? null,
-      ...(listPrice > 0 && unitPrice !== listPrice ? { original_price: listPrice } : {}),
-    });
+    if (line.customTitle && line.syncToCatalog) {
+      const s = await syncCustomToCatalog({
+        sku: (line.sku ?? "").trim(), title: line.customTitle, unitPrice: Number(line.unitPrice) || 0,
+        kind: "retail", createdBy: staff.email,
+      });
+      if (!s.ok) return { ok: false, error: s.error };
+    }
   }
 
   const discountType: DiscountType | null =
@@ -154,6 +200,7 @@ export async function createRetailBill(
   // physically happened), but staff are told exactly which SKUs to adjust.
   const moveFailed: string[] = [];
   for (const it of items) {
+    if (it.custom) continue; // custom lines hold no stock
     const res = await applyMovement({
       sku: it.sku, delta: -it.qty, reason: "order", refType: "retail_bill", refId: bill.id,
       note: `Retail bill ${bill.bill_number} — sold`, createdBy: staff.email,
@@ -238,4 +285,144 @@ export async function voidRetailBill(billId: string): Promise<Res> {
     return { ok: true, error: `Voided, but stock did NOT return for ${returnFailed.join(", ")} — adjust in Stock take.` };
   }
   return { ok: true };
+}
+
+/**
+ * Modify a saved retail bill (Ansh, 4 Sep — parity with Modify Order). The
+ * form sends the COMPLETE new line list + terms; money is recomputed
+ * server-side and stock follows the edit: per catalog SKU, only the DELTA
+ * between old and new quantities moves. The bill keeps its number and date;
+ * the PDF regenerates in place. Voided bills are history — not editable.
+ */
+export async function updateRetailBill(
+  billId: string,
+  input: Omit<RetailBillInput, "billDate" | "clientRef">,
+): Promise<Res & { warning?: string }> {
+  let staff;
+  try { staff = await requireStaff(); } catch { return { ok: false, error: "Not authorized." }; }
+  const admin = createAdminClient();
+
+  const { data: bill } = await admin.from("retail_bills").select("*").eq("id", billId).maybeSingle();
+  if (!bill) return { ok: false, error: "Bill not found." };
+  if (bill.voided_at) return { ok: false, error: "This bill is voided — create a new one instead." };
+  if (!input.items?.length) return { ok: false, error: "A bill needs at least one line — use Void instead." };
+  if (input.items.length > 100) return { ok: false, error: "Too many lines for one bill." };
+
+  const built = await buildRetailItems(input.items);
+  if (!built.ok) return { ok: false, error: built.error };
+  const items = built.items!;
+
+  for (const line of input.items) {
+    if (line.customTitle && line.syncToCatalog) {
+      const s = await syncCustomToCatalog({
+        sku: (line.sku ?? "").trim(), title: line.customTitle, unitPrice: Number(line.unitPrice) || 0,
+        kind: "retail", createdBy: staff.email,
+      });
+      if (!s.ok) return { ok: false, error: s.error };
+    }
+  }
+
+  const discountType: DiscountType | null =
+    input.discountType === "percent" || input.discountType === "absolute" ? input.discountType : null;
+  const discountValue = discountType
+    ? discountType === "percent"
+      ? Math.min(100, Math.max(0, Number(input.discountValue) || 0))
+      : Math.max(0, Number(input.discountValue) || 0)
+    : null;
+  const taxMode: TaxMode = input.taxMode === "inclusive" || input.taxMode === "exclusive" ? input.taxMode : "none";
+  const taxRate = taxMode === "none" ? null : Math.min(28, Math.max(0, Number(input.taxRate) || 0));
+  const totals = computeBillTotals(
+    items,
+    { discount_type: discountType, discount_value: discountValue, tax_mode: taxMode, tax_rate: taxRate, advance_amount: 0 },
+    { discountApplied: 0, advanceApplied: 0 },
+  );
+
+  // Stock deltas per catalog SKU — write the row FIRST (so a movement failure
+  // never desyncs the printed bill), then post the deltas and surface misses.
+  const agg = (list: OrderItem[]) => {
+    const m = new Map<string, number>();
+    for (const it of list) if (!it.custom && it.sku) m.set(it.sku, (m.get(it.sku) ?? 0) + Math.trunc(Number(it.qty) || 0));
+    return m;
+  };
+  const before = agg((bill.items ?? []) as OrderItem[]);
+  const after = agg(items);
+  const deltas: { sku: string; delta: number }[] = [];
+  for (const [sku, q] of after) { const d = q - (before.get(sku) ?? 0); if (d !== 0) deltas.push({ sku, delta: d }); }
+  for (const [sku, q] of before) if (!after.has(sku)) deltas.push({ sku, delta: -q });
+
+  const { data: won, error } = await admin
+    .from("retail_bills")
+    .update({
+      customer_name: input.customerName?.trim().slice(0, 120) || null,
+      customer_phone: input.customerPhone?.trim().slice(0, 20) || null,
+      items,
+      subtotal: totals.subtotal,
+      discount_type: discountType,
+      discount_value: discountValue,
+      discount_amount: totals.discountAmount,
+      tax_mode: totals.taxMode,
+      tax_rate: totals.taxRate,
+      tax_amount: totals.taxAmount,
+      total: totals.total,
+      payment_method: input.paymentMethod?.trim() || null,
+    })
+    .eq("id", billId)
+    .is("voided_at", null)
+    .select("id")
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!won) return { ok: false, error: "The bill was voided under you — reload." };
+
+  const moveFailed: string[] = [];
+  for (const d of deltas) {
+    const res = await applyMovement({
+      sku: d.sku,
+      delta: -d.delta, // more pieces billed → stock out; fewer → back
+      reason: d.delta > 0 ? "order" : "correction",
+      refType: "retail_bill", refId: billId,
+      note: `Retail bill ${bill.bill_number} — edited (${d.delta > 0 ? "+" : ""}${d.delta} pc)`,
+      createdBy: staff.email,
+    });
+    if (!res.ok) moveFailed.push(d.sku);
+  }
+
+  // Regenerate the stored PDF in place (the permanent route regenerates
+  // live anyway — this keeps the cached copy fresh too).
+  try {
+    const synthetic = {
+      order_number: bill.bill_number,
+      source: "in_store",
+      items,
+      total_amount: totals.total,
+      discount_type: discountType,
+      discount_value: discountValue,
+      discount_amount: totals.discountAmount,
+      tax_mode: totals.taxMode,
+      tax_rate: totals.taxRate,
+      tax_amount: totals.taxAmount,
+      advance_amount: 0,
+      payment_method: input.paymentMethod?.trim() || null,
+      notes: null,
+      submitted_at: billDateToIso(bill.bill_date),
+    } as unknown as Order;
+    const pdf = await renderOrderPdf(
+      synthetic,
+      { business_name: input.customerName?.trim() || "Retail Customer", owner_name: null, phone: input.customerPhone?.trim() || null, city: null },
+      undefined,
+      { tagline: "RETAIL - INVOICE", metaLine: "Retail sale (amended)" },
+    );
+    const pdfUrl = await uploadOrderPdf(billId, bill.bill_number, pdf);
+    await admin.from("retail_bills").update({ pdf_url: pdfUrl }).eq("id", billId);
+  } catch (e) {
+    console.error("retail bill PDF regen failed (bill stands):", (e as Error).message);
+  }
+
+  revalidatePath("/admin/retail-bill");
+  revalidatePath("/admin/orders");
+  return {
+    ok: true,
+    ...(moveFailed.length > 0
+      ? { warning: `Updated, but stock did NOT adjust for ${moveFailed.join(", ")} — fix in Stock take.` }
+      : {}),
+  };
 }

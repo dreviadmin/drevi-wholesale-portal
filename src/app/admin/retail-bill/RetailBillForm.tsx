@@ -7,8 +7,8 @@ import { ScanLine, Search, Trash2, X } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { palette } from "@/lib/palette";
 import { formatINR } from "@/lib/format";
-import { createRetailBill } from "./actions";
-import type { DiscountType, TaxMode } from "@/lib/types";
+import { createRetailBill, updateRetailBill } from "./actions";
+import type { DiscountType, RetailBill, TaxMode } from "@/lib/types";
 
 // Retail billing form (31 Aug). Scan or search → line with the retail price
 // prefilled (editable when negotiated) → optional customer, discount, GST,
@@ -25,7 +25,9 @@ export interface CatalogRow {
   retailPrice: number;
 }
 
-interface Line { sku: string; qty: number; price: string } // price as text for free editing
+// price as text for free editing; custom lines carry a title (+ optional
+// catalog-sync flag, unchecked by default — Ansh, 4 Sep).
+interface Line { sku: string; qty: number; price: string; custom?: boolean; title?: string; syncToCatalog?: boolean }
 
 const chip = (active: boolean) => ({
   fontSize: 9.5, letterSpacing: "0.12em", padding: "6px 11px",
@@ -34,20 +36,30 @@ const chip = (active: boolean) => ({
   border: active ? "none" : "1px solid rgba(26,26,26,0.2)",
 });
 
-export function RetailBillForm({ catalog }: { catalog: CatalogRow[] }) {
+export function RetailBillForm({ catalog, editBill }: { catalog: CatalogRow[]; editBill?: RetailBill | null }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [toast, setToast] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [query, setQuery] = useState("");
-  const [lines, setLines] = useState<Line[]>([]);
-  const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
-  const [discountType, setDiscountType] = useState<DiscountType | "none">("none");
-  const [discountValue, setDiscountValue] = useState("");
-  const [taxMode, setTaxMode] = useState<TaxMode>("none");
-  const [taxRate, setTaxRate] = useState(5);
-  const [payMethod, setPayMethod] = useState("Cash");
+  const [lines, setLines] = useState<Line[]>(() =>
+    editBill
+      ? (editBill.items ?? []).map((it) => ({
+          sku: it.sku, qty: it.qty, price: String(it.unit_price),
+          ...(it.custom ? { custom: true, title: it.title } : {}),
+        }))
+      : [],
+  );
+  const [customerName, setCustomerName] = useState(editBill?.customer_name ?? "");
+  const [customerPhone, setCustomerPhone] = useState(editBill?.customer_phone ?? "");
+  const [discountType, setDiscountType] = useState<DiscountType | "none">(editBill?.discount_type ?? "none");
+  const [discountValue, setDiscountValue] = useState(editBill?.discount_value ? String(editBill.discount_value) : "");
+  const [taxMode, setTaxMode] = useState<TaxMode>(editBill?.tax_mode ?? "none");
+  const [taxRate, setTaxRate] = useState(editBill?.tax_rate ? Number(editBill.tax_rate) : 5);
+  const [payMethod, setPayMethod] = useState(editBill?.payment_method ?? "Cash");
+  // Custom-item mini form
+  const [customOpen, setCustomOpen] = useState(false);
+  const [custom, setCustom] = useState({ title: "", price: "", sku: "", sync: false });
   const todayIst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   const [billDate, setBillDate] = useState("");
   const [savedInfo, setSavedInfo] = useState<{ billNumber: string; pdfUrl?: string; warning?: string } | null>(null);
@@ -87,7 +99,24 @@ export function RetailBillForm({ catalog }: { catalog: CatalogRow[] }) {
   const net = subtotal - discountAmt;
   const taxAmt = taxMode === "exclusive" ? (net * taxRate) / 100 : taxMode === "inclusive" ? (net * taxRate) / (100 + taxRate) : 0;
   const grandTotal = taxMode === "exclusive" ? net + taxAmt : net;
-  const unpriced = lines.filter((l) => (Number(l.price) || 0) <= 0);
+  // ₹0 is only invalid where it means "unpriced" — a custom freebie is fine.
+  const unpriced = lines.filter((l) => !l.custom && (Number(l.price) || 0) <= 0);
+
+  function addCustom() {
+    const title = custom.title.trim();
+    if (!title) { flash("A custom item needs a name."); return; }
+    if (custom.sync && !custom.sku.trim()) { flash("Catalog sync needs a SKU — give the item one, or untick the sync."); return; }
+    setLines((prev) => [...prev, {
+      sku: custom.sku.trim().toUpperCase() || "CUSTOM",
+      qty: 1,
+      price: custom.price || "0",
+      custom: true,
+      title,
+      syncToCatalog: custom.sync,
+    }]);
+    setCustom({ title: "", price: "", sku: "", sync: false });
+    setCustomOpen(false);
+  }
 
   function save() {
     if (lines.length === 0) { flash("Add at least one item."); return; }
@@ -106,18 +135,28 @@ export function RetailBillForm({ catalog }: { catalog: CatalogRow[] }) {
       return;
     }
     lowArmedRef.current = false;
+    const payload = {
+      items: lines.map((l) => ({
+        sku: l.sku, qty: l.qty, unitPrice: Number(l.price),
+        ...(l.custom ? { customTitle: l.title, syncToCatalog: l.syncToCatalog } : {}),
+      })),
+      customerName: customerName || undefined,
+      customerPhone: customerPhone || undefined,
+      discountType: discountType === "none" ? undefined : discountType,
+      discountValue: discountType === "none" ? undefined : discountNum,
+      taxMode, taxRate,
+      paymentMethod: payMethod,
+    };
     start(async () => {
-      const r = await createRetailBill({
-        items: lines.map((l) => ({ sku: l.sku, qty: l.qty, unitPrice: Number(l.price) })),
-        customerName: customerName || undefined,
-        customerPhone: customerPhone || undefined,
-        discountType: discountType === "none" ? undefined : discountType,
-        discountValue: discountType === "none" ? undefined : discountNum,
-        taxMode, taxRate,
-        paymentMethod: payMethod,
-        billDate: billDate || undefined,
-        clientRef,
-      });
+      if (editBill) {
+        const r = await updateRetailBill(editBill.id, payload);
+        if (!r.ok) { flash(r.error ?? "Failed"); return; }
+        setSavedInfo({ billNumber: `${editBill.bill_number} updated`, warning: r.warning });
+        router.push("/admin/retail-bill");
+        router.refresh();
+        return;
+      }
+      const r = await createRetailBill({ ...payload, billDate: billDate || undefined, clientRef });
       if (!r.ok) { flash(r.error ?? "Failed"); return; }
       setSavedInfo({ billNumber: r.billNumber!, pdfUrl: r.pdfUrl, warning: r.warning });
       setLines([]); setCustomerName(""); setCustomerPhone(""); setDiscountType("none"); setDiscountValue("");
@@ -129,6 +168,16 @@ export function RetailBillForm({ catalog }: { catalog: CatalogRow[] }) {
 
   return (
     <div className="mt-5">
+      {editBill && (
+        <div className="p-3 mb-4 flex items-center justify-between gap-2 flex-wrap" style={{ background: "rgba(196,163,90,0.12)", border: "1px solid rgba(196,163,90,0.5)" }}>
+          <span className="font-body" style={{ fontSize: 12.5, color: palette.goldDeep, fontWeight: 600 }}>
+            Editing {editBill.bill_number} — stock adjusts to the changes; the PDF regenerates.
+          </span>
+          <button type="button" onClick={() => router.push("/admin/retail-bill")} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.mutedGreige, textDecoration: "underline" }}>
+            Cancel edit
+          </button>
+        </div>
+      )}
       {savedInfo && (
         <div className="p-3 mb-4 flex items-center justify-between gap-2 flex-wrap" style={{ background: savedInfo.warning ? "#F3E9CE" : "rgba(31,107,69,0.1)", border: `1px solid ${savedInfo.warning ? "rgba(196,163,90,0.5)" : "rgba(31,107,69,0.35)"}` }}>
           <span className="font-body" style={{ fontSize: 12.5, color: savedInfo.warning ? "#8a6d1a" : "#1F6B45", fontWeight: 600 }}>
@@ -171,17 +220,48 @@ export function RetailBillForm({ catalog }: { catalog: CatalogRow[] }) {
         </div>
       )}
 
+      {/* Custom item (parity with the wholesale cart — Ansh, 4 Sep) */}
+      <div className="mt-2">
+        {!customOpen ? (
+          <button type="button" onClick={() => setCustomOpen(true)} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.goldDeep, textDecoration: "underline" }}>
+            + Add a custom item (not on the portal)
+          </button>
+        ) : (
+          <div className="p-3 flex flex-col gap-2" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.12)" }}>
+            <input value={custom.title} onChange={(e) => setCustom((c) => ({ ...c, title: e.target.value }))} placeholder="Item name, e.g. Matching potli bag" className="font-body p-2" style={{ fontSize: 12, border: "1px solid rgba(26,26,26,0.2)", background: "#fff" }} />
+            <div className="flex gap-2 flex-wrap">
+              <input value={custom.price} inputMode="decimal" onChange={(e) => setCustom((c) => ({ ...c, price: e.target.value.replace(/[^\d.]/g, "") }))} placeholder="₹ price (0 = freebie)" className="font-body p-2" style={{ fontSize: 12, width: 140, border: "1px solid rgba(26,26,26,0.2)", background: "#fff" }} />
+              <input value={custom.sku} onChange={(e) => setCustom((c) => ({ ...c, sku: e.target.value.toUpperCase() }))} placeholder="SKU (optional)" className="font-mono p-2" style={{ fontSize: 11.5, width: 180, border: "1px solid rgba(26,26,26,0.2)", background: "#fff" }} />
+            </div>
+            <label className="flex items-center gap-2 font-body" style={{ fontSize: 11.5, color: palette.softBlack }}>
+              <input type="checkbox" checked={custom.sync} onChange={(e) => setCustom((c) => ({ ...c, sync: e.target.checked }))} style={{ accentColor: palette.goldDeep, width: 15, height: 15 }} />
+              Also add to the catalog (needs a SKU — lands hidden, complete it in Manage Catalog)
+            </label>
+            <div className="flex gap-2">
+              <button type="button" onClick={addCustom} className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "8px 12px" }}>
+                Add to bill
+              </button>
+              <button type="button" onClick={() => setCustomOpen(false)} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.mutedGreige, padding: "8px 4px" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Lines */}
       {lines.length > 0 && (
         <div className="mt-4" style={{ borderTop: "1px solid rgba(26,26,26,0.12)" }}>
           {lines.map((l, i) => {
-            const c = bySku.get(l.sku);
+            const c = l.custom ? undefined : bySku.get(l.sku);
             return (
-              <div key={l.sku} className="flex items-center gap-2.5 py-2.5 flex-wrap" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
+              <div key={`${l.sku}-${i}`} className="flex items-center gap-2.5 py-2.5 flex-wrap" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
                 <div className="min-w-0 flex-1" style={{ minWidth: 160 }}>
-                  <div className="font-body truncate" style={{ fontSize: 12.5, color: palette.black }}>{c?.title ?? l.sku}</div>
+                  <div className="font-body truncate" style={{ fontSize: 12.5, color: palette.black }}>{l.custom ? l.title : c?.title ?? l.sku}</div>
                   <div className="font-body" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.06em" }}>
-                    {l.sku}{c && c.retailPrice > 0 ? ` · MRP ${formatINR(c.retailPrice)}` : " · no MRP set"}
+                    {l.custom
+                      ? `custom · ${l.sku}${l.syncToCatalog ? " · will join the catalog" : " · not on the portal"}`
+                      : `${l.sku}${c && c.retailPrice > 0 ? ` · MRP ${formatINR(c.retailPrice)}` : " · no MRP set"}`}
                   </div>
                 </div>
                 <div className="flex items-center" style={{ border: "1px solid rgba(26,26,26,0.2)" }}>
@@ -239,7 +319,7 @@ export function RetailBillForm({ catalog }: { catalog: CatalogRow[] }) {
             ))}
           </div>
 
-          <label className="flex flex-col gap-1 mt-3" style={{ maxWidth: 260 }}>
+          <label className="flex flex-col gap-1 mt-3" style={{ maxWidth: 260, display: editBill ? "none" : undefined }}>
             <span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.mutedGreige }}>Bill date — leave empty for today</span>
             <input type="date" value={billDate} max={todayIst} onChange={(e) => setBillDate(e.target.value)} className="font-body p-2" style={{ fontSize: 12, border: "1px solid rgba(26,26,26,0.2)", background: "#fff", color: palette.black }} />
             {billDate && billDate !== todayIst && (
@@ -273,7 +353,7 @@ export function RetailBillForm({ catalog }: { catalog: CatalogRow[] }) {
           </div>
 
           <button type="button" disabled={pending || lines.length === 0} onClick={save} className="mt-4 w-full font-body uppercase disabled:opacity-40" style={{ fontSize: 11, letterSpacing: "0.2em", background: palette.black, color: palette.ivory, padding: "14px 0", fontWeight: 600 }}>
-            {pending ? "Saving…" : `Save retail bill · ${formatINR(grandTotal)}`}
+            {pending ? "Saving…" : editBill ? `Update ${editBill.bill_number} · ${formatINR(grandTotal)}` : `Save retail bill · ${formatINR(grandTotal)}`}
           </button>
         </>
       )}
