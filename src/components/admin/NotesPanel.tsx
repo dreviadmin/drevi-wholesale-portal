@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, StickyNote, Trash2, X } from "lucide-react";
+import { Camera, Image as ImageIcon, StickyNote, Trash2, X } from "lucide-react";
 import { addEntityNote, deleteEntityNote } from "@/app/admin/notes-actions";
 import { ZoomImage } from "@/components/Lightbox";
 import { palette } from "@/lib/palette";
@@ -33,6 +33,7 @@ export function NotesPanel({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const fileInput = useRef<HTMLInputElement | null>(null);
+  const galleryInput = useRef<HTMLInputElement | null>(null);
 
   function save() {
     setError(null);
@@ -98,11 +99,32 @@ export function NotesPanel({
           >
             <Camera size={11} /> Photo
           </button>
+          <button
+            type="button"
+            disabled={pending || photos.length >= 4}
+            onClick={() => galleryInput.current?.click()}
+            className="flex items-center gap-1 font-body uppercase disabled:opacity-40"
+            style={{ fontSize: 8.5, letterSpacing: "0.12em", border: "1px solid rgba(26,26,26,0.25)", color: palette.black, padding: "6px 10px" }}
+          >
+            <ImageIcon size={11} /> Gallery
+          </button>
           <input
             ref={fileInput}
             type="file"
             accept="image/*"
             capture="environment"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              const picked = Array.from(e.target.files ?? []);
+              setPhotos((cur) => [...cur, ...picked].slice(0, 4));
+              e.currentTarget.value = "";
+            }}
+          />
+          <input
+            ref={galleryInput}
+            type="file"
+            accept="image/*"
             multiple
             className="hidden"
             onChange={(e) => {

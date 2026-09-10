@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Search, X, ScanLine, Plus, MessageCircle, Camera } from "lucide-react";
@@ -187,6 +187,7 @@ export function VendorModal({ vendor, onClose, onSaved }: {
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const galleryInputs = useRef<Record<string, HTMLInputElement | null>>({});
   const hasReceipts = (vendor?.receipts ?? 0) > 0;
 
   async function save() {
@@ -253,6 +254,11 @@ export function VendorModal({ vendor, onClose, onSaved }: {
                 {!vendor && <span className="font-body" style={{ fontSize: 8.5, color: palette.mutedGreige }}>save first</span>}
                 <input type="file" accept="image/*" capture="environment" className="hidden" disabled={busy || !vendor}
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) attachPhoto(kind, f); e.currentTarget.value = ""; }} />
+                <input ref={(el) => { galleryInputs.current[kind] = el; }} type="file" accept="image/*" className="hidden" disabled={busy || !vendor}
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) attachPhoto(kind, f); e.currentTarget.value = ""; }} />
+                <button type="button" disabled={busy || !vendor} onClick={(e) => { e.preventDefault(); galleryInputs.current[kind]?.click(); }} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 8, letterSpacing: "0.14em", color: palette.goldDeep }}>
+                  From gallery
+                </button>
               </label>
             ))}
           </div>

@@ -373,6 +373,7 @@ function GarmentSheet({
   const [mintOpen, setMintOpen] = useState(!garment.designId && !garment.baseSku);
   const [supplyOpen, setSupplyOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
 
   const staleMs = staleDays * 24 * 60 * 60 * 1000;
   useEffect(() => {
@@ -538,7 +539,8 @@ function GarmentSheet({
           <div className="mt-2 p-3 font-body" style={{ background: "#FBF3E4", border: "1px solid #C9A227", fontSize: 11, color: "#8a6d1a" }}>{uploadsMessage}</div>
         ) : (
           <>
-            <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPhoto(f); }} />
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPhoto(f); e.target.value = ""; }} />
+            <input ref={galleryRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPhoto(f); e.target.value = ""; }} />
             <button type="button" disabled={pending} onClick={() => fileRef.current?.click()} className="mt-2 w-full flex flex-col items-center justify-center gap-2 disabled:opacity-50" style={{ background: palette.ivory, border: "1px dashed rgba(26,26,26,0.25)", padding: "26px 0" }}>
               {g.identRef ? (
                 <>
@@ -554,6 +556,9 @@ function GarmentSheet({
                   <span className="font-body" style={{ fontSize: 9.5, color: palette.mutedGreige }}>Optional — skipping flags &quot;No ident photo&quot;</span>
                 </>
               )}
+            </button>
+            <button type="button" disabled={pending} onClick={() => galleryRef.current?.click()} className="mt-1.5 w-full text-center disabled:opacity-50 font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.14em", color: palette.goldDeep, padding: "8px 0", border: "1px solid rgba(26,26,26,0.15)", background: "transparent" }}>
+              {g.identRef ? "Replace from gallery" : "Choose from gallery"}
             </button>
           </>
         )}
