@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setOrderStatus, sendInvoice, uploadTrackingSheet, syncOrderFromCatalog, type StageDetails } from "@/app/admin/orders/actions";
 import { sharePdfFile, downloadPdfFile, invoiceFileName, waPhone } from "@/lib/share";
@@ -33,6 +33,7 @@ export function OrderActions({
   const [dispatchOpen, setDispatchOpen] = useState(false);
   const [form, setForm] = useState<StageDetails>({ courier: courier ?? "", trackingNumber: trackingNumber ?? "", trackingNote: "" });
   const [sheet, setSheet] = useState<File | null>(null);
+  const sheetGalleryRef = useRef<HTMLInputElement>(null);
 
   function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 3500); }
 
@@ -159,7 +160,11 @@ export function OrderActions({
                 <span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.14em", color: palette.softBlack }}>
                   {sheet ? sheet.name : "Tracking sheet photo (optional)"}
                 </span>
-                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => setSheet(e.target.files?.[0] ?? null)} />
+                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setSheet(f); e.currentTarget.value = ""; }} />
+                <input ref={sheetGalleryRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setSheet(f); e.currentTarget.value = ""; }} />
+                <button type="button" onClick={(e) => { e.preventDefault(); sheetGalleryRef.current?.click(); }} className="ml-auto font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.12em", color: palette.goldDeep, whiteSpace: "nowrap" }}>
+                  Gallery
+                </button>
               </label>
             </div>
             <div className="flex gap-2 mt-4">

@@ -289,12 +289,22 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           type="file"
           accept="image/*"
           className="hidden"
+          ref={(el) => { fileInputs.current[`${a.id}:source-gallery`] = el; }}
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadFor(a.id, "source", f); e.currentTarget.value = ""; }}
+        />
+        <input
+          type="file"
+          accept="image/*"
+          className="hidden"
           ref={(el) => { fileInputs.current[`${a.id}:import`] = el; }}
           onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadFor(a.id, "import", f); e.currentTarget.value = ""; }}
         />
         <div className="flex flex-wrap gap-1.5 mt-2.5">
           <button type="button" disabled={pending || !uploadsOk} title={uploadsOk ? "Shoot or upload a new source" : uploadsMessage} onClick={() => fileInputs.current[`${a.id}:source`]?.click()} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }}>
             <Camera size={11} /> Shoot
+          </button>
+          <button type="button" disabled={pending || !uploadsOk} title={uploadsOk ? "Pick a new source photo from the gallery" : uploadsMessage} onClick={() => fileInputs.current[`${a.id}:source-gallery`]?.click()} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }}>
+            <ImageIcon size={11} /> Gallery
           </button>
           <button type="button" disabled={pending} onClick={() => setPicker({ angleId: a.id, intent: "use" })} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }} title="Use an existing image as-is — no generation, no cost">
             <ImageIcon size={11} /> Use directly

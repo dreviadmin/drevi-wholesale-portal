@@ -48,6 +48,8 @@ export default function AddBuyerPage() {
   // One idempotency key per form fill — flaky-wifi retries of Save resolve
   // to the same buyer row (audit fix).
   const clientRefRef = useRef<string | null>(null);
+  const cardCameraRef = useRef<HTMLInputElement>(null);
+  const cardGalleryRef = useRef<HTMLInputElement>(null);
 
   function save() {
     setError(null);
@@ -101,18 +103,22 @@ export default function AddBuyerPage() {
         {area("Broker details", "broker_details")}
         {area("Other details", "other_details")}
         {area("Notes", "notes")}
-        <label className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1.5">
           <span className={labelCls} style={labelStyle}>Visiting card / photo</span>
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={(e) => setCardFile(e.target.files?.[0] ?? null)}
-            className="font-body"
-            style={{ fontSize: 12 }}
-          />
+          <input ref={cardCameraRef} type="file" accept="image/*" capture="environment" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) setCardFile(f); e.currentTarget.value = ""; }} />
+          <input ref={cardGalleryRef} type="file" accept="image/*" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) setCardFile(f); e.currentTarget.value = ""; }} />
+          <div className="flex gap-2">
+            <button type="button" onClick={() => cardCameraRef.current?.click()} className="flex-1 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 9.5, letterSpacing: "0.14em", padding: "10px 0" }}>
+              Camera
+            </button>
+            <button type="button" onClick={() => cardGalleryRef.current?.click()} className="flex-1 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 9.5, letterSpacing: "0.14em", padding: "10px 0" }}>
+              Gallery
+            </button>
+          </div>
           {cardFile && <span className="font-body" style={{ fontSize: 10, color: palette.goldDeep }}>{cardFile.name} ({Math.round(cardFile.size / 1024)} KB)</span>}
-        </label>
+        </div>
         {error && <p className="font-body" style={{ fontSize: 11, color: palette.crimsonText }}>{error}</p>}
         <button type="button" onClick={save} disabled={isPending} className="font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.18em", padding: "12px 0" }}>
           {isPending ? "Saving…" : "Save & Set Credentials"}
