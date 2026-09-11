@@ -3,25 +3,49 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // Full-table export used by the backup endpoint (and mirrored by
-// scripts/backup.mjs for local runs). Keep the table list in sync with the
-// schema when new tables are added.
+// scripts/backup.mjs for local runs).
+//
+// EVERY table in supabase/migrations must appear here — backup-tables.test.ts
+// parses the migrations and fails the build if one is missing. (12 Sep: the
+// list had drifted badly — the whole Studio, the stock ledger, both billing
+// tables and the LoVs were silently outside every backup taken since they
+// were created.)
 export const BACKUP_TABLES = [
+  // Parties, auth and access
   "buyers",
-  "orders",
-  "carts",
   "staff_users",
-  "exhibition_sessions",
   "auth_audit_log",
+  "vendors",
+  // Catalog and vocabulary
   "wholesale_products",
-  // Restore-critical config + Phase 1 tables (audit finding: these were
-  // absent, making disaster recovery incomplete).
   "product_vendor_info",
   "sync_ignored_skus",
-  "order_counters",
   "sku_registry",
-  "vendors",
+  "lovs",
+  "product_images",
+  // Selling: carts, orders, bills
+  "carts",
+  "orders",
+  "order_bills",
+  "order_counters",
+  "retail_bills",
+  "exhibition_sessions",
+  // Goods in and stock truth
   "goods_receipts",
   "goods_receipt_lines",
+  "stock_movements",
+  // Studio
+  "designs",
+  "design_angles",
+  "design_images",
+  "design_copy",
+  "image_candidates",
+  "publish_targets",
+  "pipeline_jobs",
+  // Misc
+  "entity_notes",
+  "notify_me",
+  "shopify_tokens",
 ] as const;
 
 const PAGE = 1000;
@@ -55,6 +79,13 @@ export async function exportAllTables(): Promise<BackupPayload> {
 // business records that lived ONLY in Supabase Storage — a project loss would
 // have destroyed them all. Included once daily (the cron route gates on the
 // IST hour) to keep free-tier egress sane; tables stay hourly.
+//
+// Deliberately EXCLUDED (regenerable, and large enough to matter on the free
+// tier — this is a decision, not drift): `order-pdfs` re-renders from the
+// order rows via renderOrderPdf, `product-photos` and `product-images` are
+// mirrors of Google Drive refreshed by the sync / Re-push paths.
+// `receipt-photos` is created on first bill upload (ensureBucket), so it is
+// listed here before it exists and simply warns until then.
 const STORAGE_BUCKETS = ["buyer-cards", "custom-items", "receipt-photos", "design-images", "vendor-photos", "order-attachments", "note-photos"] as const;
 
 export interface StorageBackup {

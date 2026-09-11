@@ -16,21 +16,38 @@ import dotenv from "dotenv";
 
 dotenv.config({ path: join(dirname(fileURLToPath(import.meta.url)), "..", ".env.local") });
 
+// Mirrors BACKUP_TABLES in src/lib/backup.ts — backup-tables.test.ts fails the
+// build if the two lists (or the migrations) ever drift apart again.
 const TABLES = [
   "buyers",
-  "orders",
-  "carts",
   "staff_users",
-  "exhibition_sessions",
   "auth_audit_log",
+  "vendors",
   "wholesale_products",
   "product_vendor_info",
   "sync_ignored_skus",
-  "order_counters",
   "sku_registry",
-  "vendors",
+  "lovs",
+  "product_images",
+  "carts",
+  "orders",
+  "order_bills",
+  "order_counters",
+  "retail_bills",
+  "exhibition_sessions",
   "goods_receipts",
   "goods_receipt_lines",
+  "stock_movements",
+  "designs",
+  "design_angles",
+  "design_images",
+  "design_copy",
+  "image_candidates",
+  "publish_targets",
+  "pipeline_jobs",
+  "entity_notes",
+  "notify_me",
+  "shopify_tokens",
 ];
 const KEEP = 14;
 const PAGE = 1000;
