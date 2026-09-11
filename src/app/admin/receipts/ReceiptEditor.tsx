@@ -195,7 +195,9 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku, onCa
           const up = await uploadReceiptBill(initial!.id!, fd);
           if (!up.ok) window.alert(`Saved, but the bill photo failed to upload: ${up.error ?? "unknown error"}. Add it again from the receipt page.`);
         }
-        router.push(`/admin/receipts/${initial!.id}`);
+        // Keep the incoming ?from= so the back link still points where the
+        // user came from after saving.
+        router.push(`/admin/receipts/${initial!.id}${window.location.search}`);
         router.refresh();
       } else {
         input.clientRef = clientRefRef.current ?? (clientRefRef.current = uuid());

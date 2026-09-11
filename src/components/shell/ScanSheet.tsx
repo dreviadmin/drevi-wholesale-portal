@@ -71,7 +71,7 @@ export function ScanSheet({ onClose }: { onClose: () => void }) {
   }
 
   function addToPrintTray(sku: string) {
-    queueTray([sku], "merge");
+    if (!queueTray([sku], "merge")) { setToast("Could not write the print tray"); setTimeout(() => setToast(null), 1800); return; }
     setToast(t("scan.added_to_print"));
     setTimeout(() => setToast(null), 1800);
   }

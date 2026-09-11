@@ -32,6 +32,9 @@ export function ColorCombobox({
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const wantFocus = useRef(false);
+  // Enter only commits a highlight the user moved to (or a typed filter) —
+  // a bare return on the untouched list must not pick the first colour.
+  const navigated = useRef(false);
 
   const list = useMemo(() => rankColors(query, groups), [query, groups]);
   const name = findColorName(value, groups);
@@ -56,7 +59,7 @@ export function ColorCombobox({
           <span className="font-mono" style={{ fontSize: 12.5, fontWeight: 700, color: palette.black }}>{value}</span>
           <span className="font-body truncate" style={{ fontSize: 12, color: palette.softBlack }}>{name ?? ""}</span>
         </button>
-        <button type="button" aria-label="Clear colour" onClick={clear}><X size={14} color={palette.mutedGreige} /></button>
+        <button type="button" aria-label="Clear colour" onClick={reopen}><X size={14} color={palette.mutedGreige} /></button>
       </div>
     );
   }
@@ -68,7 +71,10 @@ export function ColorCombobox({
       type="button"
       role="option"
       aria-selected={i === idx}
-      onPointerDown={(e) => { e.preventDefault(); pick(code); }}
+      // pointerdown only holds focus (so blur cannot close the list first);
+      // a touch-scroll fires pointerdown too, so the pick waits for click.
+      onPointerDown={(e) => e.preventDefault()}
+      onClick={() => pick(code)}
       className="w-full text-left px-3 py-2 font-body"
       style={{ fontSize: 12.5, background: i === idx ? palette.ivoryDeep : undefined, borderBottom: "1px solid rgba(26,26,26,0.04)" }}
     >
@@ -93,13 +99,13 @@ export function ColorCombobox({
         placeholder={placeholder ?? "Type a colour or code"}
         className="font-body w-full bg-transparent outline-none"
         style={style}
-        onChange={(e) => { setQuery(e.target.value); setOpen(true); setIdx(0); }}
-        onFocus={() => setOpen(true)}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); setIdx(0); navigated.current = false; }}
+        onFocus={() => { setOpen(true); navigated.current = false; }}
         onBlur={() => setTimeout(() => setOpen(false), 120)}
         onKeyDown={(e) => {
-          if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setIdx((i) => Math.min(i + 1, Math.max(list.length - 1, 0))); }
-          else if (e.key === "ArrowUp") { e.preventDefault(); setIdx((i) => Math.max(i - 1, 0)); }
-          else if (e.key === "Enter") { e.preventDefault(); if (open && list.length > 0) { const c = list[Math.min(idx, list.length - 1)]; if (c) pick(c[0]); } }
+          if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); navigated.current = true; setIdx((i) => Math.min(i + 1, Math.max(list.length - 1, 0))); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); navigated.current = true; setIdx((i) => Math.max(i - 1, 0)); }
+          else if (e.key === "Enter") { e.preventDefault(); if (open && list.length > 0 && (!blank || navigated.current)) { const c = list[Math.min(idx, list.length - 1)]; if (c) pick(c[0]); } }
           else if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
         }}
       />

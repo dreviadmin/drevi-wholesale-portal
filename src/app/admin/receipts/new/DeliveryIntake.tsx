@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition, type Dispatch, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { withFrom } from "@/components/BackLink";
 import { Search, X, ScanLine, Plus, Minus, Camera, Image as ImageIcon, Trash2, ChevronDown, Check, Package, AlertTriangle } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { KeyboardInset } from "@/components/KeyboardInset";
@@ -103,7 +104,11 @@ export function DeliveryIntake({
   const [headerOpen, setHeaderOpen] = useState(true);
   // The open capture sheet is its own draft so a half-captured garment survives
   // a refresh: a restored sheet reopens itself; Cancel / Add to delivery clear it.
-  const [sheet, setSheet, sheetMeta] = useDraft<Garment | null>(SHEET_DRAFT_KEY, null, { hasContent: (g) => !!g });
+  // Only a sheet with progress is worth restoring — an untouched blank one
+  // would reopen on every reload with a "restored" notice.
+  const [sheet, setSheet, sheetMeta] = useDraft<Garment | null>(SHEET_DRAFT_KEY, null, {
+    hasContent: (g) => !!g && (!!g.designId || !!g.baseSku || !!g.cat || g.sizes.length > 0 || !!g.description || !!g.unitCost || !!g.vendorSku),
+  });
   const [toast, setToast] = useState<string | null>(null);
   // Save-only success step (§6.1): the form is replaced by a panel that points
   // at the master editor / specs for each design on the receipt.
@@ -244,13 +249,14 @@ export function DeliveryIntake({
                     <span className="font-mono block truncate" style={{ fontSize: 11.5, fontWeight: 700, color: palette.black }}>{d.baseSku}·{d.color}</span>
                     <span className="font-body block truncate" style={{ fontSize: 11, color: palette.softBlack }}>{d.title || "—"}</span>
                     <span className="font-body uppercase inline-block mt-1" style={{ fontSize: 8, letterSpacing: "0.12em", padding: "3px 6px", background: d.created ? palette.amberSoft : palette.ivoryDeep, color: d.created ? palette.goldDeep : palette.softBlack }}>
-                      {d.created ? "New · awaiting specs" : "Reorder"}
+                      {`${d.created ? "New" : "Reorder"} · ${d.specsVerified ? "specs confirmed" : "awaiting specs"}`}
                     </span>
                   </span>
                 </div>
                 <div className="flex gap-2 mt-2.5">
-                  <Link href={`/admin/studio/master/${d.id}`} className="font-body uppercase" style={{ ...actionBtn, background: palette.black, color: palette.ivory }}>Product details</Link>
-                  <Link href={`/admin/specs/${d.id}`} className="font-body uppercase" style={{ ...actionBtn, border: `1px solid ${palette.black}`, color: palette.black }}>Specs</Link>
+                  {/* Back from these lands on the saved receipt (same banner), not on the Studio. */}
+                  <Link href={withFrom(`/admin/studio/master/${d.id}`, `/admin/receipts/${saved.receiptId}`)} className="font-body uppercase" style={{ ...actionBtn, background: palette.black, color: palette.ivory }}>Product details</Link>
+                  <Link href={withFrom(`/admin/specs/${d.id}`, `/admin/receipts/${saved.receiptId}`)} className="font-body uppercase" style={{ ...actionBtn, border: `1px solid ${palette.black}`, color: palette.black }}>Specs</Link>
                 </div>
               </div>
             );
@@ -436,7 +442,7 @@ export function DeliveryIntake({
       {sheet && (
         <GarmentSheet
           garment={sheet}
-          onChange={(u) => setSheet((s) => (s == null ? s : typeof u === "function" ? u(s) : u))}
+          onChange={(u) => { if (sheetMeta.restored) sheetMeta.dismiss(); setSheet((s) => (s == null ? s : typeof u === "function" ? u(s) : u)); }}
           draftMeta={sheetMeta}
           knownDesigns={knownDesigns}
           uploadsOk={uploadsOk}
@@ -506,7 +512,7 @@ function GarmentSheet({
       description: s.description || d.title || "",
       vendorSku: s.vendorSku || d.vendorSku || "",
       unitCost: s.unitCost || (d.lastCost ? String(d.lastCost) : ""),
-      identRef: d.identRef, supply: { ...d.supply, ...s.supply }, isReorder: true, supplyStale: stale,
+      identRef: d.identRef, identImageId: undefined, variantSkus: [], supply: { ...d.supply, ...s.supply }, isReorder: true, supplyStale: stale,
     }));
     setMintOpen(false);
     setQuery("");
@@ -708,11 +714,11 @@ function GarmentSheet({
             <div className="grid grid-cols-2 gap-2 mt-2">
               <button type="button" disabled={photoDisabled} onClick={() => fileRef.current?.click()} className="flex flex-col items-center justify-center gap-1.5 disabled:opacity-40" style={photoTile}>
                 <Camera size={20} color={palette.goldDeep} />
-                <span className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.14em", color: palette.black }}>{g.identRef ? "Retake" : "Open camera"}</span>
+                <span className="font-body uppercase text-center" style={{ fontSize: 9.5, letterSpacing: "0.14em", color: palette.black }}>{g.identRef ? "Retake" : "Open camera"}</span>
               </button>
               <button type="button" disabled={photoDisabled} onClick={() => galleryRef.current?.click()} className="flex flex-col items-center justify-center gap-1.5 disabled:opacity-40" style={photoTile}>
                 <ImageIcon size={20} color={palette.goldDeep} />
-                <span className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.14em", color: palette.black }}>{g.identRef ? "Replace from gallery" : "Choose from gallery"}</span>
+                <span className="font-body uppercase text-center" style={{ fontSize: 9.5, letterSpacing: "0.14em", color: palette.black }}>{g.identRef ? "Replace from gallery" : "Choose from gallery"}</span>
               </button>
             </div>
             <div className="font-body mt-1.5" style={{ fontSize: 9.5, color: g.designId ? palette.mutedGreige : "#8a6d1a" }}>
@@ -781,7 +787,7 @@ function GarmentSheet({
       <div className="fixed bottom-0 inset-x-0 px-3 pb-3" style={{ background: `linear-gradient(to top, ${palette.pageBg} 70%, transparent)` }}>
         <button
           type="button"
-          disabled={pending || !g.baseSku || g.sizes.length === 0 || !g.unitCost}
+          disabled={pending || !g.baseSku || g.sizes.length === 0 || !g.unitCost || unminted.length > 0}
           onClick={() => onDone(g)}
           className="mx-auto max-w-xl w-full block font-body uppercase disabled:opacity-40"
           style={{ fontSize: 11.5, letterSpacing: "0.18em", background: palette.gold, color: palette.black, fontWeight: 600, padding: "15px 0" }}

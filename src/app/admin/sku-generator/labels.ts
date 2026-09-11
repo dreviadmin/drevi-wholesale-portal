@@ -25,12 +25,12 @@ export interface PrintDatum { sku: string; found: boolean; vendorCode: string; m
  * entries gain a copy, new ones are appended. Never throws — a receipt that is
  * already saved must not fail on a storage hiccup.
  */
-export function queueTray(skus: string[], mode: "merge" | "replace"): void {
+export function queueTray(skus: string[], mode: "merge" | "replace"): boolean {
   try {
     if (mode === "replace") {
       const fresh: TrayItem[] = [...new Set(skus)].map((sku) => ({ sku, copies: 1 }));
       localStorage.setItem(TRAY_KEY, JSON.stringify(fresh));
-      return;
+      return true;
     }
     const parsed = JSON.parse(localStorage.getItem(TRAY_KEY) ?? "[]");
     const tray: TrayItem[] = Array.isArray(parsed) ? parsed : [];
@@ -40,7 +40,8 @@ export function queueTray(skus: string[], mode: "merge" | "replace"): void {
       else tray.push({ sku, copies: 1 });
     }
     localStorage.setItem(TRAY_KEY, JSON.stringify(tray));
-  } catch { /* storage unavailable or corrupted — the caller's own state still stands */ }
+    return true;
+  } catch { return false; /* storage unavailable or corrupted — the caller's own state still stands */ }
 }
 
 // QRs encode the SKU string only — deterministic, never stored (spec §6.1).

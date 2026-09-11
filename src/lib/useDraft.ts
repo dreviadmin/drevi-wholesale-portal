@@ -91,6 +91,7 @@ export function useDraft<T>(
 
   // Latest-value refs: `initial`/`opts` are read inside effects without being deps.
   const initialRef = useRef(initial);
+  initialRef.current = initial;
   const optsRef = useRef(opts);
   optsRef.current = opts;
   const keyRef = useRef(key);
@@ -192,8 +193,12 @@ export function useDraft<T>(
   }, [cancelPending]);
 
   const discard = useCallback(() => {
+    // The reset value becomes the no-draft baseline; otherwise a seed that
+    // already has content (an edit form) would be re-written as a draft.
+    const init = resolveInitial(initialRef.current);
     clear();
-    setState(resolveInitial(initialRef.current));
+    firstStateRef.current = init;
+    setState(init);
   }, [clear]);
 
   const dismiss = useCallback(() => {

@@ -49,7 +49,9 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus, designs }
   const mismatch = receipt.billAmount != null && receipt.billAmount > 0 && Math.abs(receipt.billAmount - totals.value) > 0.5;
 
   function printTags() {
-    queueTray(lines.map((l) => l.sku), "merge");
+    // Exactly this receipt's tags — the save path may already have queued
+    // them, and merging again would print two labels per SKU.
+    queueTray(lines.map((l) => l.sku), "replace");
     router.push("/admin/sku-generator?tab=print&receipt=" + encodeURIComponent(receipt.number));
   }
 

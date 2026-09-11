@@ -33,6 +33,17 @@ export function withFrom(href: string, from: string): string {
   return `${href}${href.includes("?") ? "&" : "?"}from=${encodeURIComponent(from)}`;
 }
 
+/**
+ * This page's own URL including the `?from=` it arrived with, for building
+ * onward links — so a chain (Workbench → Specs → Product Master) unwinds hop
+ * by hop instead of dropping the origin after the first page.
+ */
+export function useHere(ownPath: string): string {
+  const params = useSearchParams();
+  const from = safeFrom(params?.get("from"));
+  return from ? withFrom(ownPath, from) : ownPath;
+}
+
 // Longest matching prefix wins; the query/hash is stripped before matching.
 const LABELS: [string, StringKey][] = [
   ["/admin/studio/master/", "back.product_master"],

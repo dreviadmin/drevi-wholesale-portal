@@ -10,7 +10,7 @@ import { supplyAge } from "@/lib/availability";
 import type { BoardRow } from "@/lib/studio/load";
 import { saveSpecs, savePricing, saveVariant, setStockForSku, saveDesignHsn, togglePortal } from "./actions";
 import { HsnInput } from "@/components/admin/HsnInput";
-import { BackLink, withFrom } from "@/components/BackLink";
+import { BackLink, withFrom, useHere } from "@/components/BackLink";
 import { DraftNotice } from "@/components/DraftNotice";
 
 // Master editor client (§12.1). Group-level fields save once per design;
@@ -93,7 +93,7 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
     <div className="font-body uppercase mt-6" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>{title}</div>
   );
   const inputStyle = { fontSize: 12.5, border: "1px solid rgba(26,26,26,0.15)", background: "#fff", color: palette.black, padding: "8px 10px" } as const;
-  const specsHref = withFrom(`/admin/specs/${board.id}`, `/admin/studio/master/${board.id}`);
+  const specsHref = withFrom(`/admin/specs/${board.id}`, useHere(`/admin/studio/master/${board.id}`));
 
   return (
     <div className="px-4 md:px-8 py-6 max-w-2xl pb-16">

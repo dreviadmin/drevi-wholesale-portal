@@ -81,6 +81,9 @@ export function SkuGeneratorClient({ isAdmin, vocab, initialTab }: { isAdmin: bo
   // The scanner captures the first render's onScan — read state through refs.
   const basesRef = useRef<BaseEntry[] | null>(null);
 
+  // The persist effect must not run before the tray has been read back, or a
+  // StrictMode double-mount writes "[]" over a hand-off staged by Log delivery.
+  const trayLoaded = useRef(false);
   // ---- bootstrap ----
   useEffect(() => {
     fetch("/api/sku/state").then((r) => r.json()).then((d) => {
@@ -90,15 +93,16 @@ export function SkuGeneratorClient({ isAdmin, vocab, initialTab }: { isAdmin: bo
       const raw = localStorage.getItem(TRAY_KEY);
       if (raw) setTray(JSON.parse(raw));
     } catch { /* corrupted tray — start fresh */ }
+    trayLoaded.current = true;
     // Log delivery hand-off (?tab=print&receipt=GR-…): the tray was staged
-    // before navigation; just say so.
-    const from = new URLSearchParams(window.location.search).get("receipt");
-    if (from) flash(`${from} · tags staged`);
+    // before navigation; say so once, then drop the param so a reload stays quiet.
+    const p = new URLSearchParams(window.location.search);
+    const from = p.get("receipt");
+    if (from) { flash(`${from} · tags staged`); p.delete("receipt"); }
     // Scan-sheet hand-off (?variant=DD-CAT-SUB-NNN-SIZE-COLOR): an unknown tag
     // lands here with everything derivable pre-filled. A parseable base flips
     // to variant mode (bases list resolves the match once loaded via
     // pendingVariantRef); otherwise new-design mode with cat/sub seeded.
-    const p = new URLSearchParams(window.location.search);
     const scanned = (p.get("variant") ?? "").trim().toUpperCase();
     if (scanned) {
       const parts = scanned.split("-");
@@ -110,8 +114,8 @@ export function SkuGeneratorClient({ isAdmin, vocab, initialTab }: { isAdmin: bo
         setDeepLink(dl);
       }
       p.delete("variant");
-      window.history.replaceState(null, "", window.location.pathname + (p.toString() ? `?${p}` : ""));
     }
+    if (scanned || from) window.history.replaceState(null, "", window.location.pathname + (p.toString() ? `?${p}` : ""));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const pendingVariantRef = useRef<string | null>(null);
@@ -130,6 +134,7 @@ export function SkuGeneratorClient({ isAdmin, vocab, initialTab }: { isAdmin: bo
     if (match) setSelectedBase(match);
   }, [bases]);
   useEffect(() => {
+    if (!trayLoaded.current) return;
     try { localStorage.setItem(TRAY_KEY, JSON.stringify(tray)); } catch { /* full */ }
   }, [tray]);
   const loadBases = useCallback(() => {

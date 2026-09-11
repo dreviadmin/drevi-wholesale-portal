@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronDown, Check, X as XIcon, RefreshCw, SlidersHorizontal, Loader2, Camera, Upload, Crop as CropIcon, Columns2, Image as ImageIcon } from "lucide-react";
 import { ZoomImage } from "@/components/Lightbox";
-import { BackLink, withFrom } from "@/components/BackLink";
+import { BackLink, withFrom, useHere } from "@/components/BackLink";
 import { DraftNotice } from "@/components/DraftNotice";
 import { palette } from "@/lib/palette";
 import { useDraft } from "@/lib/useDraft";
@@ -428,7 +428,8 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
     );
   };
 
-  const specsHref = withFrom(`/admin/specs/${board.id}`, `/admin/studio/${board.id}`);
+  const here = useHere(`/admin/studio/${board.id}`);
+  const specsHref = withFrom(`/admin/specs/${board.id}`, here);
 
   return (
     <div className="px-4 md:px-8 py-6 max-w-3xl">
@@ -472,7 +473,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           <Link href={specsHref} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }} title="Specs, supply & wholesale price">
             Specs
           </Link>
-          <Link href={`/admin/studio/master/${board.id}`} className="flex items-center gap-1 font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }} title="Product Master — per-size stock & wholesale price, MRP, HSN">
+          <Link href={withFrom(`/admin/studio/master/${board.id}`, here)} className="flex items-center gap-1 font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }} title="Product Master — per-size stock & wholesale price, MRP, HSN">
             <SlidersHorizontal size={14} /> Master
           </Link>
         </span>
@@ -666,7 +667,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               </div>
               {!board.specsVerified && (
                 <div className="font-body mt-1.5" style={{ fontSize: 9.5, lineHeight: 1.5, color: "#9C3A31" }}>
-                  Blocked until specs are confirmed — open <Link href={`/admin/studio/master/${board.id}`} style={{ textDecoration: "underline" }}>Product Master</Link> and tick &ldquo;Confirmed by Rakesh&rdquo; under Specs.
+                  Blocked until specs are confirmed — open <Link href={withFrom(`/admin/studio/master/${board.id}`, here)} style={{ textDecoration: "underline" }}>Product Master</Link> and tick &ldquo;Confirmed by Rakesh&rdquo; under Specs.
                 </div>
               )}
             </div>
@@ -677,7 +678,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               </button>
               {!board.specsVerified && (
                 <div className="font-body mt-1.5" style={{ fontSize: 9.5, lineHeight: 1.5, color: "#9C3A31" }}>
-                  Blocked until specs are confirmed — open <Link href={`/admin/studio/master/${board.id}`} style={{ textDecoration: "underline" }}>Product Master</Link> and tick &ldquo;Confirmed by Rakesh&rdquo; under Specs.
+                  Blocked until specs are confirmed — open <Link href={withFrom(`/admin/studio/master/${board.id}`, here)} style={{ textDecoration: "underline" }}>Product Master</Link> and tick &ldquo;Confirmed by Rakesh&rdquo; under Specs.
                 </div>
               )}
             </>

@@ -69,6 +69,10 @@ function seedBill(editBill: RetailBill | null | undefined): BillState {
   };
 }
 
+// Edit mode has content only when it differs from the bill row it was seeded
+// from — otherwise Discard / Use server would re-persist the seed as a draft.
+const billSig = (b: BillState) => JSON.stringify([b.lines, b.customerName, b.customerPhone, b.discountType, b.discountValue, b.taxMode, b.taxRate, b.payMethod]);
+
 const chip = (active: boolean) => ({
   fontSize: 9.5, letterSpacing: "0.12em", padding: "6px 11px",
   background: active ? palette.black : "transparent",
@@ -87,7 +91,7 @@ export function RetailBillForm({ catalog, editBill }: { catalog: CatalogRow[]; e
   // Draft autosave. Edit mode is seeded from the bill row; retail_bills has no
   // updated_at, so the seeded fields themselves are the staleness baseline.
   const [bill, setBill, draftMeta] = useDraft<BillState>(`drevi:draft:retail-bill:${editBill?.id ?? "new"}`, () => seedBill(editBill), {
-    hasContent: (d) => d.lines.length > 0 || !!d.customerName || !!d.customerPhone,
+    hasContent: (d) => (editBill ? billSig(d) !== billSig(seedBill(editBill)) : d.lines.length > 0 || !!d.customerName || !!d.customerPhone),
     base: editBill
       ? JSON.stringify([editBill.items, editBill.discount_type, editBill.discount_value, editBill.tax_mode, editBill.tax_rate, editBill.payment_method, editBill.customer_name, editBill.customer_phone])
       : null,

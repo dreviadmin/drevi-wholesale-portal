@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check, ImageOff } from "lucide-react";
-import { BackLink, withFrom } from "@/components/BackLink";
+import { BackLink, withFrom, useHere } from "@/components/BackLink";
 import { DraftNotice } from "@/components/DraftNotice";
 import { KeyboardInset } from "@/components/KeyboardInset";
 import { ZoomImage } from "@/components/Lightbox";
@@ -79,7 +79,9 @@ export function SpecsEditor({ design }: { design: DesignFields }) {
   const [draft, setDraft, draftMeta] = useDraft(`drevi:draft:specs:${design.id}`, seed, {
     // Price lives on the variants (not designs.updated_at), so it is part of
     // the staleness signature too.
-    base: `${design.updatedAt ?? seedSig}|${initialPrice}`,
+    // Sheet ingest and the other price writers never bump designs.updated_at,
+    // so the seeded values themselves are part of the signature.
+    base: `${design.updatedAt ?? ""}|${JSON.stringify(seed.fields)}|${JSON.stringify(seed.supply)}|${initialPrice}`,
     hasContent: (d) => JSON.stringify(d) !== seedSig,
     onRestore: (d) => ({ ...seed, ...d }),
   });
@@ -88,7 +90,8 @@ export function SpecsEditor({ design }: { design: DesignFields }) {
   const setFields = (fn: (f: typeof seed.fields) => typeof seed.fields) => setDraft((d) => ({ ...d, fields: fn(d.fields) }));
   const setSupply = (fn: (s: SupplyBlock) => SupplyBlock) => setDraft((d) => ({ ...d, supply: fn(d.supply) }));
   const setPrice = (p: string) => setDraft((d) => ({ ...d, price: p }));
-  const masterHref = withFrom(`/admin/studio/master/${design.id}`, `/admin/specs/${design.id}`);
+  const here = useHere(`/admin/specs/${design.id}`);
+  const masterHref = withFrom(`/admin/studio/master/${design.id}`, here);
   const codes = [design.categoryCode, design.subCategoryCode].filter(Boolean).join("-");
 
   const input = { fontSize: 14, border: "1px solid rgba(26,26,26,0.15)", background: "#fff", color: palette.black, padding: "11px 12px", width: "100%" } as const;
