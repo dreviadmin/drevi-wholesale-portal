@@ -29,6 +29,8 @@ export const BACKUP_TABLES = [
   "order_bills",
   "order_counters",
   "retail_bills",
+  "credit_notes",
+  "credit_ledger",
   "exhibition_sessions",
   // Goods in and stock truth
   "goods_receipts",

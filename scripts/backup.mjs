@@ -34,6 +34,8 @@ const TABLES = [
   "order_bills",
   "order_counters",
   "retail_bills",
+  "credit_notes",
+  "credit_ledger",
   "exhibition_sessions",
   "goods_receipts",
   "goods_receipt_lines",
