@@ -113,6 +113,10 @@ export interface OrderItem {
   // tax slab), qty/unit_price hold the BILLED figures and actual_qty keeps the
   // real piece count. Real per-piece price = qty*unit_price / actual_qty.
   actual_qty?: number;
+  // Billed units already returned against a credit note. The credit note rows
+  // are the audit trail; this is the reservation the return cap is won on
+  // (written only through patchOrderLine's lines_rev CAS).
+  returned_qty?: number;
   // Free-typed line for a piece not (yet) in the portal catalog — never
   // validated against wholesale_products.
   custom?: boolean;
@@ -195,6 +199,8 @@ export interface Order {
   tax_rate: number | null;
   tax_amount: number;
   advance_amount: number;
+  /** Wallet credit settled against this order — maintained by the apply_credit RPC. */
+  credit_applied?: number;
   payment_method: string | null;
   payment_notes: string | null;
   notes: string | null;

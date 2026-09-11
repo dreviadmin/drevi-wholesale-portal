@@ -104,7 +104,7 @@ export default async function OrdersPage({ searchParams }: { searchParams?: { st
 
   const { data: orders } = await admin
     .from("orders")
-    .select("id, order_number, buyer_id, total_amount, advance_amount, status, source, exhibition_event, submitted_at, items")
+    .select("id, order_number, buyer_id, total_amount, advance_amount, credit_applied, status, source, exhibition_event, submitted_at, items")
     .order("submitted_at", { ascending: false });
 
   const buyerIds = Array.from(new Set((orders ?? []).map((o) => o.buyer_id)));
@@ -113,7 +113,7 @@ export default async function OrdersPage({ searchParams }: { searchParams?: { st
     : { data: [] as Pick<Buyer, "id" | "business_name" | "phone">[] };
   const buyerById = new Map((buyers ?? []).map((b) => [b.id, b]));
 
-  const rows: OrderRowDTO[] = ((orders ?? []) as Array<Pick<Order, "id" | "order_number" | "buyer_id" | "total_amount" | "advance_amount" | "status" | "source" | "exhibition_event" | "submitted_at" | "items">>).map((o) => {
+  const rows: OrderRowDTO[] = ((orders ?? []) as Array<Pick<Order, "id" | "order_number" | "buyer_id" | "total_amount" | "advance_amount" | "credit_applied" | "status" | "source" | "exhibition_event" | "submitted_at" | "items">>).map((o) => {
     const advance = o.advance_amount ?? 0;
     return {
       id: o.id,
@@ -122,7 +122,8 @@ export default async function OrdersPage({ searchParams }: { searchParams?: { st
       phone: buyerById.get(o.buyer_id)?.phone ?? null,
       total: o.total_amount,
       advance,
-      balance: o.status === "cancelled" ? 0 : Math.max(0, o.total_amount - advance),
+      // Wallet credit settles part of an order just like an advance does.
+      balance: o.status === "cancelled" ? 0 : Math.max(0, o.total_amount - advance - (Number(o.credit_applied) || 0)),
       status: o.status,
       source: o.source,
       submitted_at: o.submitted_at,

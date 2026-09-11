@@ -436,7 +436,9 @@ export async function updateOrderItems(
 
   // If the edit dropped the total below money already collected, surface the
   // refund owed rather than letting the balance silently clamp to zero.
-  const overpaidBy = advanceAmount > total ? Math.round((advanceAmount - total) * 100) / 100 : undefined;
+  const creditApplied = Number((order as { credit_applied?: number }).credit_applied) || 0;
+  const collected = advanceAmount + creditApplied;
+  const overpaidBy = collected > total ? Math.round((collected - total) * 100) / 100 : undefined;
   return { ok: true, total, overpaidBy };
 }
 
