@@ -7,7 +7,7 @@ import { X, QrCode, Printer, Tag, PackageCheck, SlidersHorizontal, PlusCircle, S
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { palette } from "@/lib/palette";
 import { t } from "@/lib/strings";
-import { TRAY_KEY, type TrayItem } from "@/app/admin/sku-generator/labels";
+import { queueTray } from "@/app/admin/sku-generator/labels";
 
 // Global scan action sheet (build guide §6.5). The FAB opens the existing
 // QrScanner; a decode resolves via /api/scan/resolve (server-side, role-gated
@@ -71,18 +71,9 @@ export function ScanSheet({ onClose }: { onClose: () => void }) {
   }
 
   function addToPrintTray(sku: string) {
-    try {
-      const tray = JSON.parse(localStorage.getItem(TRAY_KEY) ?? "[]") as TrayItem[];
-      const ex = tray.find((x) => x.sku === sku);
-      if (ex) ex.copies += 1;
-      else tray.push({ sku, copies: 1 });
-      localStorage.setItem(TRAY_KEY, JSON.stringify(tray));
-      setToast(t("scan.added_to_print"));
-      setTimeout(() => setToast(null), 1800);
-    } catch {
-      setToast("Could not write the print tray");
-      setTimeout(() => setToast(null), 1800);
-    }
+    if (!queueTray([sku], "merge")) { setToast("Could not write the print tray"); setTimeout(() => setToast(null), 1800); return; }
+    setToast(t("scan.added_to_print"));
+    setTimeout(() => setToast(null), 1800);
   }
 
   const draft = resolved && resolved.known ? findWizardDraft() : null;

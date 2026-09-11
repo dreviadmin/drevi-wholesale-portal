@@ -3,9 +3,12 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronDown, Check, X as XIcon, RefreshCw, SlidersHorizontal, Loader2, Camera, Upload, Crop as CropIcon, Columns2, Image as ImageIcon } from "lucide-react";
+import { ChevronDown, Check, X as XIcon, RefreshCw, SlidersHorizontal, Loader2, Camera, Upload, Crop as CropIcon, Columns2, Image as ImageIcon } from "lucide-react";
 import { ZoomImage } from "@/components/Lightbox";
+import { BackLink, withFrom, useHere } from "@/components/BackLink";
+import { DraftNotice } from "@/components/DraftNotice";
 import { palette } from "@/lib/palette";
+import { useDraft } from "@/lib/useDraft";
 import { COPY_MODELS, estimateLabel } from "@/lib/studio/copy-models";
 import type { BoardRow, AngleDetail, CopyDetail, DesignImage } from "@/lib/studio/load";
 import { AI_ANGLES } from "@/lib/studio/state";
@@ -54,7 +57,21 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
   const [toast, setToast] = useState<string | null>(null);
   const [promptOpen, setPromptOpen] = useState<Record<string, boolean>>({});
   const [historyOpen, setHistoryOpen] = useState<Record<string, boolean>>({});
-  const [prompts, setPrompts] = useState<Record<string, string>>({});
+  // Per-angle prompt edits keyed by angle id. An entry equal to its server
+  // prompt is pruned — on restore and after every refresh — so a saved
+  // prompt drops its key once the refresh confirms it (dropping it on click
+  // would flash the old prompt in the box until the refresh lands).
+  const isPromptEdit = (angleId: string, p: string) => { const sp = angles.find((a) => a.id === angleId)?.prompt; return sp !== undefined && p !== sp; };
+  const prunePrompts = (s: Record<string, string>) => {
+    const kept = Object.entries(s).filter(([id, p]) => isPromptEdit(id, p));
+    return kept.length === Object.keys(s).length ? s : Object.fromEntries(kept);
+  };
+  const [prompts, setPrompts, promptsMeta] = useDraft<Record<string, string>>(`drevi:draft:angle-prompts:${board.id}`, {}, {
+    hasContent: (s) => Object.entries(s).some(([id, p]) => isPromptEdit(id, p)),
+    onRestore: prunePrompts,
+  });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setPrompts(prunePrompts); }, [angles]);
   // R5 sheets
   const [picker, setPicker] = useState<{ angleId: string; intent: "use" | "source" } | null>(null);
   const [crop, setCrop] = useState<{ angleId: string | null; parentId: string; fileRef: string } | null>(null);
@@ -104,7 +121,10 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
     });
   }
   const [copyPromptOpen, setCopyPromptOpen] = useState(false);
-  const [copyPrompt, setCopyPrompt] = useState(copy.prompt);
+  const [copyPrompt, setCopyPrompt, copyPromptMeta] = useDraft(`drevi:draft:copy-prompt:${board.id}`, copy.prompt, {
+    base: copy.prompt,
+    hasContent: (p) => p !== copy.prompt,
+  });
 
   function uploadFor(angleId: string, kind: "source" | "import", file: File) {
     if (!uploadsOk) { flash(uploadsMessage); return; }
@@ -116,22 +136,51 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
       if (r.ok) router.refresh();
     });
   }
-  const [copyDraft, setCopyDraft] = useState({ title: copy?.title ?? "", description: copy?.description ?? "", tags: copy?.tags ?? {} });
-  const copyDirty = !!copy && (copyDraft.title !== copy.title || copyDraft.description !== copy.description);
+  const serverCopy = { title: copy.title, description: copy.description };
+  const [copyDraft, setCopyDraft, copyMeta] = useDraft(`drevi:draft:copy:${board.id}`, serverCopy, {
+    base: JSON.stringify(serverCopy),
+    hasContent: (d) => d.title !== copy.title || d.description !== copy.description,
+  });
+  const copyDirty = copyDraft.title !== copy.title || copyDraft.description !== copy.description;
   // router.refresh() re-renders with fresh props but never re-runs useState
-  // initializers — resync the editable draft whenever the server copy changes.
+  // initializers. Only a REAL change of the server copy may touch the draft
+  // (keying on the `copy` object clobbered edits on every refresh): a clean
+  // draft adopts it, a dirty one is kept behind the stale notice.
+  const [copyServerMoved, setCopyServerMoved] = useState(false);
+  const serverCopyRef = useRef(serverCopy);
+  const adoptNextCopyRef = useRef(false);
+  const adoptServerCopy = () => { setCopyDraft({ title: copy.title, description: copy.description }); copyMeta.clear(); setCopyServerMoved(false); };
+  const copyRegenerated = () => { adoptNextCopyRef.current = true; copyMeta.clear(); }; // generated copy replaces any edit
   useEffect(() => {
-    setCopyDraft({ title: copy?.title ?? "", description: copy?.description ?? "", tags: copy?.tags ?? {} });
-  }, [copy?.title, copy?.description, copy?.tags]);
+    const prev = serverCopyRef.current;
+    if (prev.title === copy.title && prev.description === copy.description) return;
+    serverCopyRef.current = { title: copy.title, description: copy.description };
+    const editedSincePrev = copyDraft.title !== prev.title || copyDraft.description !== prev.description;
+    if (adoptNextCopyRef.current || !editedSincePrev || !copyDirty) { adoptNextCopyRef.current = false; adoptServerCopy(); }
+    else setCopyServerMoved(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [copy.title, copy.description]);
 
-  useEffect(() => { setCopyPrompt(copy.prompt); }, [copy.prompt]);
+  const serverPromptRef = useRef(copy.prompt);
+  const adoptNextPromptRef = useRef(false);
+  useEffect(() => {
+    const prev = serverPromptRef.current;
+    if (prev === copy.prompt) return;
+    serverPromptRef.current = copy.prompt;
+    if (adoptNextPromptRef.current || copyPrompt === prev || copyPrompt === copy.prompt) {
+      adoptNextPromptRef.current = false;
+      setCopyPrompt(copy.prompt);
+      copyPromptMeta.clear();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [copy.prompt]);
 
   function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2400); }
-  function run(fn: () => Promise<{ ok: boolean; error?: string }>, done: string) {
+  function run(fn: () => Promise<{ ok: boolean; error?: string }>, done: string, onOk?: () => void) {
     startTransition(async () => {
       const r = await fn();
       flash(r.ok ? done : r.error ?? "Failed");
-      if (r.ok) router.refresh();
+      if (r.ok) { onOk?.(); router.refresh(); }
     });
   }
 
@@ -251,7 +300,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           <div className="mt-2">
             <button type="button" onClick={() => setPromptOpen((s) => ({ ...s, [a.id]: !s[a.id] }))} className="flex items-center gap-1 font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.mutedGreige }}>
               <ChevronDown size={11} style={{ transform: promptOpen[a.id] ? "rotate(180deg)" : "none" }} />
-              Prompt{a.promptEditedByHuman ? " · edited" : ""}
+              Prompt{a.promptEditedByHuman ? " · edited" : ""}{promptValue !== a.prompt ? " · unsaved" : ""}
             </button>
             {promptOpen[a.id] && (
               <div className="mt-1.5">
@@ -379,11 +428,12 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
     );
   };
 
+  const here = useHere(`/admin/studio/${board.id}`);
+  const specsHref = withFrom(`/admin/specs/${board.id}`, here);
+
   return (
     <div className="px-4 md:px-8 py-6 max-w-3xl">
-      <Link href="/admin/studio" className="inline-flex items-center gap-1 font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.15em", color: palette.mutedGreige }}>
-        <ChevronLeft size={14} /> Studio
-      </Link>
+      <BackLink fallback="/admin/studio" fallbackLabel="Studio" />
 
       <div className="mt-4 flex items-start justify-between gap-3">
         <div>
@@ -420,11 +470,11 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               Folder
             </a>
           )}
-          <Link href={`/admin/specs/${board.id}`} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }} title="Specs & supply (no pricing — counter-device safe)">
+          <Link href={specsHref} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }} title="Specs, supply & wholesale price">
             Specs
           </Link>
-          <Link href={`/admin/studio/master/${board.id}`} aria-label="Product master" title="Product Master editor">
-            <SlidersHorizontal size={16} color={palette.mutedGreige} />
+          <Link href={withFrom(`/admin/studio/master/${board.id}`, here)} className="flex items-center gap-1 font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }} title="Product Master — per-size stock & wholesale price, MRP, HSN">
+            <SlidersHorizontal size={14} /> Master
           </Link>
         </span>
       </div>
@@ -446,7 +496,14 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               </summary>
               {!g.ready && t?.enabled !== false && (
                 <ul className="mt-1.5">
-                  {g.blockers.map((b) => <li key={b} className="font-body" style={{ fontSize: 10, color: palette.mutedGreige, lineHeight: 1.7 }}>· {b}</li>)}
+                  {g.blockers.map((b) => (
+                    <li key={b} className="font-body" style={{ fontSize: 10, color: palette.mutedGreige, lineHeight: 1.7 }}>
+                      · {b}
+                      {b === "Wholesale price not set" && (
+                        <> — <Link href={specsHref} style={{ color: palette.goldDeep, textDecoration: "underline" }}>Set price</Link></>
+                      )}
+                    </li>
+                  ))}
                 </ul>
               )}
               <button
@@ -492,6 +549,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
       <JobsTicker />
 
       <div className="mt-4 flex flex-col gap-2 pb-10">
+        {Object.keys(prompts).length > 0 && <DraftNotice meta={promptsMeta} label="Unsaved prompt edits restored" />}
         {angles.filter((a) => (AI_ANGLES as readonly string[]).includes(a.angle)).map(angleCard)}
         <div className="font-body uppercase mt-2" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>Detail · macro</div>
         {angles.filter((a) => !(AI_ANGLES as readonly string[]).includes(a.angle)).map(angleCard)}
@@ -518,6 +576,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               <ChevronDown size={11} style={{ transform: copyPromptOpen ? "rotate(180deg)" : "none" }} />
               Vision prompt{copy.promptEdited ? " · edited" : " · from specs"}
             </button>
+            {copyPromptMeta.restored && <div className="mt-1.5"><DraftNotice meta={copyPromptMeta} label="Prompt draft restored" /></div>}
             {copyPromptOpen && (
               <div className="mt-1.5">
                 <textarea
@@ -528,11 +587,11 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
                   style={{ fontSize: 10, lineHeight: 1.5, border: "1px solid rgba(26,26,26,0.15)", background: "#fff", color: palette.black }}
                 />
                 <div className="flex flex-wrap gap-1.5 mt-1">
-                  <button type="button" disabled={pending || copyPrompt === copy.prompt} onClick={() => run(() => setCopyPromptAction(board.id, copyPrompt), "Prompt saved")} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, color: palette.black, padding: "5px 9px" }}>
+                  <button type="button" disabled={pending || copyPrompt === copy.prompt} onClick={() => run(() => setCopyPromptAction(board.id, copyPrompt), "Prompt saved", copyPromptMeta.clear)} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, color: palette.black, padding: "5px 9px" }}>
                     Save prompt
                   </button>
                   {copy.promptEdited && (
-                    <button type="button" disabled={pending} onClick={() => run(() => setCopyPromptAction(board.id, ""), "Back to the spec-built default")} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.mutedGreige, padding: "5px 9px" }}>
+                    <button type="button" disabled={pending} onClick={() => run(() => setCopyPromptAction(board.id, ""), "Back to the spec-built default", () => { adoptNextPromptRef.current = true; copyPromptMeta.clear(); })} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.mutedGreige, padding: "5px 9px" }}>
                       Reset to default
                     </button>
                   )}
@@ -561,6 +620,13 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
 
           {copy.status !== "none" ? (
             <div className="mt-2">
+              {(copyServerMoved || copyMeta.restored) && (
+                <div className="mb-1.5">
+                  {copyServerMoved
+                    ? <DraftNotice meta={{ ...copyMeta, restored: true, stale: true, dismiss: () => setCopyServerMoved(false), discard: adoptServerCopy }} />
+                    : <DraftNotice meta={copyMeta} />}
+                </div>
+              )}
               <input
                 value={copyDraft.title}
                 onChange={(e) => setCopyDraft((s) => ({ ...s, title: e.target.value.slice(0, 60) }))}
@@ -575,7 +641,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
                 style={{ fontSize: 12, lineHeight: 1.6, border: "1px solid rgba(26,26,26,0.12)", background: "#fff", color: palette.softBlack }}
               />
               <div className="flex flex-wrap gap-1.5 mt-1.5">
-                {Object.entries(copyDraft.tags).map(([k, v]) => (
+                {Object.entries(copy.tags).map(([k, v]) => (
                   <span key={k} className="font-body px-2 py-1" style={{ fontSize: 9.5, background: palette.ivoryDeep, color: palette.softBlack }}>
                     <b>{k}</b> · {v}
                   </span>
@@ -586,33 +652,33 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               </div>
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {copyDirty && (
-                  <button type="button" disabled={pending} onClick={() => run(() => saveCopyEdit(board.id, copyDraft), "Copy saved as draft")} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: palette.black, color: palette.ivory, padding: "7px 10px" }}>
+                  <button type="button" disabled={pending} onClick={() => run(() => saveCopyEdit(board.id, { ...copyDraft, tags: copy.tags }), "Copy saved as draft", copyMeta.clear)} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: palette.black, color: palette.ivory, padding: "7px 10px" }}>
                     Save edit
                   </button>
                 )}
                 {copy.status === "draft" && !copyDirty && (
-                  <button type="button" disabled={pending} onClick={() => run(() => approveCopy(board.id), "Copy approved")} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: "#1F6B45", color: "#fff", padding: "7px 10px" }}>
+                  <button type="button" disabled={pending} onClick={() => run(() => approveCopy(board.id), "Copy approved", copyMeta.clear)} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: "#1F6B45", color: "#fff", padding: "7px 10px" }}>
                     <Check size={11} /> Approve copy
                   </button>
                 )}
-                <button type="button" disabled={pending || !board.specsVerified} onClick={() => run(() => generateCopy(board.id), "Copy regenerated")} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }} title={`One vision call · ${estimateLabel(copy.effectiveModel)}`}>
+                <button type="button" disabled={pending || !board.specsVerified} onClick={() => run(() => generateCopy(board.id), "Copy regenerated", copyRegenerated)} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }} title={`One vision call · ${estimateLabel(copy.effectiveModel)}`}>
                   <RefreshCw size={11} /> Regen · {estimateLabel(copy.effectiveModel)}
                 </button>
               </div>
               {!board.specsVerified && (
                 <div className="font-body mt-1.5" style={{ fontSize: 9.5, lineHeight: 1.5, color: "#9C3A31" }}>
-                  Blocked until specs are confirmed — open <Link href={`/admin/studio/master/${board.id}`} style={{ textDecoration: "underline" }}>Product Master</Link> and tick &ldquo;Confirmed by Rakesh&rdquo; under Specs.
+                  Blocked until specs are confirmed — open <Link href={withFrom(`/admin/studio/master/${board.id}`, here)} style={{ textDecoration: "underline" }}>Product Master</Link> and tick &ldquo;Confirmed by Rakesh&rdquo; under Specs.
                 </div>
               )}
             </div>
           ) : (
             <>
-              <button type="button" disabled={pending || !board.specsVerified} onClick={() => run(() => generateCopy(board.id), "Copy generated")} className="mt-2 flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: palette.black, color: palette.ivory, padding: "8px 11px" }} title={`One vision call · ${estimateLabel(copy.effectiveModel)}`}>
+              <button type="button" disabled={pending || !board.specsVerified} onClick={() => run(() => generateCopy(board.id), "Copy generated", copyRegenerated)} className="mt-2 flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: palette.black, color: palette.ivory, padding: "8px 11px" }} title={`One vision call · ${estimateLabel(copy.effectiveModel)}`}>
                 Generate copy · {estimateLabel(copy.effectiveModel)}
               </button>
               {!board.specsVerified && (
                 <div className="font-body mt-1.5" style={{ fontSize: 9.5, lineHeight: 1.5, color: "#9C3A31" }}>
-                  Blocked until specs are confirmed — open <Link href={`/admin/studio/master/${board.id}`} style={{ textDecoration: "underline" }}>Product Master</Link> and tick &ldquo;Confirmed by Rakesh&rdquo; under Specs.
+                  Blocked until specs are confirmed — open <Link href={withFrom(`/admin/studio/master/${board.id}`, here)} style={{ textDecoration: "underline" }}>Product Master</Link> and tick &ldquo;Confirmed by Rakesh&rdquo; under Specs.
                 </div>
               )}
             </>

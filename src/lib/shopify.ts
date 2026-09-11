@@ -3,7 +3,9 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getShopifyAccessToken } from "@/lib/shopify-auth";
 import { writeAuditEvent } from "@/lib/audit";
+import { loadVocab } from "@/lib/sku/vocab-live";
 import { loadDesignDetail } from "./studio/load";
+import { colorNameFor } from "./studio/facts";
 
 // Stage 7b — Shopify push (build guide §11.3). FULLY implemented but parked
 // behind SHOPIFY_ENABLED until ANSH-05 signs off — flipping the flag will
@@ -71,7 +73,8 @@ export async function publishShopify(designId: string, staffId: string, staffEma
       .like("sku", `${board.baseSku}-%`);
     const group = (variants ?? []).filter((v) => v.sku.toUpperCase().endsWith(`-${board.color}`));
 
-    const title = copy?.title || board.title || `${board.baseSku} ${board.color}`;
+    // Fallback title names the colour (Gold, not GLD); the lovs read only runs on this branch.
+    const title = copy?.title || board.title || `${board.baseSku} ${colorNameFor(board.color, await loadVocab()) ?? board.color}`;
     const descriptionHtml = copy?.description ? `<p>${copy.description}</p>` : "";
     const tags = copy?.tags ? Object.values(copy.tags).filter(Boolean) : [];
 

@@ -6,9 +6,11 @@ import Image from "next/image";
 import { X, Plus, Search, ScanLine } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { ZoomImage } from "@/components/Lightbox";
+import { DraftNotice } from "@/components/DraftNotice";
 import { updateOrderItems, type OrderEditLine, type OrderEditTerms } from "@/app/admin/orders/actions";
 import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { useDraft } from "@/lib/useDraft";
 import type { DiscountType, OrderItem, TaxMode } from "@/lib/types";
 
 const PAY_METHODS = ["Cash", "UPI", "Bank", "Other"];
@@ -57,6 +59,24 @@ function calc(l: Pick<DraftLine, "qty" | "price" | "factor">) {
   return { qty, price, f, billedQty, billedUnit, total };
 }
 
+// Everything the modal holds, drafted as one unit so a reload (or the tab
+// being killed mid-edit) reopens the editor exactly where it was.
+interface EditorDraft {
+  open: boolean;
+  lines: DraftLine[];
+  dType: DiscountType | "none";
+  dValue: string;
+  tMode: TaxMode;
+  tRate: number;
+  customRate: string;
+  advance: string;
+  payMethod: string;
+  payNote: string;
+}
+const EMPTY_DRAFT: EditorDraft = {
+  open: false, lines: [], dType: "none", dValue: "", tMode: "none", tRate: 5, customRate: "", advance: "", payMethod: "Cash", payNote: "",
+};
+
 export function OrderEditor({
   orderId,
   status,
@@ -83,27 +103,55 @@ export function OrderEditor({
   paymentNotes: string | null;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [lines, setLines] = useState<DraftLine[]>([]);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [isPending, start] = useTransition();
-  // Billing terms — every option the cart page has, editable after the fact.
-  const [dType, setDType] = useState<DiscountType | "none">("none");
-  const [dValue, setDValue] = useState("");
-  const [tMode, setTMode] = useState<TaxMode>("none");
-  const [tRate, setTRate] = useState(5);
-  const [customRate, setCustomRate] = useState("");
-  const [advance, setAdvance] = useState("");
-  const [payMethod, setPayMethod] = useState("Cash");
-  const [payNote, setPayNote] = useState("");
+  const editable = status === "submitted" || status === "confirmed";
 
-  // The scanner's camera loop captures the first render's onScan, so state
-  // must be read through this ref (its identity is stable across renders).
   // Monotonic id source for added/custom draft lines — a length-based key can
   // collide with a surviving line after a removal and edit both at once.
   const seqRef = useRef(0);
+
+  // Draft autosave — the open editor (lines + billing terms) survives a reload.
+  // `base` is the order as the server has it now: a draft written against an
+  // older version restores with the stale notice. Cleared on save and close.
+  const base = useMemo(
+    () => JSON.stringify([items, discountType, discountValue, taxMode, taxRate, advanceAmount, paymentMethod, paymentNotes]),
+    [items, discountType, discountValue, taxMode, taxRate, advanceAmount, paymentMethod, paymentNotes],
+  );
+  const [draft, setDraft, draftMeta] = useDraft<EditorDraft>(`drevi:draft:order-edit:${orderId}`, EMPTY_DRAFT, {
+    enabled: editable,
+    hasContent: (d) => d.open,
+    base,
+    onRestore: (d) => {
+      const lines = d.lines ?? [];
+      // Restored add/custom keys carry their sequence number — resume above it
+      // so a new line can't collide with a restored one.
+      for (const l of lines) {
+        if (l.kind === "keep") continue;
+        const n = Number(l.key.slice(l.key.lastIndexOf("-") + 1));
+        if (Number.isFinite(n) && n > seqRef.current) seqRef.current = n;
+      }
+      return { ...EMPTY_DRAFT, ...d, lines };
+    },
+  });
+  const { open, lines, dType, dValue, tMode, tRate, customRate, advance, payMethod, payNote } = draft;
+  const setOpen = (v: boolean) => setDraft((d) => ({ ...d, open: v }));
+  const setLines = (u: DraftLine[] | ((prev: DraftLine[]) => DraftLine[])) =>
+    setDraft((d) => ({ ...d, lines: typeof u === "function" ? u(d.lines) : u }));
+  // Billing terms — every option the cart page has, editable after the fact.
+  const setDType = (v: DiscountType | "none") => setDraft((d) => ({ ...d, dType: v }));
+  const setDValue = (v: string) => setDraft((d) => ({ ...d, dValue: v }));
+  const setTMode = (v: TaxMode) => setDraft((d) => ({ ...d, tMode: v }));
+  const setTRate = (v: number) => setDraft((d) => ({ ...d, tRate: v }));
+  const setCustomRate = (v: string) => setDraft((d) => ({ ...d, customRate: v }));
+  const setAdvance = (v: string) => setDraft((d) => ({ ...d, advance: v }));
+  const setPayMethod = (v: string) => setDraft((d) => ({ ...d, payMethod: v }));
+  const setPayNote = (v: string) => setDraft((d) => ({ ...d, payNote: v }));
+
+  // The scanner's camera loop captures the first render's onScan, so state
+  // must be read through this ref (its identity is stable across renders).
   const linesRef = useRef<DraftLine[]>(lines);
   linesRef.current = lines;
 
@@ -112,9 +160,12 @@ export function OrderEditor({
     [products],
   );
 
-  function openEditor() {
-    setLines(
-      items.map((it, i) => {
+  // Open the editor seeded from the order as stored.
+  function seedFromServer() {
+    const storedRate = taxRate != null && taxRate > 0 ? taxRate : 5;
+    setDraft({
+      open: true,
+      lines: items.map((it, i) => {
         // Recover the real figures from a stored bill-split line — but only
         // when it's a well-formed ×N split. Anything else (legacy free-typed
         // data) keeps its billed figures verbatim and carries actual_qty
@@ -139,21 +190,33 @@ export function OrderEditor({
           rawActual: wellFormed ? null : it.actual_qty ?? null,
         };
       }),
-    );
-    // Billing terms start from the order's stored values.
-    setDType(discountType ?? "none");
-    setDValue(discountValue != null && discountValue > 0 ? String(discountValue) : "");
-    setTMode(taxMode ?? "none");
-    const storedRate = taxRate != null && taxRate > 0 ? taxRate : 5;
-    setTRate(TAX_RATES.includes(storedRate) ? storedRate : 5);
-    setCustomRate(TAX_RATES.includes(storedRate) ? "" : String(storedRate));
-    setAdvance(advanceAmount != null && advanceAmount > 0 ? String(advanceAmount) : "");
-    setPayMethod(paymentMethod ?? "Cash");
-    setPayNote(paymentNotes ?? "");
+      // Billing terms start from the order's stored values.
+      dType: discountType ?? "none",
+      dValue: discountValue != null && discountValue > 0 ? String(discountValue) : "",
+      tMode: taxMode ?? "none",
+      tRate: TAX_RATES.includes(storedRate) ? storedRate : 5,
+      customRate: TAX_RATES.includes(storedRate) ? "" : String(storedRate),
+      advance: advanceAmount != null && advanceAmount > 0 ? String(advanceAmount) : "",
+      payMethod: paymentMethod ?? "Cash",
+      payNote: paymentNotes ?? "",
+    });
+  }
+
+  function openEditor() {
+    // A restored draft already holds the user's edits — reopen it as-is.
+    if (draftMeta.restored) setOpen(true);
+    else seedFromServer();
     setQuery("");
     setError(null);
-    setOpen(true);
   }
+
+  // The notice's Discard / Use server re-seeds the open editor from the order
+  // rather than closing it (`open` lives inside the draft, so a bare discard()
+  // would shut the modal).
+  const notice = { ...draftMeta, discard: () => { draftMeta.clear(); seedFromServer(); } };
+
+  // Cancel / X / backdrop / after save: drop the stored draft and shut the modal.
+  function closeEditor() { draftMeta.discard(); }
 
   function patch(key: string, field: "qty" | "price" | "factor" | "title", value: string) {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, [field]: value } : l)));
@@ -283,7 +346,7 @@ export function OrderEditor({
         // Non-blocking: the edit saved, but staff need to know a refund is owed.
         alert(`Saved. Note: the buyer has now overpaid by ${formatINR(res.overpaidBy)} (advance exceeds the new total) — record a refund.`);
       }
-      setOpen(false);
+      closeEditor();
       router.refresh();
     });
   }
@@ -318,7 +381,7 @@ export function OrderEditor({
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(26,26,26,0.45)" }} onClick={() => !isPending && setOpen(false)}>
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(26,26,26,0.45)" }} onClick={() => !isPending && closeEditor()}>
           <div
             className="w-full sm:max-w-xl max-h-modal overflow-y-auto"
             style={{ background: palette.ivory, padding: "20px 18px", paddingBottom: "calc(20px + var(--kb-inset, 0px))" }}
@@ -326,8 +389,9 @@ export function OrderEditor({
           >
             <div className="flex items-center justify-between">
               <h2 className="font-display" style={{ fontSize: 17, fontWeight: 600, color: palette.black }}>Modify Order</h2>
-              <button type="button" onClick={() => !isPending && setOpen(false)} aria-label="Close"><X size={18} color={palette.softBlack} /></button>
+              <button type="button" onClick={() => !isPending && closeEditor()} aria-label="Close"><X size={18} color={palette.softBlack} /></button>
             </div>
+            {draftMeta.restored && <div className="mt-3"><DraftNotice meta={notice} /></div>}
 
             <div className="mt-3" style={{ borderTop: "1px solid rgba(26,26,26,0.1)" }}>
               {lines.map((l) => (
@@ -534,7 +598,7 @@ export function OrderEditor({
               </button>
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={closeEditor}
                 disabled={isPending}
                 className="font-body uppercase px-5"
                 style={{ fontSize: 10, letterSpacing: "0.16em", border: `1px solid ${palette.black}`, color: palette.black, background: "transparent" }}

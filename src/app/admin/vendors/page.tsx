@@ -46,6 +46,7 @@ export default async function VendorsPage() {
     cardImageRef: v.card_image_ref ?? null,
     personImageRef: v.person_image_ref ?? null,
     active: v.active,
+    updatedAt: v.updated_at ?? null,
     receipts: byVendor.get(v.id)?.count ?? 0,
     lastReceipt: byVendor.get(v.id)?.last ?? null,
     skus: Array.from(byVendor.get(v.id)?.skus ?? []),

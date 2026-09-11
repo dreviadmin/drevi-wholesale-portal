@@ -21,7 +21,7 @@ export default async function MasterPage({ params }: { params: { designId: strin
 
   const { data: design } = await admin
     .from("designs")
-    .select("fabric, handwork, origin, specs_verified, tier, markup_multiplier, auto_mrp, mrp_override, supply_mode, vendor_stock_qty, making_days, making_moq, delivery_days, supply_note, supply_updated_at, vendor_sku, ident_image_id")
+    .select("fabric, handwork, origin, specs_verified, tier, markup_multiplier, auto_mrp, mrp_override, supply_mode, vendor_stock_qty, making_days, making_moq, delivery_days, supply_note, supply_updated_at, vendor_sku, ident_image_id, updated_at")
     .eq("id", params.designId)
     .single();
   const { data: allVariants } = await admin
@@ -60,6 +60,7 @@ export default async function MasterPage({ params }: { params: { designId: strin
           supplyNote: design?.supply_note ?? "",
         },
         supplyUpdatedAt: design?.supply_updated_at ?? null,
+        updatedAt: design?.updated_at ?? null,
       }}
       variants={variants}
       hsn={variants.find((v) => v.hsn)?.hsn ?? ""}

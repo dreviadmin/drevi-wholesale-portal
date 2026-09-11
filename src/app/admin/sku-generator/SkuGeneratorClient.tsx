@@ -7,7 +7,10 @@ import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import type { LiveVocab } from "@/lib/sku/vocab-live";
 import { qrPngDataUrl, shareQr, downloadDataUrl, buildRollPdf, printPdf, loadCal, PRINT_PAPER_HINT, TRAY_KEY, type TrayItem } from "./labels";
 import { PrintTab } from "./PrintTab";
+import { ColorCombobox } from "@/components/admin/ColorCombobox";
 import { palette } from "@/lib/palette";
+import { DraftNotice } from "@/components/DraftNotice";
+import { useDraft, isDraftOlderThan, DRAFT_NOTICE_AFTER_MS } from "@/lib/useDraft";
 
 interface HistoryRow {
   variant_sku: string; base_sku: string; category: string; sub_category: string;
@@ -18,30 +21,18 @@ export interface BaseEntry {
   desc: string; variantCount: number; variants: { sku: string; size: string; color: string }[]; latestTs: string;
 }
 
+// The generate-form picks that survive a reload; selectedBase is kept as its
+// base string and resolved against the registry once that has loaded.
+interface Picks { mode: "new" | "variant"; cat: string; sub: string; base: string; color: string; size: string; description: string }
+const EMPTY_PICKS: Picks = { mode: "new", cat: "", sub: "", base: "", color: "", size: "", description: "" };
+const EMPTY_PICKS_SIG = JSON.stringify(EMPTY_PICKS);
+
 const shortname = (email: string) => email.split("@")[0];
 const istTime = (iso: string) =>
   new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
 
-// Color ranking from the reference: code exact → code prefix → name prefix →
-// code contains → name contains.
-function rankColors(q: string, groups: { name: string; items: [string, string][] }[]): [string, string][] {
-  const all = groups.flatMap((g) => g.items.map(([c, n]) => [c, n] as [string, string]));
-  const s = q.trim().toUpperCase();
-  if (!s) return all;
-  const score = ([code, name]: [string, string]) => {
-    const N = name.toUpperCase();
-    if (code === s) return 0;
-    if (code.startsWith(s)) return 1;
-    if (N.startsWith(s)) return 2;
-    if (code.includes(s)) return 3;
-    if (N.includes(s)) return 4;
-    return 9;
-  };
-  return all.filter((c) => score(c) < 9).sort((a, b) => score(a) - score(b));
-}
-
-export function SkuGeneratorClient({ isAdmin, vocab }: { isAdmin: boolean; vocab: LiveVocab }) {
-  const [tab, setTab] = useState<"generate" | "print">("generate");
+export function SkuGeneratorClient({ isAdmin, vocab, initialTab }: { isAdmin: boolean; vocab: LiveVocab; initialTab?: "generate" | "print" }) {
+  const [tab, setTab] = useState<"generate" | "print">(initialTab ?? "generate");
 
   // ---- shared state ----
   const [counters, setCounters] = useState<Record<string, number>>({});
@@ -53,18 +44,32 @@ export function SkuGeneratorClient({ isAdmin, vocab }: { isAdmin: boolean; vocab
   const flash = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(null), 2200); }, []);
 
   // ---- generate form ----
-  const [mode, setMode] = useState<"new" | "variant">("new");
-  const [cat, setCat] = useState<string | "">("");
-  const [sub, setSub] = useState("");
+  const [picks, setPicks, picksMeta] = useDraft<Picks>("drevi:draft:sku-gen", EMPTY_PICKS, {
+    hasContent: (p) => JSON.stringify(p) !== EMPTY_PICKS_SIG,
+    onRestore: (d) => ({ ...EMPTY_PICKS, ...d }),
+  });
+  const { mode, cat, sub, color, size, description } = picks;
+  const setMode = (v: Picks["mode"]) => setPicks((p) => ({ ...p, mode: v }));
+  const setCat = (v: string) => setPicks((p) => ({ ...p, cat: v }));
+  const setSub = (v: string) => setPicks((p) => ({ ...p, sub: v }));
+  const setColor = (v: string) => setPicks((p) => ({ ...p, color: v }));
+  const setSize = (v: string) => setPicks((p) => ({ ...p, size: v }));
+  const setDescription = (v: string) => setPicks((p) => ({ ...p, description: v }));
   const [peekNum, setPeekNum] = useState<number | null>(null);
   const [baseQuery, setBaseQuery] = useState("");
-  const [selectedBase, setSelectedBase] = useState<BaseEntry | null>(null);
-  const [colorQuery, setColorQuery] = useState("");
-  const [color, setColor] = useState("");
-  const [colorOpen, setColorOpen] = useState(false);
-  const [colorIdx, setColorIdx] = useState(0);
-  const [size, setSize] = useState("");
-  const [description, setDescription] = useState("");
+  const [selectedBase, setSelectedBaseState] = useState<BaseEntry | null>(null);
+  const setSelectedBase = (b: BaseEntry | null) => { setSelectedBaseState(b); setPicks((p) => (p.base === (b?.base ?? "") ? p : { ...p, base: b?.base ?? "" })); };
+  // selectedBase follows picks.base — a restored draft or Discard changes the
+  // string, and the entry is looked up once the registry has loaded.
+  useEffect(() => {
+    if ((selectedBase?.base ?? "") === picks.base) return;
+    setSelectedBaseState(picks.base ? bases?.find((b) => b.base === picks.base) ?? null : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picks.base, bases]);
+  // ?variant= is applied one commit after mount so it lands ON TOP of a
+  // restored draft (the hook's restore has to settle before anything else
+  // touches the picks).
+  const [deepLink, setDeepLink] = useState<Partial<Picks> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ message: string; duplicate: boolean; dupSku?: string } | null>(null);
   const [result, setResult] = useState<{ baseSku: string; variantSku: string } | null>(null);
@@ -76,6 +81,9 @@ export function SkuGeneratorClient({ isAdmin, vocab }: { isAdmin: boolean; vocab
   // The scanner captures the first render's onScan — read state through refs.
   const basesRef = useRef<BaseEntry[] | null>(null);
 
+  // The persist effect must not run before the tray has been read back, or a
+  // StrictMode double-mount writes "[]" over a hand-off staged by Log delivery.
+  const trayLoaded = useRef(false);
   // ---- bootstrap ----
   useEffect(() => {
     fetch("/api/sku/state").then((r) => r.json()).then((d) => {
@@ -85,34 +93,40 @@ export function SkuGeneratorClient({ isAdmin, vocab }: { isAdmin: boolean; vocab
       const raw = localStorage.getItem(TRAY_KEY);
       if (raw) setTray(JSON.parse(raw));
     } catch { /* corrupted tray — start fresh */ }
+    trayLoaded.current = true;
+    // Log delivery hand-off (?tab=print&receipt=GR-…): the tray was staged
+    // before navigation; say so once, then drop the param so a reload stays quiet.
+    const p = new URLSearchParams(window.location.search);
+    const from = p.get("receipt");
+    if (from) { flash(`${from} · tags staged`); p.delete("receipt"); }
     // Scan-sheet hand-off (?variant=DD-CAT-SUB-NNN-SIZE-COLOR): an unknown tag
     // lands here with everything derivable pre-filled. A parseable base flips
     // to variant mode (bases list resolves the match once loaded via
     // pendingVariantRef); otherwise new-design mode with cat/sub seeded.
-    const p = new URLSearchParams(window.location.search);
     const scanned = (p.get("variant") ?? "").trim().toUpperCase();
     if (scanned) {
       const parts = scanned.split("-");
       if (parts[0] === "DD" && parts.length >= 4) {
         const base = parts.slice(0, 4).join("-");
-        if (/^\d{3}$/.test(parts[3])) {
-          setMode("variant");
-          pendingVariantRef.current = base;
-          loadBases();
-        } else {
-          setMode("new");
-          setCat(parts[1] as string);
-          setSub(parts[2]);
-        }
-        if (parts[4]) setSize(parts[4]);
-        if (parts[5]) setColor(parts.slice(5).join("-"));
+        const dl: Partial<Picks> = /^\d{3}$/.test(parts[3]) ? { mode: "variant", base } : { mode: "new", cat: parts[1] as string, sub: parts[2], base: "" };
+        if (parts[4]) dl.size = parts[4];
+        if (parts[5]) dl.color = parts.slice(5).join("-");
+        setDeepLink(dl);
       }
       p.delete("variant");
-      window.history.replaceState(null, "", window.location.pathname + (p.toString() ? `?${p}` : ""));
     }
+    if (scanned || from) window.history.replaceState(null, "", window.location.pathname + (p.toString() ? `?${p}` : ""));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const pendingVariantRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!deepLink) return;
+    const dl = deepLink;
+    setDeepLink(null);
+    setPicks((p) => ({ ...p, ...dl }));
+    if (dl.base) { pendingVariantRef.current = dl.base; loadBases(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLink]);
   useEffect(() => {
     if (!bases || !pendingVariantRef.current) return;
     const match = bases.find((b) => b.base === pendingVariantRef.current);
@@ -120,6 +134,7 @@ export function SkuGeneratorClient({ isAdmin, vocab }: { isAdmin: boolean; vocab
     if (match) setSelectedBase(match);
   }, [bases]);
   useEffect(() => {
+    if (!trayLoaded.current) return;
     try { localStorage.setItem(TRAY_KEY, JSON.stringify(tray)); } catch { /* full */ }
   }, [tray]);
   const loadBases = useCallback(() => {
@@ -218,6 +233,7 @@ export function SkuGeneratorClient({ isAdmin, vocab }: { isAdmin: boolean; vocab
       }
       setResult({ baseSku: d.baseSku, variantSku: d.variantSku });
       setMintWarnings(Array.isArray(d.warnings) ? d.warnings : []);
+      picksMeta.clear(); // minted — the picks stop being a draft; the next edit starts a new one
       // refresh state + bases
       fetch("/api/sku/state").then((r) => r.json()).then((s) => {
         if (s.counters) { setCounters(s.counters); setHistory(s.history); setTotalSkus(s.totalSkus); }
@@ -241,12 +257,6 @@ export function SkuGeneratorClient({ isAdmin, vocab }: { isAdmin: boolean; vocab
     border: active ? "none" : "1px solid rgba(26,26,26,0.2)",
   });
   const selectStyle = { border: "1px solid rgba(26,26,26,0.2)", padding: "9px 10px", fontSize: 13, background: palette.ivory, width: "100%" } as const;
-
-  const colorList = useMemo(() => rankColors(colorQuery, vocab.colorGroups), [colorQuery, vocab.colorGroups]);
-  const colorName = useMemo(
-    () => vocab.colorGroups.flatMap((g) => g.items.map(([c, n]) => [c, n] as [string, string])).find(([c]) => c === color)?.[1],
-    [color, vocab.colorGroups],
-  );
 
   const qrActions = (sku: string, extra?: boolean) => (
     <div className="flex gap-2 flex-wrap mt-3">
@@ -278,6 +288,7 @@ export function SkuGeneratorClient({ isAdmin, vocab }: { isAdmin: boolean; vocab
         <PrintTab tray={tray} setTray={setTray} bases={bases} flash={flash} />
       ) : (
         <>
+          {isDraftOlderThan(picksMeta, DRAFT_NOTICE_AFTER_MS) && <div className="mt-3"><DraftNotice meta={picksMeta} /></div>}
           {/* Mode toggle */}
           <div className="flex gap-1.5 mt-5">
             <button type="button" onClick={() => { setMode("new"); setError(null); setResult(null); }} className="font-body uppercase" style={chip(mode === "new")}>New Design</button>
@@ -377,47 +388,9 @@ export function SkuGeneratorClient({ isAdmin, vocab }: { isAdmin: boolean; vocab
 
           {/* Color + Size */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-            <div className="relative">
+            <div>
               {label("Colour")}
-              <input
-                value={color ? `${color} — ${colorName}` : colorQuery}
-                onChange={(e) => { setColor(""); setColorQuery(e.target.value); setColorOpen(true); setColorIdx(0); }}
-                onFocus={() => { setColorOpen(true); if (color) { setColor(""); setColorQuery(""); } }}
-                onBlur={() => setTimeout(() => setColorOpen(false), 120)}
-                onKeyDown={(e) => {
-                  if (!colorOpen) return;
-                  if (e.key === "ArrowDown") { e.preventDefault(); setColorIdx((i) => Math.min(i + 1, colorList.length - 1)); }
-                  else if (e.key === "ArrowUp") { e.preventDefault(); setColorIdx((i) => Math.max(i - 1, 0)); }
-                  else if (e.key === "Enter") { e.preventDefault(); if (colorQuery.trim() !== "") { const c = colorList[colorIdx]; if (c) { setColor(c[0]); setColorOpen(false); } } }
-                  else if (e.key === "Escape") setColorOpen(false);
-                }}
-                placeholder="Type a colour or code"
-                className="font-body w-full bg-transparent outline-none"
-                style={selectStyle}
-              />
-              {colorOpen && !color && (
-                <div className="absolute z-20 w-full max-h-64 overflow-y-auto" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.15)", boxShadow: "0 8px 24px rgba(26,26,26,0.12)" }}>
-                  {colorQuery.trim() === "" ? (
-                    vocab.colorGroups.map((g) => (
-                      <div key={g.name}>
-                        <div className="font-body uppercase px-3 py-1.5" style={{ fontSize: 8, letterSpacing: "0.16em", color: palette.goldDeep, background: palette.ivoryDeep }}>{g.name}</div>
-                        {g.items.map(([code, name]) => (
-                          <button key={code} type="button" onMouseDown={(e) => { e.preventDefault(); setColor(code); setColorOpen(false); }} className="w-full text-left px-3 py-2 font-body" style={{ fontSize: 12.5, borderBottom: "1px solid rgba(26,26,26,0.04)" }}>
-                            <span className="font-mono" style={{ fontWeight: 700 }}>{code}</span> — {name}
-                          </button>
-                        ))}
-                      </div>
-                    ))
-                  ) : (
-                    colorList.map(([code, name], i) => (
-                      <button key={code} type="button" onMouseDown={(e) => { e.preventDefault(); setColor(code); setColorOpen(false); }} className="w-full text-left px-3 py-2 font-body" style={{ fontSize: 12.5, background: i === colorIdx ? palette.ivoryDeep : undefined }}>
-                        <span className="font-mono" style={{ fontWeight: 700 }}>{code}</span> — {name}
-                      </button>
-                    ))
-                  )}
-                  {colorQuery.trim() !== "" && colorList.length === 0 && <div className="font-body p-3" style={{ fontSize: 11.5, color: palette.mutedGreige }}>No colours match.</div>}
-                </div>
-              )}
+              <ColorCombobox value={color} onChange={setColor} groups={vocab.colorGroups} style={selectStyle} />
             </div>
             <div>
               {label("Size")}

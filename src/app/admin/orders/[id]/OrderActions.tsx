@@ -33,6 +33,7 @@ export function OrderActions({
   const [dispatchOpen, setDispatchOpen] = useState(false);
   const [form, setForm] = useState<StageDetails>({ courier: courier ?? "", trackingNumber: trackingNumber ?? "", trackingNote: "" });
   const [sheet, setSheet] = useState<File | null>(null);
+  const sheetCameraRef = useRef<HTMLInputElement>(null);
   const sheetGalleryRef = useRef<HTMLInputElement>(null);
 
   function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 3500); }
@@ -156,16 +157,20 @@ export function OrderActions({
               <label className="flex flex-col gap-1"><span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.softBlack }}>Note</span>
                 <input value={form.trackingNote ?? ""} onChange={(e) => setForm((f) => ({ ...f, trackingNote: e.target.value }))} className="font-body bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "6px 2px", fontSize: 13 }} />
               </label>
-              <label className="flex items-center gap-2 cursor-pointer" style={{ border: "1px dashed rgba(26,26,26,0.3)", padding: "9px 10px" }}>
-                <span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.14em", color: palette.softBlack }}>
-                  {sheet ? sheet.name : "Tracking sheet photo (optional)"}
-                </span>
-                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setSheet(f); e.currentTarget.value = ""; }} />
+              <div className="flex flex-col gap-1">
+                <span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.softBlack }}>Tracking sheet photo (optional)</span>
+                <input ref={sheetCameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setSheet(f); e.currentTarget.value = ""; }} />
                 <input ref={sheetGalleryRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setSheet(f); e.currentTarget.value = ""; }} />
-                <button type="button" onClick={(e) => { e.preventDefault(); sheetGalleryRef.current?.click(); }} className="ml-auto font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.12em", color: palette.goldDeep, whiteSpace: "nowrap" }}>
-                  Gallery
-                </button>
-              </label>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => sheetCameraRef.current?.click()} className="flex-1 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 9.5, letterSpacing: "0.14em", padding: "10px 0" }}>
+                    Camera
+                  </button>
+                  <button type="button" onClick={() => sheetGalleryRef.current?.click()} className="flex-1 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 9.5, letterSpacing: "0.14em", padding: "10px 0" }}>
+                    Gallery
+                  </button>
+                </div>
+                {sheet && <span className="font-body" style={{ fontSize: 10, color: palette.goldDeep }}>{sheet.name}</span>}
+              </div>
             </div>
             <div className="flex gap-2 mt-4">
               <button type="button" onClick={dispatchNow} disabled={isPending} className="flex-1 font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.16em", padding: "12px 0" }}>

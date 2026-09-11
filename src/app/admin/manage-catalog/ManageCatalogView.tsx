@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import { Search, X, Lock, Unlock, Eye, EyeOff, Pencil, ImageOff, ScanLine } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { ZoomImage } from "@/components/Lightbox";
+import { DraftNotice } from "@/components/DraftNotice";
 import {
   updateProductFields, unlockProductField, uploadProductPhotoAction, renameProductSku, setProductVisibility,
 } from "./actions";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { useDraft } from "@/lib/useDraft";
 import { HsnInput } from "@/components/admin/HsnInput";
 import type { WholesaleProduct } from "@/lib/types";
 
@@ -29,6 +31,17 @@ const FIELDS: { key: string; label: string; type?: "number" | "textarea" | "bool
   { key: "description", label: "Description", type: "textarea" },
 ];
 
+// The editable snapshot of a product, keyed by FIELDS — also the edit draft's
+// stale-check signature (wholesale_products has no updated_at).
+function valuesFrom(product: WholesaleProduct): Record<string, string> {
+  const v: Record<string, string> = {};
+  for (const f of FIELDS) {
+    const raw = (product as unknown as Record<string, unknown>)[f.key];
+    v[f.key] = f.type === "bool" ? (raw ? "true" : "false") : raw == null ? "" : String(raw);
+  }
+  return v;
+}
+
 export function ManageCatalogView({ products, hsnOptions }: { products: WholesaleProduct[]; hsnOptions: string[] }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -41,7 +54,14 @@ export function ManageCatalogView({ products, hsnOptions }: { products: Wholesal
     if (sku) setQuery(sku);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [editing, setEditing] = useState<WholesaleProduct | null>(null);
+  // Which product the modal is open for survives a reload (the field edits are
+  // drafted inside EditModal). Resolved against products so a renamed or
+  // removed SKU is dropped.
+  const [editingSku, setEditingSku, editingDraft] = useDraft<string | null>("drevi:draft:catalog:editing", null, { hasContent: (v) => v != null });
+  const editing = editingSku ? products.find((p) => p.sku === editingSku) ?? null : null;
+  useEffect(() => {
+    if (editingSku && !products.some((p) => p.sku === editingSku)) editingDraft.discard();
+  }, [editingSku, products, editingDraft]);
   const [scanning, setScanning] = useState(false);
 
   const filtered = useMemo(() => {
@@ -57,7 +77,7 @@ export function ManageCatalogView({ products, hsnOptions }: { products: Wholesal
     const p = products.find((x) => x.sku.trim().toUpperCase() === sku);
     if (!p) return { ok: false, message: `${sku || "Empty scan"} — not on the portal` };
     setScanning(false);
-    setEditing(p);
+    setEditingSku(p.sku);
     return { ok: true, message: p.title ?? p.sku };
   }
 
@@ -96,10 +116,10 @@ export function ManageCatalogView({ products, hsnOptions }: { products: Wholesal
               key={p.sku}
               role="button"
               tabIndex={0}
-              onClick={() => setEditing(p)}
+              onClick={() => setEditingSku(p.sku)}
               onKeyDown={(e) => {
                 if (e.target !== e.currentTarget) return; // let the nested photo button keep its own Enter/Space
-                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setEditing(p); }
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setEditingSku(p.sku); }
               }}
               className="flex items-center gap-3 py-2.5 text-left cursor-pointer"
               style={{ borderBottom: "1px solid rgba(26,26,26,0.07)", opacity: p.wholesale_visible ? 1 : 0.5 }}
@@ -132,8 +152,8 @@ export function ManageCatalogView({ products, hsnOptions }: { products: Wholesal
 
       {editing && (
         <EditModal hsnOptions={hsnOptions} product={editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); router.refresh(); }}
+          onClose={() => setEditingSku(null)}
+          onSaved={() => { setEditingSku(null); router.refresh(); }}
         />
       )}
     </div>
@@ -143,13 +163,16 @@ export function ManageCatalogView({ products, hsnOptions }: { products: Wholesal
 function EditModal({ product, hsnOptions, onClose, onSaved }: { product: WholesaleProduct; hsnOptions: string[]; onClose: () => void; onSaved: () => void }) {
   const router = useRouter();
   const [locked, setLocked] = useState<Set<string>>(() => new Set(product.locked_fields ?? []));
-  const [values, setValues] = useState<Record<string, string>>(() => {
-    const v: Record<string, string> = {};
-    for (const f of FIELDS) {
-      const raw = (product as unknown as Record<string, unknown>)[f.key];
-      v[f.key] = f.type === "bool" ? (raw ? "true" : "false") : raw == null ? "" : String(raw);
-    }
-    return v;
+  // Field edits survive a reload. `base` is the product as the server has it
+  // now (wholesale_products has no updated_at) — if the 10-minute sheet sync
+  // changed a field since the draft was written, it restores with the stale
+  // notice. Cleared on save, rename and Close. newSku / photoUrl stay volatile.
+  const seedValues = useMemo(() => valuesFrom(product), [product]);
+  const seedSig = JSON.stringify(seedValues);
+  const [values, setValues, draft] = useDraft<Record<string, string>>(`drevi:draft:catalog:${product.sku}`, seedValues, {
+    base: seedSig,
+    hasContent: (v) => JSON.stringify(v) !== seedSig,
+    onRestore: (d) => ({ ...seedValues, ...d }),
   });
   const [newSku, setNewSku] = useState(product.sku);
   const [photoUrl, setPhotoUrl] = useState(product.image_urls?.[0] ?? null);
@@ -159,19 +182,21 @@ function EditModal({ product, hsnOptions, onClose, onSaved }: { product: Wholesa
 
   function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2500); }
 
+  // X / backdrop / Close: an explicit close drops the draft.
+  const close = () => { if (isPending) return; draft.clear(); onClose(); };
+
   // Only send fields whose value actually changed.
   function saveFields() {
     const edits: Record<string, string> = {};
     for (const f of FIELDS) {
-      const raw = (product as unknown as Record<string, unknown>)[f.key];
-      const orig = f.type === "bool" ? (raw ? "true" : "false") : raw == null ? "" : String(raw);
-      if (values[f.key] !== orig) edits[f.key] = values[f.key];
+      if (values[f.key] !== seedValues[f.key]) edits[f.key] = values[f.key];
     }
     if (Object.keys(edits).length === 0) { flash("No changes"); return; }
     setError(null);
     start(async () => {
       const res = await updateProductFields(product.sku, edits);
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
+      draft.clear();
       onSaved();
     });
   }
@@ -210,6 +235,7 @@ function EditModal({ product, hsnOptions, onClose, onSaved }: { product: Wholesa
     start(async () => {
       const res = await renameProductSku(product.sku, newSku);
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
+      draft.clear(); // keyed by the old SKU — nothing carries over to the renamed row
       onSaved();
     });
   }
@@ -232,12 +258,13 @@ function EditModal({ product, hsnOptions, onClose, onSaved }: { product: Wholesa
     );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(26,26,26,0.5)" }} onClick={() => !isPending && onClose()}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(26,26,26,0.5)" }} onClick={close}>
       <div className="w-full sm:max-w-lg max-h-modal overflow-y-auto" style={{ background: palette.ivory, padding: "20px 18px", paddingBottom: "calc(20px + var(--kb-inset, 0px))" }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h2 className="font-display truncate pr-3" style={{ fontSize: 16, fontWeight: 600, color: palette.black }}>{product.title ?? product.sku}</h2>
-          <button type="button" onClick={() => !isPending && onClose()} aria-label="Close"><X size={18} color={palette.softBlack} /></button>
+          <button type="button" onClick={close} aria-label="Close"><X size={18} color={palette.softBlack} /></button>
         </div>
+        {draft.restored && <div className="mt-3"><DraftNotice meta={draft} /></div>}
 
         {/* Photo */}
         <div className="flex gap-3 mt-4">
@@ -304,7 +331,7 @@ function EditModal({ product, hsnOptions, onClose, onSaved }: { product: Wholesa
 
         <div className="flex gap-2 mt-5">
           <button type="button" onClick={saveFields} disabled={isPending} className="flex-1 font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.16em", padding: "12px 0" }}>{isPending ? "Saving…" : "Save Changes"}</button>
-          <button type="button" onClick={() => !isPending && onClose()} className="font-body uppercase px-5" style={{ border: `1px solid ${palette.black}`, fontSize: 10, letterSpacing: "0.16em" }}>Close</button>
+          <button type="button" onClick={close} className="font-body uppercase px-5" style={{ border: `1px solid ${palette.black}`, fontSize: 10, letterSpacing: "0.16em" }}>Close</button>
         </div>
       </div>
     </div>

@@ -1,13 +1,15 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, X, ScanLine, Plus, MessageCircle, Camera } from "lucide-react";
+import { Search, X, ScanLine, Plus, MessageCircle, Camera, Images } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { useSort, SortTh, type SortAccessor } from "@/components/sortable";
+import { DraftNotice } from "@/components/DraftNotice";
 import { createVendor, updateVendor, uploadVendorPhoto, type VendorForm } from "./actions";
 import { palette } from "@/lib/palette";
+import { useDraft, isDraftOlderThan, DRAFT_NOTICE_AFTER_MS } from "@/lib/useDraft";
 
 export interface VendorRow {
   id: string;
@@ -23,6 +25,7 @@ export interface VendorRow {
   cardImageRef: string | null;
   personImageRef: string | null;
   active: boolean;
+  updatedAt?: string | null; // vendors.updated_at — baseline for the edit draft's stale check
   receipts: number;
   lastReceipt: string | null;
   skus: string[]; // SKUs seen on this vendor's receipt lines (for scan lookup)
@@ -51,7 +54,13 @@ export function VendorsView({ rows, sheetVendorBySku }: { rows: VendorRow[]; she
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [scanning, setScanning] = useState(false);
-  const [editing, setEditing] = useState<VendorRow | "new" | null>(null);
+  // Which vendor the modal is open for survives a reload (the form itself is
+  // drafted inside VendorModal). Resolved against rows so a stale id is dropped.
+  const [editingId, setEditingId, editingDraft] = useDraft<string | null>("drevi:draft:vendors:editing", null, { hasContent: (v) => v != null });
+  const editing: VendorRow | "new" | null = editingId === "new" ? "new" : editingId ? rows.find((r) => r.id === editingId) ?? null : null;
+  useEffect(() => {
+    if (editingId && editingId !== "new" && !rows.some((r) => r.id === editingId)) editingDraft.discard();
+  }, [editingId, rows, editingDraft]);
   const [toast, setToast] = useState<string | null>(null);
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2400); };
 
@@ -88,7 +97,7 @@ export function VendorsView({ rows, sheetVendorBySku }: { rows: VendorRow[]; she
     <div className="px-4 md:px-6 py-5 max-w-4xl">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>Vendors</h1>
-        <button type="button" onClick={() => setEditing("new")} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.gold, color: palette.black, fontSize: 10, letterSpacing: "0.18em", padding: "9px 16px" }}>
+        <button type="button" onClick={() => setEditingId("new")} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.gold, color: palette.black, fontSize: 10, letterSpacing: "0.18em", padding: "9px 16px" }}>
           <Plus size={13} strokeWidth={2.5} /> Add Vendor
         </button>
       </div>
@@ -152,8 +161,8 @@ export function VendorsView({ rows, sheetVendorBySku }: { rows: VendorRow[]; she
       {editing && (
         <VendorModal
           vendor={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)}
-          onSaved={(msg) => { setEditing(null); flash(msg); router.refresh(); }}
+          onClose={() => setEditingId(null)}
+          onSaved={(msg) => { setEditingId(null); flash(msg); router.refresh(); }}
         />
       )}
 
@@ -164,12 +173,10 @@ export function VendorsView({ rows, sheetVendorBySku }: { rows: VendorRow[]; she
   );
 }
 
-export function VendorModal({ vendor, onClose, onSaved }: {
-  vendor: VendorRow | null;
-  onClose: () => void;
-  onSaved: (msg: string) => void;
-}) {
-  const [form, setForm] = useState<VendorForm & { active?: boolean }>({
+type VendorFormState = VendorForm & { active?: boolean };
+
+function seedVendorForm(vendor: VendorRow | null): VendorFormState {
+  return {
     name: vendor?.name ?? "",
     phone: vendor?.phone ?? "",
     whatsapp: vendor?.whatsapp ?? "",
@@ -180,6 +187,24 @@ export function VendorModal({ vendor, onClose, onSaved }: {
     contactName: vendor?.contactName ?? "",
     email: vendor?.email ?? "",
     active: vendor?.active ?? true,
+  };
+}
+
+export function VendorModal({ vendor, onClose, onSaved }: {
+  vendor: VendorRow | null;
+  onClose: () => void;
+  onSaved: (msg: string) => void;
+}) {
+  const seed = seedVendorForm(vendor);
+  const seedSig = JSON.stringify(seed);
+  // Draft autosave — edits survive a reload. `base` is the row's updated_at,
+  // so a draft older than the server row restores with the stale notice.
+  // Cleared on save, Cancel and backdrop close. Photos are server-backed and
+  // never drafted.
+  const [form, setForm, draft] = useDraft<VendorFormState>(`drevi:draft:vendor:${vendor?.id ?? "new"}`, seed, {
+    base: vendor?.updatedAt ?? null,
+    hasContent: (f) => JSON.stringify(f) !== seedSig,
+    onRestore: (d) => ({ ...seed, ...d }),
   });
   const [photos, setPhotos] = useState<{ card: string | null; person: string | null }>({
     card: vendor?.cardImageRef ?? null,
@@ -187,8 +212,11 @@ export function VendorModal({ vendor, onClose, onSaved }: {
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const cameraInputs = useRef<Record<string, HTMLInputElement | null>>({});
   const galleryInputs = useRef<Record<string, HTMLInputElement | null>>({});
   const hasReceipts = (vendor?.receipts ?? 0) > 0;
+  // Cancel / backdrop: an explicit close drops the draft.
+  const close = () => { if (busy) return; draft.clear(); onClose(); };
 
   async function save() {
     setBusy(true);
@@ -196,6 +224,7 @@ export function VendorModal({ vendor, onClose, onSaved }: {
     try {
       const res = vendor ? await updateVendor(vendor.id, form) : await createVendor(form);
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
+      draft.clear();
       onSaved(vendor ? "Vendor updated" : "Vendor added");
     } finally {
       setBusy(false);
@@ -223,9 +252,10 @@ export function VendorModal({ vendor, onClose, onSaved }: {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(26,26,26,0.5)" }} onClick={() => !busy && onClose()}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(26,26,26,0.5)" }} onClick={close}>
       <div className="w-full sm:max-w-md max-h-modal overflow-y-auto" style={{ background: palette.ivory, padding: "20px 18px", paddingBottom: "calc(20px + var(--kb-inset, 0px))" }} onClick={(e) => e.stopPropagation()}>
         <h2 className="font-display" style={{ fontSize: 17, fontWeight: 600, color: palette.black }}>{vendor ? "Edit Vendor" : "Add Vendor"}</h2>
+        {(vendor ? draft.restored : isDraftOlderThan(draft, DRAFT_NOTICE_AFTER_MS)) && <div className="mt-3"><DraftNotice meta={draft} /></div>}
         <div className="flex flex-col gap-3 mt-4">
           {FIELDS.map(([key, label]) => (
             <label key={key} className="flex flex-col gap-1">
@@ -241,25 +271,28 @@ export function VendorModal({ vendor, onClose, onSaved }: {
           {/* UX sprint — the business card and the person, captured in place. */}
           <div className="flex gap-3">
             {(["card", "person"] as const).map((kind) => (
-              <label key={kind} className="flex-1 flex flex-col items-center gap-1.5 cursor-pointer" style={{ border: "1px dashed rgba(26,26,26,0.3)", padding: "10px 6px" }}>
-                {photos[kind] ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img src={`/api/drive-photo?id=${encodeURIComponent(photos[kind]!)}&s=300`} alt={kind} style={{ width: "100%", maxHeight: 110, objectFit: "contain" }} />
-                ) : (
-                  <Camera size={18} color={palette.mutedGreige} />
-                )}
+              <div key={kind} className="flex-1 flex flex-col gap-1.5">
                 <span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.14em", color: palette.softBlack }}>
                   {kind === "card" ? (photos.card ? "Replace business card" : "Business card") : photos.person ? "Replace person photo" : "Person photo"}
                 </span>
-                {!vendor && <span className="font-body" style={{ fontSize: 8.5, color: palette.mutedGreige }}>save first</span>}
-                <input type="file" accept="image/*" capture="environment" className="hidden" disabled={busy || !vendor}
+                {photos[kind] && (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={`/api/drive-photo?id=${encodeURIComponent(photos[kind]!)}&s=300`} alt={kind} style={{ width: "100%", maxHeight: 110, objectFit: "contain" }} />
+                )}
+                <input ref={(el) => { cameraInputs.current[kind] = el; }} type="file" accept="image/*" capture="environment" className="hidden" disabled={busy || !vendor}
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) attachPhoto(kind, f); e.currentTarget.value = ""; }} />
                 <input ref={(el) => { galleryInputs.current[kind] = el; }} type="file" accept="image/*" className="hidden" disabled={busy || !vendor}
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) attachPhoto(kind, f); e.currentTarget.value = ""; }} />
-                <button type="button" disabled={busy || !vendor} onClick={(e) => { e.preventDefault(); galleryInputs.current[kind]?.click(); }} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 8, letterSpacing: "0.14em", color: palette.goldDeep }}>
-                  From gallery
-                </button>
-              </label>
+                <div className="flex gap-2">
+                  <button type="button" disabled={busy || !vendor} onClick={() => cameraInputs.current[kind]?.click()} className="flex-1 flex items-center justify-center gap-1.5 font-body uppercase disabled:opacity-50" style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 9, letterSpacing: "0.14em", padding: "9px 0" }}>
+                    <Camera size={13} /> Camera
+                  </button>
+                  <button type="button" disabled={busy || !vendor} onClick={() => galleryInputs.current[kind]?.click()} className="flex-1 flex items-center justify-center gap-1.5 font-body uppercase disabled:opacity-50" style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 9, letterSpacing: "0.14em", padding: "9px 0" }}>
+                    <Images size={13} /> Gallery
+                  </button>
+                </div>
+                {!vendor && <span className="font-body" style={{ fontSize: 8.5, color: palette.mutedGreige }}>save first</span>}
+              </div>
             ))}
           </div>
           {vendor && (
@@ -275,7 +308,7 @@ export function VendorModal({ vendor, onClose, onSaved }: {
           <button type="button" onClick={save} disabled={busy} className="flex-1 font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.16em", padding: "12px 0" }}>
             {busy ? "Saving…" : "Save"}
           </button>
-          <button type="button" onClick={onClose} disabled={busy} className="font-body uppercase px-5" style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 10, letterSpacing: "0.16em" }}>
+          <button type="button" onClick={close} disabled={busy} className="font-body uppercase px-5" style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 10, letterSpacing: "0.16em" }}>
             Cancel
           </button>
         </div>

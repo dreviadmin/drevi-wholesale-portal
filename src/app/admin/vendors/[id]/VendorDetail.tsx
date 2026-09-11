@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Pencil, MessageCircle } from "lucide-react";
+import { withFrom } from "@/components/BackLink";
 import { VendorModal, type VendorRow } from "../VendorsView";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -69,7 +70,7 @@ export function VendorDetail({ vendor, receipts }: { vendor: VendorRow; receipts
         ) : (
           <div className="mt-2 flex flex-col">
             {receipts.map((r) => (
-              <Link key={r.id} href={`/admin/receipts/${r.id}`} className="flex items-center gap-3 py-2.5" style={{ borderBottom: "1px solid rgba(26,26,26,0.07)" }}>
+              <Link key={r.id} href={withFrom(`/admin/receipts/${r.id}`, `/admin/vendors/${vendor.id}`)} className="flex items-center gap-3 py-2.5" style={{ borderBottom: "1px solid rgba(26,26,26,0.07)" }}>
                 <span className="font-mono" style={{ fontSize: 12.5, fontWeight: 600, color: palette.black }}>{r.number}</span>
                 <span className="font-body" style={{ fontSize: 11, color: palette.mutedGreige }}>{fmtDate(r.date)}</span>
                 <span className="font-body ml-auto" style={{ fontSize: 11.5, color: palette.softBlack }}>{r.pieces} pc</span>

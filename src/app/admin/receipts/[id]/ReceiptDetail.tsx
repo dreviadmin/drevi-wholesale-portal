@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Pencil, Trash2, ImageOff } from "lucide-react";
+import { Pencil, Trash2, ImageOff, Printer } from "lucide-react";
 import { ZoomImage } from "@/components/Lightbox";
+import { withFrom } from "@/components/BackLink";
+import { queueTray } from "@/app/admin/sku-generator/labels";
 import { ReceiptEditor, type VendorOption, type EditorLine } from "../ReceiptEditor";
 import { deleteReceipt } from "../actions";
 import { uuid } from "@/lib/uuid";
@@ -14,23 +17,43 @@ interface ReceiptHeader {
   id: string; number: string; vendorId: string; vendorName: string; vendorCity: string | null;
   date: string; billAmount: number | null; notes: string; billUrl: string | null;
   gstMode: "kaccha" | "pakka" | null; gstRate: number | null; gstInclusive: boolean | null;
-  createdBy: string; createdAt: string;
+  createdBy: string; createdAt: string; updatedAt: string | null;
 }
 interface Line { id: string; sku: string; description: string; qty: number; unitCost: number }
+/** A design group on this receipt and what still keeps it off the wholesale floor. */
+export interface ReceiptDesign {
+  id: string; baseSku: string; color: string; title: string | null;
+  specsVerified: boolean; priceSet: boolean; createdHere: boolean;
+}
 
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+const chip = (text: string, neutral = false) => (
+  <span className="font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.12em", padding: "2px 6px", background: neutral ? palette.ivoryDeep : palette.ivory, color: neutral ? palette.softBlack : palette.goldDeep, border: neutral ? "none" : `1px solid ${palette.gold}` }}>
+    {text}
+  </span>
+);
 
-export function ReceiptDetail({ receipt, lines, vendors, registrySkus }: {
+export function ReceiptDetail({ receipt, lines, vendors, registrySkus, designs }: {
   receipt: ReceiptHeader;
   lines: Line[];
   vendors: VendorOption[];
   registrySkus: string[];
+  designs: ReceiptDesign[];
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const incomplete = designs.filter((d) => !d.specsVerified || !d.priceSet);
+  const here = `/admin/receipts/${receipt.id}`;
   const totals = lines.reduce((t, l) => ({ pieces: t.pieces + l.qty, value: t.value + l.qty * l.unitCost }), { pieces: 0, value: 0 });
   const mismatch = receipt.billAmount != null && receipt.billAmount > 0 && Math.abs(receipt.billAmount - totals.value) > 0.5;
+
+  function printTags() {
+    // Exactly this receipt's tags — the save path may already have queued
+    // them, and merging again would print two labels per SKU.
+    queueTray(lines.map((l) => l.sku), "replace");
+    router.push("/admin/sku-generator?tab=print&receipt=" + encodeURIComponent(receipt.number));
+  }
 
   async function doDelete() {
     if (!window.confirm(`Delete receipt ${receipt.number}? Its lines are removed with it. This cannot be undone.`)) return;
@@ -51,6 +74,7 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus }: {
           registrySkus={registrySkus}
           initial={{
             id: receipt.id,
+            updatedAt: receipt.updatedAt,
             vendorId: receipt.vendorId,
             receiptDate: receipt.date,
             billAmount: receipt.billAmount != null ? String(receipt.billAmount) : "",
@@ -61,10 +85,8 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus }: {
             gstInclusive: receipt.gstInclusive,
             lines: initialLines,
           }}
+          onCancel={() => setEditing(false)}
         />
-        <button type="button" onClick={() => setEditing(false)} className="mt-2 w-full font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 10, letterSpacing: "0.16em", padding: "11px 0" }}>
-          Cancel Edit
-        </button>
       </>
     );
   }
@@ -83,6 +105,9 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus }: {
           </div>
         </div>
         <div className="flex gap-2">
+          <button type="button" onClick={printTags} disabled={lines.length === 0} className="flex items-center gap-1.5 font-body uppercase disabled:opacity-50" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
+            <Printer size={12} /> Print tags
+          </button>
           <button type="button" onClick={() => setEditing(true)} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
             <Pencil size={12} /> Edit
           </button>
@@ -91,6 +116,40 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus }: {
           </button>
         </div>
       </div>
+
+      {incomplete.length > 0 && (
+        <div className="mt-4" style={{ background: palette.amberSoft, border: `1px solid ${palette.gold}`, padding: "12px 14px" }}>
+          <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.goldDeep }}>
+            Complete product details · {incomplete.length} of {designs.length}
+          </div>
+          <div className="font-body mt-1" style={{ fontSize: 11, color: palette.softBlack }}>
+            Fabric, handwork, origin and a wholesale price — then Confirmed by Rakesh. Hidden from buyers until then.
+          </div>
+          <div className="mt-2">
+            {incomplete.map((d) => (
+              <div key={d.id} className="flex items-center gap-3 flex-wrap" style={{ padding: "9px 0", borderTop: "1px solid rgba(26,26,26,0.08)" }}>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-mono" style={{ fontSize: 12, fontWeight: 600, color: palette.black }}>{d.baseSku}·{d.color}</span>
+                    {!d.specsVerified && chip("specs")}
+                    {!d.priceSet && chip("price")}
+                    {d.createdHere && chip("new here", true)}
+                  </div>
+                  {d.title && <div className="font-body truncate" style={{ fontSize: 11, color: palette.mutedGreige }}>{d.title}</div>}
+                </div>
+                <div className="flex gap-2">
+                  <Link href={withFrom(`/admin/studio/master/${d.id}`, here)} className="font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
+                    Product details
+                  </Link>
+                  <Link href={withFrom(`/admin/specs/${d.id}`, here)} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
+                    Specs
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-4 mt-4 items-start">
         {receipt.billUrl ? (

@@ -19,6 +19,31 @@ export const TRAY_KEY = "drevi_print_tray_v1";
 export interface TrayItem { sku: string; copies: number }
 export interface PrintDatum { sku: string; found: boolean; vendorCode: string; mrp: string }
 
+/**
+ * Stage SKUs on this device's print tray (the handoff SkuGeneratorClient reads
+ * on mount). "replace" = exactly these SKUs, one label each; "merge" = queued
+ * entries gain a copy, new ones are appended. Never throws — a receipt that is
+ * already saved must not fail on a storage hiccup.
+ */
+export function queueTray(skus: string[], mode: "merge" | "replace"): boolean {
+  try {
+    if (mode === "replace") {
+      const fresh: TrayItem[] = [...new Set(skus)].map((sku) => ({ sku, copies: 1 }));
+      localStorage.setItem(TRAY_KEY, JSON.stringify(fresh));
+      return true;
+    }
+    const parsed = JSON.parse(localStorage.getItem(TRAY_KEY) ?? "[]");
+    const tray: TrayItem[] = Array.isArray(parsed) ? parsed : [];
+    for (const sku of skus) {
+      const ex = tray.find((x) => x.sku === sku);
+      if (ex) ex.copies += 1;
+      else tray.push({ sku, copies: 1 });
+    }
+    localStorage.setItem(TRAY_KEY, JSON.stringify(tray));
+    return true;
+  } catch { return false; /* storage unavailable or corrupted — the caller's own state still stands */ }
+}
+
 // QRs encode the SKU string only — deterministic, never stored (spec §6.1).
 export async function qrPngDataUrl(sku: string, pixels = 512): Promise<string> {
   return QRCode.toDataURL(sku, {

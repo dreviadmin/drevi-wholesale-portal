@@ -104,7 +104,11 @@ five-space nav: **Home · Sell · Stock · Studio · Office**.
   With-price roll labels for the DCode DC421 Pro (38×25 mm calibrated PDF;
   price labels carry a coded vendor string and MRP — never raw costs), and a
   calibration panel. Every mint mirrors to the legacy Google Sheet while dual
-  mode lasts; a 10-minute cron imports sheet-minted rows back.
+  mode lasts; a 10-minute cron imports sheet-minted rows back. Since 11 Sep
+  the colour picker is a **searchable combobox** (shared `ColorCombobox`,
+  type a code or a name, grouped list, keyboard/touch friendly) and the page
+  honours `?tab=print&receipt=GR-…` so "Save & print tags" lands on the Print
+  tab with exactly that delivery's SKUs staged.
 - **Exhibition billing** (`/admin/exhibition`) — the session-based
   order-taking wizard for shows: sessions give orders their numbering prefix
   (`DX-YYYYMMDD-NNN`, gapless and race-safe via an atomic
@@ -128,12 +132,21 @@ five-space nav: **Home · Sell · Stock · Studio · Office**.
 ### Studio (AI product imagery + copy)
 
 The Studio takes a design from rack shot to publishable product photos and
-copy. Everything is per-design, review-gated, and audited.
+copy. Everything is per-design, review-gated, and audited. Prompt facts
+(copy FACTS block and the angle prompts) resolve category / sub-category /
+colour **codes to their vocabulary names** — "Category: Saree / Pre-Draped
+(code SAR-PRD)", "Colour: Gold (code GLD)" — via `src/lib/studio/facts.ts`
+(11 Sep); a staff-typed colour name in Specs wins, unknown values pass
+through untouched, and prompts already saved keep their text until "Reset to
+default".
 
 - **Board** (`/admin/studio`) — every design with its stage badge (Awaiting
   specs → Ready to generate → Needs review → Approved…), publish blockers per
   portal, an active-jobs ticker, and search/scan. Batch copy generation runs
-  from here through the same generator as the workbench.
+  from here through the same generator as the workbench. Default order is
+  **newest first** (11 Sep: `created_at desc`, visible "Added" column, all
+  other sorts still selectable); the "Wholesale price not set" blocker links
+  straight to the Specs page ("Set price").
 - **Workbench** (`/admin/studio/[designId]`) — per-angle review across
   **front / back / side / lifestyle / detail_1 / detail_2**:
   - **Four input modes per angle** — *Shoot* (camera/upload → a `source`
@@ -193,10 +206,16 @@ copy. Everything is per-design, review-gated, and audited.
   manual override); **HSN (all sizes)**; supplier availability; per-variant
   rows with stock, wholesale price and the **"kept at" physical location**
   field.
-- **Specs page** (`/admin/specs/[designId]`) — a price-free spec + supply
-  editor, safe for counter devices. Fields (3 Sep): Fabric, Handwork, Origin
-  and **Colour** (the human name beside the SKU code — it feeds the AI copy
-  and photo prompts), each with an ⓘ info button explaining what to enter.
+- **Specs page** (`/admin/specs/[designId]`) — the spec + supply editor for
+  counter devices. Fields (3 Sep): Fabric, Handwork, Origin and **Colour**
+  (the human name beside the SKU code — it feeds the AI copy and photo
+  prompts), each with an ⓘ info button explaining what to enter; category and
+  sub-category show as vocab names ("Saree · Pre-Draped") with the codes
+  alongside. Since 11 Sep it also carries the buyer-facing **Wholesale price**
+  — one price for every size of the design, written to each size SKU with the
+  sheet-sync lock (blank = leave as is; mixed per-size prices are listed and
+  per-size editing stays in the Product Master). Cost and MRP are never shown
+  here (`docs/DECISIONS.md`).
 
 ### Back office (admins)
 
@@ -261,16 +280,26 @@ copy. Everything is per-design, review-gated, and audited.
     supply in a single motion": pick the vendor (chips + quick-add), set the
     delivery's **GST treatment** — *Kaccha* (no GST) or *Pakka* with **5% /
     18%**, **included in prices or added on top** — then per garment:
-    scan an existing tag **or** mint a brand-new SKU inline (category →
-    sub-category → colour → sizes from the live vocabulary, HSN pre-filled
-    with the default), shoot the ident photo (binds to the SKU immediately,
-    stored in the design's Drive folder), set counts and unit cost, and add
-    to the delivery. Saving writes the receipt + lines, posts `receipt`
+    (re-sequenced 11 Sep, in dependency order) identify — scan an existing
+    tag, search, **or** describe a new design (category → sub-category →
+    **searchable colour dropdown**) → pick the **sizes received** and a name
+    → **Mint SKU** (or "Prepare N tags" / "Mint N more" for a reorder) →
+    ident photo (two equal **Open camera / Choose from gallery** tiles,
+    disabled until the SKU exists because the file is named after it; stored
+    in the design's Drive folder) → quantities per size, unit cost, HSN → add
+    to the delivery. The open garment sheet autosaves, so a closed tab
+    resumes where it was. Saving writes the receipt + lines, posts `receipt`
     stock movements, creates hidden catalog rows for new SKUs (invisible
-    until the Studio approves them), links the vendor at design **and** SKU
+    until the Studio approves them; a new size inherits the sibling price
+    when every priced size agrees), links the vendor at design **and** SKU
     level, and records `last_cost` **ex-GST** (input credit is claimed —
-    pricing runs on the true cost; decision, 2 Aug). Save & Print sends the
-    new tags to the label tray.
+    pricing runs on the true cost; decision, 2 Aug). **Save only** shows a
+    success panel — receipt number, counts, a "Complete product details" row
+    per design with Product details / Specs links, plus Print tags / View
+    receipt / Log another delivery. **Save & print tags** stages exactly this
+    delivery's SKUs and lands on the SKU generator's Print tab. The receipt
+    page shows a "Complete product details · N of M" banner (missing specs /
+    price) with the same links and a **Print tags** button.
   - **Classic receipts** (`/admin/receipts`) — GR-numbered records with
     vendor, date, GST treatment, optional bill photo (private bucket) and
     bill amount with a mismatch badge, scan-in lines, edit/delete with audit
@@ -346,6 +375,24 @@ payload. The portal is invisible to the public and noindexed.
    `useSort`/`SortTh`).
 4. **Forms stay usable with the keyboard open** (`KeyboardInset` visual-
    viewport padding).
+5. **Back navigation** — drill-in pages render `<BackLink>`
+   (`src/components/BackLink.tsx`): an explicit `?from=<same-origin path>`
+   wins (label derived from the path — "Workbench", "Vendor", …), else the
+   page's own default. Links that can be reached from more than one parent
+   pass `withFrom(href, currentPath)`; `safeFrom` rejects anything that is
+   not a relative path. No history heuristics.
+6. **Autosave drafts** (11 Sep) — every substantial form keeps an in-progress
+   draft in localStorage through the shared `useDraft` hook
+   (`src/lib/useDraft.ts`: restore in an effect, debounced write flushed on
+   tab-hide, `hasContent` so untouched forms leave nothing behind, cleared on
+   a successful save). Keys follow `drevi:draft:<form>:<id>`. Create forms
+   (Log delivery + its open garment sheet, retail bill, receipt, buyer,
+   stock take, SKU generator picks, notes) restore silently (a notice only
+   if the draft is over an hour old). Forms seeded from server data (Specs,
+   Product Master, Workbench copy/prompts, order editor, vendor, catalog and
+   buyer editors) always show **"Draft restored · Discard"**, and a draft
+   written against an older server row shows the stale variant with
+   **Keep mine / Use server** — a restored draft never auto-saves.
 
 ---
 

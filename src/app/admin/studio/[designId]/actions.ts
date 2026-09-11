@@ -5,6 +5,8 @@ import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import { defaultAnglePrompt } from "@/lib/studio/prompts";
+import { promptDesignFrom } from "@/lib/studio/facts";
+import { loadVocab } from "@/lib/sku/vocab-live";
 import { engineConfigured } from "@/lib/pipeline/engines";
 import { COPY_MODELS } from "@/lib/studio/copy-models";
 import { DETAIL_ANGLES } from "@/lib/studio/state";
@@ -187,16 +189,16 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
   }
   if (!angle.source_ref) return fail("No source image on this angle yet");
 
-  const { data: dRow } = await admin
-    .from("designs")
-    .select("title, category, sub_category, color, color_name, fabric, handwork, brand_model, bg_style, base_sku")
-    .eq("id", angle.design_id)
-    .maybeSingle();
-  const promptDesign = {
-    title: dRow?.title, category: dRow?.category, subCategory: dRow?.sub_category,
-    color: dRow?.color, colorName: dRow?.color_name, fabric: dRow?.fabric, handwork: dRow?.handwork,
-    bgStyle: dRow?.bg_style, bgSeed: `${dRow?.base_sku ?? ""}|${dRow?.color ?? ""}`,
-  };
+  const [{ data: dRow }, vocab] = await Promise.all([
+    admin
+      .from("designs")
+      .select("title, category, sub_category, color, color_name, fabric, handwork, brand_model, bg_style, base_sku")
+      .eq("id", angle.design_id)
+      .maybeSingle(),
+    loadVocab(),
+  ]);
+  // Codes → names so the runner prompt reads "Gold georgette Pre-Draped", not "GLD georgette PRD".
+  const promptDesign = promptDesignFrom(dRow, vocab);
 
   // A server death mid-generation would strand the job in running forever
   // and permanently hide the Generate button — sweep anything older than 15m.

@@ -11,7 +11,8 @@ export default async function ReceiptsPage({ searchParams }: { searchParams?: { 
   const admin = createAdminClient();
 
   const [{ data: receipts }, { data: vendors }, lines] = await Promise.all([
-    admin.from("goods_receipts").select("id, receipt_number, vendor_id, receipt_date, bill_amount, created_by").order("receipt_date", { ascending: false }),
+    // receipt_date is a DATE — created_at breaks same-day ties so the list never reshuffles.
+    admin.from("goods_receipts").select("id, receipt_number, vendor_id, receipt_date, bill_amount, created_by").order("receipt_date", { ascending: false }).order("created_at", { ascending: false }),
     admin.from("vendors").select("id, name"),
     fetchAll<{ receipt_id: string; sku: string; qty: number; unit_cost: number }>(admin, "goods_receipt_lines", "receipt_id, sku, qty, unit_cost"),
   ]);

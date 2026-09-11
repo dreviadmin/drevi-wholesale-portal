@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { BackLink } from "@/components/BackLink";
 import { requireAdminOrRedirect } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NotesPanel } from "@/components/admin/NotesPanel";
@@ -35,16 +34,14 @@ export default async function VendorDetailPage({ params }: { params: { id: strin
 
   return (
     <div className="px-4 md:px-6 py-5 max-w-3xl">
-      <Link href="/admin/vendors" className="inline-flex items-center gap-1 font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.15em", color: "#998F7A" }}>
-        <ChevronLeft size={14} /> Vendors
-      </Link>
+      <BackLink fallback="/admin/vendors" fallbackLabel="Vendors" />
       <VendorDetail
         vendor={{
           id: vendor.id, name: vendor.name, phone: vendor.phone, whatsapp: vendor.whatsapp,
           city: vendor.city, gstin: vendor.gstin, address: vendor.address, notes: vendor.notes,
           contactName: vendor.contact_name ?? null, email: vendor.email ?? null,
           cardImageRef: vendor.card_image_ref ?? null, personImageRef: vendor.person_image_ref ?? null,
-          active: vendor.active, receipts: (receipts ?? []).length, lastReceipt: receipts?.[0]?.receipt_date ?? null,
+          active: vendor.active, updatedAt: vendor.updated_at ?? null, receipts: (receipts ?? []).length, lastReceipt: receipts?.[0]?.receipt_date ?? null,
           skus: [],
         }}
         receipts={(receipts ?? []).map((r) => ({

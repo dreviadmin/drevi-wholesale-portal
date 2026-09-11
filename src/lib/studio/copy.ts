@@ -2,18 +2,19 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchDriveImage } from "@/lib/drive";
+import { loadVocab } from "@/lib/sku/vocab-live";
 import { defaultCopyModel } from "./copy-models";
+import { defaultCopyPrompt } from "./copy-prompt";
+import { promptDesignFrom, type VocabLike } from "./facts";
+
+export { BUILT_IN_TEMPLATE, defaultCopyPrompt, type PromptFacts } from "./copy-prompt";
 
 // Copy track (build guide §10). ONE implementation — the workbench single
 // generate and the board batch both call generateCopyForDesign. Inputs are
 // the design's approved images (fallback: angle sources), its spec-mirror
 // fields and tier. STRICT_SPEC_MODE (default on): an unverified-spec design
 // is refused — "Awaiting Rakesh's specs" — through every path.
-//
-// Template: docs/reference/copy-template.md when ANSH-02 drops it in; until
-// then the guide's built-in minimum — title ≤ 60 chars, 2–3 sentence
-// description in brand voice (no exclamation marks, sentences end with
-// periods), tags {occasion, fabric, silhouette, color}.
+// The template and prompt builder live in copy-prompt.ts (pure, tested).
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
@@ -28,34 +29,8 @@ function strictSpecMode(): boolean {
   return (process.env.STRICT_SPEC_MODE ?? "true").toLowerCase() !== "false";
 }
 
-export const BUILT_IN_TEMPLATE = `You write product copy for Drevi, an Indian occasion-wear fashion house (lehengas, sarees, sharara sets, gowns). Voice: refined, confident, tactile — never salesy. No exclamation marks. Sentences end with periods.
-
-From the photos and the facts below, return STRICT JSON only (no markdown fence):
-{"title": "<= 60 characters, Title Case, no SKU>",
- "description": "2-3 sentences: silhouette, fabric/handwork, occasion. Specific to what is visible.",
- "tags": {"occasion": "...", "fabric": "...", "silhouette": "...", "color": "..."}}`;
-
-export interface PromptFacts {
-  title?: string | null; category?: string | null; subCategory?: string | null;
-  color?: string | null; colorName?: string | null; fabric?: string | null; handwork?: string | null;
-  origin?: string | null; tier?: string | null;
-}
-
-/** §8 — the prompt an unedited design would run, built from its own specs. */
-export function defaultCopyPrompt(d: PromptFacts): string {
-  const facts = [
-    d.title && `Working name: ${d.title}`,
-    d.category && `Category: ${d.category} / ${d.subCategory ?? ""}`,
-    d.colorName ? `Colour: ${d.colorName} (code ${d.color ?? "?"})` : d.color && `Colour code: ${d.color}`,
-    d.fabric && `Fabric (verified): ${d.fabric}`,
-    d.handwork && `Handwork (verified): ${d.handwork}`,
-    d.origin && `Origin: ${d.origin}`,
-    d.tier && `Tier: ${d.tier}`,
-  ].filter(Boolean).join("\n");
-  return `${BUILT_IN_TEMPLATE}\n\nFACTS:\n${facts}`;
-}
-
-export async function generateCopyForDesign(designId: string, requestedBy: string): Promise<CopyResult> {
+/** opts.vocab — a batch caller loads the vocabulary once and passes it through. */
+export async function generateCopyForDesign(designId: string, requestedBy: string, opts?: { vocab?: VocabLike }): Promise<CopyResult> {
   const admin = createAdminClient();
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: false, error: "ANTHROPIC_API_KEY not configured (ANSH-03)" };
@@ -107,13 +82,10 @@ export async function generateCopyForDesign(designId: string, requestedBy: strin
 
   // An edited prompt wins; otherwise the default is rebuilt from the specs, so
   // a spec correction flows through without anyone re-saving the prompt (§8).
+  // Codes resolve to names (Saree, Gold) via the live vocabulary — only on this branch.
   const prompt = saved?.prompt?.trim()
     ? saved.prompt
-    : defaultCopyPrompt({
-        title: design.title, category: design.category, subCategory: design.sub_category,
-        color: design.color, colorName: design.color_name, fabric: design.fabric, handwork: design.handwork,
-        origin: design.origin, tier: design.tier,
-      });
+    : defaultCopyPrompt(promptDesignFrom(design, opts?.vocab ?? (await loadVocab())));
   const model = saved?.model_override || defaultCopyModel(design.tier);
   const res = await fetch(ANTHROPIC_URL, {
     method: "POST",

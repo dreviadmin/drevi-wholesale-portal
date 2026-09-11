@@ -1,14 +1,17 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, Check } from "lucide-react";
+import { Check } from "lucide-react";
 import { palette } from "@/lib/palette";
+import { useDraft } from "@/lib/useDraft";
 import { supplyAge } from "@/lib/availability";
 import type { BoardRow } from "@/lib/studio/load";
 import { saveSpecs, savePricing, saveVariant, setStockForSku, saveDesignHsn, togglePortal } from "./actions";
 import { HsnInput } from "@/components/admin/HsnInput";
+import { BackLink, withFrom, useHere } from "@/components/BackLink";
+import { DraftNotice } from "@/components/DraftNotice";
 
 // Master editor client (§12.1). Group-level fields save once per design;
 // size-level rows save per variant. Sheet-owned live prices keep flowing
@@ -21,6 +24,7 @@ interface DesignFields {
   vendorSku?: string | null;
   supply?: { supplyMode?: string; vendorStockQty?: number | null; makingDays?: number | null; makingMoq?: number | null; deliveryDays?: number | null; supplyNote?: string };
   supplyUpdatedAt?: string | null;
+  updatedAt?: string | null;
 }
 interface VariantRow { sku: string; current_qty: number; wholesale_price: number; wholesale_visible: boolean; hsn?: string | null; location?: string | null }
 
@@ -35,22 +39,50 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [stockNote, setStockNote] = useState<Record<string, string>>({});
   const [resetFor, setResetFor] = useState<string | null>(null);
   const [resetQty, setResetQty] = useState("");
   const [resetNote, setResetNote] = useState("");
   const [toast, setToast] = useState<string | null>(null);
-  const [specs, setSpecs] = useState({ fabric: design.fabric, handwork: design.handwork, origin: design.origin, specsVerified: design.specsVerified });
-  const [pricing, setPricing] = useState({ markupMultiplier: design.markupMultiplier, mrpOverride: design.mrpOverride?.toString() ?? "" });
-  const [hsnValue, setHsnValue] = useState(hsn);
-  const [rows, setRows] = useState(variants.map((v) => ({ ...v, qty: String(v.current_qty), ws: String(v.wholesale_price), savedQty: Number(v.current_qty) || 0, loc: v.location ?? "" })));
+  // One draft per Save button so a save clears only its own key. Specs and
+  // pricing live on the design row (updated_at bumps on save); HSN and the
+  // size rows come from wholesale_products, so their seed is their base.
+  const draftKey = `drevi:draft:master:${board.id}`;
+  const specsSeed = { fabric: design.fabric, handwork: design.handwork, origin: design.origin, specsVerified: design.specsVerified };
+  const pricingSeed = { markupMultiplier: design.markupMultiplier, mrpOverride: design.mrpOverride?.toString() ?? "" };
+  const specsSig = JSON.stringify(specsSeed);
+  const pricingSig = JSON.stringify(pricingSeed);
+  const [specs, setSpecs, specsMeta] = useDraft(`${draftKey}:specs`, specsSeed, { base: design.updatedAt ?? specsSig, hasContent: (s) => JSON.stringify(s) !== specsSig, onRestore: (d) => ({ ...specsSeed, ...d }) });
+  const [pricing, setPricing, pricingMeta] = useDraft(`${draftKey}:pricing`, pricingSeed, { base: design.updatedAt ?? pricingSig, hasContent: (p) => JSON.stringify(p) !== pricingSig, onRestore: (d) => ({ ...pricingSeed, ...d }) });
+  const [hsnValue, setHsnValue, hsnMeta] = useDraft(`${draftKey}:hsn`, hsn, { base: hsn, hasContent: (h) => h !== hsn });
+  // Row edits keyed by SKU, merged over the server variants on render. An
+  // entry whose qty/ws/loc equal the server row is pruned (on restore and
+  // after every refresh) so a saved row drops out once the refresh confirms
+  // it — pruning on click would flash the old values until the refresh lands.
+  type RowEdit = { qty: string; ws: string; loc: string; stockNote: string };
+  const rowSeed = (v: VariantRow): RowEdit => ({ qty: String(v.current_qty), ws: String(v.wholesale_price), loc: v.location ?? "", stockNote: "" });
+  const rowEdited = (r: RowEdit, v: VariantRow) => { const s = rowSeed(v); return r.qty !== s.qty || r.ws !== s.ws || r.loc !== s.loc; };
+  const pruneRows = (e: Record<string, RowEdit>) => {
+    const kept = Object.entries(e).filter(([sku, r]) => { const v = variants.find((x) => x.sku === sku); return !!v && rowEdited(r, v); });
+    return kept.length === Object.keys(e).length ? e : Object.fromEntries(kept);
+  };
+  const [rowEdits, setRowEdits, rowsMeta] = useDraft<Record<string, RowEdit>>(`${draftKey}:rows`, {}, {
+    base: JSON.stringify(variants.map((v) => [v.sku, rowSeed(v)])),
+    hasContent: (e) => Object.keys(pruneRows(e)).length > 0,
+    onRestore: pruneRows,
+  });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setRowEdits(pruneRows); }, [variants]);
+  const rows = variants.map((v) => ({ ...v, ...rowSeed(v), ...rowEdits[v.sku], savedQty: Number(v.current_qty) || 0 }));
+  const setRow = (v: VariantRow & RowEdit, patch: Partial<RowEdit>) =>
+    setRowEdits((e) => ({ ...e, [v.sku]: { ...(e[v.sku] ?? { qty: v.qty, ws: v.ws, loc: v.loc, stockNote: v.stockNote }), ...patch } }));
+  const rowsRestored = rowsMeta.restored && Object.keys(rowEdits).length > 0;
 
   function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2400); }
-  function run(fn: () => Promise<{ ok: boolean; error?: string }>, done: string) {
+  function run(fn: () => Promise<{ ok: boolean; error?: string }>, done: string, onOk?: () => void) {
     startTransition(async () => {
       const r = await fn();
       flash(r.ok ? done : r.error ?? "Failed");
-      if (r.ok) router.refresh();
+      if (r.ok) { onOk?.(); router.refresh(); }
     });
   }
 
@@ -61,14 +93,21 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
     <div className="font-body uppercase mt-6" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>{title}</div>
   );
   const inputStyle = { fontSize: 12.5, border: "1px solid rgba(26,26,26,0.15)", background: "#fff", color: palette.black, padding: "8px 10px" } as const;
+  const specsHref = withFrom(`/admin/specs/${board.id}`, useHere(`/admin/studio/master/${board.id}`));
 
   return (
     <div className="px-4 md:px-8 py-6 max-w-2xl pb-16">
-      <Link href={`/admin/studio/${board.id}`} className="inline-flex items-center gap-1 font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.15em", color: palette.mutedGreige }}>
-        <ChevronLeft size={14} /> Workbench
-      </Link>
+      <BackLink fallback={`/admin/studio/${board.id}`} fallbackLabel="Workbench" />
       <h1 className="font-mono mt-3" style={{ fontSize: 19, fontWeight: 700, color: palette.black }}>{board.baseSku} · {board.color}</h1>
       <div className="font-body mt-1" style={{ fontSize: 12.5, color: palette.softBlack }}>{board.title ?? "—"} · Product Master</div>
+      {(specsMeta.restored || pricingMeta.restored || hsnMeta.restored || rowsRestored) && (
+        <div className="mt-4 flex flex-col gap-1">
+          <DraftNotice meta={specsMeta} label="Specs draft restored" />
+          <DraftNotice meta={pricingMeta} label="Pricing draft restored" />
+          <DraftNotice meta={hsnMeta} label="HSN draft restored" />
+          {rowsRestored && <DraftNotice meta={rowsMeta} label="Size rows draft restored" />}
+        </div>
+      )}
 
       {/* Specs */}
       {section("Specs")}
@@ -83,7 +122,7 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
           <input type="checkbox" checked={specs.specsVerified} onChange={(e) => setSpecs((s) => ({ ...s, specsVerified: e.target.checked }))} style={{ accentColor: palette.goldDeep }} />
           Confirmed by Rakesh
         </label>
-        <button type="button" disabled={pending} onClick={() => run(() => saveSpecs(board.id, specs), "Specs saved")} className="self-start font-body uppercase disabled:opacity-40" style={{ fontSize: 9, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "8px 12px" }}>
+        <button type="button" disabled={pending} onClick={() => run(() => saveSpecs(board.id, specs), "Specs saved", specsMeta.clear)} className="self-start font-body uppercase disabled:opacity-40" style={{ fontSize: 9, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "8px 12px" }}>
           Save specs
         </button>
       </div>
@@ -113,9 +152,12 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
           Effective MRP: <b style={{ color: palette.black }}>{effectiveMrp ? `₹${Number(effectiveMrp).toLocaleString("en-IN")}` : "—"}</b>
           {sheetMrp > 0 && <span style={{ color: palette.mutedGreige }}> · sheet says ₹{sheetMrp.toLocaleString("en-IN")} (live until cutover)</span>}
         </div>
-        <button type="button" disabled={pending} onClick={() => run(() => savePricing(board.id, { markupMultiplier: Number(pricing.markupMultiplier), mrpOverride: pricing.mrpOverride ? Number(pricing.mrpOverride) : null }), "Pricing saved")} className="mt-2 font-body uppercase disabled:opacity-40" style={{ fontSize: 9, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "8px 12px" }}>
+        <button type="button" disabled={pending} onClick={() => run(() => savePricing(board.id, { markupMultiplier: Number(pricing.markupMultiplier), mrpOverride: pricing.mrpOverride ? Number(pricing.mrpOverride) : null }), "Pricing saved", pricingMeta.clear)} className="mt-2 font-body uppercase disabled:opacity-40" style={{ fontSize: 9, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "8px 12px" }}>
           Save pricing
         </button>
+        <div className="font-body mt-2" style={{ fontSize: 10.5, color: palette.mutedGreige, lineHeight: 1.5 }}>
+          Wholesale price is per size — see Sizes below, or set one price for all sizes on the <Link href={specsHref} style={{ color: palette.goldDeep, textDecoration: "underline" }}>Specs page</Link>.
+        </div>
 
         {/* Ansh (31 Jul): one HSN across every size of the design. */}
         <div className="flex items-end gap-2 mt-3 flex-wrap">
@@ -123,7 +165,7 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
             <span className="uppercase" style={{ letterSpacing: "0.14em" }}>HSN (all sizes)</span>
             <div><HsnInput value={hsnValue} onChange={setHsnValue} options={hsnOptions} style={{ width: 110 }} /></div>
           </label>
-          <button type="button" disabled={pending || hsnValue === hsn} onClick={() => run(() => saveDesignHsn(board.id, board.baseSku, board.color, hsnValue), "HSN saved on all sizes")} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 9, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, padding: "8px 12px" }}>
+          <button type="button" disabled={pending || hsnValue === hsn} onClick={() => run(() => saveDesignHsn(board.id, board.baseSku, board.color, hsnValue), "HSN saved on all sizes", hsnMeta.clear)} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 9, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, padding: "8px 12px" }}>
             Save HSN
           </button>
         </div>
@@ -155,7 +197,7 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
           <Link href={`/admin/receipts?q=${encodeURIComponent(board.baseSku)}`} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }}>
             Receipts
           </Link>
-          <Link href={`/admin/specs/${board.id}`} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }}>
+          <Link href={specsHref} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }}>
             Edit specs &amp; supply
           </Link>
           <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
@@ -187,22 +229,22 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
       {/* Size variants */}
       {section("Sizes · stock & wholesale")}
       <div className="mt-2 flex flex-col gap-1.5">
-        {rows.map((v, i) => (
+        {rows.map((v) => (
           <div key={v.sku} className="flex items-center gap-2 p-2.5 flex-wrap" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
             {/* w-full on phones: the fixed-width inputs used to squeeze the
                 SKU to nothing in the flex-wrap (Ansh, 4 Sep) — give it its own
                 line below sm and let it share the row on wider screens. */}
             <span className="font-mono w-full sm:w-auto sm:flex-1 sm:min-w-0 truncate" style={{ fontSize: 11, fontWeight: 600, color: palette.black }}>{v.sku}</span>
             <label className="font-body" style={{ fontSize: 9, color: palette.mutedGreige }}>
-              qty <input type="number" min="0" value={v.qty} onChange={(e) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, qty: e.target.value } : r)))} className="font-body ml-1" style={{ ...inputStyle, width: 64, padding: "5px 7px" }} />
+              qty <input type="number" min="0" value={v.qty} onChange={(e) => setRow(v, { qty: e.target.value })} className="font-body ml-1" style={{ ...inputStyle, width: 64, padding: "5px 7px" }} />
             </label>
             <label className="font-body" style={{ fontSize: 9, color: palette.mutedGreige }}>
-              ₹ <input type="number" min="0" value={v.ws} onChange={(e) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ws: e.target.value } : r)))} className="font-body ml-1" style={{ ...inputStyle, width: 84, padding: "5px 7px" }} />
+              wholesale ₹ <input type="number" min="0" value={v.ws} onChange={(e) => setRow(v, { ws: e.target.value })} className="font-body ml-1" style={{ ...inputStyle, width: 84, padding: "5px 7px" }} />
             </label>
             <label className="font-body" style={{ fontSize: 9, color: palette.mutedGreige }}>
-              kept at <input value={v.loc} placeholder="Rack B2…" onChange={(e) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, loc: e.target.value } : r)))} className="font-body ml-1" style={{ ...inputStyle, width: 96, padding: "5px 7px" }} />
+              kept at <input value={v.loc} placeholder="Rack B2…" onChange={(e) => setRow(v, { loc: e.target.value })} className="font-body ml-1" style={{ ...inputStyle, width: 96, padding: "5px 7px" }} />
             </label>
-            <button type="button" disabled={pending} onClick={() => run(() => saveVariant(v.sku, { currentQty: Number(v.qty) || 0, wholesalePrice: Number(v.ws) || 0, stockNote: stockNote[v.sku], location: v.loc }), `${v.sku} saved`)} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "6px 9px" }}>
+            <button type="button" disabled={pending} onClick={() => run(() => saveVariant(v.sku, { currentQty: Number(v.qty) || 0, wholesalePrice: Number(v.ws) || 0, stockNote: v.stockNote, location: v.loc }), `${v.sku} saved`)} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "6px 9px" }}>
               Save
             </button>
             <button type="button" onClick={() => setResetFor((cur) => (cur === v.sku ? null : v.sku))} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.1em", color: palette.mutedGreige, padding: "6px 4px" }} title="Declare a counted quantity">
@@ -212,8 +254,8 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
             {/* §10.1 — a manual stock change is a movement and needs a note. */}
             {Number(v.qty) !== v.savedQty && (
               <input
-                value={stockNote[v.sku] ?? ""}
-                onChange={(e) => setStockNote((s) => ({ ...s, [v.sku]: e.target.value }))}
+                value={v.stockNote}
+                onChange={(e) => setRow(v, { stockNote: e.target.value })}
                 placeholder="Why did stock change? — required"
                 className="w-full font-body p-2"
                 style={{ fontSize: 11, border: "1px solid rgba(196,163,90,0.5)", background: "#FBF3E2", color: palette.black }}
