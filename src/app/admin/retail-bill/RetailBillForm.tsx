@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { ScanLine, Search, Trash2, X } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
+import { DraftNotice } from "@/components/DraftNotice";
 import { palette } from "@/lib/palette";
 import { formatINR } from "@/lib/format";
+import { useDraft, isDraftOlderThan, DRAFT_NOTICE_AFTER_MS } from "@/lib/useDraft";
 import { createRetailBill, updateRetailBill } from "./actions";
 import type { DiscountType, RetailBill, TaxMode } from "@/lib/types";
 
@@ -29,6 +31,44 @@ export interface CatalogRow {
 // catalog-sync flag, unchecked by default — Ansh, 4 Sep).
 interface Line { sku: string; qty: number; price: string; custom?: boolean; title?: string; syncToCatalog?: boolean }
 
+// The bill in flight, as one object so a half-built bill survives closing the
+// app / a tab reload. clientRef rides along: a retried save after a reload
+// still resolves to the same bill server-side.
+interface BillState {
+  lines: Line[];
+  customerName: string; customerPhone: string;
+  discountType: DiscountType | "none"; discountValue: string;
+  taxMode: TaxMode; taxRate: number; payMethod: string;
+  billDate: string;
+  clientRef: string;
+  custom: { title: string; price: string; sku: string; sync: boolean };
+  customOpen: boolean;
+}
+
+function seedBill(editBill: RetailBill | null | undefined): BillState {
+  return {
+    lines: editBill
+      ? (editBill.items ?? []).map((it) => ({
+          sku: it.sku, qty: it.qty, price: String(it.unit_price),
+          ...(it.custom ? { custom: true, title: it.title } : {}),
+        }))
+      : [],
+    customerName: editBill?.customer_name ?? "",
+    customerPhone: editBill?.customer_phone ?? "",
+    discountType: editBill?.discount_type ?? "none",
+    discountValue: editBill?.discount_value ? String(editBill.discount_value) : "",
+    taxMode: editBill?.tax_mode ?? "none",
+    taxRate: editBill?.tax_rate ? Number(editBill.tax_rate) : 5,
+    payMethod: editBill?.payment_method ?? "Cash",
+    billDate: "",
+    // One idempotency key per bill attempt — a double-tap or retried request
+    // resolves to the same bill server-side. Re-minted after each save.
+    clientRef: crypto.randomUUID(),
+    custom: { title: "", price: "", sku: "", sync: false },
+    customOpen: false,
+  };
+}
+
 const chip = (active: boolean) => ({
   fontSize: 9.5, letterSpacing: "0.12em", padding: "6px 11px",
   background: active ? palette.black : "transparent",
@@ -42,30 +82,33 @@ export function RetailBillForm({ catalog, editBill }: { catalog: CatalogRow[]; e
   const [toast, setToast] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [query, setQuery] = useState("");
-  const [lines, setLines] = useState<Line[]>(() =>
-    editBill
-      ? (editBill.items ?? []).map((it) => ({
-          sku: it.sku, qty: it.qty, price: String(it.unit_price),
-          ...(it.custom ? { custom: true, title: it.title } : {}),
-        }))
-      : [],
-  );
-  const [customerName, setCustomerName] = useState(editBill?.customer_name ?? "");
-  const [customerPhone, setCustomerPhone] = useState(editBill?.customer_phone ?? "");
-  const [discountType, setDiscountType] = useState<DiscountType | "none">(editBill?.discount_type ?? "none");
-  const [discountValue, setDiscountValue] = useState(editBill?.discount_value ? String(editBill.discount_value) : "");
-  const [taxMode, setTaxMode] = useState<TaxMode>(editBill?.tax_mode ?? "none");
-  const [taxRate, setTaxRate] = useState(editBill?.tax_rate ? Number(editBill.tax_rate) : 5);
-  const [payMethod, setPayMethod] = useState(editBill?.payment_method ?? "Cash");
-  // Custom-item mini form
-  const [customOpen, setCustomOpen] = useState(false);
-  const [custom, setCustom] = useState({ title: "", price: "", sku: "", sync: false });
   const todayIst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-  const [billDate, setBillDate] = useState("");
   const [savedInfo, setSavedInfo] = useState<{ billNumber: string; pdfUrl?: string; warning?: string } | null>(null);
-  // One idempotency key per bill attempt — a double-tap or retried request
-  // resolves to the same bill server-side. Re-minted after each save.
-  const [clientRef, setClientRef] = useState<string>(() => crypto.randomUUID());
+  // Draft autosave. Edit mode is seeded from the bill row; retail_bills has no
+  // updated_at, so the seeded fields themselves are the staleness baseline.
+  const [bill, setBill, draftMeta] = useDraft<BillState>(`drevi:draft:retail-bill:${editBill?.id ?? "new"}`, () => seedBill(editBill), {
+    hasContent: (d) => d.lines.length > 0 || !!d.customerName || !!d.customerPhone,
+    base: editBill
+      ? JSON.stringify([editBill.items, editBill.discount_type, editBill.discount_value, editBill.tax_mode, editBill.tax_rate, editBill.payment_method, editBill.customer_name, editBill.customer_phone])
+      : null,
+    onRestore: (d) => ({ ...seedBill(editBill), ...d }),
+  });
+  const { lines, customerName, customerPhone, discountType, discountValue, taxMode, taxRate, payMethod, billDate, clientRef, custom, customOpen } = bill;
+  // Per-field setters so the call sites below read as before.
+  const setField = <K extends keyof BillState>(k: K) => (v: SetStateAction<BillState[K]>) =>
+    setBill((b) => ({ ...b, [k]: typeof v === "function" ? (v as (prev: BillState[K]) => BillState[K])(b[k]) : v }));
+  const setLines = setField("lines");
+  const setCustomerName = setField("customerName");
+  const setCustomerPhone = setField("customerPhone");
+  const setDiscountType = setField("discountType");
+  const setDiscountValue = setField("discountValue");
+  const setTaxMode = setField("taxMode");
+  const setTaxRate = setField("taxRate");
+  const setPayMethod = setField("payMethod");
+  const setBillDate = setField("billDate");
+  // Custom-item mini form
+  const setCustomOpen = setField("customOpen");
+  const setCustom = setField("custom");
   const lowArmedRef = useRef(false);
 
   const bySku = useMemo(() => new Map(catalog.map((c) => [c.sku.toUpperCase(), c])), [catalog]);
@@ -152,6 +195,7 @@ export function RetailBillForm({ catalog, editBill }: { catalog: CatalogRow[]; e
         const r = await updateRetailBill(editBill.id, payload);
         if (!r.ok) { flash(r.error ?? "Failed"); return; }
         setSavedInfo({ billNumber: `${editBill.bill_number} updated`, warning: r.warning });
+        draftMeta.clear();
         router.push("/admin/retail-bill");
         router.refresh();
         return;
@@ -159,9 +203,12 @@ export function RetailBillForm({ catalog, editBill }: { catalog: CatalogRow[]; e
       const r = await createRetailBill({ ...payload, billDate: billDate || undefined, clientRef });
       if (!r.ok) { flash(r.error ?? "Failed"); return; }
       setSavedInfo({ billNumber: r.billNumber!, pdfUrl: r.pdfUrl, warning: r.warning });
-      setLines([]); setCustomerName(""); setCustomerPhone(""); setDiscountType("none"); setDiscountValue("");
-      setTaxMode("none"); setBillDate("");
-      setClientRef(crypto.randomUUID());
+      draftMeta.clear();
+      // GST rate and payment method carry over to the next bill, as before.
+      setBill((b) => ({
+        ...b, lines: [], customerName: "", customerPhone: "", discountType: "none", discountValue: "",
+        taxMode: "none", billDate: "", clientRef: crypto.randomUUID(),
+      }));
       router.refresh();
     });
   }
@@ -173,7 +220,7 @@ export function RetailBillForm({ catalog, editBill }: { catalog: CatalogRow[]; e
           <span className="font-body" style={{ fontSize: 12.5, color: palette.goldDeep, fontWeight: 600 }}>
             Editing {editBill.bill_number} — stock adjusts to the changes; the PDF regenerates.
           </span>
-          <button type="button" onClick={() => router.push("/admin/retail-bill")} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.mutedGreige, textDecoration: "underline" }}>
+          <button type="button" onClick={() => { draftMeta.clear(); router.push("/admin/retail-bill"); }} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.mutedGreige, textDecoration: "underline" }}>
             Cancel edit
           </button>
         </div>
@@ -190,6 +237,11 @@ export function RetailBillForm({ catalog, editBill }: { catalog: CatalogRow[]; e
             <button type="button" onClick={() => setSavedInfo(null)} aria-label="Dismiss"><X size={14} color={palette.mutedGreige} /></button>
           </span>
         </div>
+      )}
+
+      {/* Seeded (edit) drafts always announce themselves; a fresh bill only when the draft is old enough to surprise. */}
+      {(editBill ? draftMeta.restored : isDraftOlderThan(draftMeta, DRAFT_NOTICE_AFTER_MS)) && (
+        <div className="mb-4"><DraftNotice meta={draftMeta} /></div>
       )}
 
       {/* Add items */}

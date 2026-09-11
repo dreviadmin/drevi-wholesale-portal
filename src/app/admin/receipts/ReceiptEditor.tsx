@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
 import { Search, X, ScanLine, Minus, Plus, ImageOff } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { ZoomImage } from "@/components/Lightbox";
+import { DraftNotice } from "@/components/DraftNotice";
+import { useDraft, isDraftOlderThan, DRAFT_NOTICE_AFTER_MS } from "@/lib/useDraft";
 import { uuid } from "@/lib/uuid";
 import { createReceipt, updateReceipt, uploadReceiptBill, type ReceiptInput } from "./actions";
 import { quickAddVendor } from "@/app/admin/vendors/actions";
@@ -15,6 +17,7 @@ export interface VendorOption { id: string; name: string; city: string | null }
 export interface EditorLine { key: string; sku: string; description: string; qty: number; unitCost: string }
 export interface ReceiptEditorInitial {
   id?: string; // set = edit mode
+  updatedAt?: string | null; // server row's updated_at — staleness baseline for the edit draft
   vendorId?: string;
   receiptDate?: string;
   billAmount?: string;
@@ -26,79 +29,87 @@ export interface ReceiptEditorInitial {
   gstInclusive?: boolean | null;
 }
 
-const DRAFT_KEY = "drevi_receipt_draft_v1";
+type Gst = { mode: "kaccha" | "pakka" | null; rate: number | null; inclusive: boolean | null };
+interface ReceiptDraft { vendorId: string; receiptDate: string; gst: Gst; billAmount: string; notes: string; lines: EditorLine[] }
+
+// The create-form key predates the shared hook and may still hold a bare
+// (envelope-less, gst-less) draft on a shop device — kept so it restores.
+const NEW_DRAFT_KEY = "drevi_receipt_draft_v1";
 const istToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 // "1,500" or "₹1500" must not silently become 0.
 const num = (v: string) => Number(String(v ?? "").replace(/[^\d.]/g, "")) || 0;
+const hasContent = (d: ReceiptDraft) => !!d.vendorId || d.lines.length > 0;
+const seedFrom = (initial?: ReceiptEditorInitial): ReceiptDraft => ({
+  vendorId: initial?.vendorId ?? "",
+  receiptDate: initial?.receiptDate ?? istToday(),
+  gst: { mode: initial?.gstMode ?? null, rate: initial?.gstRate ?? 5, inclusive: initial?.gstInclusive ?? true },
+  billAmount: initial?.billAmount ?? "",
+  notes: initial?.notes ?? "",
+  lines: initial?.lines ?? [],
+});
+// Adds sku as a line unless already present; returns the SAME array when
+// nothing changes (the draft setter relies on that identity).
+const withSku = (lines: EditorLine[], sku: string | undefined): EditorLine[] => {
+  const key = (sku ?? "").trim().toUpperCase();
+  if (!key || lines.some((l) => l.sku === key)) return lines;
+  return [...lines, { key: uuid(), sku: key, description: "", qty: 1, unitCost: "" }];
+};
 
-export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku }: {
+export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku, onCancel }: {
   vendors: VendorOption[];
   registrySkus: string[];
   initial?: ReceiptEditorInitial;
   prefillSku?: string;
+  onCancel?: () => void; // edit mode: renders Cancel Edit, which also drops the draft
 }) {
   const router = useRouter();
   const editMode = !!initial?.id;
   const known = useMemo(() => new Set(registrySkus.map((s) => s.toUpperCase())), [registrySkus]);
 
-  const [vendorId, setVendorId] = useState(initial?.vendorId ?? "");
+  // Draft autosave. New receipts keep their pre-hook key; an edit is keyed by
+  // receipt and baselined on updated_at so a draft older than the row shows
+  // as stale. A ?sku= deep link ADDS its line to any saved draft rather than
+  // clobbering it (the operator may have a half-built receipt going when a
+  // duplicate-variant pops up).
+  const [draft, setDraft, draftMeta] = useDraft<ReceiptDraft>(
+    editMode ? `drevi:draft:receipt:${initial!.id}` : NEW_DRAFT_KEY,
+    () => seedFrom(initial),
+    {
+      hasContent,
+      base: initial?.updatedAt ?? null,
+      onRestore: (d) => {
+        // Pre-hook drafts lack gst and were written even when blank.
+        const merged = { ...seedFrom(initial), ...d };
+        const s = hasContent(merged) ? merged : seedFrom(initial);
+        return { ...s, lines: withSku(s.lines, prefillSku) };
+      },
+    },
+  );
+  const { vendorId, receiptDate, gst, billAmount, notes, lines } = draft;
+  const setVendorId = (v: string) => setDraft((d) => ({ ...d, vendorId: v }));
+  const setReceiptDate = (v: string) => setDraft((d) => ({ ...d, receiptDate: v }));
+  const setGst = (u: SetStateAction<Gst>) => setDraft((d) => ({ ...d, gst: typeof u === "function" ? u(d.gst) : u }));
+  const setBillAmount = (v: string) => setDraft((d) => ({ ...d, billAmount: v }));
+  const setNotes = (v: string) => setDraft((d) => ({ ...d, notes: v }));
+  // Identity-preserving: the ?sku= effect below re-applies a line the restore
+  // already merged, and the hook's restore gate compares state by reference.
+  const setLines = useCallback((u: SetStateAction<EditorLine[]>) => setDraft((d) => {
+    const next = typeof u === "function" ? u(d.lines) : u;
+    return next === d.lines ? d : { ...d, lines: next };
+  }), [setDraft]);
   const [vendorQuery, setVendorQuery] = useState("");
   const [showVendorAdd, setShowVendorAdd] = useState(false);
   const [newVendor, setNewVendor] = useState({ name: "", phone: "" });
   const [vendorList, setVendorList] = useState(vendors);
-  const [receiptDate, setReceiptDate] = useState(initial?.receiptDate ?? istToday());
-  const [gst, setGst] = useState<{ mode: "kaccha" | "pakka" | null; rate: number | null; inclusive: boolean | null }>({
-    mode: initial?.gstMode ?? null, rate: initial?.gstRate ?? 5, inclusive: initial?.gstInclusive ?? true,
-  });
-  const [billAmount, setBillAmount] = useState(initial?.billAmount ?? "");
-  const [notes, setNotes] = useState(initial?.notes ?? "");
-  const [billFile, setBillFile] = useState<File | null>(null);
+  const [billFile, setBillFile] = useState<File | null>(null); // never drafted
   const [billPreview, setBillPreview] = useState<string | null>(initial?.billPhotoUrl ?? null);
-  const [lines, setLines] = useState<EditorLine[]>(initial?.lines ?? []);
   const [skuQuery, setSkuQuery] = useState("");
   const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const clientRefRef = useRef<string | null>(null);
-  const restoredRef = useRef(false);
   const linesRef = useRef(lines);
   linesRef.current = lines;
-
-  // Draft restore (new mode only) — a ?sku= deep link ADDS its line to any
-  // saved draft rather than clobbering it (the operator may have a half-built
-  // receipt going when a duplicate-variant pops up).
-  useEffect(() => {
-    if (editMode || restoredRef.current) return;
-    restoredRef.current = true;
-    let restored: EditorLine[] = [];
-    try {
-      const raw = localStorage.getItem(DRAFT_KEY);
-      if (raw) {
-        const d = JSON.parse(raw);
-        if (d.lines?.length || d.vendorId) {
-          setVendorId(d.vendorId ?? "");
-          setReceiptDate(d.receiptDate ?? istToday());
-          setBillAmount(d.billAmount ?? "");
-          setNotes(d.notes ?? "");
-          restored = d.lines ?? [];
-        }
-      }
-    } catch { /* corrupted draft */ }
-    if (prefillSku) {
-      const key = prefillSku.toUpperCase();
-      if (!restored.some((l) => l.sku === key)) {
-        restored = [...restored, { key: uuid(), sku: key, description: "", qty: 1, unitCost: "" }];
-      }
-    }
-    if (restored.length > 0) setLines(restored);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editMode, prefillSku]);
-  useEffect(() => {
-    if (editMode) return;
-    try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ vendorId, receiptDate, billAmount, notes, lines }));
-    } catch { /* full */ }
-  }, [editMode, vendorId, receiptDate, billAmount, notes, lines]);
 
   // Deep-link from the global scan sheet: /admin/receipts/new?sku=… starts
   // the receipt with that garment already on line one.
@@ -177,6 +188,7 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku }: {
       if (editMode) {
         const res = await updateReceipt(initial!.id!, input);
         if (!res.ok) { setError(res.error ?? "Failed"); return; }
+        draftMeta.clear();
         if (billFile) {
           const fd = new FormData();
           fd.append("bill", billFile);
@@ -195,7 +207,7 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku }: {
           const up = await uploadReceiptBill(res.id, fd);
           if (!up.ok) window.alert(`Receipt saved, but the bill photo failed to upload: ${up.error ?? "unknown error"}. Add it again from the receipt page.`);
         }
-        try { localStorage.removeItem(DRAFT_KEY); } catch { /* non-fatal */ }
+        draftMeta.clear();
         router.push(`/admin/receipts/${res.id}`);
         router.refresh();
       }
@@ -210,6 +222,10 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku }: {
 
   return (
     <div className="mt-4">
+      {(editMode ? draftMeta.restored : isDraftOlderThan(draftMeta, DRAFT_NOTICE_AFTER_MS)) && (
+        <div className="mb-3"><DraftNotice meta={draftMeta} /></div>
+      )}
+
       {/* 1. Vendor */}
       <div className="p-3" style={{ background: palette.ivoryDeep }}>
         {label("Vendor")}
@@ -392,6 +408,11 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku }: {
       <button type="button" onClick={save} disabled={busy} className="mt-4 w-full font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 11, letterSpacing: "0.2em", padding: "14px 0" }}>
         {busy ? "Saving…" : editMode ? "Save Changes" : "Save Receipt"}
       </button>
+      {onCancel && (
+        <button type="button" onClick={() => { draftMeta.clear(); onCancel(); }} className="mt-2 w-full font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 10, letterSpacing: "0.16em", padding: "11px 0" }}>
+          Cancel Edit
+        </button>
+      )}
 
       {scanning && <QrScanner title="Scan pieces into the receipt" onScan={handleScan} onClose={() => setScanning(false)} holdFeedback />}
     </div>

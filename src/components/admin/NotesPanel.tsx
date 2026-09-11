@@ -6,6 +6,7 @@ import { Camera, Image as ImageIcon, StickyNote, Trash2, X } from "lucide-react"
 import { addEntityNote, deleteEntityNote } from "@/app/admin/notes-actions";
 import { ZoomImage } from "@/components/Lightbox";
 import { palette } from "@/lib/palette";
+import { useDraft } from "@/lib/useDraft";
 import type { EntityNote, NoteEntityType } from "@/lib/entity-notes";
 
 // Notes panel (Ansh, 30 Jul) — every entity page mounts this: a running log of
@@ -28,7 +29,12 @@ export function NotesPanel({
   revalidate: string;
 }) {
   const router = useRouter();
-  const [text, setText] = useState("");
+  // Draft autosave — a half-typed note survives navigating away or a reload.
+  // Restored silently (a small "draft" hint by the label); cleared once the
+  // note is saved. Photos are File objects and can't be drafted.
+  const [text, setText, draft] = useDraft(`drevi:draft:note:${entityType}:${entityId}`, "", {
+    hasContent: (t) => t.trim() !== "",
+  });
   const [photos, setPhotos] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -43,6 +49,7 @@ export function NotesPanel({
       for (const p of photos) fd.append("photos", p);
       const res = await addEntityNote(entityType, entityId, revalidate, fd);
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
+      draft.clear();
       setText("");
       setPhotos([]);
       router.refresh();
@@ -65,6 +72,9 @@ export function NotesPanel({
         <span className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>
           Notes{notes.length > 0 ? ` · ${notes.length}` : ""}
         </span>
+        {draft.restored && (
+          <span className="font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.14em", color: palette.goldDeep }}>draft</span>
+        )}
       </div>
 
       {/* Composer */}

@@ -17,7 +17,7 @@ interface ReceiptHeader {
   id: string; number: string; vendorId: string; vendorName: string; vendorCity: string | null;
   date: string; billAmount: number | null; notes: string; billUrl: string | null;
   gstMode: "kaccha" | "pakka" | null; gstRate: number | null; gstInclusive: boolean | null;
-  createdBy: string; createdAt: string;
+  createdBy: string; createdAt: string; updatedAt: string | null;
 }
 interface Line { id: string; sku: string; description: string; qty: number; unitCost: number }
 /** A design group on this receipt and what still keeps it off the wholesale floor. */
@@ -72,6 +72,7 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus, designs }
           registrySkus={registrySkus}
           initial={{
             id: receipt.id,
+            updatedAt: receipt.updatedAt,
             vendorId: receipt.vendorId,
             receiptDate: receipt.date,
             billAmount: receipt.billAmount != null ? String(receipt.billAmount) : "",
@@ -82,10 +83,8 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus, designs }
             gstInclusive: receipt.gstInclusive,
             lines: initialLines,
           }}
+          onCancel={() => setEditing(false)}
         />
-        <button type="button" onClick={() => setEditing(false)} className="mt-2 w-full font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 10, letterSpacing: "0.16em", padding: "11px 0" }}>
-          Cancel Edit
-        </button>
       </>
     );
   }

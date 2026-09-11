@@ -343,7 +343,9 @@ export async function updateBuyerProfile(
       address: form.address?.trim() || null,
       transport_details: form.transport_details?.trim() || null,
       broker_details: form.broker_details?.trim() || null,
-      other_details: form.other_details?.trim() || null,
+      // The order-page editor has no other_details field; only a form that
+      // carries the key may overwrite it.
+      ...("other_details" in form ? { other_details: form.other_details?.trim() || null } : {}),
     })
     .eq("id", buyerId);
   if (error) return { ok: false, error: error.message };

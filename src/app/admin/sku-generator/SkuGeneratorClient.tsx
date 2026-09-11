@@ -9,6 +9,8 @@ import { qrPngDataUrl, shareQr, downloadDataUrl, buildRollPdf, printPdf, loadCal
 import { PrintTab } from "./PrintTab";
 import { ColorCombobox } from "@/components/admin/ColorCombobox";
 import { palette } from "@/lib/palette";
+import { DraftNotice } from "@/components/DraftNotice";
+import { useDraft, isDraftOlderThan, DRAFT_NOTICE_AFTER_MS } from "@/lib/useDraft";
 
 interface HistoryRow {
   variant_sku: string; base_sku: string; category: string; sub_category: string;
@@ -18,6 +20,12 @@ export interface BaseEntry {
   base: string; cat: string; sub: string; catName: string; subName: string;
   desc: string; variantCount: number; variants: { sku: string; size: string; color: string }[]; latestTs: string;
 }
+
+// The generate-form picks that survive a reload; selectedBase is kept as its
+// base string and resolved against the registry once that has loaded.
+interface Picks { mode: "new" | "variant"; cat: string; sub: string; base: string; color: string; size: string; description: string }
+const EMPTY_PICKS: Picks = { mode: "new", cat: "", sub: "", base: "", color: "", size: "", description: "" };
+const EMPTY_PICKS_SIG = JSON.stringify(EMPTY_PICKS);
 
 const shortname = (email: string) => email.split("@")[0];
 const istTime = (iso: string) =>
@@ -36,15 +44,32 @@ export function SkuGeneratorClient({ isAdmin, vocab, initialTab }: { isAdmin: bo
   const flash = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(null), 2200); }, []);
 
   // ---- generate form ----
-  const [mode, setMode] = useState<"new" | "variant">("new");
-  const [cat, setCat] = useState<string | "">("");
-  const [sub, setSub] = useState("");
+  const [picks, setPicks, picksMeta] = useDraft<Picks>("drevi:draft:sku-gen", EMPTY_PICKS, {
+    hasContent: (p) => JSON.stringify(p) !== EMPTY_PICKS_SIG,
+    onRestore: (d) => ({ ...EMPTY_PICKS, ...d }),
+  });
+  const { mode, cat, sub, color, size, description } = picks;
+  const setMode = (v: Picks["mode"]) => setPicks((p) => ({ ...p, mode: v }));
+  const setCat = (v: string) => setPicks((p) => ({ ...p, cat: v }));
+  const setSub = (v: string) => setPicks((p) => ({ ...p, sub: v }));
+  const setColor = (v: string) => setPicks((p) => ({ ...p, color: v }));
+  const setSize = (v: string) => setPicks((p) => ({ ...p, size: v }));
+  const setDescription = (v: string) => setPicks((p) => ({ ...p, description: v }));
   const [peekNum, setPeekNum] = useState<number | null>(null);
   const [baseQuery, setBaseQuery] = useState("");
-  const [selectedBase, setSelectedBase] = useState<BaseEntry | null>(null);
-  const [color, setColor] = useState("");
-  const [size, setSize] = useState("");
-  const [description, setDescription] = useState("");
+  const [selectedBase, setSelectedBaseState] = useState<BaseEntry | null>(null);
+  const setSelectedBase = (b: BaseEntry | null) => { setSelectedBaseState(b); setPicks((p) => (p.base === (b?.base ?? "") ? p : { ...p, base: b?.base ?? "" })); };
+  // selectedBase follows picks.base — a restored draft or Discard changes the
+  // string, and the entry is looked up once the registry has loaded.
+  useEffect(() => {
+    if ((selectedBase?.base ?? "") === picks.base) return;
+    setSelectedBaseState(picks.base ? bases?.find((b) => b.base === picks.base) ?? null : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picks.base, bases]);
+  // ?variant= is applied one commit after mount so it lands ON TOP of a
+  // restored draft (the hook's restore has to settle before anything else
+  // touches the picks).
+  const [deepLink, setDeepLink] = useState<Partial<Picks> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ message: string; duplicate: boolean; dupSku?: string } | null>(null);
   const [result, setResult] = useState<{ baseSku: string; variantSku: string } | null>(null);
@@ -79,17 +104,10 @@ export function SkuGeneratorClient({ isAdmin, vocab, initialTab }: { isAdmin: bo
       const parts = scanned.split("-");
       if (parts[0] === "DD" && parts.length >= 4) {
         const base = parts.slice(0, 4).join("-");
-        if (/^\d{3}$/.test(parts[3])) {
-          setMode("variant");
-          pendingVariantRef.current = base;
-          loadBases();
-        } else {
-          setMode("new");
-          setCat(parts[1] as string);
-          setSub(parts[2]);
-        }
-        if (parts[4]) setSize(parts[4]);
-        if (parts[5]) setColor(parts.slice(5).join("-"));
+        const dl: Partial<Picks> = /^\d{3}$/.test(parts[3]) ? { mode: "variant", base } : { mode: "new", cat: parts[1] as string, sub: parts[2], base: "" };
+        if (parts[4]) dl.size = parts[4];
+        if (parts[5]) dl.color = parts.slice(5).join("-");
+        setDeepLink(dl);
       }
       p.delete("variant");
       window.history.replaceState(null, "", window.location.pathname + (p.toString() ? `?${p}` : ""));
@@ -97,6 +115,14 @@ export function SkuGeneratorClient({ isAdmin, vocab, initialTab }: { isAdmin: bo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const pendingVariantRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!deepLink) return;
+    const dl = deepLink;
+    setDeepLink(null);
+    setPicks((p) => ({ ...p, ...dl }));
+    if (dl.base) { pendingVariantRef.current = dl.base; loadBases(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLink]);
   useEffect(() => {
     if (!bases || !pendingVariantRef.current) return;
     const match = bases.find((b) => b.base === pendingVariantRef.current);
@@ -202,6 +228,7 @@ export function SkuGeneratorClient({ isAdmin, vocab, initialTab }: { isAdmin: bo
       }
       setResult({ baseSku: d.baseSku, variantSku: d.variantSku });
       setMintWarnings(Array.isArray(d.warnings) ? d.warnings : []);
+      picksMeta.clear(); // minted — the picks stop being a draft; the next edit starts a new one
       // refresh state + bases
       fetch("/api/sku/state").then((r) => r.json()).then((s) => {
         if (s.counters) { setCounters(s.counters); setHistory(s.history); setTotalSkus(s.totalSkus); }
@@ -256,6 +283,7 @@ export function SkuGeneratorClient({ isAdmin, vocab, initialTab }: { isAdmin: bo
         <PrintTab tray={tray} setTray={setTray} bases={bases} flash={flash} />
       ) : (
         <>
+          {isDraftOlderThan(picksMeta, DRAFT_NOTICE_AFTER_MS) && <div className="mt-3"><DraftNotice meta={picksMeta} /></div>}
           {/* Mode toggle */}
           <div className="flex gap-1.5 mt-5">
             <button type="button" onClick={() => { setMode("new"); setError(null); setResult(null); }} className="font-body uppercase" style={chip(mode === "new")}>New Design</button>

@@ -83,6 +83,7 @@ export default async function ReceiptDetailPage({ params }: { params: { id: stri
           billUrl,
           createdBy: rec.created_by,
           createdAt: rec.created_at,
+          updatedAt: rec.updated_at ?? null,
         }}
         lines={(lines ?? []).map((l) => ({
           id: l.id, sku: l.sku, description: l.description ?? "", qty: l.qty, unitCost: Number(l.unit_cost),

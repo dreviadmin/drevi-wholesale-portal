@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type Dispatch, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Search, X, ScanLine, Plus, Minus, Camera, Image as ImageIcon, Trash2, ChevronDown, Check, Package, AlertTriangle } from "lucide-react";
@@ -8,6 +8,8 @@ import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { KeyboardInset } from "@/components/KeyboardInset";
 import { HsnInput } from "@/components/admin/HsnInput";
 import { ColorCombobox } from "@/components/admin/ColorCombobox";
+import { DraftNotice } from "@/components/DraftNotice";
+import { useDraft, isDraftOlderThan, DRAFT_NOTICE_AFTER_MS, type DraftMeta } from "@/lib/useDraft";
 import { DEFAULT_HSN } from "@/lib/hsn-default";
 import { palette } from "@/lib/palette";
 import { uuid } from "@/lib/uuid";
@@ -22,6 +24,7 @@ import { resolveGarmentDesign, uploadIdentPhoto, saveDelivery, quickAddVendor, t
 // but there is no offline queue and no locally invented SKU.
 
 const DRAFT_KEY = "drevi:delivery:draft";
+const SHEET_DRAFT_KEY = "drevi:delivery:sheet";
 
 interface Vendor { id: string; name: string; city: string | null }
 interface KnownDesign { id: string; baseSku: string; color: string; title: string | null; identRef: string | null; supply: SupplyBlock; supplyUpdatedAt: string | null; vendorSku: string | null; lastCost: number | null }
@@ -52,6 +55,16 @@ const emptyGarment = (): Garment => ({
   key: uuid(), description: "", vendorSku: "", unitCost: "", hsn: DEFAULT_HSN, sizes: [], supply: {}, variantSkus: [], isReorder: false,
 });
 
+type Gst = { mode: "kaccha" | "pakka" | null; rate: number | null; inclusive: boolean | null };
+interface DeliveryDraft { vendorId: string; receiptDate: string; billAmount: string; gst: Gst; notes: string; garments: Garment[]; clientRef: string }
+
+const istToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+// clientRef lives in the draft: saveDelivery is idempotent on it, so a retry
+// after a refresh resolves to the same receipt. Minted fresh per empty form.
+const emptyDraft = (): DeliveryDraft => ({
+  vendorId: "", receiptDate: istToday(), billAmount: "", gst: { mode: null, rate: 5, inclusive: true }, notes: "", garments: [], clientRef: uuid(),
+});
+
 export function DeliveryIntake({
   vendors: initialVendors,
   knownDesigns,
@@ -72,51 +85,38 @@ export function DeliveryIntake({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [vendors, setVendors] = useState(initialVendors);
-  const [vendorId, setVendorId] = useState("");
+  // §5.8 — draft autosave protects refresh / back-swipe / restart. Pre-hook
+  // drafts on shop devices are this same shape, so they restore as-is.
+  const [draft, setDraft, draftMeta] = useDraft<DeliveryDraft>(DRAFT_KEY, emptyDraft, {
+    hasContent: (d) => !!d.vendorId || d.garments.length > 0,
+    onRestore: (d) => ({ ...emptyDraft(), ...d }),
+  });
+  const { vendorId, receiptDate, billAmount, gst, notes, garments } = draft;
+  const setVendorId = (v: string) => setDraft((d) => ({ ...d, vendorId: v }));
+  const setReceiptDate = (v: string) => setDraft((d) => ({ ...d, receiptDate: v }));
+  const setBillAmount = (v: string) => setDraft((d) => ({ ...d, billAmount: v }));
+  const setNotes = (v: string) => setDraft((d) => ({ ...d, notes: v }));
+  const setGst = (u: SetStateAction<Gst>) => setDraft((d) => ({ ...d, gst: typeof u === "function" ? u(d.gst) : u }));
+  const setGarments = (u: SetStateAction<Garment[]>) => setDraft((d) => ({ ...d, garments: typeof u === "function" ? u(d.garments) : u }));
   const [vendorQuery, setVendorQuery] = useState("");
   const [newVendor, setNewVendor] = useState<{ name: string; phone: string } | null>(null);
-  const [receiptDate, setReceiptDate] = useState(() => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }));
-  const [billAmount, setBillAmount] = useState("");
-  const [gst, setGst] = useState<{ mode: "kaccha" | "pakka" | null; rate: number | null; inclusive: boolean | null }>({ mode: null, rate: 5, inclusive: true });
-  const [notes, setNotes] = useState("");
   const [headerOpen, setHeaderOpen] = useState(true);
-  const [garments, setGarments] = useState<Garment[]>([]);
-  const [sheet, setSheet] = useState<Garment | null>(null);
+  // The open capture sheet is its own draft so a half-captured garment survives
+  // a refresh: a restored sheet reopens itself; Cancel / Add to delivery clear it.
+  const [sheet, setSheet, sheetMeta] = useDraft<Garment | null>(SHEET_DRAFT_KEY, null, { hasContent: (g) => !!g });
   const [toast, setToast] = useState<string | null>(null);
   // Save-only success step (§6.1): the form is replaced by a panel that points
   // at the master editor / specs for each design on the receipt.
   const [saved, setSaved] = useState<{ receiptId: string; receiptNumber: string; skus: string[]; designs: SavedDesign[]; pieces: number; value: number } | null>(null);
-  const clientRef = useRef(uuid());
   const entryDate = useMemo(() => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }), []);
 
   function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2600); }
 
-  // §5.8 — draft autosave protects refresh / back-swipe / restart.
+  // Restored garments mean the vendor block is already filled — collapse it.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(DRAFT_KEY);
-      if (raw) {
-        const d = JSON.parse(raw);
-        if (d.vendorId) setVendorId(d.vendorId);
-        if (d.receiptDate) setReceiptDate(d.receiptDate);
-        if (d.billAmount) setBillAmount(d.billAmount);
-        if (d.gst) setGst(d.gst);
-        if (d.notes) setNotes(d.notes);
-        if (Array.isArray(d.garments) && d.garments.length) { setGarments(d.garments); setHeaderOpen(false); }
-        if (d.clientRef) clientRef.current = d.clientRef;
-      }
-    } catch { /* corrupt draft — start clean */ }
-  }, []);
-  useEffect(() => {
-    // The success panel keeps garments mounted (for the ident thumbs); without
-    // this guard the still-populated state would re-create a phantom draft.
-    if (saved) return;
-    try {
-      const hasContent = vendorId || garments.length > 0;
-      if (hasContent) localStorage.setItem(DRAFT_KEY, JSON.stringify({ vendorId, receiptDate, billAmount, notes, gst, garments, clientRef: clientRef.current }));
-      else localStorage.removeItem(DRAFT_KEY);
-    } catch { /* storage full — non-fatal */ }
-  }, [vendorId, receiptDate, billAmount, notes, gst, garments, saved]);
+    if (draftMeta.restored && draft.garments.length > 0) setHeaderOpen(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftMeta.restored]);
 
   const vendor = vendors.find((v) => v.id === vendorId);
   const totals = useMemo(() => {
@@ -150,7 +150,7 @@ export function DeliveryIntake({
         billAmount: billNum || null,
         gst: { mode: gst.mode, rate: gst.rate, inclusive: gst.inclusive },
         notes,
-        clientRef: clientRef.current,
+        clientRef: draft.clientRef,
         garments: garments.map((g) => ({
           designId: g.designId,
           baseSku: g.baseSku,
@@ -167,7 +167,10 @@ export function DeliveryIntake({
       // §5.6 — Save & print tags stages EXACTLY this delivery's SKUs; Save only
       // queues them behind whatever the device already has in the tray.
       queueTray(res.skus ?? [], thenPrint ? "replace" : "merge");
-      try { localStorage.removeItem(DRAFT_KEY); } catch { /* non-fatal */ }
+      // The success panel keeps garments in state for the ident thumbs; the
+      // draft state does not change there, so nothing is re-written until
+      // resetForNext() replaces it.
+      draftMeta.clear();
       flash(`${res.receiptNumber} saved`);
       if (thenPrint) {
         router.push(`/admin/sku-generator?tab=print&receipt=${encodeURIComponent(res.receiptNumber ?? "")}`);
@@ -185,18 +188,12 @@ export function DeliveryIntake({
 
   function resetForNext() {
     setSaved(null);
-    setGarments([]);
-    setVendorId("");
+    // emptyDraft() mints a fresh clientRef — saveDelivery is idempotent on it,
+    // so reusing it would silently return the receipt just saved.
+    setDraft(emptyDraft());
     setVendorQuery("");
     setNewVendor(null);
-    setBillAmount("");
-    setNotes("");
-    setGst({ mode: null, rate: 5, inclusive: true });
-    setReceiptDate(new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }));
     setHeaderOpen(true);
-    // saveDelivery is idempotent on clientRef — reusing it would silently
-    // return the receipt just saved instead of writing a new one.
-    clientRef.current = uuid();
   }
 
   const label = (t: string) => (
@@ -279,8 +276,14 @@ export function DeliveryIntake({
     );
   }
 
+  // Discarding the restored delivery must also reopen the vendor block the
+  // restore collapsed, or the empty form would sit behind a "—" chip.
+  const headerDraftMeta: DraftMeta = { ...draftMeta, discard: () => { draftMeta.discard(); setHeaderOpen(true); } };
+
   return (
     <div className="pb-40">
+      {isDraftOlderThan(draftMeta, DRAFT_NOTICE_AFTER_MS) && <div className="mb-3"><DraftNotice meta={headerDraftMeta} /></div>}
+
       {/* 1 — Vendor & dates, collapses to a chip once set (§5.2) */}
       {headerOpen ? (
         <div className="p-3.5" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
@@ -431,14 +434,16 @@ export function DeliveryIntake({
       {sheet && (
         <GarmentSheet
           garment={sheet}
+          onChange={(u) => setSheet((s) => (s == null ? s : typeof u === "function" ? u(s) : u))}
+          draftMeta={sheetMeta}
           knownDesigns={knownDesigns}
           uploadsOk={uploadsOk}
           uploadsMessage={uploadsMessage}
           staleDays={staleDays}
           hsnOptions={hsnOptions}
           vocab={vocab}
-          onCancel={() => setSheet(null)}
-          onDone={(g) => { upsertGarment(g); setSheet(null); setHeaderOpen(false); }}
+          onCancel={sheetMeta.discard}
+          onDone={(g) => { upsertGarment(g); sheetMeta.discard(); setHeaderOpen(false); }}
           flash={flash}
         />
       )}
@@ -453,9 +458,11 @@ export function DeliveryIntake({
 // (the ident photo is filed under the minted SKU, so mint comes first)
 // ---------------------------------------------------------------------------
 function GarmentSheet({
-  garment, knownDesigns, uploadsOk, uploadsMessage, staleDays, hsnOptions, vocab, onCancel, onDone, flash,
+  garment, onChange, draftMeta, knownDesigns, uploadsOk, uploadsMessage, staleDays, hsnOptions, vocab, onCancel, onDone, flash,
 }: {
   garment: Garment;
+  onChange: Dispatch<SetStateAction<Garment>>;
+  draftMeta: DraftMeta;
   knownDesigns: KnownDesign[];
   uploadsOk: boolean;
   uploadsMessage: string;
@@ -466,7 +473,8 @@ function GarmentSheet({
   onDone: (g: Garment) => void;
   flash: (m: string) => void;
 }) {
-  const [g, setG] = useState<Garment>(garment);
+  // Controlled by the parent's sheet draft (§5.8) so every edit is persisted.
+  const g = garment, setG = onChange;
   const [pending, startTransition] = useTransition();
   const [scanOpen, setScanOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -562,6 +570,8 @@ function GarmentSheet({
       </div>
 
       <div className="px-4 py-4 max-w-xl mx-auto pb-40">
+        {draftMeta.restored && <div className="mb-3"><DraftNotice meta={draftMeta} label="Garment capture restored" /></div>}
+
         {/* a. Identify */}
         <div className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>Identify</div>
         <div className="flex gap-2 mt-2">

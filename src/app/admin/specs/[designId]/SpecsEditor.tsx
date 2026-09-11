@@ -5,11 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check, ImageOff } from "lucide-react";
 import { BackLink, withFrom } from "@/components/BackLink";
+import { DraftNotice } from "@/components/DraftNotice";
 import { KeyboardInset } from "@/components/KeyboardInset";
 import { ZoomImage } from "@/components/Lightbox";
 import { palette } from "@/lib/palette";
 import { formatINR } from "@/lib/format";
 import { supplyAge } from "@/lib/availability";
+import { useDraft } from "@/lib/useDraft";
 import { saveSpecsAndSupply } from "./actions";
 import type { SupplyBlock } from "@/app/admin/receipts/new/delivery-actions";
 
@@ -30,6 +32,8 @@ interface DesignFields {
   /** sku + wholesale price only — never cost. */
   variants: { sku: string; wholesalePrice: number }[];
   supply: SupplyBlock; supplyUpdatedAt: string | null; supplyUpdatedBy: string | null;
+  /** designs.updated_at — the draft's baseline, so a draft older than the row is flagged. */
+  updatedAt: string | null;
 }
 
 // Ansh (3 Sep): every spec field explains itself — tap ⓘ for what to enter.
@@ -49,11 +53,6 @@ export function SpecsEditor({ design }: { design: DesignFields }) {
   const [pending, startTransition] = useTransition();
   const [toast, setToast] = useState<string | null>(null);
   const [help, setHelp] = useState<string | null>(null);
-  const [fields, setFields] = useState({
-    fabric: design.fabric, handwork: design.handwork, origin: design.origin,
-    colorName: design.colorName, specsVerified: design.specsVerified,
-  });
-  const [supply, setSupply] = useState<SupplyBlock>(design.supply);
 
   const prices = design.variants.map((v) => v.wholesalePrice);
   const noVariants = prices.length === 0;
@@ -61,7 +60,28 @@ export function SpecsEditor({ design }: { design: DesignFields }) {
   // Pre-fill only when every size agrees on a real price — otherwise blank,
   // and blank is a no-op on save so nothing is flattened by accident.
   const initialPrice = uniform && prices[0] > 0 ? String(prices[0]) : "";
-  const [price, setPrice] = useState(initialPrice);
+
+  // Draft autosave — an unsaved edit survives closing the app / navigating
+  // away. Seeded from the server row; a draft written against an older
+  // updated_at is flagged, never silently applied. Cleared on a successful save.
+  const seed = {
+    fields: {
+      fabric: design.fabric, handwork: design.handwork, origin: design.origin,
+      colorName: design.colorName, specsVerified: design.specsVerified,
+    },
+    supply: design.supply,
+    price: initialPrice,
+  };
+  const seedSig = JSON.stringify(seed);
+  const [draft, setDraft, draftMeta] = useDraft(`drevi:draft:specs:${design.id}`, seed, {
+    base: design.updatedAt ?? seedSig,
+    hasContent: (d) => JSON.stringify(d) !== seedSig,
+    onRestore: (d) => ({ ...seed, ...d }),
+  });
+  const { fields, supply, price } = draft;
+  const setFields = (fn: (f: typeof seed.fields) => typeof seed.fields) => setDraft((d) => ({ ...d, fields: fn(d.fields) }));
+  const setSupply = (fn: (s: SupplyBlock) => SupplyBlock) => setDraft((d) => ({ ...d, supply: fn(d.supply) }));
+  const setPrice = (p: string) => setDraft((d) => ({ ...d, price: p }));
   const masterHref = withFrom(`/admin/studio/master/${design.id}`, `/admin/specs/${design.id}`);
   const codes = [design.categoryCode, design.subCategoryCode].filter(Boolean).join("-");
 
@@ -108,6 +128,7 @@ export function SpecsEditor({ design }: { design: DesignFields }) {
     startTransition(async () => {
       const r = await saveSpecsAndSupply(design.id, { ...fields, supply, wholesalePrice });
       flash(r.ok ? "Saved" : r.error ?? "Failed");
+      if (r.ok) draftMeta.clear();
       if (r.ok || r.partial) router.refresh();
     });
   }
@@ -131,6 +152,7 @@ export function SpecsEditor({ design }: { design: DesignFields }) {
           </div>
         </div>
       </div>
+      {draftMeta.restored && <div className="mt-4"><DraftNotice meta={draftMeta} /></div>}
 
       <div className="font-body uppercase mt-6" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>Specs</div>
       <div className="mt-2 p-3.5 flex flex-col gap-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>

@@ -21,7 +21,7 @@ export default async function SpecsPage({ params }: { params: { designId: string
 
   const { data: design } = await admin
     .from("designs")
-    .select("id, base_sku, color, title, category, sub_category, fabric, handwork, origin, color_name, specs_verified, ident_image_id, supply_mode, vendor_stock_qty, making_days, making_moq, delivery_days, supply_note, supply_updated_at, supply_updated_by")
+    .select("id, base_sku, color, title, category, sub_category, fabric, handwork, origin, color_name, specs_verified, ident_image_id, supply_mode, vendor_stock_qty, making_days, making_moq, delivery_days, supply_note, supply_updated_at, supply_updated_by, updated_at")
     .eq("id", params.designId)
     .maybeSingle();
   if (!design) notFound();
@@ -73,6 +73,7 @@ export default async function SpecsPage({ params }: { params: { designId: string
         },
         supplyUpdatedAt: design.supply_updated_at,
         supplyUpdatedBy: design.supply_updated_by,
+        updatedAt: design.updated_at ?? null,
       }}
     />
   );

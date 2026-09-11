@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Copy, MessageCircle, RefreshCw, UserPlus, Pencil, ImageOff } from "lucide-react";
 import { BackLink, withFrom } from "@/components/BackLink";
+import { DraftNotice } from "@/components/DraftNotice";
 import { StatusPill } from "@/components/admin/Pills";
 import { CredentialModal } from "@/components/admin/CredentialModal";
 import { Lightbox, ZoomImage } from "@/components/Lightbox";
@@ -18,9 +19,11 @@ import {
   updateBuyerProfile,
   uploadBuyerCard,
 } from "@/app/admin/buyers/actions";
+import { buyerEditDraftKey, buyerEditSignature, type BuyerEditFields } from "@/app/admin/orders/[id]/EditBuyerButton";
 import { buildWhatsAppMessage, shareWhatsApp, buildVCard, downloadVCard } from "@/lib/share";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { useDraft } from "@/lib/useDraft";
 import { ORDER_STATUS_LABEL } from "@/lib/order-status";
 import type { BuyerStatus, BuyerSource, OrderStatus, AuditEventType } from "@/lib/types";
 
@@ -45,6 +48,7 @@ interface BuyerDTO {
   hasPassword: boolean;
   cardUrl?: string | null;
 }
+type BuyerEditForm = BuyerEditFields & { other_details: string };
 interface OrderDTO { id: string; order_number: string; total_amount: number; status: OrderStatus; submitted_at: string; }
 interface ActivityDTO { event_type: AuditEventType; event_at: string; notes: string | null; staffName: string | null; }
 
@@ -67,29 +71,45 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
   const [toast, setToast] = useState<string | null>(null);
   const [cardZoom, setCardZoom] = useState(false);
   // Full profile edit — every stored detail plus the photo/visiting card.
-  const [editOpen, setEditOpen] = useState(false);
-  const [editForm, setEditForm] = useState<Record<string, string>>({});
+  // The draft (open flag + fields) is shared with the order page's Edit button.
+  const editSeed: BuyerEditForm = {
+    business_name: buyer.business_name ?? "",
+    owner_name: buyer.owner_name ?? "",
+    phone: buyer.phone ?? "",
+    city: buyer.city ?? "",
+    gstin: buyer.gstin ?? "",
+    address: buyer.address ?? "",
+    transport_details: buyer.transport_details ?? "",
+    broker_details: buyer.broker_details ?? "",
+    other_details: buyer.other_details ?? "",
+  };
+  const [edit, setEdit, editMeta] = useDraft<{ open: boolean; form: BuyerEditForm }>(
+    buyerEditDraftKey(buyer.id),
+    { open: false, form: editSeed },
+    {
+      enabled: isAdmin, // Edit Details is admin-only; a shared shop device must not reopen an admin draft for staff
+      hasContent: (d) => d.open,
+      base: buyerEditSignature(editSeed),
+      // A draft from the order page has no other_details; fill it from the server so saving here keeps it.
+      onRestore: (d) => ({ ...d, form: { ...editSeed, ...d.form } }),
+    },
+  );
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   function openEdit() {
-    setEditForm({
-      business_name: buyer.business_name ?? "",
-      owner_name: buyer.owner_name ?? "",
-      phone: buyer.phone ?? "",
-      city: buyer.city ?? "",
-      gstin: buyer.gstin ?? "",
-      address: buyer.address ?? "",
-      transport_details: buyer.transport_details ?? "",
-      broker_details: buyer.broker_details ?? "",
-      other_details: buyer.other_details ?? "",
-    });
-    setEditOpen(true);
+    setEdit((d) => (editMeta.restored ? { ...d, open: true } : { open: true, form: editSeed }));
   }
+  function closeEdit() {
+    editMeta.clear();
+    setEdit({ open: false, form: editSeed });
+  }
+  // Discard / Use server keep the modal open on the current server values.
+  const editNotice = { ...editMeta, discard: () => { editMeta.clear(); setEdit({ open: true, form: editSeed }); } };
   function saveEdit() {
     start(async () => {
-      const r = await updateBuyerProfile(buyer.id, editForm);
+      const r = await updateBuyerProfile(buyer.id, edit.form);
       if (!r.ok) { flash(r.error ?? "Failed"); return; }
-      setEditOpen(false);
+      closeEdit();
       flash("Details saved");
       router.refresh();
     });
@@ -107,8 +127,14 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
       setUploadingPhoto(false);
     }
   }
-  const [notes, setNotes] = useState(buyer.notes ?? "");
+  const [notes, setNotes, notesMeta] = useDraft(`drevi:draft:buyer-notes:${buyer.id}`, buyer.notes ?? "", {
+    enabled: isAdmin,
+    base: buyer.notes ?? "",
+    hasContent: (n) => n !== (buyer.notes ?? ""),
+  });
   const [editingNotes, setEditingNotes] = useState(false);
+  // A restored draft reopens the composer so it is never mistaken for the saved notes.
+  useEffect(() => { if (notesMeta.restored) setEditingNotes(true); }, [notesMeta.restored]);
 
   function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2500); }
 
@@ -314,10 +340,11 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
         <h2 className="font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.2em", color: palette.gold }}>Notes</h2>
         {editingNotes ? (
           <div className="mt-2">
+            {notesMeta.restored && <div className="mb-2"><DraftNotice meta={notesMeta} /></div>}
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="w-full font-body bg-transparent outline-none" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: 8, fontSize: 12.5 }} />
             <div className="flex gap-2 mt-2">
-              <button type="button" onClick={() => start(async () => { await addNote(buyer.id, notes); setEditingNotes(false); router.refresh(); flash("Notes saved"); })} className="font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 12px" }}>Save</button>
-              <button type="button" onClick={() => { setNotes(buyer.notes ?? ""); setEditingNotes(false); }} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, fontSize: 9, letterSpacing: "0.15em", padding: "7px 12px" }}>Cancel</button>
+              <button type="button" onClick={() => start(async () => { await addNote(buyer.id, notes); notesMeta.clear(); setEditingNotes(false); router.refresh(); flash("Notes saved"); })} className="font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 12px" }}>Save</button>
+              <button type="button" onClick={() => { notesMeta.clear(); setNotes(buyer.notes ?? ""); setEditingNotes(false); }} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, fontSize: 9, letterSpacing: "0.15em", padding: "7px 12px" }}>Cancel</button>
             </div>
           </div>
         ) : (
@@ -351,10 +378,11 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
       )}
 
       {/* Full profile edit — details + photo. Email stays with the credential flow. */}
-      {editOpen && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(26,26,26,0.5)" }} onClick={() => !isPending && setEditOpen(false)}>
+      {edit.open && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(26,26,26,0.5)" }} onClick={() => !isPending && closeEdit()}>
           <div className="w-full sm:max-w-lg max-h-modal overflow-y-auto" style={{ background: palette.ivory, padding: "20px 18px", paddingBottom: "calc(20px + var(--kb-inset, 0px))" }} onClick={(e) => e.stopPropagation()}>
             <h2 className="font-display" style={{ fontSize: 17, fontWeight: 600, color: palette.black }}>Edit Buyer</h2>
+            {editMeta.restored && <div className="mt-3"><DraftNotice meta={editNotice} /></div>}
 
             {/* Photo / visiting card */}
             <div className="flex gap-3 mt-4 items-start">
@@ -389,8 +417,8 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
                 <label key={key} className="flex flex-col gap-1">
                   <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.softBlack }}>{label}</span>
                   <input
-                    value={editForm[key] ?? ""}
-                    onChange={(e) => setEditForm((f) => ({ ...f, [key]: e.target.value }))}
+                    value={edit.form[key]}
+                    onChange={(e) => setEdit((d) => ({ ...d, form: { ...d.form, [key]: e.target.value } }))}
                     className="font-body bg-transparent outline-none"
                     style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "6px 2px", fontSize: 13.5 }}
                   />
@@ -402,7 +430,7 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
               <button type="button" onClick={saveEdit} disabled={isPending} className="flex-1 font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.16em", padding: "12px 0" }}>
                 {isPending ? "Saving…" : "Save Changes"}
               </button>
-              <button type="button" onClick={() => setEditOpen(false)} disabled={isPending} className="font-body uppercase px-5" style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 10, letterSpacing: "0.16em" }}>
+              <button type="button" onClick={closeEdit} disabled={isPending} className="font-body uppercase px-5" style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 10, letterSpacing: "0.16em" }}>
                 Cancel
               </button>
             </div>

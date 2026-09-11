@@ -29,7 +29,7 @@ export interface DraftMeta {
   restored: boolean;      // a draft was applied on mount (until dismiss()/clear())
   stale: boolean;         // restored AND envelope.base !== opts.base (server row changed since the draft)
   savedAt: number | null; // envelope savedAt at restore time; null for a pre-envelope draft
-  clear: () => void;      // remove the stored draft; suppress the next write
+  clear: () => void;      // remove the stored draft; the current state becomes the no-draft baseline
   discard: () => void;    // clear() + reset state to `initial`
   dismiss: () => void;    // hide the notice, keep state
 }
@@ -95,11 +95,15 @@ export function useDraft<T>(
   optsRef.current = opts;
   const keyRef = useRef(key);
   keyRef.current = key;
+  // Baseline the write effect compares against: mount-time initial, moved to
+  // the current state by clear() so a saved form never re-drafts itself but
+  // the very next edit is persisted.
   const firstStateRef = useRef(state);
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   const hydratedForRef = useRef<string | null>(null);                 // key whose restore effect has run
-  const restoredRef = useRef<{ key: string; data: T } | null>(null);   // restored value not yet observed by the write effect
-  const suppressRef = useRef(false);
+  const restoredRef = useRef<{ key: string; data: T; seen: boolean } | null>(null);   // restored value not yet observed by the write effect
   const prevKeyRef = useRef<string | null | undefined>(undefined);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<{ key: string; version: number; base: string | null; data: T } | null>(null);
@@ -121,7 +125,6 @@ export function useDraft<T>(
     prevKeyRef.current = key;
     flush(); // a write still pending for the previous key lands on that key
     restoredRef.current = null;
-    suppressRef.current = false;
     if (!enabled || key == null) {
       hydratedForRef.current = null;
       if (keyChanged) setMetaState(EMPTY_META);
@@ -131,7 +134,7 @@ export function useDraft<T>(
     const found = readDraft<T>(key, o.version ?? DEFAULT_VERSION, o.ttlMs ?? DEFAULT_TTL_MS);
     if (found) {
       const data = o.onRestore ? o.onRestore(found.data) : found.data;
-      restoredRef.current = { key, data };
+      restoredRef.current = { key, data, seen: false };
       setState(data);
       setMetaState({ restored: true, stale: found.base !== (o.base ?? null), savedAt: found.savedAt });
     } else if (keyChanged) {
@@ -147,11 +150,16 @@ export function useDraft<T>(
     if (hydratedForRef.current !== key) return;
     const r = restoredRef.current;
     if (r && r.key === key) {
-      if (state !== r.data) return; // the restore setState has not landed yet
-      restoredRef.current = null;   // landed — don't re-write the identical draft (keeps savedAt honest)
-      return;
+      if (state === r.data) {
+        restoredRef.current = null; // landed — don't re-write the identical draft (keeps savedAt honest)
+        return;
+      }
+      // First mismatch is the commit the restore was issued in (state not landed
+      // yet); a second one means a consumer moved state on in the same commit as
+      // the restore — stop waiting or nothing would ever persist for this key.
+      if (!r.seen) { r.seen = true; return; }
+      restoredRef.current = null;
     }
-    if (suppressRef.current) { suppressRef.current = false; return; }
     const o = optsRef.current;
     if (state === firstStateRef.current || (o.hasContent && !o.hasContent(state))) {
       cancelPending();
@@ -177,7 +185,7 @@ export function useDraft<T>(
 
   const clear = useCallback(() => {
     cancelPending();
-    suppressRef.current = true;
+    firstStateRef.current = stateRef.current;
     restoredRef.current = null;
     if (keyRef.current != null) removeDraft(keyRef.current);
     setMetaState((m) => (m.restored ? EMPTY_META : m));

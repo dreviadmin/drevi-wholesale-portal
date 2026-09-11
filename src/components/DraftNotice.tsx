@@ -30,7 +30,7 @@ export function DraftNotice({ meta, label }: { meta: DraftMeta; label?: string }
     >
       {meta.stale ? (
         <>
-          <span>Unsaved draft restored — this record changed on the server since</span>
+          <span>{label ? `${label} — unsaved draft restored, this record changed on the server since` : "Unsaved draft restored — this record changed on the server since"}</span>
           <span>·</span>
           <button type="button" onClick={meta.dismiss} className="font-body uppercase" style={btnStyle}>Keep mine</button>
           <span>/</span>
