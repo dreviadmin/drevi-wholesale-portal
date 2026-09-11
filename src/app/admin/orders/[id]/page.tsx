@@ -13,7 +13,9 @@ import { LineHsnEditor } from "./LineHsnEditor";
 import { listKnownHsnCodes } from "@/lib/hsn";
 import { OrderEditor, type PickerProduct } from "./OrderEditor";
 import { LineStateControls, GenerateBillBar } from "./LineBilling";
+import { ReturnPanel, ApplyCreditBar, type ReturnPanelLine } from "./ReturnPanel";
 import { effectiveLineState, billableLines, computeBillTotals } from "@/lib/order-lines-core";
+import { loadOrderCredit, loadBuyerWallet } from "@/lib/credit-load";
 import type { Order, OrderBill } from "@/lib/types";
 import { productionMoqFlag, supplyAge, type SupplyInput } from "@/lib/availability";
 
@@ -30,16 +32,56 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   const { data: order } = await admin.from("orders").select("*").eq("id", params.id).maybeSingle();
   if (!order) notFound();
   const o = order as Order;
-  const [{ data: buyer }, { data: takenBy }, { data: billRows }] = await Promise.all([
+  const [{ data: buyer }, { data: takenBy }, { data: billRows }, credit, wallet] = await Promise.all([
     admin.from("buyers").select("business_name, owner_name, phone, city, gstin, address, transport_details, broker_details").eq("id", o.buyer_id).maybeSingle(),
     o.assisted_by
       ? admin.from("staff_users").select("name, email").eq("id", o.assisted_by).maybeSingle()
       : Promise.resolve({ data: null }),
     admin.from("order_bills").select("*").eq("order_id", o.id).order("seq"),
+    loadOrderCredit(o.id),
+    loadBuyerWallet(o.buyer_id),
   ]);
   const bills = (billRows ?? []) as OrderBill[];
   const billNumberById = new Map(bills.map((b) => [b.id, b.bill_number]));
   const lineFlowLocked = ["cancelled", "delivered", "fulfilled"].includes(o.status);
+  // Maintained by the apply/unapply RPCs (0046) as a read cache of the
+  // consumption rows, so every balance-due surface can subtract it without a join.
+  const creditApplied = Number((order as Record<string, unknown>).credit_applied ?? 0) || 0;
+  const balanceDue = Math.max(0, o.total_amount - (o.advance_amount ?? 0) - creditApplied);
+
+  // Returns anchor to the BILL snapshot: order_bills.items is immutable, while
+  // a position in orders.items is not (Modify Order re-packs that array).
+  // generateOrderBill freezes billableLines in order, so the k-th line of a
+  // bill is the k-th order line billed into it; the sku must still agree or
+  // the pair is dropped and the line simply shows no return badge.
+  const billLineOf = new Map<number, { bill: OrderBill; billIndex: number }>();
+  const orderLineOfBillLine = new Map<string, number>();
+  for (const b of bills) {
+    let k = 0;
+    (o.items ?? []).forEach((it, i) => {
+      if (it.billed_in !== b.id) return;
+      const snap = (b.items ?? [])[k];
+      if (snap && snap.sku === it.sku) {
+        billLineOf.set(i, { bill: b, billIndex: k });
+        orderLineOfBillLine.set(`${b.id}:${k}`, i);
+      }
+      k += 1;
+    });
+  }
+  const returnedOf = (billId: string, billIndex: number) => credit.returnedByBillLine.get(`${billId}:${billIndex}`) ?? 0;
+  const returnLinesFor = (b: OrderBill): ReturnPanelLine[] =>
+    (b.items ?? []).map((item, index) => ({
+      item,
+      index,
+      returned: returnedOf(b.id, index),
+      orderLineIndex: orderLineOfBillLine.get(`${b.id}:${index}`) ?? null,
+    }));
+  const sourceBillOf = (b: OrderBill) => ({
+    subtotal: Number(b.subtotal) || 0,
+    discount_amount: Number(b.discount_amount) || 0,
+    tax_mode: b.tax_mode ?? null,
+    tax_rate: b.tax_rate == null ? null : Number(b.tax_rate),
+  });
   const billable = billableLines(o);
   const billableTotals = computeBillTotals(billable.map((b) => b.item), o, {
     discountApplied: bills.reduce((s, b) => s + (Number(b.discount_amount) || 0), 0),
@@ -171,7 +213,11 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
       )}
 
       <div className="mt-6" style={{ borderTop: "1px solid rgba(26,26,26,0.1)" }}>
-        {(o.items ?? []).map((it, i) => (
+        {(o.items ?? []).map((it, i) => {
+          const mapped = billLineOf.get(i);
+          const billedQty = mapped ? Number(mapped.bill.items[mapped.billIndex]?.qty) || 0 : 0;
+          const returnedQty = mapped ? returnedOf(mapped.bill.id, mapped.billIndex) : 0;
+          return (
           <div key={`${it.sku}-${i}`} className="flex items-start gap-3 py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
             {it.image_url ? (
               <ZoomImage src={it.image_url} alt={it.title} width={56} height={70} />
@@ -209,14 +255,30 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
                 holdNote={it.hold_note ?? null}
                 billNumber={it.billed_in ? billNumberById.get(it.billed_in) ?? null : null}
                 locked={lineFlowLocked}
+                returnedQty={returnedQty}
+                billedQty={billedQty || undefined}
               />
+              {/* Returns happen AFTER delivery, so this control must not sit
+                  inside the !locked branch — it is gated on the line being
+                  billed and on something still being returnable. */}
+              {isAdminRole(staff.role) && mapped && billedQty - returnedQty > 0 && (
+                <ReturnPanel
+                  orderId={o.id}
+                  billId={mapped.bill.id}
+                  billNumber={mapped.bill.bill_number}
+                  bill={sourceBillOf(mapped.bill)}
+                  lines={returnLinesFor(mapped.bill)}
+                  focusIndex={mapped.billIndex}
+                />
+              )}
             </div>
             <div className="text-right">
               <div className="font-body" style={{ fontSize: 12, color: palette.softBlack }}>{it.qty} × {formatUnitINR(it.unit_price)}</div>
               <div className="font-display mt-0.5" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>{formatINR(it.qty * it.unit_price)}</div>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {(o.discount_amount ?? 0) > 0 && (
@@ -236,13 +298,23 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
       {o.tax_mode === "inclusive" && (
         <div className="font-body text-right mt-1" style={{ fontSize: 10, color: palette.mutedGreige }}>includes GST @ {o.tax_rate}% = {formatINR(o.tax_amount)}</div>
       )}
-      {(o.advance_amount ?? 0) > 0 && (
+      {/* Credit settles an order exactly as an advance does, so the block has
+          to mount for credit alone — an order with no advance was showing no
+          balance due at all. */}
+      {((o.advance_amount ?? 0) > 0 || creditApplied > 0) && (
         <div className="mt-3 p-3" style={{ background: palette.ivoryDeep }}>
-          <div className="flex justify-between font-body" style={{ fontSize: 12, color: palette.softBlack }}>
-            <span>Advance received{o.payment_method ? ` (${o.payment_method})` : ""}</span><span>{formatINR(o.advance_amount)}</span>
-          </div>
+          {(o.advance_amount ?? 0) > 0 && (
+            <div className="flex justify-between font-body" style={{ fontSize: 12, color: palette.softBlack }}>
+              <span>Advance received{o.payment_method ? ` (${o.payment_method})` : ""}</span><span>{formatINR(o.advance_amount)}</span>
+            </div>
+          )}
+          {creditApplied > 0 && (
+            <div className="flex justify-between font-body mt-1" style={{ fontSize: 12, color: palette.softBlack }}>
+              <span>Credit applied from the wallet</span><span>− {formatINR(creditApplied)}</span>
+            </div>
+          )}
           <div className="flex justify-between font-body mt-1" style={{ fontSize: 13, color: palette.goldDeep, fontWeight: 600 }}>
-            <span>Balance due</span><span>{formatINR(Math.max(0, o.total_amount - o.advance_amount))}</span>
+            <span>Balance due</span><span>{formatINR(balanceDue)}</span>
           </div>
           {o.payment_notes && <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige }}>{o.payment_notes}</div>}
         </div>
@@ -275,6 +347,63 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Lineage, in one place: what came back, what it was credited at, what
+          of that credit has been spent on this order, and what the party still
+          holds. Notes are documents — a wrong one is voided, never deleted. */}
+      {(credit.notes.length > 0 || creditApplied > 0 || (isAdminRole(staff.role) && wallet.balance !== 0)) && (
+        <div className="mt-5">
+          <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}>Returns &amp; credit</div>
+          {credit.notes.map((n) => {
+            const pieces = ((n.items ?? []) as unknown as { qty?: number | null }[]).reduce((s, it) => s + (Number(it?.qty) || 0), 0);
+            const voided = n.status !== "issued";
+            return (
+              <div key={n.id} className="flex items-center justify-between gap-2 py-2.5" style={{ borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-body" style={{ fontSize: 12.5, fontWeight: 600, color: palette.black, textDecoration: voided ? "line-through" : "none" }}>{n.note_number}</span>
+                    {voided && (
+                      <span className="font-body uppercase inline-block" style={{ fontSize: 8.5, letterSpacing: "0.1em", padding: "3px 8px", background: palette.crimsonSoft, color: palette.crimsonText, fontWeight: 600 }}>Void</span>
+                    )}
+                  </div>
+                  <div className="font-body" style={{ fontSize: 10.5, color: palette.mutedGreige }}>
+                    {new Date(n.note_date + "T12:00:00+05:30").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                    {pieces > 0 ? ` · ${pieces} pc returned` : ""}
+                    {n.source_bill_number ? ` · against ${n.source_bill_number}` : ""}
+                    {n.reason ? ` · ${n.reason}` : ""}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="font-display" style={{ fontSize: 14, fontWeight: 600, color: voided ? palette.mutedGreige : palette.black }}>{formatINR(Number(n.total) || 0)}</span>
+                  <a href={`/api/credit-notes/${n.id}/pdf`} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.goldDeep, textDecoration: "underline" }}>
+                    PDF
+                  </a>
+                </div>
+              </div>
+            );
+          })}
+          {credit.creditTotal > 0 && (
+            <div className="flex justify-between font-body mt-2" style={{ fontSize: 12, color: palette.softBlack }}>
+              <span>Credited against this order</span><span>{formatINR(credit.creditTotal)}</span>
+            </div>
+          )}
+          {creditApplied > 0 && (
+            <div className="flex justify-between font-body mt-1" style={{ fontSize: 12, color: palette.softBlack }}>
+              <span>Credit spent on this order</span><span>{formatINR(creditApplied)}</span>
+            </div>
+          )}
+          {/* A wallet is a SUM over the ledger, so a negative one is a fault,
+              not a number to format quietly past. */}
+          {isAdminRole(staff.role) && wallet.balance < 0 && (
+            <div className="font-body mt-2 p-2.5" style={{ fontSize: 11.5, fontWeight: 600, background: palette.crimsonSoft, color: palette.crimsonText, border: `1px solid ${palette.crimsonBorder}` }}>
+              Wallet overdrawn by {formatINR(Math.abs(wallet.balance))} — investigate before any more credit is applied.
+            </div>
+          )}
+          {isAdminRole(staff.role) && wallet.balance > 0 && (
+            <ApplyCreditBar orderId={o.id} balance={wallet.balance} maxApplicable={balanceDue} />
+          )}
         </div>
       )}
 

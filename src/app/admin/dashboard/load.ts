@@ -2,17 +2,23 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAll } from "@/lib/supabase/fetch-all";
+import { walletBalancesByBuyer } from "@/lib/credit-load";
 import type { DashOrder, DashBuyer, DashProduct, VendorInfo } from "./DashboardView";
 
 // Shared loader for the dashboard AND the Stock-space /admin/reorder route
 // (Stage 2 gives the Reorder view its own address; same data, same view).
-export async function loadDashboardData() {
+// `withCredit` is here so /admin/reorder can skip the wallet aggregate it
+// never renders; both callers take the default today.
+export async function loadDashboardData(opts?: { withCredit?: boolean }) {
   const admin = createAdminClient();
+  const withCredit = opts?.withCredit !== false;
 
-  const [{ data: orders }, { data: buyers }, { data: products }, { data: vendors }, { data: grReceipts }, grLines] = await Promise.all([
+  const [{ data: orders }, { data: buyers }, { data: products }, { data: vendors }, { data: grReceipts }, grLines, walletByBuyer] = await Promise.all([
     admin
       .from("orders")
-      .select("id, order_number, status, source, total_amount, advance_amount, submitted_at, buyer_id, items")
+      // credit_applied: settled with a credit note, so every balance-due
+      // figure below subtracts it rather than chasing money already paid.
+      .select("id, order_number, status, source, total_amount, advance_amount, credit_applied, submitted_at, buyer_id, items")
       .order("submitted_at", { ascending: false }),
     admin.from("buyers").select("id, business_name, owner_name, phone, city"),
     admin
@@ -21,6 +27,7 @@ export async function loadDashboardData() {
     admin.from("product_vendor_info").select("sku, vendor_name, vendor_id, vendor_sku, last_cost, last_receipt_date"),
     admin.from("goods_receipts").select("id, receipt_date, created_at"),
     fetchAll<{ receipt_id: string; sku: string; unit_cost: number }>(admin, "goods_receipt_lines", "receipt_id, sku, unit_cost"),
+    withCredit ? walletBalancesByBuyer() : Promise.resolve(new Map<string, number>()),
   ]);
 
   // Latest goods-receipt cost per SKU (Phase 1 §8.5): by receipt_date, then
@@ -39,11 +46,17 @@ export async function loadDashboardData() {
   const grBySku: Record<string, { cost: number; date: string }> = {};
   for (const [sku, v] of grLatest) grBySku[sku] = { cost: v.cost, date: v.date };
 
+  // A wallet balance is an all-time point-in-time number, not a flow — it is
+  // handed over as a plain record because DashboardView is a client component.
+  const creditByBuyer: Record<string, number> = {};
+  for (const [buyerId, balance] of walletByBuyer) creditByBuyer[buyerId] = balance;
+
   return {
     orders: (orders ?? []) as DashOrder[],
     buyers: (buyers ?? []) as DashBuyer[],
     products: (products ?? []) as DashProduct[],
     vendors: (vendors ?? []) as VendorInfo[],
     grBySku,
+    creditByBuyer,
   };
 }

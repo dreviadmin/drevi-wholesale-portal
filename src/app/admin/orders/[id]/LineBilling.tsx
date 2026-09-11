@@ -21,7 +21,7 @@ const chip = (bg: string, fg: string) => ({
 });
 
 export function LineStateControls({
-  orderId, index, state, holdNote, billNumber, locked,
+  orderId, index, state, holdNote, billNumber, locked, returnedQty, billedQty,
 }: {
   orderId: string;
   index: number;
@@ -29,6 +29,11 @@ export function LineStateControls({
   holdNote: string | null;
   billNumber: string | null;
   locked: boolean; // terminal order — no state changes
+  // Returns (11 Sep): derived from the credit notes raised against this
+  // order's bills, never stored on the line — orders.items is re-packed by
+  // Modify Order, so a position there is not an address.
+  returnedQty?: number;
+  billedQty?: number;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -59,6 +64,11 @@ export function LineStateControls({
     <div className="mt-1.5">
       <div className="flex items-center gap-1.5 flex-wrap">
         <span className="font-body uppercase inline-block" style={style}>{label}</span>
+        {(returnedQty ?? 0) > 0 && (
+          <span className="font-body uppercase inline-block" style={chip(palette.crimsonSoft, palette.crimsonText)}>
+            Returned · {returnedQty}{billedQty ? ` of ${billedQty}` : ""}
+          </span>
+        )}
         {!locked && state !== "billed" && (
           <>
             {state !== "confirmed" && (

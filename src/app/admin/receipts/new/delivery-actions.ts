@@ -204,7 +204,46 @@ export async function uploadIdentPhoto(
   // Previous ident row is archived, never deleted (§4.5).
   if (design.ident_image_id) await admin.from("design_images").update({ status: "archived" }).eq("id", design.ident_image_id);
   await admin.from("designs").update({ ident_image_id: row.id }).eq("id", designId);
+  await seedFrontFromIdent(admin, designId, up.fileRef);
   return { ok: true, imageId: row.id, fileRef: up.fileRef };
+}
+
+/**
+ * The rack photo taken at delivery becomes the FRONT angle's source until a
+ * real front shot exists (Ansh, 12 Sep) — the Studio then opens with something
+ * to work from instead of an empty card, and the board shows the garment.
+ *
+ * Only ever fills a gap: an angle that already has a source or an approved
+ * image is left alone, so saving a proper front silently supersedes this. A
+ * re-shot ident replaces a front that is still pointing at the old ident.
+ */
+async function seedFrontFromIdent(
+  admin: ReturnType<typeof createAdminClient>,
+  designId: string,
+  identRef: string,
+): Promise<void> {
+  const { data: front } = await admin
+    .from("design_angles")
+    .select("id, source_ref, approved_image_id")
+    .eq("design_id", designId)
+    .eq("angle", "front")
+    .maybeSingle();
+  if (!front || front.approved_image_id) return;
+
+  if (front.source_ref) {
+    // Still the previous ident? Follow the re-shoot. A real front stays put.
+    const { data: prevIdent } = await admin
+      .from("design_images")
+      .select("file_ref")
+      .eq("design_id", designId)
+      .eq("role", "ident")
+      .eq("status", "archived")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!prevIdent || prevIdent.file_ref !== front.source_ref) return;
+  }
+  await admin.from("design_angles").update({ source_ref: identRef }).eq("id", front.id);
 }
 
 /**

@@ -111,6 +111,14 @@ export function invoiceFileName(orderNumber: string, isInvoice = true): string {
   return `Drevi-${isInvoice ? "Invoice" : "Order"}-${safe}.pdf`;
 }
 
+// A credit note must never reach a customer named "Invoice" — they forward these
+// to their accountant. Same sanitising as above: the number also lands in a
+// Content-Disposition header.
+export function creditNoteFileName(noteNumber: string): string {
+  const safe = noteNumber.replace(/[^A-Za-z0-9-]/g, "");
+  return `Drevi-CreditNote-${safe}.pdf`;
+}
+
 export function downloadVCard(vcard: string, filename: string): void {
   const blob = new Blob([vcard], { type: "text/vcard;charset=utf-8" });
   const url = URL.createObjectURL(blob);

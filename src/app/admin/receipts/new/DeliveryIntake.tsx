@@ -256,7 +256,7 @@ export function DeliveryIntake({
                 <div className="flex gap-2 mt-2.5">
                   {/* Back from these lands on the saved receipt (same banner), not on the Studio. */}
                   <Link href={withFrom(`/admin/studio/master/${d.id}`, `/admin/receipts/${saved.receiptId}`)} className="font-body uppercase" style={{ ...actionBtn, background: palette.black, color: palette.ivory }}>Product details</Link>
-                  <Link href={withFrom(`/admin/specs/${d.id}`, `/admin/receipts/${saved.receiptId}`)} className="font-body uppercase" style={{ ...actionBtn, border: `1px solid ${palette.black}`, color: palette.black }}>Specs</Link>
+                  <Link href={withFrom(`/admin/studio/master/${d.id}`, `/admin/receipts/${saved.receiptId}`)} className="font-body uppercase" style={{ ...actionBtn, border: `1px solid ${palette.black}`, color: palette.black }}>Specs</Link>
                 </div>
               </div>
             );
@@ -686,7 +686,7 @@ function GarmentSheet({
             {g.designId && (
               <div className="flex gap-3 mt-1.5">
                 <a href={`/admin/studio/master/${g.designId}`} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: "#1F6B45", textDecoration: "underline" }}>Product details</a>
-                <a href={`/admin/specs/${g.designId}`} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: "#1F6B45", textDecoration: "underline" }}>Specs</a>
+                <a href={`/admin/studio/master/${g.designId}`} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: "#1F6B45", textDecoration: "underline" }}>Specs</a>
                 <a href={`/admin/studio/${g.designId}`} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: "#1F6B45", textDecoration: "underline" }}>Studio</a>
               </div>
             )}

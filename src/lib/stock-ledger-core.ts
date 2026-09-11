@@ -7,7 +7,7 @@
 //   stock = R.snapshot_qty + Σ(delta) for movements created_at > R.created_at
 //         (no reset yet → Σ(delta) over all movements)
 
-export type MovementReason = "reset" | "receipt" | "order" | "manual" | "correction" | "shopify_sync";
+export type MovementReason = "reset" | "receipt" | "order" | "manual" | "correction" | "shopify_sync" | "return";
 
 export interface Movement {
   id: string;

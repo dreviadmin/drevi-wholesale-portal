@@ -23,9 +23,11 @@ export async function computeAttention(): Promise<AttentionItem[]> {
 
   const [submitted, pendingBuyers, soldOutBest, orderedItems] = await Promise.all([
     // 1. Money-blocking: submitted orders whose balance hasn't been collected.
+    //    credit_applied is settled money too — chasing it would ask the buyer
+    //    to pay twice for what their own credit note already covered.
     admin
       .from("orders")
-      .select("id, total_amount, advance_amount")
+      .select("id, total_amount, advance_amount, credit_applied")
       .eq("status", "submitted"),
     // 2. Buyers waiting for approval.
     admin.from("buyers").select("id", { count: "exact", head: true }).eq("status", "pending"),
@@ -45,7 +47,10 @@ export async function computeAttention(): Promise<AttentionItem[]> {
 
   const subs = submitted.data ?? [];
   if (subs.length > 0) {
-    const due = subs.reduce((s, o) => s + Math.max(0, (o.total_amount ?? 0) - (o.advance_amount ?? 0)), 0);
+    const due = subs.reduce(
+      (s, o) => s + Math.max(0, (o.total_amount ?? 0) - (o.advance_amount ?? 0) - (Number(o.credit_applied) || 0)),
+      0,
+    );
     items.push({
       key: "orders_submitted",
       title: `${subs.length} order${subs.length === 1 ? "" : "s"} awaiting confirmation`,
@@ -210,14 +215,14 @@ export async function computeToday(): Promise<TodayMetrics> {
   const startUtc = new Date(`${today}T00:00:00+05:30`).toISOString();
   const { data } = await admin
     .from("orders")
-    .select("total_amount, advance_amount, items, status")
+    .select("total_amount, advance_amount, credit_applied, items, status")
     .gte("submitted_at", startUtc)
     .neq("status", "cancelled");
   let sales = 0, pieces = 0, advanceIn = 0, balanceDue = 0;
   for (const o of data ?? []) {
     sales += o.total_amount ?? 0;
     advanceIn += o.advance_amount ?? 0;
-    balanceDue += Math.max(0, (o.total_amount ?? 0) - (o.advance_amount ?? 0));
+    balanceDue += Math.max(0, (o.total_amount ?? 0) - (o.advance_amount ?? 0) - (Number(o.credit_applied) || 0));
     for (const it of (o.items as { qty?: number }[] | null) ?? []) pieces += it.qty ?? 0;
   }
   return { sales, orders: (data ?? []).length, pieces, advanceIn, balanceDue };

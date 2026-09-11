@@ -8,9 +8,10 @@ import { palette } from "@/lib/palette";
 import { useDraft } from "@/lib/useDraft";
 import { supplyAge } from "@/lib/availability";
 import type { BoardRow } from "@/lib/studio/load";
-import { saveSpecs, savePricing, saveVariant, setStockForSku, saveDesignHsn, togglePortal } from "./actions";
+import type { SupplyBlock } from "@/app/admin/receipts/new/delivery-actions";
+import { saveSpecs, savePricing, setGroupWholesalePrice, saveVariant, setStockForSku, saveDesignHsn, togglePortal } from "./actions";
 import { HsnInput } from "@/components/admin/HsnInput";
-import { BackLink, withFrom, useHere } from "@/components/BackLink";
+import { BackLink } from "@/components/BackLink";
 import { DraftNotice } from "@/components/DraftNotice";
 
 // Master editor client (§12.1). Group-level fields save once per design;
@@ -19,10 +20,10 @@ import { DraftNotice } from "@/components/DraftNotice";
 // honest without blocking editor adoption.
 
 interface DesignFields {
-  fabric: string; handwork: string; origin: string; specsVerified: boolean;
+  fabric: string; handwork: string; origin: string; colorName?: string | null; specsVerified: boolean;
   tier: string; markupMultiplier: number; autoMrp: number | null; mrpOverride: number | null;
   vendorSku?: string | null;
-  supply?: { supplyMode?: string; vendorStockQty?: number | null; makingDays?: number | null; makingMoq?: number | null; deliveryDays?: number | null; supplyNote?: string };
+  supply?: SupplyBlock;
   supplyUpdatedAt?: string | null;
   updatedAt?: string | null;
 }
@@ -47,12 +48,31 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
   // pricing live on the design row (updated_at bumps on save); HSN and the
   // size rows come from wholesale_products, so their seed is their base.
   const draftKey = `drevi:draft:master:${board.id}`;
-  const specsSeed = { fabric: design.fabric, handwork: design.handwork, origin: design.origin, specsVerified: design.specsVerified };
-  const pricingSeed = { markupMultiplier: design.markupMultiplier, mrpOverride: design.mrpOverride?.toString() ?? "" };
+  const specsSeed = {
+    fabric: design.fabric, handwork: design.handwork, origin: design.origin,
+    colorName: design.colorName ?? "", specsVerified: design.specsVerified,
+    supply: design.supply ?? {},
+  };
+  // One wholesale price for every size, beside the MRP — both prices belong in
+  // one place (Ansh, 12 Sep). Pre-filled only when the sizes already agree, so
+  // a blank box never flattens per-size prices by accident.
+  const wsPrices = variants.map((v) => Number(v.wholesale_price) || 0);
+  const wsUniform = wsPrices.length > 0 && wsPrices.every((p) => p === wsPrices[0]);
+  const wsInitial = wsUniform && wsPrices[0] > 0 ? String(wsPrices[0]) : "";
+  const pricingSeed = {
+    markupMultiplier: design.markupMultiplier,
+    mrpOverride: design.mrpOverride?.toString() ?? "",
+    // null = untouched: the box shows the live server value, so a draft
+    // restored after someone repriced elsewhere never re-submits a stale one.
+    wholesale: null as string | null,
+  };
   const specsSig = JSON.stringify(specsSeed);
   const pricingSig = JSON.stringify(pricingSeed);
   const [specs, setSpecs, specsMeta] = useDraft(`${draftKey}:specs`, specsSeed, { base: design.updatedAt ?? specsSig, hasContent: (s) => JSON.stringify(s) !== specsSig, onRestore: (d) => ({ ...specsSeed, ...d }) });
-  const [pricing, setPricing, pricingMeta] = useDraft(`${draftKey}:pricing`, pricingSeed, { base: design.updatedAt ?? pricingSig, hasContent: (p) => JSON.stringify(p) !== pricingSig, onRestore: (d) => ({ ...pricingSeed, ...d }) });
+  const [pricing, setPricing, pricingMeta] = useDraft(`${draftKey}:pricing`, pricingSeed, { base: `${design.updatedAt ?? pricingSig}|${wsInitial}`, hasContent: (p) => JSON.stringify(p) !== pricingSig, onRestore: (d) => ({ ...pricingSeed, ...d }) });
+  const wholesaleValue = pricing.wholesale ?? wsInitial;
+  const setWholesale = (v: string) => setPricing((p) => ({ ...p, wholesale: v }));
+  const setSupply = (fn: (s: SupplyBlock) => SupplyBlock) => setSpecs((s) => ({ ...s, supply: fn(s.supply ?? {}) }));
   const [hsnValue, setHsnValue, hsnMeta] = useDraft(`${draftKey}:hsn`, hsn, { base: hsn, hasContent: (h) => h !== hsn });
   // Row edits keyed by SKU, merged over the server variants on render. An
   // entry whose qty/ws/loc equal the server row is pruned (on restore and
@@ -93,7 +113,6 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
     <div className="font-body uppercase mt-6" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>{title}</div>
   );
   const inputStyle = { fontSize: 12.5, border: "1px solid rgba(26,26,26,0.15)", background: "#fff", color: palette.black, padding: "8px 10px" } as const;
-  const specsHref = withFrom(`/admin/specs/${board.id}`, useHere(`/admin/studio/master/${board.id}`));
 
   return (
     <div className="px-4 md:px-8 py-6 max-w-2xl pb-16">
@@ -118,12 +137,22 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
             <input value={specs[f]} onChange={(e) => setSpecs((s) => ({ ...s, [f]: e.target.value }))} className="w-full mt-1 font-body" style={inputStyle} />
           </label>
         ))}
+        <label className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+          <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Colour</span>
+          <input
+            value={specs.colorName}
+            onChange={(e) => setSpecs((s) => ({ ...s, colorName: e.target.value }))}
+            placeholder={`the name a customer would say — e.g. Champagne Gold (code ${board.color})`}
+            className="w-full mt-1 font-body"
+            style={inputStyle}
+          />
+        </label>
         <label className="flex items-center gap-2 mt-1 font-body" style={{ fontSize: 12.5, color: palette.black }}>
           <input type="checkbox" checked={specs.specsVerified} onChange={(e) => setSpecs((s) => ({ ...s, specsVerified: e.target.checked }))} style={{ accentColor: palette.goldDeep }} />
           Confirmed by Rakesh
         </label>
         <button type="button" disabled={pending} onClick={() => run(() => saveSpecs(board.id, specs), "Specs saved", specsMeta.clear)} className="self-start font-body uppercase disabled:opacity-40" style={{ fontSize: 9, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "8px 12px" }}>
-          Save specs
+          Save specs &amp; supply
         </button>
       </div>
 
@@ -152,11 +181,46 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
           Effective MRP: <b style={{ color: palette.black }}>{effectiveMrp ? `₹${Number(effectiveMrp).toLocaleString("en-IN")}` : "—"}</b>
           {sheetMrp > 0 && <span style={{ color: palette.mutedGreige }}> · sheet says ₹{sheetMrp.toLocaleString("en-IN")} (live until cutover)</span>}
         </div>
-        <button type="button" disabled={pending} onClick={() => run(() => savePricing(board.id, { markupMultiplier: Number(pricing.markupMultiplier), mrpOverride: pricing.mrpOverride ? Number(pricing.mrpOverride) : null }), "Pricing saved", pricingMeta.clear)} className="mt-2 font-body uppercase disabled:opacity-40" style={{ fontSize: 9, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "8px 12px" }}>
-          Save pricing
+        <button type="button" disabled={pending} onClick={() => run(() => savePricing(board.id, { markupMultiplier: Number(pricing.markupMultiplier), mrpOverride: pricing.mrpOverride ? Number(pricing.mrpOverride) : null }), "Retail pricing saved", pricingMeta.clear)} className="mt-2 font-body uppercase disabled:opacity-40" style={{ fontSize: 9, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "8px 12px" }}>
+          Save retail pricing
         </button>
-        <div className="font-body mt-2" style={{ fontSize: 10.5, color: palette.mutedGreige, lineHeight: 1.5 }}>
-          Wholesale price is per size — see Sizes below, or set one price for all sizes on the <Link href={specsHref} style={{ color: palette.goldDeep, textDecoration: "underline" }}>Specs page</Link>.
+
+        {/* The buyer-facing price, next to the MRP — one place for both. */}
+        <div className="mt-4 pt-3" style={{ borderTop: "1px solid rgba(26,26,26,0.12)" }}>
+          <div className="flex items-end gap-2 flex-wrap">
+            <label className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+              <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Wholesale price (all sizes)</span>
+              <input
+                type="number" inputMode="decimal" min="0" step="any"
+                value={wholesaleValue}
+                onChange={(e) => setWholesale(e.target.value)}
+                placeholder={variants.length === 0 ? "" : "₹ per piece"}
+                disabled={variants.length === 0}
+                className="w-full mt-1 font-body disabled:opacity-40"
+                style={{ ...inputStyle, width: 150 }}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={pending || variants.length === 0 || wholesaleValue.trim() === "" || wholesaleValue === wsInitial}
+              onClick={() => {
+                const n = Number(wholesaleValue);
+                if (!Number.isFinite(n) || n <= 0) { flash("Enter a price above ₹0"); return; }
+                run(() => setGroupWholesalePrice(board.id, n), `Wholesale price saved on ${variants.length} size(s)`, () => setPricing((p) => ({ ...p, wholesale: null })));
+              }}
+              className="font-body uppercase disabled:opacity-40"
+              style={{ fontSize: 9, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, padding: "8px 12px" }}
+            >
+              Save wholesale
+            </button>
+          </div>
+          <div className="font-body mt-1.5" style={{ fontSize: 10.5, color: palette.mutedGreige, lineHeight: 1.5 }}>
+            {variants.length === 0
+              ? "No size variants yet — log a delivery first."
+              : wsUniform
+                ? `Applies to all ${variants.length} size${variants.length === 1 ? "" : "s"}. Buyers see this price; it prints on the tag.`
+                : `Sizes are priced differently right now (${wsPrices.map((p) => `₹${p.toLocaleString("en-IN")}`).join(" · ")}). Saving here sets every size to one price — for per-size prices use the Sizes section below.`}
+          </div>
         </div>
 
         {/* Ansh (31 Jul): one HSN across every size of the design. */}
@@ -171,34 +235,59 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
         </div>
       </div>
 
-      {/* Supplier availability — read-only summary; edited on the cost-free
-          specs view so Rakesh can work on the shared counter device (§6.2). */}
+      {/* Supplier availability — editable here since 12 Sep; the separate
+          cost-free specs view it used to live on is gone (floor scope was
+          never built, so both screens were admin-only anyway). Saved by the
+          "Save specs & supply" button above, which writes this same draft. */}
       {section("Supplier availability")}
       <div className="mt-2 p-3.5" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
-        {design.supply?.supplyMode ? (
-          <>
-            <div className="font-body" style={{ fontSize: 12.5, color: palette.black }}>
-              {design.supply.supplyMode.replace("_", " ")}
-              {design.supply.vendorStockQty != null ? ` · ~${design.supply.vendorStockQty} ready` : ""}
-              {design.supply.makingDays != null ? ` · ${design.supply.makingDays}d to make` : ""}
-              {design.supply.deliveryDays != null ? ` · ${design.supply.deliveryDays}d transit` : ""}
-            </div>
-            {design.supply.makingMoq != null && (
-              <div className="font-body mt-1" style={{ fontSize: 11, color: palette.goldDeep }}>
-                Vendor makes minimum {design.supply.makingMoq} — internal only; raise the buyer MOQ if it should be passed on.
-              </div>
-            )}
-            {design.supply.supplyNote && <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige }}>{design.supply.supplyNote}</div>}
-          </>
-        ) : (
-          <div className="font-body" style={{ fontSize: 11.5, color: palette.mutedGreige }}>No supplier data recorded.</div>
+        <div className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+          <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Do they keep this in stock, make it to order, or both?</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5 mt-1.5">
+          {(["ready_stock", "made_to_order", "both"] as const).map((m) => {
+            const on = (specs.supply as SupplyBlock).supplyMode === m;
+            return (
+              <button key={m} type="button" onClick={() => setSupply((s) => ({ ...s, supplyMode: on ? "" : m }))} className="font-body" style={{ fontSize: 11.5, padding: "9px 12px", border: `1px solid ${on ? palette.black : "rgba(26,26,26,0.15)"}`, background: on ? palette.black : "transparent", color: on ? palette.ivory : palette.softBlack }}>
+                {m.replace("_", " ")}
+              </button>
+            );
+          })}
+        </div>
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          {([
+            ["vendorStockQty", "Roughly how many ready?"],
+            ["makingDays", "Days to make it?"],
+            ["makingMoq", "Vendor's minimum order"],
+            ["deliveryDays", "Days in transit"],
+          ] as const).map(([k, labelText]) => (
+            <label key={k} className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+              <span className="uppercase" style={{ letterSpacing: "0.14em" }}>{labelText}</span>
+              <input
+                type="number" min="0"
+                value={(specs.supply as SupplyBlock)[k] ?? ""}
+                onChange={(e) => setSupply((s) => ({ ...s, [k]: e.target.value === "" ? null : Number(e.target.value) }))}
+                className="w-full mt-1 font-body" style={inputStyle}
+              />
+            </label>
+          ))}
+        </div>
+        <label className="font-body block mt-3" style={{ fontSize: 10, color: palette.mutedGreige }}>
+          <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Anything else about supply</span>
+          <input
+            value={(specs.supply as SupplyBlock).supplyNote ?? ""}
+            onChange={(e) => setSupply((s) => ({ ...s, supplyNote: e.target.value }))}
+            className="w-full mt-1 font-body" style={inputStyle}
+          />
+        </label>
+        {(specs.supply as SupplyBlock).makingMoq != null && (
+          <div className="font-body mt-2" style={{ fontSize: 11, color: palette.goldDeep }}>
+            Vendor makes minimum {(specs.supply as SupplyBlock).makingMoq} — internal only; raise the buyer MOQ if it should be passed on.
+          </div>
         )}
-        <div className="flex items-center gap-3 mt-2">
+        <div className="flex items-center gap-3 mt-3">
           <Link href={`/admin/receipts?q=${encodeURIComponent(board.baseSku)}`} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }}>
             Receipts
-          </Link>
-          <Link href={specsHref} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }}>
-            Edit specs &amp; supply
           </Link>
           <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
             {supplyAge(design.supplyUpdatedAt ?? null)?.label ?? "never recorded"}
