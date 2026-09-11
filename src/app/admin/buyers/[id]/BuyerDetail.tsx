@@ -3,7 +3,8 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, Eye, EyeOff, Copy, MessageCircle, RefreshCw, UserPlus, Pencil, ImageOff } from "lucide-react";
+import { Eye, EyeOff, Copy, MessageCircle, RefreshCw, UserPlus, Pencil, ImageOff } from "lucide-react";
+import { BackLink, withFrom } from "@/components/BackLink";
 import { StatusPill } from "@/components/admin/Pills";
 import { CredentialModal } from "@/components/admin/CredentialModal";
 import { Lightbox, ZoomImage } from "@/components/Lightbox";
@@ -167,9 +168,7 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
 
   return (
     <div className="px-4 md:px-8 py-6 max-w-3xl">
-      <Link href="/admin/buyers" className="inline-flex items-center gap-1 font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.15em", color: palette.mutedGreige }}>
-        <ChevronLeft size={14} /> Buyers
-      </Link>
+      <BackLink fallback="/admin/buyers" fallbackLabel="Buyers" />
 
       {/* Header */}
       <div className="mt-4 flex items-start justify-between gap-3 flex-wrap">
@@ -302,7 +301,7 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
           {orders.length === 0 ? (
             <p className="font-body" style={{ fontSize: 12, color: palette.mutedGreige }}>No orders yet.</p>
           ) : orders.map((o) => (
-            <Link key={o.id} href={`/admin/orders/${o.id}`} className="flex items-center justify-between py-2" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
+            <Link key={o.id} href={withFrom(`/admin/orders/${o.id}`, `/admin/buyers/${buyer.id}`)} className="flex items-center justify-between py-2" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
               <span className="font-body" style={{ fontSize: 12.5, color: palette.black }}>{o.order_number} · {fmt(o.submitted_at)}</span>
               <span className="font-body" style={{ fontSize: 12.5, color: palette.softBlack }}>{formatINR(o.total_amount)} · {ORDER_STATUS_LABEL[o.status]}</span>
             </Link>

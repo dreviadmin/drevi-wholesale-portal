@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { BackLink } from "@/components/BackLink";
 import { ZoomImage } from "@/components/Lightbox";
 import { requireAdminOrRedirect, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -103,9 +102,7 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
 
   return (
     <div className="px-4 md:px-8 py-6 max-w-2xl">
-      <Link href="/admin/orders" className="inline-flex items-center gap-1 font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.15em", color: palette.mutedGreige }}>
-        <ChevronLeft size={14} /> Orders
-      </Link>
+      <BackLink fallback="/admin/orders" fallbackLabel="Orders" />
 
       <div className="mt-4 flex items-start justify-between gap-3 flex-wrap">
         <div>

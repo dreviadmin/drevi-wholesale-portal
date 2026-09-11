@@ -7,6 +7,7 @@ import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import type { LiveVocab } from "@/lib/sku/vocab-live";
 import { qrPngDataUrl, shareQr, downloadDataUrl, buildRollPdf, printPdf, loadCal, PRINT_PAPER_HINT, TRAY_KEY, type TrayItem } from "./labels";
 import { PrintTab } from "./PrintTab";
+import { ColorCombobox } from "@/components/admin/ColorCombobox";
 import { palette } from "@/lib/palette";
 
 interface HistoryRow {
@@ -22,26 +23,8 @@ const shortname = (email: string) => email.split("@")[0];
 const istTime = (iso: string) =>
   new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
 
-// Color ranking from the reference: code exact → code prefix → name prefix →
-// code contains → name contains.
-function rankColors(q: string, groups: { name: string; items: [string, string][] }[]): [string, string][] {
-  const all = groups.flatMap((g) => g.items.map(([c, n]) => [c, n] as [string, string]));
-  const s = q.trim().toUpperCase();
-  if (!s) return all;
-  const score = ([code, name]: [string, string]) => {
-    const N = name.toUpperCase();
-    if (code === s) return 0;
-    if (code.startsWith(s)) return 1;
-    if (N.startsWith(s)) return 2;
-    if (code.includes(s)) return 3;
-    if (N.includes(s)) return 4;
-    return 9;
-  };
-  return all.filter((c) => score(c) < 9).sort((a, b) => score(a) - score(b));
-}
-
-export function SkuGeneratorClient({ isAdmin, vocab }: { isAdmin: boolean; vocab: LiveVocab }) {
-  const [tab, setTab] = useState<"generate" | "print">("generate");
+export function SkuGeneratorClient({ isAdmin, vocab, initialTab }: { isAdmin: boolean; vocab: LiveVocab; initialTab?: "generate" | "print" }) {
+  const [tab, setTab] = useState<"generate" | "print">(initialTab ?? "generate");
 
   // ---- shared state ----
   const [counters, setCounters] = useState<Record<string, number>>({});
@@ -59,10 +42,7 @@ export function SkuGeneratorClient({ isAdmin, vocab }: { isAdmin: boolean; vocab
   const [peekNum, setPeekNum] = useState<number | null>(null);
   const [baseQuery, setBaseQuery] = useState("");
   const [selectedBase, setSelectedBase] = useState<BaseEntry | null>(null);
-  const [colorQuery, setColorQuery] = useState("");
   const [color, setColor] = useState("");
-  const [colorOpen, setColorOpen] = useState(false);
-  const [colorIdx, setColorIdx] = useState(0);
   const [size, setSize] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
@@ -85,6 +65,10 @@ export function SkuGeneratorClient({ isAdmin, vocab }: { isAdmin: boolean; vocab
       const raw = localStorage.getItem(TRAY_KEY);
       if (raw) setTray(JSON.parse(raw));
     } catch { /* corrupted tray — start fresh */ }
+    // Log delivery hand-off (?tab=print&receipt=GR-…): the tray was staged
+    // before navigation; just say so.
+    const from = new URLSearchParams(window.location.search).get("receipt");
+    if (from) flash(`${from} · tags staged`);
     // Scan-sheet hand-off (?variant=DD-CAT-SUB-NNN-SIZE-COLOR): an unknown tag
     // lands here with everything derivable pre-filled. A parseable base flips
     // to variant mode (bases list resolves the match once loaded via
@@ -242,12 +226,6 @@ export function SkuGeneratorClient({ isAdmin, vocab }: { isAdmin: boolean; vocab
   });
   const selectStyle = { border: "1px solid rgba(26,26,26,0.2)", padding: "9px 10px", fontSize: 13, background: palette.ivory, width: "100%" } as const;
 
-  const colorList = useMemo(() => rankColors(colorQuery, vocab.colorGroups), [colorQuery, vocab.colorGroups]);
-  const colorName = useMemo(
-    () => vocab.colorGroups.flatMap((g) => g.items.map(([c, n]) => [c, n] as [string, string])).find(([c]) => c === color)?.[1],
-    [color, vocab.colorGroups],
-  );
-
   const qrActions = (sku: string, extra?: boolean) => (
     <div className="flex gap-2 flex-wrap mt-3">
       <button type="button" onClick={async () => downloadDataUrl(await qrPngDataUrl(sku), `${sku}.png`)} className="flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, padding: "7px 11px" }}><Download size={12} /> Download</button>
@@ -377,47 +355,9 @@ export function SkuGeneratorClient({ isAdmin, vocab }: { isAdmin: boolean; vocab
 
           {/* Color + Size */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-            <div className="relative">
+            <div>
               {label("Colour")}
-              <input
-                value={color ? `${color} — ${colorName}` : colorQuery}
-                onChange={(e) => { setColor(""); setColorQuery(e.target.value); setColorOpen(true); setColorIdx(0); }}
-                onFocus={() => { setColorOpen(true); if (color) { setColor(""); setColorQuery(""); } }}
-                onBlur={() => setTimeout(() => setColorOpen(false), 120)}
-                onKeyDown={(e) => {
-                  if (!colorOpen) return;
-                  if (e.key === "ArrowDown") { e.preventDefault(); setColorIdx((i) => Math.min(i + 1, colorList.length - 1)); }
-                  else if (e.key === "ArrowUp") { e.preventDefault(); setColorIdx((i) => Math.max(i - 1, 0)); }
-                  else if (e.key === "Enter") { e.preventDefault(); if (colorQuery.trim() !== "") { const c = colorList[colorIdx]; if (c) { setColor(c[0]); setColorOpen(false); } } }
-                  else if (e.key === "Escape") setColorOpen(false);
-                }}
-                placeholder="Type a colour or code"
-                className="font-body w-full bg-transparent outline-none"
-                style={selectStyle}
-              />
-              {colorOpen && !color && (
-                <div className="absolute z-20 w-full max-h-64 overflow-y-auto" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.15)", boxShadow: "0 8px 24px rgba(26,26,26,0.12)" }}>
-                  {colorQuery.trim() === "" ? (
-                    vocab.colorGroups.map((g) => (
-                      <div key={g.name}>
-                        <div className="font-body uppercase px-3 py-1.5" style={{ fontSize: 8, letterSpacing: "0.16em", color: palette.goldDeep, background: palette.ivoryDeep }}>{g.name}</div>
-                        {g.items.map(([code, name]) => (
-                          <button key={code} type="button" onMouseDown={(e) => { e.preventDefault(); setColor(code); setColorOpen(false); }} className="w-full text-left px-3 py-2 font-body" style={{ fontSize: 12.5, borderBottom: "1px solid rgba(26,26,26,0.04)" }}>
-                            <span className="font-mono" style={{ fontWeight: 700 }}>{code}</span> — {name}
-                          </button>
-                        ))}
-                      </div>
-                    ))
-                  ) : (
-                    colorList.map(([code, name], i) => (
-                      <button key={code} type="button" onMouseDown={(e) => { e.preventDefault(); setColor(code); setColorOpen(false); }} className="w-full text-left px-3 py-2 font-body" style={{ fontSize: 12.5, background: i === colorIdx ? palette.ivoryDeep : undefined }}>
-                        <span className="font-mono" style={{ fontWeight: 700 }}>{code}</span> — {name}
-                      </button>
-                    ))
-                  )}
-                  {colorQuery.trim() !== "" && colorList.length === 0 && <div className="font-body p-3" style={{ fontSize: 11.5, color: palette.mutedGreige }}>No colours match.</div>}
-                </div>
-              )}
+              <ColorCombobox value={color} onChange={setColor} groups={vocab.colorGroups} style={selectStyle} />
             </div>
             <div>
               {label("Size")}

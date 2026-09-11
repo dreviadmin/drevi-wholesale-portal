@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, X, ScanLine, Plus, MessageCircle, Camera } from "lucide-react";
+import { Search, X, ScanLine, Plus, MessageCircle, Camera, Images } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { useSort, SortTh, type SortAccessor } from "@/components/sortable";
 import { createVendor, updateVendor, uploadVendorPhoto, type VendorForm } from "./actions";
@@ -187,6 +187,7 @@ export function VendorModal({ vendor, onClose, onSaved }: {
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const cameraInputs = useRef<Record<string, HTMLInputElement | null>>({});
   const galleryInputs = useRef<Record<string, HTMLInputElement | null>>({});
   const hasReceipts = (vendor?.receipts ?? 0) > 0;
 
@@ -241,25 +242,28 @@ export function VendorModal({ vendor, onClose, onSaved }: {
           {/* UX sprint — the business card and the person, captured in place. */}
           <div className="flex gap-3">
             {(["card", "person"] as const).map((kind) => (
-              <label key={kind} className="flex-1 flex flex-col items-center gap-1.5 cursor-pointer" style={{ border: "1px dashed rgba(26,26,26,0.3)", padding: "10px 6px" }}>
-                {photos[kind] ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img src={`/api/drive-photo?id=${encodeURIComponent(photos[kind]!)}&s=300`} alt={kind} style={{ width: "100%", maxHeight: 110, objectFit: "contain" }} />
-                ) : (
-                  <Camera size={18} color={palette.mutedGreige} />
-                )}
+              <div key={kind} className="flex-1 flex flex-col gap-1.5">
                 <span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.14em", color: palette.softBlack }}>
                   {kind === "card" ? (photos.card ? "Replace business card" : "Business card") : photos.person ? "Replace person photo" : "Person photo"}
                 </span>
-                {!vendor && <span className="font-body" style={{ fontSize: 8.5, color: palette.mutedGreige }}>save first</span>}
-                <input type="file" accept="image/*" capture="environment" className="hidden" disabled={busy || !vendor}
+                {photos[kind] && (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={`/api/drive-photo?id=${encodeURIComponent(photos[kind]!)}&s=300`} alt={kind} style={{ width: "100%", maxHeight: 110, objectFit: "contain" }} />
+                )}
+                <input ref={(el) => { cameraInputs.current[kind] = el; }} type="file" accept="image/*" capture="environment" className="hidden" disabled={busy || !vendor}
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) attachPhoto(kind, f); e.currentTarget.value = ""; }} />
                 <input ref={(el) => { galleryInputs.current[kind] = el; }} type="file" accept="image/*" className="hidden" disabled={busy || !vendor}
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) attachPhoto(kind, f); e.currentTarget.value = ""; }} />
-                <button type="button" disabled={busy || !vendor} onClick={(e) => { e.preventDefault(); galleryInputs.current[kind]?.click(); }} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 8, letterSpacing: "0.14em", color: palette.goldDeep }}>
-                  From gallery
-                </button>
-              </label>
+                <div className="flex gap-2">
+                  <button type="button" disabled={busy || !vendor} onClick={() => cameraInputs.current[kind]?.click()} className="flex-1 flex items-center justify-center gap-1.5 font-body uppercase disabled:opacity-50" style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 9, letterSpacing: "0.14em", padding: "9px 0" }}>
+                    <Camera size={13} /> Camera
+                  </button>
+                  <button type="button" disabled={busy || !vendor} onClick={() => galleryInputs.current[kind]?.click()} className="flex-1 flex items-center justify-center gap-1.5 font-body uppercase disabled:opacity-50" style={{ border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", fontSize: 9, letterSpacing: "0.14em", padding: "9px 0" }}>
+                    <Images size={13} /> Gallery
+                  </button>
+                </div>
+                {!vendor && <span className="font-body" style={{ fontSize: 8.5, color: palette.mutedGreige }}>save first</span>}
+              </div>
             ))}
           </div>
           {vendor && (

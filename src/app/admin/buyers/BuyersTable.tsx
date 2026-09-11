@@ -29,6 +29,12 @@ const SOURCE_LABEL: Record<BuyerSource, string> = { inquiry_form: "Inquiry", exh
 function fmtDate(iso: string | null): string {
   return iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
 }
+// Numeric on purpose: useSort compares strings with localeCompare({numeric:true}),
+// which mis-orders ISO stamps whose fractional-second digits differ in length.
+function ts(iso: string | null): number | null {
+  const t = iso ? Date.parse(iso) : NaN;
+  return Number.isNaN(t) ? null : t;
+}
 function waLink(phone: string | null): string | null {
   if (!phone) return null;
   // 10-digit numbers (inquiry-form buyers) need the country code or wa.me
@@ -46,8 +52,8 @@ const ACCESSORS: Record<string, SortAccessor<BuyerRowDTO>> = {
   status: (r) => r.status,
   source: (r) => SOURCE_LABEL[r.source],
   orders: (r) => r.ordersCount,
-  lastOrder: (r) => r.lastOrder,
-  created: (r) => r.created_at,
+  lastOrder: (r) => ts(r.lastOrder),
+  created: (r) => ts(r.created_at),
 };
 
 export function BuyersTable({ rows }: { rows: BuyerRowDTO[] }) {
@@ -74,7 +80,7 @@ export function BuyersTable({ rows }: { rows: BuyerRowDTO[] }) {
     setter(next);
   }
 
-  const { sorted, sort, toggle: toggleSort } = useSort(filtered, ACCESSORS);
+  const { sorted, sort, toggle: toggleSort } = useSort(filtered, ACCESSORS, { key: "created", dir: "desc" });
 
   const chip = (active: boolean) => ({
     fontSize: 9,

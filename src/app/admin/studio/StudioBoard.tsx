@@ -6,6 +6,7 @@ import Image from "next/image";
 import { Search, X, ScanLine, ImageOff, Check, Crown } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { useSort, SortTh } from "@/components/sortable";
+import { withFrom } from "@/components/BackLink";
 import { palette } from "@/lib/palette";
 import { BADGE_LABEL, type DesignBadge } from "@/lib/studio/state";
 import type { BoardRow } from "@/lib/studio/load";
@@ -28,6 +29,8 @@ const BADGE_STYLE: Record<DesignBadge, { bg: string; fg: string }> = {
   live: { bg: "#14532D", fg: "#E8F5EC" },
   changes_pending: { bg: "#F7DFDC", fg: "#9C3A31" },
 };
+
+const fmtAdded = (iso: string) => (iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—");
 
 export function StudioBoard({ rows }: { rows: BoardRow[] }) {
   const router = useRouter();
@@ -71,7 +74,10 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
     badge: (r) => r.badgeLabel,
     photos: (r) => r.approvedAiCount,
     tier: (r) => r.tier,
-  });
+    // Numeric on purpose: useSort compares strings with localeCompare({numeric:true}),
+    // which mis-orders ISO fractional seconds of unequal length.
+    added: (r) => (r.createdAt ? Date.parse(r.createdAt) : null),
+  }, { key: "added", dir: "desc" });
 
   function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2200); }
 
@@ -100,11 +106,13 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
 
   const ids = [...selected];
   const dot = (on: boolean) => (on ? "✓" : "○");
+  // Carry the active chip so the workbench's back link lands on the same filter.
+  const openRow = (id: string) => router.push(withFrom(`/admin/studio/${id}`, chip === "all" ? "/admin/studio" : `/admin/studio?state=${chip}`));
 
   const rowCard = (r: BoardRow) => (
     <div key={r.id} className="flex items-center gap-3 p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
       <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleRow(r.id)} aria-label={`Select ${r.baseSku}`} style={{ accentColor: palette.goldDeep }} />
-      <button type="button" onClick={() => router.push(`/admin/studio/${r.id}`)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
+      <button type="button" onClick={() => openRow(r.id)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
         {r.thumb ? (
           <Image src={r.thumb} alt={r.baseSku} width={44} height={55} className="object-cover flex-shrink-0" unoptimized />
         ) : (
@@ -120,6 +128,7 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
           <span className="font-mono block mt-0.5" style={{ fontSize: 9.5, color: palette.mutedGreige }}>
             {dot(r.specsVerified)} specs · ◑ {r.approvedAiCount}/4 · {dot(r.copyStatus === "approved")} copy ·{" "}
             {r.targets.map((t) => `${t.state === "live" ? "▪" : "▫"}${t.portal === "wholesale" ? "WS" : "SH"}`).join(" ")}
+            {` · added ${fmtAdded(r.createdAt)}`}
             {r.notifyCount > 0 ? ` · 🔔 ${r.notifyCount}` : ""}
           </span>
         </span>
@@ -220,11 +229,12 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               <SortTh label="State" k="badge" sort={sort} onToggle={toggle} />
               <SortTh label="Photos" k="photos" sort={sort} onToggle={toggle} right defaultDir="desc" />
               <SortTh label="Tier" k="tier" sort={sort} onToggle={toggle} />
+              <SortTh label="Added" k="added" sort={sort} onToggle={toggle} right defaultDir="desc" />
             </tr>
           </thead>
           <tbody>
             {sorted.map((r) => (
-              <tr key={r.id} className="cursor-pointer" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }} onClick={() => router.push(`/admin/studio/${r.id}`)}>
+              <tr key={r.id} className="cursor-pointer" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }} onClick={() => openRow(r.id)}>
                 <td onClick={(e) => e.stopPropagation()} style={{ padding: "8px 4px" }}>
                   <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleRow(r.id)} aria-label={`Select ${r.baseSku}`} style={{ accentColor: palette.goldDeep }} />
                 </td>
@@ -240,6 +250,7 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
                 </td>
                 <td className="font-mono text-right" style={{ fontSize: 11.5, color: palette.softBlack, padding: "8px 6px" }}>{r.approvedAiCount}/4</td>
                 <td className="font-body uppercase" style={{ fontSize: 10, color: r.tier === "hero" ? palette.goldDeep : palette.mutedGreige, padding: "8px 6px" }}>{r.tier}</td>
+                <td className="font-mono text-right" style={{ fontSize: 10.5, color: palette.mutedGreige, padding: "8px 6px", whiteSpace: "nowrap" }}>{fmtAdded(r.createdAt)}</td>
               </tr>
             ))}
           </tbody>

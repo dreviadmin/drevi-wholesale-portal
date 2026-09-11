@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { BackLink } from "@/components/BackLink";
 import { requireAdminOrRedirect } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAll } from "@/lib/supabase/fetch-all";
@@ -29,9 +29,7 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: {
   if (!receiptIntakeV2()) {
     return (
       <div className="px-4 md:px-6 py-5 max-w-2xl">
-        <Link href="/admin/receipts" className="inline-flex items-center gap-1 font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.15em", color: "#998F7A" }}>
-          <ChevronLeft size={14} /> Receipts
-        </Link>
+        <BackLink fallback="/admin/receipts" fallbackLabel="Receipts" />
         <h1 className="font-display mt-3" style={{ fontSize: 22, fontWeight: 600, color: "#1A1A1A" }}>New Goods Receipt</h1>
         <ReceiptEditor
           vendors={vendorList}
@@ -81,9 +79,7 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: {
 
   return (
     <div className="px-4 md:px-6 py-5 max-w-2xl">
-      <Link href="/admin/receipts" className="inline-flex items-center gap-1 font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.15em", color: "#998F7A" }}>
-        <ChevronLeft size={14} /> Receipts
-      </Link>
+      <BackLink fallback="/admin/receipts" fallbackLabel="Receipts" />
       <div className="mt-3 flex items-baseline justify-between gap-3 flex-wrap">
         <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: "#1A1A1A" }}>Log delivery</h1>
         <Link href="/admin/receipts" className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.16em", color: "#8a6d1a" }}>

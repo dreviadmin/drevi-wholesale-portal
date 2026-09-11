@@ -18,6 +18,7 @@ import { uuid } from "@/lib/uuid";
 import { getStockState, qtyCap } from "@/lib/stock";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { useDraft } from "@/lib/useDraft";
 import type { WholesaleProduct, SessionType, TaxMode, DiscountType } from "@/lib/types";
 
 type Buyer = { id: string; business_name: string | null; owner_name: string | null; phone: string | null; city: string | null; status?: string };
@@ -69,7 +70,12 @@ export function ExhibitionWizard({
     business_name: "", owner_name: "", email: "", phone: "", city: "", gstin: "",
     address: "", transport_details: "", broker_details: "", other_details: "",
   };
-  const [nb, setNb] = useState(NB_EMPTY);
+  // Draft autosave — a half-captured buyer survives closing the tablet app
+  // mid-conversation. Cleared once the capture succeeds.
+  const [nb, setNb, nbDraft] = useDraft("drevi:draft:exh-buyer", NB_EMPTY, {
+    hasContent: (d) => Object.values(d).some((v) => typeof v === "string" && v.trim() !== ""),
+    onRestore: (d) => ({ ...NB_EMPTY, ...d }),
+  });
   const [cardFile, setCardFile] = useState<File | null>(null);
 
   // Global scan sheet hand-off (build guide §6.5): ?add=SKU appends one piece
@@ -90,23 +96,6 @@ export function ExhibitionWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Draft autosave — a half-captured buyer survives closing the tablet app
-  // mid-conversation. Cleared once the capture succeeds.
-  const NB_DRAFT_KEY = "drevi:draft:exh-buyer";
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(NB_DRAFT_KEY);
-      if (raw) setNb({ ...NB_EMPTY, ...JSON.parse(raw) });
-    } catch { /* corrupt draft — ignore */ }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  useEffect(() => {
-    const hasContent = Object.values(nb).some((v) => typeof v === "string" && v.trim() !== "");
-    try {
-      if (hasContent) localStorage.setItem(NB_DRAFT_KEY, JSON.stringify(nb));
-      else localStorage.removeItem(NB_DRAFT_KEY);
-    } catch { /* storage full/blocked — non-fatal */ }
-  }, [nb]);
   const [staffNote, setStaffNote] = useState("");
   const [takenBy, setTakenBy] = useState(meId); // UX sprint — who is taking this order
   // Past-dated billing (18 Aug): empty = today; a chosen past date drives the
@@ -178,6 +167,7 @@ export function ExhibitionWizard({
     staffNote: string;
     buyerNote: string;
     takenBy?: string;
+    billDate?: string;
     orderRef: string | null;
   }
   const [parked, setParked] = useState<ParkedOrder[]>([]);
@@ -193,6 +183,7 @@ export function ExhibitionWizard({
     setAdvance(d.advance ?? ""); setPayMethod(d.payMethod ?? "Cash"); setPayNote(d.payNote ?? "");
     setStaffNote(d.staffNote ?? ""); setBuyerNote(d.buyerNote ?? "");
     if (d.takenBy) setTakenBy(d.takenBy);
+    setBillDate(d.billDate ?? "");
     setConfirmInfo(null);
     orderRefRef.current = d.orderRef ?? null;
     // keep the custom-item id counter ahead of any restored keys
@@ -206,7 +197,7 @@ export function ExhibitionWizard({
       id: uuid(), parkedAt: Date.now(),
       buyer, buyerClientRef, cart, priceOverrides, splitFactors, customItems,
       taxMode, taxRate, customRate, discountType, discountValue,
-      advance, payMethod, payNote, staffNote, buyerNote, takenBy,
+      advance, payMethod, payNote, staffNote, buyerNote, takenBy, billDate,
       orderRef: orderRefRef.current,
     };
   }
@@ -249,14 +240,14 @@ export function ExhibitionWizard({
         localStorage.setItem(CART_DRAFT_KEY, JSON.stringify({
           buyer, buyerClientRef, cart, priceOverrides, splitFactors, customItems,
           taxMode, taxRate, customRate, discountType, discountValue,
-          advance, payMethod, payNote, staffNote, buyerNote, takenBy,
+          advance, payMethod, payNote, staffNote, buyerNote, takenBy, billDate,
           orderRef: orderRefRef.current, step, savedAt: Date.now(),
         }));
       } else {
         localStorage.removeItem(CART_DRAFT_KEY);
       }
     } catch { /* storage blocked — non-fatal */ }
-  }, [CART_DRAFT_KEY, buyer, buyerClientRef, cart, priceOverrides, splitFactors, customItems, taxMode, taxRate, customRate, discountType, discountValue, advance, payMethod, payNote, staffNote, buyerNote, takenBy, step, confirmInfo]);
+  }, [CART_DRAFT_KEY, buyer, buyerClientRef, cart, priceOverrides, splitFactors, customItems, taxMode, taxRate, customRate, discountType, discountValue, advance, payMethod, payNote, staffNote, buyerNote, takenBy, billDate, step, confirmInfo]);
 
   // Warn before an accidental unload (refresh / edge-swipe back) with a live cart.
   useEffect(() => {
@@ -537,8 +528,7 @@ export function ExhibitionWizard({
         setBuyer({ id: "", business_name: nb.business_name, owner_name: nb.owner_name, phone: nb.phone, city: nb.city });
         setNewBuyer(false);
         setCardFile(null); // don't carry this card onto the next buyer captured online
-        try { localStorage.removeItem(NB_DRAFT_KEY); } catch { /* non-fatal */ }
-        setNb(NB_EMPTY);
+        nbDraft.discard();
         setStep("catalog");
         return;
       }
@@ -555,8 +545,7 @@ export function ExhibitionWizard({
         setBuyer({ id: "", business_name: nb.business_name, owner_name: nb.owner_name, phone: nb.phone, city: nb.city });
         setNewBuyer(false);
         setCardFile(null);
-        try { localStorage.removeItem(NB_DRAFT_KEY); } catch { /* non-fatal */ }
-        setNb(NB_EMPTY);
+        nbDraft.discard();
         setStep("catalog");
         return;
       }
@@ -573,8 +562,7 @@ export function ExhibitionWizard({
       setBuyer({ id: res.id!, business_name: nb.business_name, owner_name: nb.owner_name, phone: nb.phone, city: nb.city });
       setNewBuyer(false);
       setCardFile(null);
-      try { localStorage.removeItem(NB_DRAFT_KEY); } catch { /* non-fatal */ }
-      setNb(NB_EMPTY);
+      nbDraft.discard();
       setStep("catalog");
     });
   }
@@ -699,7 +687,7 @@ export function ExhibitionWizard({
     // the previous buyer's visiting-card photo (a cross-buyer data leak), their
     // GST mode/rate, payment method, and any custom items.
     setCardFile(null); setCustomItems({}); setCustomForm({ open: false, name: "", price: "", file: null, sku: "", sync: false });
-    setTaxMode("none"); setTaxRate(5); setCustomRate(""); setPayMethod("Cash");
+    setTaxMode("none"); setTaxRate(5); setCustomRate(""); setPayMethod("Cash"); setBillDate("");
     orderRefRef.current = null; // fresh idempotency key for the next order
     setStep("buyer");
   }

@@ -19,8 +19,8 @@ const STOCK_LABEL: Record<string, string> = {
 };
 
 // A scan/search result: either a matched portal product, or a bare SKU that
-// isn't on the portal yet (the missing-price items — copy the SKU to price it
-// in the sheet).
+// isn't on the portal yet (the missing-price items — copy the SKU, then price
+// it in Studio → Specs, or per size in the Product Master).
 type Result = { sku: string; product: WholesaleProduct | null };
 
 async function copyText(text: string): Promise<boolean> {
@@ -84,12 +84,12 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
     if (!sku) return { ok: false, message: "Empty scan" };
     const p = bySku.get(sku) ?? null;
     show({ sku, product: p });
-    // Auto-copy every scanned SKU so a paste into the sheet is instant.
+    // Auto-copy every scanned SKU so a paste into Studio search is instant.
     void copyText(sku);
     setCopied(sku);
     setTimeout(() => setCopied((c) => (c === sku ? null : c)), 1500);
     return p
-      ? { ok: true, message: p.wholesale_price > 0 ? `${formatINR(p.wholesale_price)} — ${p.title ?? p.sku}` : `${p.title ?? sku} — price not set · SKU copied` }
+      ? { ok: true, message: p.wholesale_price > 0 ? `${formatINR(p.wholesale_price)} — ${p.title ?? p.sku}` : `${p.title ?? sku} — price not set · SKU copied · set it in Studio → Specs` }
       : { ok: true, message: `${sku} · copied` }; // not on portal, but SKU captured
   }
 
@@ -151,7 +151,7 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
     <div className="px-4 md:px-8 py-6 max-w-2xl">
       <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>Price Check</h1>
       <p className="font-body mt-1" style={{ fontSize: 12, color: palette.mutedGreige }}>
-        Scan a tag — see the price if it’s on the portal, or copy the SKU to add its price in the sheet.
+        Scan a tag — see the price if it’s on the portal, or copy the SKU and set its price in Studio → Specs.
       </p>
 
       <button
@@ -250,7 +250,7 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
                 </div>
               ) : (
                 <div className="font-body mt-3" style={{ fontSize: 13, color: palette.goldDeep, fontWeight: 600 }}>
-                  Price not set — copy the SKU and add it in the sheet
+                  Price not set — copy the SKU, then set it in Studio → Specs (per size: Product Master)
                 </div>
               )}
               <div className="font-body mt-2 flex flex-wrap gap-x-4 gap-y-1" style={{ fontSize: 11, color: palette.softBlack }}>
@@ -275,7 +275,7 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
               <div className="font-display mt-1" style={{ fontSize: 20, fontWeight: 700, color: palette.black, wordBreak: "break-all" }}>{current.sku}</div>
               <div className="mt-3">{copyBtn(current.sku, true)}</div>
               <p className="font-body mt-3" style={{ fontSize: 11, color: palette.mutedGreige, lineHeight: 1.5 }}>
-                Not on the portal yet — copy the SKU to add its price in the sheet.
+                Not on the portal yet — copy the SKU; once its delivery is logged, set the price in Studio → Specs.
               </p>
             </div>
           </div>

@@ -1,10 +1,12 @@
 import "server-only";
 
 import { defaultAnglePrompt } from "./prompts";
-import { defaultCopyPrompt } from "./copy";
+import { defaultCopyPrompt } from "./copy-prompt";
 import { defaultCopyModel } from "./copy-models";
+import { promptDesignFrom } from "./facts";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAll } from "@/lib/supabase/fetch-all";
+import { loadVocab } from "@/lib/sku/vocab-live";
 import {
   deriveBadge, badgeLabelWithPortals, gateFor,
   type Angle, type DesignBadge, type DesignStateInput, type PortalKey, type TargetState,
@@ -30,13 +32,18 @@ export interface BoardRow {
   thumb: string | null;
   wholesalePriceSet: boolean;
   notifyCount: number; // open back-in-stock requests (Stage 9)
+  createdAt: string; // ISO from designs.created_at ('' if null)
 }
 
 export async function loadBoard(): Promise<BoardRow[]> {
   const admin = createAdminClient();
   const [designs, angles, generatedAngleIds, copies, targets, products, notifies] = await Promise.all([
-    fetchAll<{ id: string; base_sku: string; color: string; title: string | null; category: string | null; tier: "standard" | "hero"; specs_verified: boolean }>(
-      admin, "designs", "id, base_sku, color, title, category, tier, specs_verified"),
+    fetchAll<{ id: string; base_sku: string; color: string; title: string | null; category: string | null; tier: "standard" | "hero"; specs_verified: boolean; created_at: string | null }>(
+      admin, "designs", "id, base_sku, color, title, category, tier, specs_verified, created_at",
+      // Board default: newest design first (§7.4 / Item 4). nullsFirst:false —
+      // the column is nullable and Postgres floats NULLs to the top on DESC.
+      // id desc is the stable tiebreak so paging never reshuffles equal stamps.
+      (q) => q.order("created_at", { ascending: false, nullsFirst: false }).order("id", { ascending: false })),
     fetchAll<{ id: string; design_id: string; angle: Angle; approved_image_id: string | null; source_ref: string | null }>(
       admin, "design_angles", "id, design_id, angle, approved_image_id, source_ref"),
     fetchAll<{ angle_id: string }>(admin, "design_images", "angle_id", (q) => q.eq("status", "active")),
@@ -118,6 +125,7 @@ export async function loadBoard(): Promise<BoardRow[]> {
       thumb: groupThumb.get(key) ?? null,
       wholesalePriceSet: input.wholesalePriceSet,
       notifyCount: notifyByGroup.get(key.toUpperCase()) ?? 0,
+      createdAt: d.created_at ?? "",
     };
   });
 }
@@ -166,7 +174,7 @@ export async function loadDesignDetail(designId: string): Promise<{
   const board = rows.find((r) => r.id === designId);
   if (!board) return null;
   const admin = createAdminClient();
-  const [{ data: angles }, { data: jobs }, { data: copyRow }, { data: poolRows }, { data: designRow }] = await Promise.all([
+  const [{ data: angles }, { data: jobs }, { data: copyRow }, { data: poolRows }, { data: designRow }, vocab] = await Promise.all([
     admin
       .from("design_angles")
       // Two FKs link these tables (angle_id + approved_image_id) — the
@@ -187,13 +195,10 @@ export async function loadDesignDetail(designId: string): Promise<{
       .eq("design_id", designId)
       .order("created_at", { ascending: false }),
     admin.from("designs").select("ident_image_id, drive_folder_id, title, category, sub_category, color, color_name, fabric, handwork, origin, tier, bg_style, base_sku").eq("id", designId).maybeSingle(),
+    loadVocab(),
   ]);
-  const promptDesign = {
-    title: designRow?.title, category: designRow?.category, subCategory: designRow?.sub_category,
-    color: designRow?.color, colorName: designRow?.color_name, fabric: designRow?.fabric, handwork: designRow?.handwork,
-    origin: designRow?.origin, tier: designRow?.tier,
-    bgStyle: designRow?.bg_style, bgSeed: `${designRow?.base_sku ?? ""}|${designRow?.color ?? ""}`,
-  };
+  // Codes → names (Saree / Pre-Draped, Gold) for both the copy and angle defaults.
+  const promptDesign = promptDesignFrom(designRow, vocab);
   const order: Record<string, number> = { front: 0, back: 1, side: 2, lifestyle: 3, detail_1: 4, detail_2: 5 };
   const angleNameById = new Map((angles ?? []).map((a) => [a.id, a.angle as string]));
   const pool: DesignImage[] = (poolRows ?? []).map((r) => ({

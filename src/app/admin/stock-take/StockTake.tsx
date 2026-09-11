@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ScanLine, Check, Trash2, AlertTriangle } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
+import { DraftNotice } from "@/components/DraftNotice";
+import { useDraft, isDraftOlderThan, DRAFT_NOTICE_AFTER_MS } from "@/lib/useDraft";
 import { palette } from "@/lib/palette";
 import { lookupSku, commitCount, type ScannedSku } from "./actions";
 
@@ -20,29 +22,20 @@ interface Line extends ScannedSku {
 
 export function StockTake() {
   const router = useRouter();
-  const [lines, setLines] = useState<Line[]>([]);
+  // A stock take is a long walk around a rack — never lose it to a reload.
+  const [draft, setDraft, draftMeta] = useDraft<{ lines: Line[]; note: string }>(DRAFT_KEY, { lines: [], note: "" }, {
+    hasContent: (d) => d.lines.length > 0 || d.note.trim() !== "",
+    onRestore: (d) => ({ lines: d.lines ?? [], note: d.note ?? "" }),
+  });
+  const { lines, note } = draft;
+  const setLines = (u: Line[] | ((prev: Line[]) => Line[])) => setDraft((d) => ({ ...d, lines: typeof u === "function" ? u(d.lines) : u }));
+  const setNote = (v: string) => setDraft((d) => ({ ...d, note: v }));
   const [active, setActive] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [manual, setManual] = useState("");
-  const [note, setNote] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const qtyRef = useRef<HTMLInputElement | null>(null);
-
-  // A stock take is a long walk around a rack — never lose it to a reload.
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(DRAFT_KEY);
-      if (raw) {
-        const d = JSON.parse(raw);
-        setLines(d.lines ?? []);
-        setNote(d.note ?? "");
-      }
-    } catch { /* corrupted draft — start clean */ }
-  }, []);
-  useEffect(() => {
-    try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ lines, note })); } catch { /* quota — the screen still works */ }
-  }, [lines, note]);
 
   function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2600); }
 
@@ -98,8 +91,7 @@ export function StockTake() {
       );
       if (res.ok) {
         flash(`${res.committed} SKU(s) set`);
-        setLines([]); setNote(""); setActive(null);
-        try { localStorage.removeItem(DRAFT_KEY); } catch { /* nothing to clear */ }
+        draftMeta.discard(); setActive(null);
         router.refresh();
       } else {
         flash(res.error ?? "Commit failed");
@@ -115,6 +107,7 @@ export function StockTake() {
         SKU on the list — it <b>supersedes earlier receipt arithmetic</b> for those SKUs.
         Anything you don&apos;t count is left completely untouched.
       </p>
+      {isDraftOlderThan(draftMeta, DRAFT_NOTICE_AFTER_MS) && <div className="mt-3"><DraftNotice meta={draftMeta} /></div>}
 
       <div className="flex flex-wrap gap-2 mt-4">
         <button

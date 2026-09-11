@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import { DETAIL_ANGLES } from "@/lib/studio/state";
+import { loadVocab } from "@/lib/sku/vocab-live";
 
 // Stage 3's two LIVE batch actions (§7.4). Spend/push actions arrive with
 // Stages 4–7 — their buttons render disabled until then.
@@ -197,9 +198,10 @@ export async function generateCopyBatch(
   }
   if (designIds.length === 0) return { ok: false, error: "Nothing selected" };
   const { generateCopyForDesign } = await import("@/lib/studio/copy");
+  const vocab = await loadVocab(); // one lovs read for the whole batch
   let generated = 0, skipped = 0, failed = 0;
   for (const id of designIds.slice(0, 10)) {
-    const res = await generateCopyForDesign(id, staff.email);
+    const res = await generateCopyForDesign(id, staff.email, { vocab });
     if (res.ok) generated++;
     else if (res.skipped) skipped++;
     else failed++;

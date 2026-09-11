@@ -33,6 +33,14 @@ const STRINGS = {
     "nav.lovs": "Lists",
     "nav.audit": "Audit Log",
     "nav.staff": "Staff",
+    // back links (BackLink labelFor) — drill-in pages reuse nav.* above
+    "back.back": "Back",
+    "back.workbench": "Workbench",
+    "back.product_master": "Product Master",
+    "back.receipt": "Receipt",
+    "back.vendor": "Vendor",
+    "back.buyer": "Buyer",
+    "back.order": "Order",
     // home cockpit
     "home.greeting.morning": "Good morning",
     "home.greeting.afternoon": "Good afternoon",

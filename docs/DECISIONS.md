@@ -165,3 +165,21 @@ along — with migration 0034 applied to the prod DB (only 0034; the dev-only
 (title, photo, HSN): money on a placed order never changes outside the order
 editor. Auto-refresh covers ACTIVE orders at the end of each catalog sync;
 terminal orders are history and stay untouched.
+
+### 11 Sep — wholesale price on the Specs view; explicit back navigation
+
+- **11 Sep 2026 · Wholesale price allowed on `/admin/specs`** (relaxes R4
+  §6.2): the buyer-visible wholesale price is not cost data — every logged-in
+  buyer already sees it in the catalog and it prints on the tag — and floor
+  scope was never built (ANSH-20), so the Specs view now carries ONE price for
+  all sizes of a design, written per size SKU to `wholesale_products.
+  wholesale_price` with `"wholesale_price"` added to each row's
+  `locked_fields` (same column and lock the Product Master and Manage Catalog
+  use; no new column). Blank = no write, never 0. Per-size prices stay in the
+  Product Master. `last_cost`, vendor cost and MRP remain excluded from the
+  Specs view.
+- **11 Sep 2026 · Back links are explicit, not heuristic**: drill-in pages use
+  `<BackLink fallback fallbackLabel>`; a validated `?from=` (relative path
+  only) beats the fallback, and multi-parent links pass `withFrom()`. No
+  `history.back()` / referrer / nav-history module — `from` alone fixes every
+  known entry point deterministically.

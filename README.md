@@ -193,10 +193,16 @@ copy. Everything is per-design, review-gated, and audited.
   manual override); **HSN (all sizes)**; supplier availability; per-variant
   rows with stock, wholesale price and the **"kept at" physical location**
   field.
-- **Specs page** (`/admin/specs/[designId]`) — a price-free spec + supply
-  editor, safe for counter devices. Fields (3 Sep): Fabric, Handwork, Origin
-  and **Colour** (the human name beside the SKU code — it feeds the AI copy
-  and photo prompts), each with an ⓘ info button explaining what to enter.
+- **Specs page** (`/admin/specs/[designId]`) — the spec + supply editor for
+  counter devices. Fields (3 Sep): Fabric, Handwork, Origin and **Colour**
+  (the human name beside the SKU code — it feeds the AI copy and photo
+  prompts), each with an ⓘ info button explaining what to enter; category and
+  sub-category show as vocab names ("Saree · Pre-Draped") with the codes
+  alongside. Since 11 Sep it also carries the buyer-facing **Wholesale price**
+  — one price for every size of the design, written to each size SKU with the
+  sheet-sync lock (blank = leave as is; mixed per-size prices are listed and
+  per-size editing stays in the Product Master). Cost and MRP are never shown
+  here (`docs/DECISIONS.md`).
 
 ### Back office (admins)
 
@@ -346,6 +352,12 @@ payload. The portal is invisible to the public and noindexed.
    `useSort`/`SortTh`).
 4. **Forms stay usable with the keyboard open** (`KeyboardInset` visual-
    viewport padding).
+5. **Back navigation** — drill-in pages render `<BackLink>`
+   (`src/components/BackLink.tsx`): an explicit `?from=<same-origin path>`
+   wins (label derived from the path — "Workbench", "Vendor", …), else the
+   page's own default. Links that can be reached from more than one parent
+   pass `withFrom(href, currentPath)`; `safeFrom` rejects anything that is
+   not a relative path. No history heuristics.
 
 ---
 

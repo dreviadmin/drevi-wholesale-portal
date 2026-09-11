@@ -63,6 +63,17 @@ export interface DeliveryInput {
   garments: GarmentInput[];
 }
 
+/** A design group touched by a saved delivery — drives the post-save "complete product details" prompt. */
+export interface SavedDesign {
+  id: string;
+  baseSku: string;
+  color: string;
+  title: string | null;
+  /** this receipt is the design's first — it was born (or first stocked) here */
+  created: boolean;
+  specsVerified: boolean;
+}
+
 type Res = { ok: boolean; error?: string };
 const fail = (error: string): Res => ({ ok: false, error });
 
@@ -264,8 +275,26 @@ export async function resolveGarmentDesign(input: {
   return { ok: true, designId: design.id, baseSku: first.baseSku, color, variantSkus, created: true };
 }
 
+/**
+ * Wholesale price of any already-priced sibling size in the (base_sku, colour)
+ * group, else 0. The Studio gate counts a group as priced when ANY variant is,
+ * so a new size seeded at ₹0 would pass the gate and then be refused by the cart.
+ */
+async function pricedSiblingPrice(baseSku: string, color: string): Promise<number> {
+  const admin = createAdminClient();
+  const prefix = `${baseSku}-`.toUpperCase();
+  const suffix = `-${color}`.toUpperCase();
+  const { data } = await admin.from("wholesale_products").select("sku, wholesale_price").ilike("sku", `${prefix}%${suffix}`).gt("wholesale_price", 0);
+  for (const p of data ?? []) {
+    const sku = String(p.sku).toUpperCase();
+    const size = sku.slice(prefix.length, sku.length - suffix.length);
+    if (sku.startsWith(prefix) && sku.endsWith(suffix) && size && !size.includes("-")) return Number(p.wholesale_price) || 0;
+  }
+  return 0;
+}
+
 /** §5.7 — save the whole delivery. */
-export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean; error?: string; receiptId?: string; receiptNumber?: string; skus?: string[] }> {
+export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean; error?: string; receiptId?: string; receiptNumber?: string; skus?: string[]; designs?: SavedDesign[] }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
   const admin = createAdminClient();
@@ -276,7 +305,22 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
   const clientRef = input.clientRef?.trim() || null;
   if (clientRef) {
     const { data: existing } = await admin.from("goods_receipts").select("id, receipt_number").eq("client_ref", clientRef).maybeSingle();
-    if (existing) return { ok: true, receiptId: existing.id, receiptNumber: existing.receipt_number };
+    if (existing) {
+      // Same shape as a fresh save so a replayed "Save & print tags" still stages its tray.
+      const { data: ls } = await admin.from("goods_receipt_lines").select("sku, design_id, description").eq("receipt_id", existing.id).order("position");
+      const lineRows = ls ?? [];
+      const ids = [...new Set(lineRows.map((l) => l.design_id).filter(Boolean))] as string[];
+      const ds = ids.length ? (await admin.from("designs").select("id, base_sku, color, title, specs_verified, first_receipt_id").in("id", ids)).data ?? [] : [];
+      const designs: SavedDesign[] = ds.map((d) => ({
+        id: d.id,
+        baseSku: d.base_sku,
+        color: d.color,
+        title: d.title || lineRows.find((l) => l.design_id === d.id)?.description || null,
+        created: d.first_receipt_id === existing.id,
+        specsVerified: !!d.specs_verified,
+      }));
+      return { ok: true, receiptId: existing.id, receiptNumber: existing.receipt_number, skus: lineRows.map((l) => l.sku), designs };
+    }
   }
 
   const today = istToday();
@@ -305,11 +349,25 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
   if (rErr) return fail(rErr.message);
 
   const allSkus: string[] = [];
+  const savedDesigns = new Map<string, SavedDesign>();
   let position = 0;
   for (const g of input.garments) {
     if (!g.designId || !g.baseSku) return fail("A garment is missing its design — re-open the card");
-    const { data: design } = await admin.from("designs").select("id, base_sku, color, first_receipt_id").eq("id", g.designId).maybeSingle();
+    const { data: design } = await admin.from("designs").select("id, base_sku, color, title, specs_verified, first_receipt_id").eq("id", g.designId).maybeSingle();
     if (!design) return fail("Design vanished mid-save — retry");
+    // Read BEFORE the update below stamps first_receipt_id — that is what "created here" means.
+    if (!savedDesigns.has(design.id)) {
+      savedDesigns.set(design.id, {
+        id: design.id,
+        baseSku: design.base_sku,
+        color: design.color,
+        title: design.title || g.description?.trim() || null,
+        created: !design.first_receipt_id,
+        specsVerified: !!design.specs_verified,
+      });
+    }
+    // A new size on an already-priced design inherits the sibling price.
+    const siblingPrice = await pricedSiblingPrice(design.base_sku, design.color);
 
     // Design-level: provenance, vendor, supply, ident (§5.7 / §5.9).
     const designPatch: Record<string, unknown> = {
@@ -359,11 +417,12 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
           category: null,
           sub_category: null,
           color: design.color,
-          wholesale_price: 0,
+          wholesale_price: siblingPrice,
           wholesale_visible: false,
           current_qty: 0,
           restockable: true,
-          locked_fields: ["wholesale_visible"], // sheet sync must not flip it
+          // sheet sync must not flip visibility, nor overwrite an inherited price
+          locked_fields: siblingPrice > 0 ? ["wholesale_visible", "wholesale_price"] : ["wholesale_visible"],
           synced_at: new Date().toISOString(),
         });
       } else if (hsnValue) {
@@ -398,7 +457,7 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
   });
   revalidatePath("/admin/receipts");
   revalidatePath("/admin/studio");
-  return { ok: true, receiptId: receipt.id, receiptNumber, skus: allSkus };
+  return { ok: true, receiptId: receipt.id, receiptNumber, skus: allSkus, designs: Array.from(savedDesigns.values()) };
 }
 
 /** Inline "+ New vendor" from the delivery screen (§5.2). */

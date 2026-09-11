@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { withFrom } from "@/components/BackLink";
 import { Search, X, ScanLine, Copy, Check, ImageOff } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { ZoomImage } from "@/components/Lightbox";
@@ -475,7 +476,7 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
                       </div>
                       <div className="text-right whitespace-nowrap">
                         <span className="font-body" style={{ fontSize: 11.5, color: palette.softBlack }}>{piecesOf(r.item)} pc</span>
-                        <Link href={`/admin/orders/${r.order.id}`} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.1em", color: palette.goldDeep, marginLeft: 10, textDecoration: "underline" }}>{r.order.order_number}</Link>
+                        <Link href={withFrom(`/admin/orders/${r.order.id}`, "/admin/dashboard")} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.1em", color: palette.goldDeep, marginLeft: 10, textDecoration: "underline" }}>{r.order.order_number}</Link>
                       </div>
                     </div>
                   ))}
@@ -501,7 +502,7 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
                       </div>
                       <div className="text-right whitespace-nowrap">
                         <span className="font-body" style={{ fontSize: 11.5, color: palette.softBlack }}>{piecesOf(r.item)} pc</span>
-                        <Link href={`/admin/orders/${r.order.id}`} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.1em", color: palette.goldDeep, marginLeft: 10, textDecoration: "underline" }}>{r.order.order_number}</Link>
+                        <Link href={withFrom(`/admin/orders/${r.order.id}`, "/admin/dashboard")} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.1em", color: palette.goldDeep, marginLeft: 10, textDecoration: "underline" }}>{r.order.order_number}</Link>
                       </div>
                     </div>
                   ))}
@@ -549,7 +550,7 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
                 {custSort.sorted.map((r) => (
                   <tr key={r.id} style={{ borderBottom: "1px solid rgba(26,26,26,0.07)" }}>
                     {td(
-                      <Link href={`/admin/buyers/${r.id}`} className="block">
+                      <Link href={withFrom(`/admin/buyers/${r.id}`, "/admin/dashboard")} className="block">
                         <span className="font-display" style={{ fontSize: 13, fontWeight: 500, borderBottom: `1px solid ${palette.gold}` }}>{r.buyer?.business_name ?? "Unknown buyer"}</span><br />
                         <span style={{ fontSize: 9, color: palette.mutedGreige }}>{[r.buyer?.owner_name, r.buyer?.city, r.buyer?.phone].filter(Boolean).join(" · ")}</span>
                       </Link>,

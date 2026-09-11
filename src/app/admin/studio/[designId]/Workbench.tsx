@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronDown, Check, X as XIcon, RefreshCw, SlidersHorizontal, Loader2, Camera, Upload, Crop as CropIcon, Columns2, Image as ImageIcon } from "lucide-react";
+import { ChevronDown, Check, X as XIcon, RefreshCw, SlidersHorizontal, Loader2, Camera, Upload, Crop as CropIcon, Columns2, Image as ImageIcon } from "lucide-react";
 import { ZoomImage } from "@/components/Lightbox";
+import { BackLink, withFrom } from "@/components/BackLink";
 import { palette } from "@/lib/palette";
 import { COPY_MODELS, estimateLabel } from "@/lib/studio/copy-models";
 import type { BoardRow, AngleDetail, CopyDetail, DesignImage } from "@/lib/studio/load";
@@ -379,11 +380,11 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
     );
   };
 
+  const specsHref = withFrom(`/admin/specs/${board.id}`, `/admin/studio/${board.id}`);
+
   return (
     <div className="px-4 md:px-8 py-6 max-w-3xl">
-      <Link href="/admin/studio" className="inline-flex items-center gap-1 font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.15em", color: palette.mutedGreige }}>
-        <ChevronLeft size={14} /> Studio
-      </Link>
+      <BackLink fallback="/admin/studio" fallbackLabel="Studio" />
 
       <div className="mt-4 flex items-start justify-between gap-3">
         <div>
@@ -420,11 +421,11 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               Folder
             </a>
           )}
-          <Link href={`/admin/specs/${board.id}`} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }} title="Specs & supply (no pricing — counter-device safe)">
+          <Link href={specsHref} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }} title="Specs, supply & wholesale price">
             Specs
           </Link>
-          <Link href={`/admin/studio/master/${board.id}`} aria-label="Product master" title="Product Master editor">
-            <SlidersHorizontal size={16} color={palette.mutedGreige} />
+          <Link href={`/admin/studio/master/${board.id}`} className="flex items-center gap-1 font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }} title="Product Master — per-size stock & wholesale price, MRP, HSN">
+            <SlidersHorizontal size={14} /> Master
           </Link>
         </span>
       </div>
@@ -446,7 +447,14 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               </summary>
               {!g.ready && t?.enabled !== false && (
                 <ul className="mt-1.5">
-                  {g.blockers.map((b) => <li key={b} className="font-body" style={{ fontSize: 10, color: palette.mutedGreige, lineHeight: 1.7 }}>· {b}</li>)}
+                  {g.blockers.map((b) => (
+                    <li key={b} className="font-body" style={{ fontSize: 10, color: palette.mutedGreige, lineHeight: 1.7 }}>
+                      · {b}
+                      {b === "Wholesale price not set" && (
+                        <> — <Link href={specsHref} style={{ color: palette.goldDeep, textDecoration: "underline" }}>Set price</Link></>
+                      )}
+                    </li>
+                  ))}
                 </ul>
               )}
               <button
