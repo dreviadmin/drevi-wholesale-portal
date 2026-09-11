@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireAdminOrRedirect, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { loadBuyerWallet } from "@/lib/credit-load";
 import { signedCardUrl } from "@/lib/storage";
 import { NotesPanel } from "@/components/admin/NotesPanel";
 import { listEntityNotes } from "@/lib/entity-notes";
@@ -17,14 +18,46 @@ export default async function BuyerDetailPage({ params }: { params: { id: string
   if (!buyer) notFound();
   const b = buyer as Buyer;
 
-  const [{ data: orders }, { data: audit }, { data: staffRows }] = await Promise.all([
+  const [{ data: orders }, { data: audit }, { data: staffRows }, wallet] = await Promise.all([
     admin.from("orders").select("id, order_number, total_amount, status, submitted_at").eq("buyer_id", b.id).order("submitted_at", { ascending: false }),
     admin.from("auth_audit_log").select("event_type, event_at, staff_user_id, notes").eq("buyer_id", b.id).order("event_at", { ascending: false }).limit(25),
     admin.from("staff_users").select("id, name"),
+    loadBuyerWallet(b.id),
   ]);
 
   const staffName = new Map<string, string>((staffRows ?? []).map((s) => [s.id, s.name ?? "Staff"]));
   const cardUrl = b.card_image_path ? await signedCardUrl(b.card_image_path) : null;
+
+  // The allocation map is flattened onto each note — a Map does not belong in
+  // a client component's props, and consumed/remaining is what the card shows.
+  const walletDTO = {
+    balance: wallet.balance,
+    notes: wallet.notes.map((n) => ({
+      id: n.id,
+      note_number: n.note_number,
+      kind: n.kind,
+      note_date: n.note_date,
+      created_at: n.created_at,
+      total: Number(n.total) || 0,
+      status: n.status,
+      reason: n.reason,
+      order_id: n.order_id,
+      source_bill_number: n.source_bill_number,
+      consumed: wallet.allocation.get(n.id)?.consumed ?? 0,
+      remaining: wallet.allocation.get(n.id)?.remaining ?? 0,
+    })),
+    entries: wallet.entries.map((e) => ({
+      id: e.id,
+      delta: Number(e.delta) || 0,
+      reason: e.reason,
+      note: e.note,
+      ref_type: e.ref_type,
+      ref_id: e.ref_id,
+      effective_date: e.effective_date,
+      created_at: e.created_at,
+      orderNumber: e.orderNumber ?? null,
+    })),
+  };
 
   return (
     <>
@@ -52,6 +85,7 @@ export default async function BuyerDetailPage({ params }: { params: { id: string
         cardUrl,
       }}
       orders={((orders ?? []) as Pick<Order, "id" | "order_number" | "total_amount" | "status" | "submitted_at">[])}
+      wallet={walletDTO}
       activity={(audit ?? []).map((a) => ({
         event_type: a.event_type,
         event_at: a.event_at,

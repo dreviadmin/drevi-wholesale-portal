@@ -429,7 +429,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
   };
 
   const here = useHere(`/admin/studio/${board.id}`);
-  const specsHref = withFrom(`/admin/specs/${board.id}`, here);
+  const specsHref = withFrom(`/admin/studio/master/${board.id}`, here);
 
   return (
     <div className="px-4 md:px-8 py-6 max-w-3xl">
@@ -470,11 +470,10 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               Folder
             </a>
           )}
-          <Link href={specsHref} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }} title="Specs, supply & wholesale price">
-            Specs
-          </Link>
-          <Link href={withFrom(`/admin/studio/master/${board.id}`, here)} className="flex items-center gap-1 font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }} title="Product Master — per-size stock & wholesale price, MRP, HSN">
-            <SlidersHorizontal size={14} /> Master
+          {/* One page for everything about the product (12 Sep) — specs,
+              supply, both prices, HSN, stock and the publish toggles. */}
+          <Link href={specsHref} className="flex items-center gap-1 font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }} title="Specs, supply, wholesale + retail price, HSN and stock">
+            <SlidersHorizontal size={14} /> Product details
           </Link>
         </span>
       </div>

@@ -19,6 +19,7 @@ export interface DashOrder {
   source: string;
   total_amount: number;
   advance_amount: number | null;
+  credit_applied: number | null;
   submitted_at: string;
   buyer_id: string;
   items: OrderItem[];
@@ -56,7 +57,7 @@ type Range = "today" | "7d" | "30d" | "mtd" | "all" | "custom";
 // Row shapes for the four tables (also used by their sort accessors).
 interface ProductRow { sku: string; title: string; image: string | null; pieces: number; value: number; orders: Set<string> }
 interface VendorRow { vendor: string; skus: Set<string>; pieces: number; value: number }
-interface CustomerRow { buyer: DashBuyer | null; id: string; orders: number; total: number; advance: number; pieces: number }
+interface CustomerRow { buyer: DashBuyer | null; id: string; orders: number; total: number; advance: number; creditApplied: number; pieces: number; credit: number }
 interface ReorderRow { p: DashProduct; v: VendorInfo | null; sold: number; gr: { cost: number; date: string } | null }
 
 const PRODUCT_ACC: Record<string, SortAccessor<ProductRow>> = {
@@ -77,7 +78,8 @@ const CUSTOMER_ACC: Record<string, SortAccessor<CustomerRow>> = {
   pieces: (r) => r.pieces,
   total: (r) => r.total,
   advance: (r) => r.advance,
-  balance: (r) => Math.max(0, r.total - r.advance),
+  credit: (r) => r.credit,
+  balance: (r) => Math.max(0, r.total - r.advance - r.creditApplied),
 };
 const REORDER_ACC: Record<string, SortAccessor<ReorderRow>> = {
   product: (r) => r.p.title ?? r.p.sku,
@@ -114,13 +116,17 @@ async function copyText(text: string): Promise<boolean> {
   } catch { return false; }
 }
 
-export function DashboardView({ orders, buyers, products, vendors, grBySku = {}, initialTab }: {
+export function DashboardView({ orders, buyers, products, vendors, grBySku = {}, creditByBuyer = {}, initialTab }: {
   orders: DashOrder[];
   buyers: DashBuyer[];
   products: DashProduct[];
   vendors: VendorInfo[];
   // Latest goods-receipt cost/date per SKU — shown beside the sheet columns.
   grBySku?: Record<string, { cost: number; date: string }>;
+  // Unspent wallet credit per buyer. A balance is all-time by nature, so it is
+  // deliberately NOT filtered by the date chips (a July return is still owed
+  // in September) — the tile and the column both say so on screen.
+  creditByBuyer?: Record<string, number>;
   initialTab?: Tab; // /admin/reorder opens straight on the Reorder view
 }) {
   const [tab, setTab] = useState<Tab>(initialTab ?? "products");
@@ -161,9 +167,17 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
   const tiles = useMemo(() => {
     const revenue = live.reduce((s, o) => s + (o.total_amount || 0), 0);
     const advance = live.reduce((s, o) => s + (o.advance_amount || 0), 0);
+    const creditApplied = live.reduce((s, o) => s + (Number(o.credit_applied) || 0), 0);
     const pieces = live.reduce((s, o) => s + (o.items ?? []).reduce((t, it) => t + piecesOf(it), 0), 0);
-    return { orders: live.length, revenue, advance, balance: Math.max(0, revenue - advance), pieces };
+    return { orders: live.length, revenue, advance, creditApplied, balance: Math.max(0, revenue - advance - creditApplied), pieces };
   }, [live]);
+
+  // What the business still owes its parties in unspent credit. All-time by
+  // definition, so it ignores the range chips.
+  const creditOutstanding = useMemo(
+    () => Object.values(creditByBuyer).reduce((s, v) => s + (Number(v) || 0), 0),
+    [creditByBuyer],
+  );
 
   // ---- By product -----------------------------------------------------------
   const byProduct = useMemo(() => {
@@ -204,17 +218,28 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
 
   // ---- By customer ----------------------------------------------------------
   const byCustomer = useMemo(() => {
-    const map = new Map<string, { buyer: DashBuyer | null; id: string; orders: number; total: number; advance: number; pieces: number }>();
+    const map = new Map<string, CustomerRow>();
+    const blank = (id: string): CustomerRow => ({
+      buyer: buyerById.get(id) ?? null, id, orders: 0, total: 0, advance: 0, creditApplied: 0, pieces: 0,
+      credit: Number(creditByBuyer[id]) || 0,
+    });
     for (const o of live) {
-      const e = map.get(o.buyer_id) ?? { buyer: buyerById.get(o.buyer_id) ?? null, id: o.buyer_id, orders: 0, total: 0, advance: 0, pieces: 0 };
+      const e = map.get(o.buyer_id) ?? blank(o.buyer_id);
       e.orders += 1;
       e.total += o.total_amount || 0;
       e.advance += o.advance_amount || 0;
+      e.creditApplied += Number(o.credit_applied) || 0;
       e.pieces += (o.items ?? []).reduce((t, it) => t + piecesOf(it), 0);
       map.set(o.buyer_id, e);
     }
+    // A party holding credit but with no order in the selected range is still a
+    // live liability — without this row their wallet is simply invisible here.
+    for (const [buyerId, balance] of Object.entries(creditByBuyer)) {
+      if (!(Number(balance) || 0)) continue;
+      if (!map.has(buyerId)) map.set(buyerId, blank(buyerId));
+    }
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
-  }, [live, buyerById]);
+  }, [live, buyerById, creditByBuyer]);
 
   // ---- Pending lines (18 Aug) ----------------------------------------------
   // What customers are still owed: every hold/unconfirmed line on an open
@@ -337,12 +362,15 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
     </button>
   );
 
-  const tile = (label: string, value: string, accent = false) => (
-    <div style={{ background: accent ? palette.black : palette.ivoryDeep, padding: "12px 14px", minWidth: 0 }}>
-      <div className="font-body uppercase truncate" style={{ fontSize: 8, letterSpacing: "0.16em", color: accent ? palette.champagne ?? palette.gold : palette.mutedGreige }}>{label}</div>
-      <div className="font-display truncate" style={{ fontSize: 19, fontWeight: 600, color: accent ? palette.ivory : palette.black, marginTop: 3 }}>{value}</div>
-    </div>
-  );
+  const tile = (label: string, value: string, accent = false, href?: string) => {
+    const body = (
+      <div style={{ background: accent ? palette.black : palette.ivoryDeep, padding: "12px 14px", minWidth: 0, height: "100%" }}>
+        <div className="font-body uppercase truncate" style={{ fontSize: 8, letterSpacing: "0.16em", color: accent ? palette.champagne ?? palette.gold : palette.mutedGreige }}>{label}</div>
+        <div className="font-display truncate" style={{ fontSize: 19, fontWeight: 600, color: accent ? palette.ivory : palette.black, marginTop: 3 }}>{value}</div>
+      </div>
+    );
+    return href ? <Link href={href} className="block">{body}</Link> : body;
+  };
 
   return (
     <div className="px-4 md:px-6 py-5 max-w-6xl">
@@ -365,13 +393,18 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
       </div>
 
       {/* Money tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 mt-3">
         {tile("Orders", String(tiles.orders))}
         {tile("Pieces", String(tiles.pieces))}
         {tile("Sales", formatINR(tiles.revenue), true)}
         {tile("Advance In", formatINR(tiles.advance))}
         {tile("Balance Due", formatINR(tiles.balance))}
+        {tile("Credit Outstanding", formatINR(creditOutstanding), false, withFrom("/admin/credit-notes", "/admin/dashboard"))}
       </div>
+      <p className="font-body mt-1.5" style={{ fontSize: 10, color: palette.mutedGreige }}>
+        Balance due is net of advances <i>and</i> of credit applied from returns. Credit outstanding is the live unspent
+        wallet total across all parties — it ignores the date range. Tap it for the credit-note register.
+      </p>
 
       {/* Tabs */}
       <div className="flex gap-1.5 overflow-x-auto no-scrollbar mt-5">
@@ -537,6 +570,11 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
 
         {tab === "customers" && (
           byCustomer.length === 0 ? <Empty label="No orders in this period." /> : (
+            <>
+            <p className="font-body mb-2" style={{ fontSize: 10, color: palette.mutedGreige }}>
+              Credit is a live all-time wallet balance and does not follow the date chips — a party holding credit but
+              with no order in this period still gets a row. Balance is net of advance and of credit applied.
+            </p>
             <table className="w-full" style={{ borderCollapse: "collapse" }}>
               <thead><tr style={{ borderBottom: `1px solid ${palette.black}` }}>
                 <SortTh label="Customer" k="customer" sort={custSort.sort} onToggle={custSort.toggle} />
@@ -544,6 +582,7 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
                 <SortTh label="Pieces" k="pieces" sort={custSort.sort} onToggle={custSort.toggle} right defaultDir="desc" />
                 <SortTh label="Total" k="total" sort={custSort.sort} onToggle={custSort.toggle} right defaultDir="desc" />
                 <SortTh label="Advance" k="advance" sort={custSort.sort} onToggle={custSort.toggle} right defaultDir="desc" />
+                <SortTh label="Credit" k="credit" sort={custSort.sort} onToggle={custSort.toggle} right defaultDir="desc" />
                 <SortTh label="Balance" k="balance" sort={custSort.sort} onToggle={custSort.toggle} right defaultDir="desc" />
               </tr></thead>
               <tbody>
@@ -560,8 +599,18 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
                     {td(formatINR(r.total), true, true)}
                     {td(formatINR(r.advance), true)}
                     {td(
-                      <span style={{ color: r.total - r.advance > 0 ? palette.crimsonText : palette.mutedGreige }}>
-                        {formatINR(Math.max(0, r.total - r.advance))}
+                      r.credit < 0
+                        // A negative wallet means more was spent than granted —
+                        // never show it as a quiet minus.
+                        ? <span style={{ color: palette.crimsonText, fontWeight: 600 }}>OVERDRAWN {formatINR(Math.abs(r.credit))}</span>
+                        : r.credit > 0
+                          ? <span style={{ color: palette.goldDeep }}>{formatINR(r.credit)}</span>
+                          : <span style={{ color: palette.mutedGreige }}>—</span>,
+                      true,
+                    )}
+                    {td(
+                      <span style={{ color: r.total - r.advance - r.creditApplied > 0 ? palette.crimsonText : palette.mutedGreige }}>
+                        {formatINR(Math.max(0, r.total - r.advance - r.creditApplied))}
                       </span>,
                       true,
                     )}
@@ -569,6 +618,7 @@ export function DashboardView({ orders, buyers, products, vendors, grBySku = {},
                 ))}
               </tbody>
             </table>
+            </>
           )
         )}
 

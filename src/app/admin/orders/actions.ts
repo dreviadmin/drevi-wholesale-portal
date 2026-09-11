@@ -187,7 +187,7 @@ export async function uploadTrackingSheet(
 export type OrderEditLine =
   | { kind: "keep"; index: number; qty: number; unitPrice: number; actualQty?: number | null }
   | { kind: "add"; sku: string; qty: number; unitPrice?: number | null; actualQty?: number | null }
-  | { kind: "custom"; title: string; sku?: string; qty: number; unitPrice: number; actualQty?: number | null };
+  | { kind: "custom"; title: string; sku?: string; qty: number; unitPrice: number; actualQty?: number | null; imageUrl?: string | null };
 
 // Full re-bill: the editor can change every billing term the cart page has —
 // tax mode/rate, discount, advance and payment. Omitted (undefined) terms keep
@@ -286,7 +286,9 @@ export async function updateOrderItems(
         qty,
         stock_state: "ready",
         restock_days: null,
-        image_url: null,
+        // Photo of the off-portal piece, snapped in the editor and uploaded to
+        // the public custom-items bucket — the invoice PDF fetches this URL.
+        image_url: (line.imageUrl ?? "").trim() || null,
         custom: true,
         ...(actualQty != null ? { actual_qty: actualQty } : {}),
       });
@@ -434,7 +436,9 @@ export async function updateOrderItems(
 
   // If the edit dropped the total below money already collected, surface the
   // refund owed rather than letting the balance silently clamp to zero.
-  const overpaidBy = advanceAmount > total ? Math.round((advanceAmount - total) * 100) / 100 : undefined;
+  const creditApplied = Number((order as { credit_applied?: number }).credit_applied) || 0;
+  const collected = advanceAmount + creditApplied;
+  const overpaidBy = collected > total ? Math.round((collected - total) * 100) / 100 : undefined;
   return { ok: true, total, overpaidBy };
 }
 

@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import { applyMovement, setStock } from "@/lib/stock-ledger";
+import type { SupplyBlock } from "@/app/admin/receipts/new/delivery-actions";
 
 // Product Master editor actions (build guide §12.1). Every save is admin+,
 // audit-logged, and — during the transition — writes ONLY to app-owned
@@ -21,26 +22,109 @@ function to99(n: number): number {
 
 export async function saveSpecs(
   designId: string,
-  patch: { fabric: string; handwork: string; origin: string; specsVerified: boolean },
+  patch: { fabric: string; handwork: string; origin: string; colorName?: string; specsVerified: boolean; supply?: SupplyBlock },
 ): Promise<Res> {
   let staff;
   try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
   const admin = createAdminClient();
-  const { error } = await admin
-    .from("designs")
-    .update({
-      fabric: patch.fabric || null,
-      handwork: patch.handwork || null,
-      origin: patch.origin || null,
-      specs_verified: patch.specsVerified,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", designId);
+
+  const update: Record<string, unknown> = {
+    fabric: patch.fabric || null,
+    handwork: patch.handwork || null,
+    origin: patch.origin || null,
+    // The human colour ("Champagne Gold") beside the SKU code — the copy and
+    // image prompts read it (Ansh, 3 Sep).
+    color_name: patch.colorName?.trim() || null,
+    specs_verified: patch.specsVerified,
+    updated_at: new Date().toISOString(),
+  };
+
+  // §5.9 write rule: only fields the form actually supplied overwrite, so a
+  // blank box never wipes what the delivery intake recorded.
+  const s = patch.supply ?? {};
+  const supplyTouched =
+    !!s.supplyMode || s.vendorStockQty != null || s.makingDays != null ||
+    s.makingMoq != null || s.deliveryDays != null || !!s.supplyNote?.trim();
+  if (s.supplyMode) update.supply_mode = s.supplyMode;
+  if (s.vendorStockQty != null) update.vendor_stock_qty = s.vendorStockQty;
+  if (s.makingDays != null) update.making_days = s.makingDays;
+  if (s.makingMoq != null) update.making_moq = s.makingMoq;
+  if (s.deliveryDays != null) update.delivery_days = s.deliveryDays;
+  if (s.supplyNote?.trim()) update.supply_note = s.supplyNote.trim();
+  if (supplyTouched) {
+    update.supply_updated_at = new Date().toISOString();
+    update.supply_updated_by = staff.email;
+  }
+
+  const { error } = await admin.from("designs").update(update).eq("id", designId);
   if (error) return fail(error.message);
-  await writeAuditEvent({ eventType: "catalog_edit", staffUserId: staff.id, notes: `master specs ${designId} (verified=${patch.specsVerified})` });
+  await writeAuditEvent({
+    eventType: "catalog_edit",
+    staffUserId: staff.id,
+    notes: `master specs ${designId} (verified=${patch.specsVerified}${supplyTouched ? ", supply updated" : ""})`,
+  });
   revalidatePath(`/admin/studio/master/${designId}`);
   revalidatePath("/admin/studio");
   return { ok: true };
+}
+
+/**
+ * ONE buyer-facing wholesale price for every size of the design (Ansh, 12 Sep:
+ * both prices belong in one place, beside the MRP).
+ *
+ * The price lives per size SKU (wholesale_products.wholesale_price — the same
+ * column Manage Catalog writes), so this is a group writer. Each row is
+ * updated on its own because locked_fields is per row, and the lock is what
+ * stops the 10-minute sheet sync from reverting the decision.
+ */
+export async function setGroupWholesalePrice(designId: string, price: number): Promise<Res & { count?: number }> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
+  // 0 is refused: a stray "0" on a phone keypad must never unprice and lock
+  // every size. Removing a price stays a per-size action below.
+  const p = Number(price);
+  if (!Number.isFinite(p) || p <= 0) return fail("Enter a price above ₹0");
+  const value = Math.round(p * 100) / 100;
+
+  const admin = createAdminClient();
+  const { data: design } = await admin.from("designs").select("base_sku, color").eq("id", designId).maybeSingle();
+  if (!design) return fail("Design not found");
+
+  const { data: variants, error: loadErr } = await admin
+    .from("wholesale_products")
+    .select("sku, wholesale_price, locked_fields")
+    .like("sku", `${design.base_sku}-%`);
+  if (loadErr) return fail(loadErr.message);
+  // `like` also matches sibling colours of the same base — filter on the
+  // suffix, upper-casing both sides.
+  const suffix = `-${String(design.color).toUpperCase()}`;
+  const mine = (variants ?? []).filter((v) => v.sku.toUpperCase().endsWith(suffix));
+  if (mine.length === 0) return fail("No size variants yet — log a delivery first");
+
+  for (const v of mine) {
+    const locks = new Set<string>(Array.isArray(v.locked_fields) ? v.locked_fields : []);
+    // A row already at this value AND locked needs nothing; an unlocked match
+    // still gets the lock, or the sheet sync could move it later.
+    if (Number(v.wholesale_price) === value && locks.has("wholesale_price")) continue;
+    locks.add("wholesale_price");
+    const { error } = await admin
+      .from("wholesale_products")
+      .update({ wholesale_price: value, locked_fields: [...locks] })
+      .eq("sku", v.sku);
+    if (error) return fail(`${v.sku}: ${error.message}`);
+  }
+
+  await writeAuditEvent({
+    eventType: "catalog_edit",
+    staffUserId: staff.id,
+    notes: `master wholesale price ${designId} — ₹${value} on ${mine.length} variant(s)`,
+  });
+  revalidatePath(`/admin/studio/master/${designId}`);
+  revalidatePath(`/admin/studio/${designId}`);
+  revalidatePath("/admin/studio");
+  revalidatePath("/admin/manage-catalog");
+  revalidatePath("/catalog");
+  return { ok: true, count: mine.length };
 }
 
 export async function savePricing(

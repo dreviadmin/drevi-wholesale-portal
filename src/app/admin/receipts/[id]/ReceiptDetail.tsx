@@ -141,7 +141,7 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus, designs }
                   <Link href={withFrom(`/admin/studio/master/${d.id}`, here)} className="font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
                     Product details
                   </Link>
-                  <Link href={withFrom(`/admin/specs/${d.id}`, here)} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
+                  <Link href={withFrom(`/admin/studio/master/${d.id}`, here)} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
                     Specs
                   </Link>
                 </div>

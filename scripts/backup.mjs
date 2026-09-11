@@ -16,21 +16,40 @@ import dotenv from "dotenv";
 
 dotenv.config({ path: join(dirname(fileURLToPath(import.meta.url)), "..", ".env.local") });
 
+// Mirrors BACKUP_TABLES in src/lib/backup.ts — backup-tables.test.ts fails the
+// build if the two lists (or the migrations) ever drift apart again.
 const TABLES = [
   "buyers",
-  "orders",
-  "carts",
   "staff_users",
-  "exhibition_sessions",
   "auth_audit_log",
+  "vendors",
   "wholesale_products",
   "product_vendor_info",
   "sync_ignored_skus",
-  "order_counters",
   "sku_registry",
-  "vendors",
+  "lovs",
+  "product_images",
+  "carts",
+  "orders",
+  "order_bills",
+  "order_counters",
+  "retail_bills",
+  "credit_notes",
+  "credit_ledger",
+  "exhibition_sessions",
   "goods_receipts",
   "goods_receipt_lines",
+  "stock_movements",
+  "designs",
+  "design_angles",
+  "design_images",
+  "design_copy",
+  "image_candidates",
+  "publish_targets",
+  "pipeline_jobs",
+  "entity_notes",
+  "notify_me",
+  "shopify_tokens",
 ];
 const KEEP = 14;
 const PAGE = 1000;
@@ -46,7 +65,11 @@ async function dumpTable(table) {
   const rows = [];
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await admin.from(table).select("*").range(from, from + PAGE - 1);
-    if (error) throw new Error(`${table}: ${error.message}`);
+    if (error) {
+      // Migration not run yet on this target — skip the table, keep the backup.
+      if (/does not exist|schema cache/i.test(error.message)) return null;
+      throw new Error(`${table}: ${error.message}`);
+    }
     rows.push(...(data ?? []));
     if (!data || data.length < PAGE) break;
   }
@@ -57,9 +80,11 @@ const stamp = new Date().toISOString().slice(0, 10);
 const out = {};
 let total = 0;
 for (const t of TABLES) {
-  out[t] = await dumpTable(t);
-  total += out[t].length;
-  console.log(`  ${t.padEnd(22)} ${out[t].length} rows`);
+  const rows = await dumpTable(t);
+  if (rows === null) { console.log(`  ${t.padEnd(22)} not found — skipped (migration pending)`); continue; }
+  out[t] = rows;
+  total += rows.length;
+  console.log(`  ${t.padEnd(22)} ${rows.length} rows`);
 }
 
 const file = join(dir, `backup-${stamp}.json.gz`);

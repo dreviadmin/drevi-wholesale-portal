@@ -21,7 +21,7 @@ export interface DriftRow {
 
 const REASON_LABEL: Record<string, string> = {
   reset: "Counted", receipt: "Received", order: "Ordered",
-  manual: "Manual edit", correction: "Correction", shopify_sync: "Shopify",
+  manual: "Manual edit", correction: "Correction", shopify_sync: "Shopify", return: "Returned",
 };
 
 function when(iso: string) {

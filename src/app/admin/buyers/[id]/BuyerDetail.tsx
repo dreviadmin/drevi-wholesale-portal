@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, Copy, MessageCircle, RefreshCw, UserPlus, Pencil, ImageOff } from "lucide-react";
+import { Eye, EyeOff, Copy, MessageCircle, RefreshCw, UserPlus, Pencil, ImageOff, Undo2 } from "lucide-react";
 import { BackLink, withFrom } from "@/components/BackLink";
 import { DraftNotice } from "@/components/DraftNotice";
 import { StatusPill } from "@/components/admin/Pills";
@@ -20,6 +20,7 @@ import {
   uploadBuyerCard,
 } from "@/app/admin/buyers/actions";
 import { buyerEditDraftKey, buyerEditSignature, type BuyerEditFields } from "@/app/admin/orders/[id]/EditBuyerButton";
+import { unapplyCredit } from "@/app/admin/credit-notes/actions";
 import { buildWhatsAppMessage, shareWhatsApp, buildVCard, downloadVCard } from "@/lib/share";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -52,6 +53,31 @@ type BuyerEditForm = BuyerEditFields & { other_details: string };
 interface OrderDTO { id: string; order_number: string; total_amount: number; status: OrderStatus; submitted_at: string; }
 interface ActivityDTO { event_type: AuditEventType; event_at: string; notes: string | null; staffName: string | null; }
 
+// Wallet (11 Sep). A credit note IS the grant, so the grants come from
+// credit_notes and credit_ledger carries consumption only; consumed/remaining
+// per note is the FIFO allocation computed server-side.
+interface WalletNoteDTO {
+  id: string; note_number: string; kind: string; note_date: string; created_at: string;
+  total: number; status: string; reason: string;
+  order_id: string | null; source_bill_number: string | null;
+  consumed: number; remaining: number;
+}
+interface WalletEntryDTO {
+  id: string; delta: number; reason: string; note: string | null;
+  ref_type: string | null; ref_id: string | null;
+  effective_date: string; created_at: string; orderNumber: string | null;
+}
+export interface WalletDTO { balance: number; notes: WalletNoteDTO[]; entries: WalletEntryDTO[] }
+
+// One timeline row: a grant (an issued note) or a consumption entry, in the
+// order the FIFO allocator uses so the running balance reconciles to the card.
+interface WalletEvent {
+  key: string; date: string; createdAt: string; delta: number;
+  title: string; sub: string;
+  href: string | null; pdfHref: string | null;
+  undoEntryId: string | null; voided: boolean;
+}
+
 const EVENT_LABEL: Record<string, string> = {
   credential_created: "Credentials created", credential_viewed: "Password viewed", credential_regenerated: "Password regenerated",
   credential_changed: "Password changed", credential_shared: "Credentials shared", login_success: "Login", login_failed: "Failed login",
@@ -60,8 +86,11 @@ const EVENT_LABEL: Record<string, string> = {
 const SOURCE_LABEL: Record<BuyerSource, string> = { inquiry_form: "Inquiry", exhibition: "Exhibition", manual_admin: "Manual" };
 function fmt(iso: string | null) { return iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"; }
 function fmtTime(iso: string) { return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }); }
+// note_date / effective_date are DATE columns — pinned to IST noon so a device
+// behind UTC doesn't render the day before.
+function fmtDay(day: string) { return new Date(`${day}T12:00:00+05:30`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }); }
 
-export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boolean; buyer: BuyerDTO; orders: OrderDTO[]; activity: ActivityDTO[] }) {
+export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet }: { isAdmin: boolean; buyer: BuyerDTO; orders: OrderDTO[]; activity: ActivityDTO[]; wallet: WalletDTO }) {
   const router = useRouter();
   const [isPending, start] = useTransition();
   const [showModal, setShowModal] = useState(false);
@@ -192,6 +221,65 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
 
   const totalSpend = orders.reduce((s, o) => s + o.total_amount, 0);
 
+  // ---- Wallet ---------------------------------------------------------------
+  const here = `/admin/buyers/${buyer.id}`;
+  // An application that has already been reversed carries an 'unapplied' row
+  // pointing back at it, and the DB allows exactly one — so Undo disappears
+  // rather than failing on the second tap.
+  const reversedEntryIds = new Set(
+    wallet.entries
+      .filter((e) => e.reason === "unapplied" && e.ref_type === "credit_ledger" && e.ref_id)
+      .map((e) => e.ref_id as string),
+  );
+  const walletEvents: WalletEvent[] = [
+    ...wallet.notes.map((n) => ({
+      key: `note:${n.id}`,
+      date: n.note_date,
+      createdAt: n.created_at,
+      // A voided note grants nothing; it stays in the history as the record.
+      delta: n.status === "issued" ? n.total : 0,
+      title: `${n.note_number} · ${n.kind === "return" ? "Return" : "Manual credit"}`,
+      sub: [n.reason, n.source_bill_number ? `against ${n.source_bill_number}` : null].filter(Boolean).join(" · "),
+      href: n.order_id ? withFrom(`/admin/orders/${n.order_id}`, here) : withFrom(`/admin/credit-notes?q=${encodeURIComponent(n.note_number)}`, here),
+      pdfHref: `/api/credit-notes/${n.id}/pdf`,
+      undoEntryId: null,
+      voided: n.status !== "issued",
+    })),
+    ...wallet.entries.map((e) => ({
+      key: `entry:${e.id}`,
+      date: e.effective_date,
+      createdAt: e.created_at,
+      delta: e.delta,
+      title:
+        e.reason === "applied"
+          ? `Applied to ${e.orderNumber ?? "an order"}`
+          : e.reason === "unapplied"
+            ? `Reversed — ${e.orderNumber ?? "order"}`
+            : "Refunded in cash",
+      sub: e.note ?? "",
+      href: e.ref_type === "order" && e.ref_id ? withFrom(`/admin/orders/${e.ref_id}`, here) : null,
+      pdfHref: null,
+      undoEntryId: e.reason === "applied" && !reversedEntryIds.has(e.id) ? e.id : null,
+      voided: false,
+    })),
+  ].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt) || a.key.localeCompare(b.key));
+  let running = 0;
+  const walletRows = walletEvents.map((ev) => {
+    running = Math.round((running + ev.delta) * 100) / 100;
+    return { ...ev, balance: running };
+  });
+  const openNotes = wallet.notes.filter((n) => n.status === "issued");
+
+  function undoApplication(entryId: string, title: string) {
+    if (!window.confirm(`Undo "${title}"? The credit goes back to this party's wallet and the order's balance due rises again.`)) return;
+    start(async () => {
+      const r = await unapplyCredit(entryId);
+      if (!r.ok) { flash(r.error ?? "Failed"); return; }
+      flash("Credit returned to the wallet");
+      router.refresh();
+    });
+  }
+
   return (
     <div className="px-4 md:px-8 py-6 max-w-3xl">
       <BackLink fallback="/admin/buyers" fallbackLabel="Buyers" />
@@ -239,6 +327,118 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity }: { isAdmin: boo
           </div>
         )}
       </div>
+
+      {/* Wallet — credit this party holds. The balance is derived from issued
+          notes less consumption, so it can never drift from the documents. */}
+      <section
+        className="mt-6"
+        style={{
+          border: `1px solid ${wallet.balance < 0 ? palette.crimsonBorder : "rgba(26,26,26,0.14)"}`,
+          background: wallet.balance < 0 ? palette.crimsonSoft : palette.ivoryDeep,
+          padding: "14px 16px",
+        }}
+      >
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <div className="font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.2em", color: palette.gold }}>Wallet</div>
+            {wallet.balance < 0 ? (
+              <>
+                <div className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.crimsonText, marginTop: 5 }}>
+                  OVERDRAWN — investigate
+                </div>
+                <div className="font-body" style={{ fontSize: 12, color: palette.crimsonText, marginTop: 3, lineHeight: 1.6, maxWidth: 460 }}>
+                  {formatINR(Math.abs(wallet.balance))} more credit has been spent than was ever granted. Undo an
+                  application below, or issue the credit note that should have backed it.
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="font-display" style={{ fontSize: 30, fontWeight: 600, color: palette.black, marginTop: 4 }}>
+                  {formatINR(wallet.balance)}
+                </div>
+                <div className="font-body" style={{ fontSize: 10.5, color: palette.mutedGreige, marginTop: 2 }}>
+                  Unspent credit · {openNotes.length} open note{openNotes.length === 1 ? "" : "s"}
+                </div>
+              </>
+            )}
+          </div>
+          {isAdmin && (
+            <div className="flex gap-2 flex-wrap justify-end">
+              <Link href={withFrom(`/admin/credit-notes/new?buyer=${buyer.id}`, here)} className="font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
+                Issue Credit Note
+              </Link>
+              <Link href={withFrom("/admin/credit-notes", here)} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
+                Credit Register
+              </Link>
+            </div>
+          )}
+        </div>
+
+        {/* Per note: how much of THIS credit is left. */}
+        {openNotes.length > 0 && (
+          <div className="mt-4">
+            <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>Open notes</div>
+            {openNotes.map((n) => (
+              <div key={n.id} className="flex items-center justify-between gap-3 py-1.5 flex-wrap" style={{ borderBottom: "1px solid rgba(26,26,26,0.07)" }}>
+                <span className="font-body" style={{ fontSize: 11.5, color: palette.black }}>
+                  {n.note_number}
+                  <span style={{ color: palette.mutedGreige }}> · {fmtDay(n.note_date)}</span>
+                </span>
+                <span className="font-body" style={{ fontSize: 11.5, color: palette.softBlack }}>
+                  {formatINR(n.total)} issued · {formatINR(n.consumed)} used ·{" "}
+                  <b style={{ color: n.remaining > 0 ? palette.goldDeep : palette.mutedGreige }}>{formatINR(n.remaining)} left</b>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* History, oldest first, so the running balance ends on the number above. */}
+        <div className="mt-4">
+          <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>History</div>
+          {walletRows.length === 0 ? (
+            <p className="font-body mt-1.5" style={{ fontSize: 11.5, color: palette.mutedGreige }}>
+              No credit yet — a return or a manual note starts the wallet.
+            </p>
+          ) : walletRows.map((r) => (
+            <div key={r.key} className="flex items-start justify-between gap-3 py-2 flex-wrap" style={{ borderBottom: "1px solid rgba(26,26,26,0.07)", opacity: r.voided ? 0.55 : 1 }}>
+              <div className="min-w-0">
+                <div className="font-body" style={{ fontSize: 12, color: palette.black }}>
+                  {r.href ? (
+                    <Link href={r.href} style={{ borderBottom: `1px solid ${palette.gold}` }}>{r.title}</Link>
+                  ) : r.title}
+                  {r.voided && <span className="font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.12em", color: palette.crimsonText, marginLeft: 8 }}>VOIDED</span>}
+                </div>
+                <div className="font-body" style={{ fontSize: 10.5, color: palette.mutedGreige }}>
+                  {fmtDay(r.date)}{r.sub ? ` · ${r.sub}` : ""}
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="font-body" style={{ fontSize: 12, color: r.delta > 0 ? palette.goldDeep : r.delta < 0 ? palette.crimsonText : palette.mutedGreige }}>
+                  {r.delta > 0 ? "+" : r.delta < 0 ? "−" : ""}{formatINR(Math.abs(r.delta))}
+                </span>
+                <span className="font-body" style={{ fontSize: 12, fontWeight: 600, color: r.balance < 0 ? palette.crimsonText : palette.black, minWidth: 72, textAlign: "right" }}>
+                  {formatINR(r.balance)}
+                </span>
+                {r.pdfHref && (
+                  <a href={r.pdfHref} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.goldDeep, textDecoration: "underline" }}>PDF</a>
+                )}
+                {isAdmin && r.undoEntryId && (
+                  <button
+                    type="button"
+                    disabled={isPending}
+                    onClick={() => undoApplication(r.undoEntryId!, r.title)}
+                    className="flex items-center gap-1 font-body uppercase disabled:opacity-40"
+                    style={{ fontSize: 8.5, letterSpacing: "0.1em", color: palette.mutedGreige }}
+                  >
+                    <Undo2 size={11} /> Undo
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
 
       {/* No credentials yet → set them (approves too when still pending) */}
       {isAdmin && !buyer.hasPassword && buyer.status !== "rejected" && (

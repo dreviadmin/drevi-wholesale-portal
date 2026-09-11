@@ -9,7 +9,11 @@ import { ORDER_STATUS_LABEL } from "@/lib/order-status";
 import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { effectiveLineState } from "@/lib/order-lines-core";
+import { returnedByBillLine, type CreditNoteLike } from "@/lib/credit-core";
 import type { Order, OrderBill, OrderItem } from "@/lib/types";
+
+/** Only what this page shows of a credit note — the note itself is staff-side. */
+type BuyerCreditNote = CreditNoteLike & { note_number: string };
 
 export const dynamic = "force-dynamic";
 
@@ -45,9 +49,48 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
   const items = Array.isArray(o.items) ? o.items : [];
   // Bills (18 Aug): RLS proved ownership on the order read above; the bills
   // themselves are fetched with the admin client (order_bills has no buyer
-  // policies) — scoped strictly to this order's id.
-  const { data: billRows } = await createAdminClient().from("order_bills").select("*").eq("order_id", o.id).order("seq");
+  // policies) — scoped strictly to this order's id. Credit notes (11 Sep) are
+  // read the same way for the same reason, so a returned line does not keep
+  // reading as plainly billed on the buyer's own page.
+  const admin = createAdminClient();
+  const [{ data: billRows }, { data: noteRows }] = await Promise.all([
+    admin.from("order_bills").select("*").eq("order_id", o.id).order("seq"),
+    admin
+      .from("credit_notes")
+      .select("id, note_number, status, order_bill_id, items")
+      .eq("order_id", o.id)
+      .eq("status", "issued")
+      .order("created_at"),
+  ]);
   const bills = (billRows ?? []) as OrderBill[];
+  const creditNotes = (noteRows ?? []) as BuyerCreditNote[];
+  const creditApplied = Number((order as Record<string, unknown>).credit_applied ?? 0) || 0;
+  const returnedQtyByBillLine = returnedByBillLine(creditNotes);
+
+  // The bill snapshot is the stable address for a return (orders.items is
+  // re-packed by Modify Order), so resolve each order line to its bill line —
+  // same order, sku-checked — before reading the returned quantity off it.
+  const billLineOf = new Map<number, { bill: OrderBill; billIndex: number }>();
+  const noteNumbersOf = new Map<string, string[]>();
+  for (const b of bills) {
+    let k = 0;
+    items.forEach((it, i) => {
+      if (it.billed_in !== b.id) return;
+      const snap = (b.items ?? [])[k];
+      if (snap && snap.sku === it.sku) billLineOf.set(i, { bill: b, billIndex: k });
+      k += 1;
+    });
+  }
+  for (const n of creditNotes) {
+    if (!n.order_bill_id) continue;
+    for (const line of n.items ?? []) {
+      if (line?.bill_line_index == null) continue;
+      const key = `${n.order_bill_id}:${line.bill_line_index}`;
+      const list = noteNumbersOf.get(key) ?? [];
+      if (!list.includes(n.note_number)) list.push(n.note_number);
+      noteNumbersOf.set(key, list);
+    }
+  }
   const maxLead = items
     .filter((i) => i.stock_state === "made_to_order")
     .reduce((m, i) => Math.max(m, i.restock_days ?? 0), 0);
@@ -56,7 +99,6 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
   const missingImg = items.filter((i) => !i.image_url).map((i) => i.sku);
   const imgBySku = new Map<string, string>();
   if (missingImg.length > 0) {
-    const admin = createAdminClient();
     const { data: prods } = await admin.from("wholesale_products").select("sku, image_urls").in("sku", missingImg);
     for (const p of prods ?? []) {
       const first = Array.isArray(p.image_urls) ? (p.image_urls as string[])[0] : undefined;
@@ -117,6 +159,23 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
                     );
                     return null;
                   })()}
+                  {/* A line that came back must not keep reading as plainly
+                      billed — the credit note is the buyer's own receipt for it. */}
+                  {(() => {
+                    const m = billLineOf.get(idx);
+                    if (!m) return null;
+                    const key = `${m.bill.id}:${m.billIndex}`;
+                    const back = returnedQtyByBillLine.get(key) ?? 0;
+                    if (back <= 0) return null;
+                    const billedQty = Number(m.bill.items[m.billIndex]?.qty) || 0;
+                    const nums = noteNumbersOf.get(key) ?? [];
+                    return (
+                      <div className="font-body mt-1" style={{ fontSize: 10.5, color: palette.crimsonText }}>
+                        Returned {back}{billedQty ? ` of ${billedQty}` : ""}
+                        {nums.length ? ` · credit note ${nums.join(", ")}` : ""}
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="text-right flex-shrink-0">
                   <div className="font-body" style={{ fontSize: 12, color: palette.softBlack }}>{it.qty} × {formatUnitINR(it.unit_price)}</div>
@@ -148,15 +207,26 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
         {o.tax_mode === "inclusive" && (
           <div className="font-body text-right mt-1" style={{ fontSize: 10, color: palette.mutedGreige }}>includes GST @ {o.tax_rate}% = {formatINR(o.tax_amount)}</div>
         )}
-        {(o.advance_amount ?? 0) > 0 && (
+        {/* Credit settles the order like an advance does, so this block mounts
+            for credit alone too — otherwise an order paid partly from the
+            buyer's own credit note showed the full balance. */}
+        {((o.advance_amount ?? 0) > 0 || creditApplied > 0) && (
           <div className="mt-3 p-3" style={{ background: palette.ivoryDeep }}>
-            <div className="flex justify-between font-body" style={{ fontSize: 12, color: palette.softBlack }}>
-              <span>Advance paid{o.payment_method ? ` (${o.payment_method})` : ""}</span>
-              <span>{formatINR(o.advance_amount)}</span>
-            </div>
+            {(o.advance_amount ?? 0) > 0 && (
+              <div className="flex justify-between font-body" style={{ fontSize: 12, color: palette.softBlack }}>
+                <span>Advance paid{o.payment_method ? ` (${o.payment_method})` : ""}</span>
+                <span>{formatINR(o.advance_amount)}</span>
+              </div>
+            )}
+            {creditApplied > 0 && (
+              <div className="flex justify-between font-body mt-1" style={{ fontSize: 12, color: palette.softBlack }}>
+                <span>Credit applied</span>
+                <span>− {formatINR(creditApplied)}</span>
+              </div>
+            )}
             <div className="flex justify-between font-body mt-1" style={{ fontSize: 13, color: palette.goldDeep, fontWeight: 600 }}>
               <span>Balance due</span>
-              <span>{formatINR(Math.max(0, o.total_amount - o.advance_amount))}</span>
+              <span>{formatINR(Math.max(0, o.total_amount - (o.advance_amount ?? 0) - creditApplied))}</span>
             </div>
           </div>
         )}

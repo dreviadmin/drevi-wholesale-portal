@@ -2,6 +2,9 @@ import "server-only";
 
 import { Document, Page, Text, View, Image, StyleSheet, renderToBuffer } from "@react-pdf/renderer";
 import type { Order, OrderItem } from "@/lib/types";
+import type { CreditLineSnapshot } from "@/lib/credit-core";
+import type { CreditNoteRow } from "@/lib/credit-load";
+import { billDateToIso } from "@/lib/order-lines-core";
 
 // Pre-fetched outfit thumbnails, keyed by SKU. Fetched OUTSIDE the renderer
 // (with timeouts + format sniffing) so a slow/broken CDN URL can never hang or
@@ -127,6 +130,14 @@ export interface BillMeta {
 export interface DocVariant {
   tagline?: string; // e.g. "RETAIL - INVOICE" (default: wholesale wording)
   metaLine?: string; // replaces the source line under the number
+  // Credit notes (11 Sep). Every field is optional and every default is the
+  // wording that shipped before, so existing callers are untouched.
+  docTitle?: string; // PDF metadata title + subject (else "Drevi Invoice <no>")
+  partyLabel?: string; // buyer-block heading (else "Order For")
+  referenceLine?: string; // under the number — a GST credit note must name the invoice it reverses
+  totalLabel?: string; // the totals-row label (else "Total")
+  footerNote?: string; // first footer line (else the invoice / order-request wording)
+  hideStockLabels?: boolean; // availability + lead time say nothing about goods that came back
 }
 
 function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; buyer: PdfBuyer; images: ImgMap; billMeta?: BillMeta; variant?: DocVariant }) {
@@ -147,9 +158,9 @@ function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; b
 
   return (
     <Document
-      title={`Drevi ${isInvoice ? "Invoice" : "Order"} ${order.order_number}`}
+      title={variant?.docTitle ?? `Drevi ${isInvoice ? "Invoice" : "Order"} ${order.order_number}`}
       author="Drevi Fashion"
-      subject={`${isInvoice ? "Invoice" : "Order request"} ${order.order_number}`}
+      subject={variant?.docTitle ?? `${isInvoice ? "Invoice" : "Order request"} ${order.order_number}`}
       creator="Drevi Wholesale Portal"
       producer="Drevi Wholesale Portal"
     >
@@ -163,11 +174,12 @@ function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; b
             <Text style={s.orderNo}>{order.order_number}</Text>
             <Text style={s.meta}>{date}</Text>
             <Text style={s.meta}>{variant?.metaLine ?? (billMeta ? `Bill ${billMeta.seq} against order ${billMeta.orderNumber}` : SOURCE_LABEL[order.source] ?? "Order")}</Text>
+            {variant?.referenceLine ? <Text style={s.meta}>{variant.referenceLine}</Text> : null}
           </View>
         </View>
 
         <View style={s.buyerBlock}>
-          <Text style={s.sectionLabel}>Order For</Text>
+          <Text style={s.sectionLabel}>{variant?.partyLabel ?? "Order For"}</Text>
           <Text style={s.buyerName}>{buyer.business_name ?? "-"}</Text>
           <Text style={s.meta}>{[buyer.owner_name, buyer.phone, buyer.city].filter(Boolean).join(" - ")}</Text>
         </View>
@@ -176,7 +188,7 @@ function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; b
         <View style={s.tableHead}>
           <Text style={[s.th, { width: 42 }]}> </Text>
           <Text style={[s.th, s.cItem]}>Item</Text>
-          <Text style={[s.th, s.cState]}>Availability</Text>
+          {variant?.hideStockLabels ? null : <Text style={[s.th, s.cState]}>Availability</Text>}
           <Text style={[s.th, s.cQty]}>Qty x Price</Text>
           <Text style={[s.th, s.cAmt]}>Amount</Text>
         </View>
@@ -193,7 +205,7 @@ function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; b
                 <Text style={s.itemTitle}>{it.title}</Text>
                 <Text style={s.sku}>{it.sku}{it.hsn ? `  ·  HSN ${it.hsn}` : ""}{it.special_request ? "  ·  SPECIAL QTY REQUEST" : ""}</Text>
               </View>
-              <Text style={[s.state, s.cState]}>{stateLabel(it)}</Text>
+              {variant?.hideStockLabels ? null : <Text style={[s.state, s.cState]}>{stateLabel(it)}</Text>}
               <Text style={[s.cQty, { fontSize: 9 }]}>
                 {/* "(was …)" marks a genuine discount — never printed for GST
                     bill-splits (actual_qty set), which must look like plain lines */}
@@ -229,7 +241,7 @@ function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; b
         )}
 
         <View style={s.totalRow}>
-          <Text style={s.totalLabel}>Total</Text>
+          <Text style={s.totalLabel}>{variant?.totalLabel ?? "Total"}</Text>
           <Text style={s.totalAmt}>{inr(order.total_amount)}</Text>
         </View>
         {taxed && order.tax_mode === "inclusive" && (
@@ -258,7 +270,7 @@ function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; b
           </View>
         )}
 
-        {maxLead > 0 && !billMeta && <Text style={s.lead}>Estimated availability: {maxLead} days</Text>}
+        {maxLead > 0 && !billMeta && !variant?.hideStockLabels && <Text style={s.lead}>Estimated availability: {maxLead} days</Text>}
         {billMeta && billMeta.pendingCount > 0 && (
           <Text style={s.lead}>
             {billMeta.pendingCount} item{billMeta.pendingCount === 1 ? "" : "s"} from this order await availability and will be billed separately.
@@ -273,9 +285,10 @@ function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; b
         )}
 
         <Text style={s.footer}>
-          {isInvoice
-            ? "Thank you for your business."
-            : "This is an order request, not an invoice. Rakesh will confirm availability and billing."}{"\n"}
+          {variant?.footerNote ??
+            (isInvoice
+              ? "Thank you for your business."
+              : "This is an order request, not an invoice. Rakesh will confirm availability and billing.")}{"\n"}
           Drevi Fashion - Dadar West, Mumbai - +91 88280 43555 - Dream Forward. Root Deep.
         </Text>
       </Page>
@@ -286,4 +299,96 @@ function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; b
 export async function renderOrderPdf(order: Order, buyer: PdfBuyer, billMeta?: BillMeta, variant?: DocVariant): Promise<Buffer> {
   const images = await fetchItemImages(order.items ?? []);
   return renderToBuffer(<OrderDoc order={order} buyer={buyer} images={images} billMeta={billMeta} variant={variant} />);
+}
+
+// The customer-facing wording for a credit: this document does not move money,
+// it records money held against the party's account with us.
+const CREDIT_FOOTER =
+  "This credit is held against your account with Drevi Fashion and can be set off against future purchases. It is not a payment receipt.";
+
+function longDate(ymd: string): string {
+  return new Date(billDateToIso(ymd)).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" });
+}
+
+/**
+ * Credit note PDF (11 Sep) — the invoice layout read the other way round, built
+ * from the note's OWN snapshot so it can be regenerated forever.
+ *
+ * Lines print their net_amount: this bill's discount share is already taken out
+ * of it, so the printed line totals add up to the credit that was actually
+ * granted instead of to a gross the buyer never paid. HSN travels with the
+ * snapshot (never re-looked-up from the catalog) because a GST credit note has
+ * to classify the goods exactly as the invoice did.
+ */
+export async function renderCreditNotePdf(note: CreditNoteRow, buyer: PdfBuyer): Promise<Buffer> {
+  const snapshot = (Array.isArray(note.items) ? note.items : []) as unknown as CreditLineSnapshot[];
+  const isManual = note.kind === "manual";
+  const reason = String(note.reason ?? "").trim();
+  const noteDate = String(note.note_date ?? "").slice(0, 10);
+  const sourceDate = String(note.source_bill_date ?? "").slice(0, 10);
+
+  // A manual note has no goods. Print the reason as its single line rather than
+  // sending the customer an empty table above a number.
+  const items: OrderItem[] = isManual
+    ? [
+        {
+          sku: "",
+          title: reason ? `Credit adjustment - ${reason}` : "Credit adjustment",
+          qty: 1,
+          unit_price: Number(note.subtotal) || Number(note.total) || 0,
+          stock_state: "ready",
+          restock_days: null,
+        },
+      ]
+    : snapshot.map((l) => {
+        const qty = Number(l.qty) || 0;
+        const net = Number(l.net_amount) || 0;
+        return {
+          sku: l.sku,
+          title: l.title ?? l.sku,
+          hsn: l.hsn ?? null,
+          qty,
+          // qty x unit is what the line prints, so the unit shown is the NET one.
+          unit_price: qty > 0 ? net / qty : 0,
+          stock_state: "ready",
+          restock_days: null,
+          image_url: l.image_url ?? null,
+        } as OrderItem;
+      });
+
+  const synthetic = {
+    order_number: note.note_number,
+    source: "in_store",
+    items,
+    total_amount: Number(note.total) || 0,
+    // The discount already sits inside each line's net amount — showing it as a
+    // deduction underneath would subtract it a second time.
+    discount_type: null,
+    discount_value: null,
+    discount_amount: 0,
+    tax_mode: note.tax_mode === "inclusive" || note.tax_mode === "exclusive" ? note.tax_mode : "none",
+    tax_rate: note.tax_rate == null ? null : Number(note.tax_rate),
+    tax_amount: Number(note.tax_amount) || 0,
+    advance_amount: 0,
+    payment_method: null,
+    notes: isManual || !reason ? null : `Reason for credit: ${reason}`,
+    submitted_at: noteDate ? billDateToIso(noteDate) : new Date().toISOString(),
+  } as unknown as Order;
+
+  const kindLine = isManual ? "Credit note — manual adjustment" : "Credit note — goods returned";
+  const voided = !!note.voided_at || note.status === "void";
+
+  return renderOrderPdf(synthetic, buyer, undefined, {
+    tagline: "CREDIT NOTE",
+    metaLine: voided ? `${kindLine} — VOIDED` : kindLine,
+    docTitle: `Drevi Credit Note ${note.note_number}`,
+    partyLabel: "Credit To",
+    referenceLine: note.source_bill_number
+      ? `Against invoice ${note.source_bill_number}${sourceDate ? ` dated ${longDate(sourceDate)}` : ""}`
+      : undefined,
+    totalLabel: "Credit total",
+    footerNote: voided ? `VOIDED — this credit note has been cancelled. ${CREDIT_FOOTER}` : CREDIT_FOOTER,
+    // "In Stock" / "Sold Out" beside goods that came back is nonsense.
+    hideStockLabels: true,
+  });
 }

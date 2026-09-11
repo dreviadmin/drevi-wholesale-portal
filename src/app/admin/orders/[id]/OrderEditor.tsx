@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { X, Plus, Search, ScanLine } from "lucide-react";
+import { X, Plus, Search, ScanLine, Camera, Image as ImageIcon } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { ZoomImage } from "@/components/Lightbox";
 import { DraftNotice } from "@/components/DraftNotice";
@@ -11,10 +11,75 @@ import { updateOrderItems, type OrderEditLine, type OrderEditTerms } from "@/app
 import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { useDraft } from "@/lib/useDraft";
+import { downscalePhoto } from "@/lib/downscale-photo";
+import { uploadCustomItemPhoto } from "@/app/admin/exhibition/actions";
 import type { DiscountType, OrderItem, TaxMode } from "@/lib/types";
 
 const PAY_METHODS = ["Cash", "UPI", "Bank", "Other"];
 const TAX_RATES = [5, 12, 18];
+
+// A custom line has no catalog photo, so the piece is unidentifiable on the
+// invoice and in history unless staff snap one here — the same camera/gallery
+// pair and public custom-items bucket the exhibition cart uses.
+function CustomPhoto({
+  line,
+  onChange,
+  onError,
+}: {
+  line: DraftLine;
+  onChange: (url: string | null) => void;
+  onError: (msg: string) => void;
+}) {
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function upload(file: File) {
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("image", await downscalePhoto(file));
+      const res = await uploadCustomItemPhoto(fd);
+      // An expired session makes the action resolve to undefined (auth redirect).
+      if (!res) { onError("Session expired — sign in again."); return; }
+      if (!res.ok) { onError(res.error ?? "Photo upload failed."); return; }
+      onChange(res.url ?? null);
+    } catch {
+      onError("Photo upload failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const pick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) upload(f);
+    e.currentTarget.value = "";
+  };
+  const btn = {
+    fontSize: 8.5, letterSpacing: "0.12em", padding: "5px 8px",
+    border: `1px solid ${palette.black}`, color: palette.black, background: "transparent",
+  } as const;
+
+  return (
+    <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={pick} />
+      <input ref={galleryRef} type="file" accept="image/*" className="hidden" onChange={pick} />
+      <button type="button" disabled={busy} onClick={() => cameraRef.current?.click()} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={btn}>
+        <Camera size={10} /> {line.image_url ? "Retake" : "Photo"}
+      </button>
+      <button type="button" disabled={busy} onClick={() => galleryRef.current?.click()} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={btn}>
+        <ImageIcon size={10} /> Gallery
+      </button>
+      {line.image_url && !busy && (
+        <button type="button" onClick={() => onChange(null)} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.mutedGreige, textDecoration: "underline" }}>
+          Remove
+        </button>
+      )}
+      {busy && <span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }}>Uploading…</span>}
+    </div>
+  );
+}
 
 export interface PickerProduct {
   sku: string;
@@ -327,7 +392,7 @@ export function OrderEditor({
       const unitPrice = billedUnit;
       const actualQty = f > 1 ? realQty : l.rawActual ?? null;
       if (l.kind === "keep") return { kind: "keep", index: l.index!, qty, unitPrice, actualQty };
-      if (l.kind === "custom") return { kind: "custom", title: l.title.trim(), qty, unitPrice, actualQty };
+      if (l.kind === "custom") return { kind: "custom", title: l.title.trim(), qty, unitPrice, actualQty, imageUrl: l.image_url };
       return { kind: "add", sku: l.sku, qty, unitPrice, actualQty };
     });
     const terms: OrderEditTerms = {
@@ -418,6 +483,13 @@ export function OrderEditor({
                       <div className="font-body" style={{ fontSize: 8.5, color: palette.mutedGreige, letterSpacing: "0.1em" }}>
                         {l.kind === "custom" ? "CUSTOM ITEM · NOT ON PORTAL" : `${l.sku}${l.kind === "add" ? " · NEW" : ""}`}
                       </div>
+                      {l.kind === "custom" && (
+                        <CustomPhoto
+                          line={l}
+                          onChange={(url) => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, image_url: url } : x)))}
+                          onError={setError}
+                        />
+                      )}
                     </div>
                     <button type="button" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} aria-label={`Remove ${l.sku}`} className="p-1">
                       <X size={14} color={palette.mutedGreige} />

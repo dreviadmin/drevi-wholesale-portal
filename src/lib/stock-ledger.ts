@@ -125,8 +125,8 @@ export async function postOrderMovements(
   // paths off the same flag means they can never double-move a line. Lines
   // explicitly on hold stay on the shelf through a whole-order confirm.
   const items = (order.items ?? []) as {
-    sku?: string; qty?: number; custom?: boolean;
-    line_state?: string | null; stock_moved?: boolean;
+    sku?: string; qty?: number; actual_qty?: number | null; custom?: boolean;
+    line_state?: string | null; stock_moved?: boolean; returned_qty?: number | null;
   }[];
   let lines = 0;
   const movedIdx: number[] = [];
@@ -134,7 +134,14 @@ export async function postOrderMovements(
     const it = items[i];
     // Custom items are not catalog SKUs and hold no stock.
     if (!it.sku || it.custom) continue;
-    const qty = Math.trunc(Number(it.qty) || 0);
+    // Stock moves in BILLED units everywhere (a GST bill-split line's qty),
+    // so a return nets off in the same units — mixing in actual_qty here
+    // would strand every order confirmed before this line was written.
+    const billed = Math.trunc(Number(it.qty) || 0);
+    // A credit note has already put returned pieces back (reason 'return'),
+    // so a later cancel must not return them a second time.
+    const returned = direction === "back" ? Math.trunc(Number(it.returned_qty) || 0) : 0;
+    const qty = Math.max(0, billed - returned);
     if (qty <= 0) continue;
     if (direction === "out") {
       if (it.stock_moved) continue;            // already left at line confirm
