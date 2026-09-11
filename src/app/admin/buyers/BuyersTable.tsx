@@ -27,7 +27,7 @@ const SOURCES: BuyerSource[] = ["inquiry_form", "exhibition", "manual_admin"];
 const SOURCE_LABEL: Record<BuyerSource, string> = { inquiry_form: "Inquiry", exhibition: "Exhibition", manual_admin: "Manual" };
 
 function fmtDate(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
+  return iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }) : "—";
 }
 // Numeric on purpose: useSort compares strings with localeCompare({numeric:true}),
 // which mis-orders ISO stamps whose fractional-second digits differ in length.

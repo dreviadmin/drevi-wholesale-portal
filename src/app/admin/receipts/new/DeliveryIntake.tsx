@@ -163,6 +163,7 @@ export function DeliveryIntake({
           identImageId: g.identImageId,
         })),
       });
+      if (!res) { flash("Session expired — sign in again; the delivery is kept as a draft"); return; }
       if (!res.ok) { flash(res.error ?? "Save failed"); return; }
       // §5.6 — Save & print tags stages EXACTLY this delivery's SKUs; Save only
       // queues them behind whatever the device already has in the tray.
@@ -314,6 +315,7 @@ export function DeliveryIntake({
                 <div className="flex gap-2">
                   <button type="button" disabled={pending || !newVendor.name.trim()} onClick={() => startTransition(async () => {
                     const r = await quickAddVendor(newVendor.name, newVendor.phone);
+                    if (!r) { flash("Session expired — sign in again"); return; }
                     if (!r.ok) { flash(r.error ?? "Failed"); return; }
                     setVendors((vs) => [...vs, { id: r.id!, name: r.name!, city: null }].sort((a, b) => a.name.localeCompare(b.name)));
                     setVendorId(r.id!); setNewVendor(null); flash(`${r.name} added`);
@@ -533,6 +535,8 @@ function GarmentSheet({
         description: g.description,
         sizes,
       });
+      // An expired session makes the action resolve to undefined (auth redirect).
+      if (!res) { flash("Session expired — sign in again; your garment is kept as a draft"); return; }
       if (!res.ok) { flash(res.error ?? "Could not mint"); return; }
       setG((s) => ({ ...s, designId: res.designId, baseSku: res.baseSku, color: res.color, variantSkus: res.variantSkus ?? [] }));
       flash(res.created ? `Minted ${res.baseSku}` : `${res.variantSkus?.length} SKU(s) ready`);
@@ -545,6 +549,7 @@ function GarmentSheet({
       const fd = new FormData();
       fd.set("photo", file);
       const res = await uploadIdentPhoto(g.designId!, fd);
+      if (!res) { flash("Session expired — sign in again; your garment is kept as a draft"); return; }
       if (!res.ok) { flash(res.error ?? "Upload failed"); return; }
       setG((s) => ({ ...s, identImageId: res.imageId, identRef: res.fileRef ?? null }));
       flash("Ident photo saved");

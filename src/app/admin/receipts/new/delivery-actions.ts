@@ -285,12 +285,16 @@ async function pricedSiblingPrice(baseSku: string, color: string): Promise<numbe
   const prefix = `${baseSku}-`.toUpperCase();
   const suffix = `-${color}`.toUpperCase();
   const { data } = await admin.from("wholesale_products").select("sku, wholesale_price").ilike("sku", `${prefix}%${suffix}`).gt("wholesale_price", 0);
+  // Inherit only when every priced size agrees; mixed per-size prices leave
+  // the new size at 0 (unlocked) so the Specs page's mixed-price hint asks a
+  // human instead of locking a guess.
+  const seen = new Set<number>();
   for (const p of data ?? []) {
     const sku = String(p.sku).toUpperCase();
     const size = sku.slice(prefix.length, sku.length - suffix.length);
-    if (sku.startsWith(prefix) && sku.endsWith(suffix) && size && !size.includes("-")) return Number(p.wholesale_price) || 0;
+    if (sku.startsWith(prefix) && sku.endsWith(suffix) && size && !size.includes("-")) seen.add(Number(p.wholesale_price) || 0);
   }
-  return 0;
+  return seen.size === 1 ? [...seen][0] : 0;
 }
 
 /** §5.7 — save the whole delivery. */

@@ -30,7 +30,7 @@ const BADGE_STYLE: Record<DesignBadge, { bg: string; fg: string }> = {
   changes_pending: { bg: "#F7DFDC", fg: "#9C3A31" },
 };
 
-const fmtAdded = (iso: string) => (iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—");
+const fmtAdded = (iso: string) => (iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }) : "—");
 
 export function StudioBoard({ rows }: { rows: BoardRow[] }) {
   const router = useRouter();

@@ -26,8 +26,8 @@ export async function GET() {
     desc: string; variantCount: number; variants: { sku: string; size: string; color: string }[]; latestTs: string;
   }
   const byBase = new Map<string, BaseEntry>();
+  const cats = (await loadVocab()).categories;
   for (const r of data ?? []) {
-    const cats = (await loadVocab()).categories;
     const e: BaseEntry = byBase.get(r.base_sku) ?? {
       base: r.base_sku,
       cat: r.category,

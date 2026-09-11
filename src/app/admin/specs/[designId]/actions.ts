@@ -24,12 +24,13 @@ export async function saveSpecsAndSupply(
   try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized" }; }
   const admin = createAdminClient();
 
-  // Blank/absent = no-op (never write 0). Validate before any write so an
+  // Blank/absent = no-op, and 0 is refused (a stray "0" on the phone keypad
+  // must never unprice and lock every size). Validate before any write so an
   // invalid price cannot leave the specs half-saved.
   let price: number | null = null;
   if (input.wholesalePrice != null) {
     const p = Number(input.wholesalePrice);
-    if (!Number.isFinite(p) || p < 0) return { ok: false, error: "Wholesale price must be a number ≥ 0" };
+    if (!Number.isFinite(p) || p <= 0) return { ok: false, error: "Enter a price above ₹0 — to remove a price use the Product Master" };
     price = Math.round(p * 100) / 100;
   }
 

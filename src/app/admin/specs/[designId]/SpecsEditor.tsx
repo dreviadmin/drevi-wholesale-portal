@@ -70,15 +70,21 @@ export function SpecsEditor({ design }: { design: DesignFields }) {
       colorName: design.colorName, specsVerified: design.specsVerified,
     },
     supply: design.supply,
-    price: initialPrice,
+    // null = untouched: the input shows the live server prefill, so a draft
+    // restored after someone repriced in the Product Master never re-submits
+    // the old price. Only a typed value is persisted.
+    price: null as string | null,
   };
   const seedSig = JSON.stringify(seed);
   const [draft, setDraft, draftMeta] = useDraft(`drevi:draft:specs:${design.id}`, seed, {
-    base: design.updatedAt ?? seedSig,
+    // Price lives on the variants (not designs.updated_at), so it is part of
+    // the staleness signature too.
+    base: `${design.updatedAt ?? seedSig}|${initialPrice}`,
     hasContent: (d) => JSON.stringify(d) !== seedSig,
     onRestore: (d) => ({ ...seed, ...d }),
   });
-  const { fields, supply, price } = draft;
+  const { fields, supply } = draft;
+  const price = draft.price ?? initialPrice;
   const setFields = (fn: (f: typeof seed.fields) => typeof seed.fields) => setDraft((d) => ({ ...d, fields: fn(d.fields) }));
   const setSupply = (fn: (s: SupplyBlock) => SupplyBlock) => setDraft((d) => ({ ...d, supply: fn(d.supply) }));
   const setPrice = (p: string) => setDraft((d) => ({ ...d, price: p }));
@@ -113,7 +119,8 @@ export function SpecsEditor({ design }: { design: DesignFields }) {
 
   function flash(msg: string) {
     setToast(msg);
-    setTimeout(() => setToast(null), 2400);
+    // Failures (partial saves, refused prices) stay long enough to be read.
+    setTimeout(() => setToast(null), msg === "Saved" ? 2400 : 6000);
   }
 
   function save() {
@@ -122,7 +129,7 @@ export function SpecsEditor({ design }: { design: DesignFields }) {
     let wholesalePrice: number | null = null;
     if (raw !== "" && !(initialPrice !== "" && Number(raw) === Number(initialPrice))) {
       const n = Number(raw);
-      if (!Number.isFinite(n) || n < 0) { flash("Wholesale price must be a number ≥ 0"); return; }
+      if (!Number.isFinite(n) || n <= 0) { flash("Enter a price above ₹0 — to remove a price use the Product Master"); return; }
       wholesalePrice = n;
     }
     startTransition(async () => {
@@ -218,8 +225,8 @@ export function SpecsEditor({ design }: { design: DesignFields }) {
       </div>
 
       {toast && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 font-body px-4 py-2 flex items-center gap-2" style={{ background: palette.black, color: palette.ivory, fontSize: 12 }}>
-          <Check size={13} color={palette.gold} /> {toast}
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 font-body px-4 py-2 flex items-start gap-2 whitespace-normal" style={{ background: toast === "Saved" ? palette.black : "#9C3A31", color: palette.ivory, fontSize: 12, maxWidth: "calc(100vw - 2rem)", width: "max-content" }}>
+          <Check size={13} color={palette.gold} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{toast}</span>
         </div>
       )}
       <KeyboardInset />
