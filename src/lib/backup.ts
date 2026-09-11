@@ -56,24 +56,35 @@ export interface BackupPayload {
   exported_at: string;
   row_count: number;
   tables: Record<string, unknown[]>;
+  /** Tables skipped because they do not exist yet (migration pending). */
+  warnings?: string[];
 }
 
 export async function exportAllTables(): Promise<BackupPayload> {
   const admin = createAdminClient();
   const tables: Record<string, unknown[]> = {};
+  const warnings: string[] = [];
   let row_count = 0;
   for (const t of BACKUP_TABLES) {
     const rows: unknown[] = [];
+    let missing = false;
     for (let from = 0; ; from += PAGE) {
       const { data, error } = await admin.from(t).select("*").range(from, from + PAGE - 1);
-      if (error) throw new Error(`${t}: ${error.message}`);
+      if (error) {
+        // A table whose migration has not run yet (code deploys before
+        // db:migrate) must not cost us the other 30 tables — the whole point
+        // of this export is that it still runs on a bad day.
+        if (/does not exist|schema cache/i.test(error.message)) { missing = true; break; }
+        throw new Error(`${t}: ${error.message}`);
+      }
       rows.push(...(data ?? []));
       if (!data || data.length < PAGE) break;
     }
+    if (missing) { warnings.push(`${t}: table not found — skipped`); continue; }
     tables[t] = rows;
     row_count += rows.length;
   }
-  return { exported_at: new Date().toISOString(), row_count, tables };
+  return { exported_at: new Date().toISOString(), row_count, tables, warnings };
 }
 
 // --- Storage backup (audit fix) ---------------------------------------------

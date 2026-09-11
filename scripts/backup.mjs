@@ -65,7 +65,11 @@ async function dumpTable(table) {
   const rows = [];
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await admin.from(table).select("*").range(from, from + PAGE - 1);
-    if (error) throw new Error(`${table}: ${error.message}`);
+    if (error) {
+      // Migration not run yet on this target — skip the table, keep the backup.
+      if (/does not exist|schema cache/i.test(error.message)) return null;
+      throw new Error(`${table}: ${error.message}`);
+    }
     rows.push(...(data ?? []));
     if (!data || data.length < PAGE) break;
   }
@@ -76,9 +80,11 @@ const stamp = new Date().toISOString().slice(0, 10);
 const out = {};
 let total = 0;
 for (const t of TABLES) {
-  out[t] = await dumpTable(t);
-  total += out[t].length;
-  console.log(`  ${t.padEnd(22)} ${out[t].length} rows`);
+  const rows = await dumpTable(t);
+  if (rows === null) { console.log(`  ${t.padEnd(22)} not found — skipped (migration pending)`); continue; }
+  out[t] = rows;
+  total += rows.length;
+  console.log(`  ${t.padEnd(22)} ${rows.length} rows`);
 }
 
 const file = join(dir, `backup-${stamp}.json.gz`);
