@@ -199,13 +199,19 @@ default".
   - **Destination strip** — the same gate functions the pushes use, showing
     per-portal (wholesale / Shopify) blockers truthfully. Pushes create
     DRAFT products while `SHOPIFY_ENABLED` is off.
-- **Product Master** (`/admin/studio/master/[designId]`) — the admin editor
-  behind the workbench: specs (fabric, handwork, origin) with the
-  **"Confirmed by Rakesh"** verification flag that unlocks copy; pricing
-  (last ex-GST cost from receipts → tier multiplier → auto-MRP ₹…99 with
-  manual override); **HSN (all sizes)**; supplier availability; per-variant
-  rows with stock, wholesale price and the **"kept at" physical location**
-  field.
+- **Product Master** (`/admin/studio/master/[designId]`) — **the** product
+  page in the Studio (12 Sep: one page, not two). Specs (fabric, handwork,
+  origin, **Colour** — the name a customer would say, which feeds the AI copy
+  and photo prompts) with the **"Confirmed by Rakesh"** flag that unlocks copy;
+  **both prices together** — last ex-GST cost from receipts → tier multiplier →
+  auto-MRP ₹…99 with override (retail), and the buyer-facing **Wholesale price
+  (all sizes)** beside it, written to every size SKU with the sheet-sync lock
+  (₹0 is refused; sizes priced differently are listed rather than silently
+  flattened, and per-size overrides stay in the Sizes section); **HSN (all
+  sizes)**; editable **supplier availability**; per-variant rows with stock,
+  wholesale price and the "kept at" location; and the publish toggles.
+  `/admin/specs/[designId]` — a cost-free twin from retrofit R4 §6.2, whose
+  premise died when floor scope was never built — now redirects here.
 - **Specs page** (`/admin/specs/[designId]`) — the spec + supply editor for
   counter devices. Fields (3 Sep): Fabric, Handwork, Origin and **Colour**
   (the human name beside the SKU code — it feeds the AI copy and photo
@@ -305,6 +311,32 @@ default".
     bill amount with a mismatch badge, scan-in lines, edit/delete with audit
     trail. The receipt detail shows the GST line ("Pakka · GST 5% (incl.)")
     and links every line to its product / specs / studio pages.
+- **Credit notes & wallets** (`/admin/credit-notes`, 12 Sep) — returns and the
+  credit they create. A **return** is raised from a billed order line (Orders →
+  the order → **Return**): pick lines and quantities (capped at what is still
+  returnable), tick which pieces go back on the shelf, give a reason and a
+  date, and the preview shows the credit before you commit. The credit is the
+  line's share of what was actually **charged** — the source bill's discount is
+  allocated pro-rata and its tax mode reproduced, so returning a whole bill
+  credits exactly that bill's total (a refund of the pre-discount price would
+  hand back money the buyer never paid). Numbered `CN-YYYYMMDD-NNN`, snapshotted
+  with HSN and a reference to the original invoice, rendered as a **CREDIT
+  NOTE** PDF at `/api/credit-notes/[id]/pdf`. **Manual** credit notes (goodwill,
+  adjustments) are issued to any buyer from the same register.
+  **The note is the grant**: a party's wallet balance is the sum of its issued
+  notes less what has been spent, so a note can never exist without the credit
+  behind it. Credit is applied to an order from the order page — serialised by a
+  row-locking RPC so two tabs cannot spend the same balance twice — shows as
+  *Credit applied* beside the advance, and is subtracted from balance due
+  everywhere (order page, orders list, buyer's own order page, dashboard tiles
+  and the attention inbox). Each application can be **undone** from the buyer's
+  Wallet card, which also shows per-note *issued / used / left*. **Voiding** a
+  note takes the credit back, frees the returned quantity so the line can be
+  returned again, and reverses exactly the stock that actually posted — and is
+  **refused** while the credit is still spent, naming the amount to unapply
+  first. Returned goods post their own `return` reason in the stock ledger.
+  *(Retail-bill returns are not in this version — retail still uses Void /
+  Modify bill.)*
 - **Buyers** (`/admin/buyers`) — sortable/filterable table with WhatsApp
   links, pending-review counter, add-buyer flow. The buyer page has
   credential management (create / reveal / regenerate / change / share, all
@@ -681,3 +713,18 @@ docs/                  TEST-REPORT, CUTOVER-RUNBOOK, NEEDED-FROM-ANSH, DECISIONS
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+
+**Backups** — `/api/cron/backup` exports every table in `BACKUP_TABLES` as
+gzipped JSON; a GitHub Action pulls it **hourly** into a private 90-day
+artifact (off Supabase, since the free tier has no managed backups), and
+`npm run db:backup` keeps 14 daily copies in `.local/backups/`. Storage
+buckets holding irreplaceable records (visiting cards, custom-item photos,
+vendor bills, note photos) ride along once daily; `order-pdfs`,
+`product-photos` and `product-images` are deliberately excluded as
+regenerable. **12 Sep:** the table list had drifted since Phase 1 — the whole
+Studio, the stock ledger, both billing tables and the LoVs were outside every
+backup taken since they shipped. All 31 tables are covered now and
+`src/lib/backup-tables.test.ts` fails the build if a migration adds a table
+nobody backs up; a table whose migration has not run yet is skipped with a
+warning instead of aborting the export.
