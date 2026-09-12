@@ -9,6 +9,7 @@ import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { palette } from "@/lib/palette";
 import { formatINR } from "@/lib/format";
 import type { BuyerHomeData } from "@/lib/buyer-home";
+import { BuyerWalletCard, type BuyerWallet } from "@/components/BuyerWalletCard";
 import { addToCart } from "@/app/cart/actions";
 import { notifyMe, dismissNotify } from "./actions";
 
@@ -20,11 +21,12 @@ const STRIP_LABEL: Record<string, string> = {
   submitted: "received", confirmed: "confirmed", packed: "being packed", out_for_delivery: "out for delivery",
 };
 
-export function BuyerHome({ businessName, city, cartCount, data }: {
+export function BuyerHome({ businessName, city, cartCount, data, wallet }: {
   businessName: string;
   city: string | null;
   cartCount: number;
   data: BuyerHomeData;
+  wallet?: BuyerWallet | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -80,6 +82,9 @@ export function BuyerHome({ businessName, city, cartCount, data }: {
       </div>
 
       <div className="px-4 py-4 max-w-3xl mx-auto">
+        {/* Credit held with Drevi — renders nothing unless there is some. */}
+        <BuyerWalletCard wallet={wallet ?? null} />
+
         {/* Active order strip */}
         {data.activeOrder && (
           <Link href={`/order/${data.activeOrder.id}`} className="flex items-center gap-3 p-3.5 mb-4" style={{ background: "#fff", border: "1px solid #cfdae4", borderRadius: 12 }}>

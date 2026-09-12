@@ -3,6 +3,9 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight, LogOut } from "lucide-react";
 import { logout } from "@/app/actions";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { loadBuyerWalletPublic } from "@/lib/credit-load";
+import { BuyerWalletCard, type BuyerWallet } from "@/components/BuyerWalletCard";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { Order } from "@/lib/types";
@@ -36,6 +39,19 @@ export default async function OrderHistoryPage() {
     .select("id, order_number, total_amount, status, submitted_at")
     .order("submitted_at", { ascending: false });
 
+  // Credit lives behind RLS-with-no-policies, so it is read with the admin
+  // client against the buyer row this session authenticated as.
+  let wallet: BuyerWallet | null = null;
+  if (user.email) {
+    const { data: rows } = await createAdminClient()
+      .from("buyers")
+      .select("id")
+      .eq("email", user.email)
+      .not("encrypted_password", "is", null)
+      .limit(1);
+    if (rows?.[0]) wallet = await loadBuyerWalletPublic(rows[0].id as string);
+  }
+
   const list = (orders ?? []) as Pick<Order, "id" | "order_number" | "total_amount" | "status" | "submitted_at">[];
 
   return (
@@ -53,6 +69,8 @@ export default async function OrderHistoryPage() {
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-5">
+        <BuyerWalletCard wallet={wallet} />
+
         {list.length === 0 ? (
           <div className="text-center py-20 font-body" style={{ color: palette.mutedGreige, fontSize: 12, letterSpacing: "0.1em", lineHeight: 1.8 }}>
             No orders yet.

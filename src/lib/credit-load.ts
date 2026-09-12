@@ -215,6 +215,47 @@ export async function loadBuyerWallet(buyerId: string): Promise<{
 }
 
 /**
+ * What a logged-in BUYER may see of their own wallet.
+ *
+ * Deliberately narrow: a balance, what each note granted and what is left of
+ * it, and where credit went. No staff notes, no cost, no other party's data —
+ * the buyer app's pricing firewall (BuyerHome §13) applies here too. Read with
+ * the admin client because credit_notes/credit_ledger are RLS-on with no
+ * policies, so the caller MUST pass a buyer id it has already authenticated.
+ */
+export async function loadBuyerWalletPublic(buyerId: string): Promise<{
+  balance: number;
+  notes: { id: string; number: string; date: string; total: number; remaining: number; reason: string; voided: boolean }[];
+  history: { id: string; date: string; amount: number; orderNumber: string | null; kind: "credited" | "used" | "returned" }[];
+}> {
+  const { balance, notes, entries, allocation } = await loadBuyerWallet(buyerId);
+  return {
+    balance,
+    notes: notes.map((n) => ({
+      id: n.id,
+      number: n.note_number,
+      date: n.note_date,
+      total: Number(n.total) || 0,
+      remaining: allocation.get(n.id)?.remaining ?? 0,
+      reason: n.reason,
+      voided: n.status !== "issued",
+    })),
+    history: [
+      ...notes
+        .filter((n) => n.status === "issued")
+        .map((n) => ({ id: n.id, date: n.note_date, amount: Number(n.total) || 0, orderNumber: null, kind: "credited" as const })),
+      ...entries.map((e) => ({
+        id: e.id,
+        date: e.effective_date,
+        amount: Number(e.delta) || 0,
+        orderNumber: e.orderNumber ?? null,
+        kind: (Number(e.delta) < 0 ? "used" : "returned") as "used" | "returned",
+      })),
+    ].sort((a, b) => b.date.localeCompare(a.date)),
+  };
+}
+
+/**
  * The register. Paged with .range() — an un-ranged select would silently stop
  * at PostgREST's 1000-row cap once the series grows.
  */
