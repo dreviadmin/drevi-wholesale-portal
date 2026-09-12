@@ -3,6 +3,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadBuyerHome } from "@/lib/buyer-home";
 import { getDetailedCart } from "@/lib/cart";
+import { loadBuyerWalletPublic } from "@/lib/credit-load";
 import { BuyerHome } from "./BuyerHome";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +25,11 @@ export default async function BuyerHomePage() {
   const buyer = rows?.[0];
   if (!buyer || buyer.status !== "active") redirect("/login");
 
-  const [data, cart] = await Promise.all([loadBuyerHome(buyer.id), getDetailedCart(buyer.id)]);
+  const [data, cart, wallet] = await Promise.all([
+    loadBuyerHome(buyer.id),
+    getDetailedCart(buyer.id),
+    loadBuyerWalletPublic(buyer.id),
+  ]);
   const cartCount = cart.totalQty;
 
   return (
@@ -33,6 +38,7 @@ export default async function BuyerHomePage() {
       city={buyer.city ?? null}
       cartCount={cartCount}
       data={data}
+      wallet={wallet}
     />
   );
 }
