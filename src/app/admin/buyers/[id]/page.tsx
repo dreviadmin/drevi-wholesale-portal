@@ -6,6 +6,7 @@ import { signedCardUrl } from "@/lib/storage";
 import { NotesPanel } from "@/components/admin/NotesPanel";
 import { listEntityNotes } from "@/lib/entity-notes";
 import { BuyerDetail } from "./BuyerDetail";
+import { loadChangeRequests } from "../actions";
 import type { Buyer, Order } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -18,11 +19,12 @@ export default async function BuyerDetailPage({ params }: { params: { id: string
   if (!buyer) notFound();
   const b = buyer as Buyer;
 
-  const [{ data: orders }, { data: audit }, { data: staffRows }, wallet] = await Promise.all([
+  const [{ data: orders }, { data: audit }, { data: staffRows }, wallet, changeRequests] = await Promise.all([
     admin.from("orders").select("id, order_number, total_amount, status, submitted_at").eq("buyer_id", b.id).order("submitted_at", { ascending: false }),
     admin.from("auth_audit_log").select("event_type, event_at, staff_user_id, notes").eq("buyer_id", b.id).order("event_at", { ascending: false }).limit(25),
     admin.from("staff_users").select("id, name"),
     loadBuyerWallet(b.id),
+    loadChangeRequests(b.id),
   ]);
 
   const staffName = new Map<string, string>((staffRows ?? []).map((s) => [s.id, s.name ?? "Staff"]));
@@ -86,6 +88,7 @@ export default async function BuyerDetailPage({ params }: { params: { id: string
       }}
       orders={((orders ?? []) as Pick<Order, "id" | "order_number" | "total_amount" | "status" | "submitted_at">[])}
       wallet={walletDTO}
+      changeRequests={changeRequests}
       activity={(audit ?? []).map((a) => ({
         event_type: a.event_type,
         event_at: a.event_at,

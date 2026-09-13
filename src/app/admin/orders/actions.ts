@@ -826,7 +826,7 @@ export async function recaptureDocumentParty(
   // What the documents print TODAY — the honest "before" for the audit note,
   // including the live fallback for a row that predates its snapshot.
   const before = await resolveDocumentParty(admin, o, o.buyer_id);
-  const party = await captureBuyerSnapshot(admin, o.buyer_id, "issue");
+  const party = await captureBuyerSnapshot(admin, o.buyer_id, "recapture");
   const after: BuyerParty = {
     business_name: party.buyer_business_name,
     owner_name: party.buyer_owner_name,

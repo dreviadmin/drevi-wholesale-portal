@@ -23,7 +23,7 @@ export interface BuyerParty {
 }
 
 /** Provenance — see the 0047 header. */
-export type SnapshotSource = "issue" | "issue_backdated" | "queued" | "backfill";
+export type SnapshotSource = "issue" | "issue_backdated" | "queued" | "backfill" | "recapture";
 
 /** The columns to spread into a document INSERT. */
 export interface BuyerSnapshotColumns {

@@ -124,6 +124,13 @@ begin
 end $$;
 
 -- ── backfill ────────────────────────────────────────────────────────────────
+-- CAVEAT ADDED AFTER REVIEW: this became only partly true in the same change.
+-- The party block now also prints the recipient GSTIN and address, so a REPRINT
+-- of a pre-0047 document shows a GSTIN that was never on the copy the customer
+-- holds - including for a buyer who registered for GST after that document was
+-- issued. The backfill froze today values, not the values of that day. Raised
+-- with Ansh for his accountant; nothing on the page yet says a reprint differs.
+--
 -- These UPDATEs do NOT change what a legacy document prints today: the on-demand
 -- order route and the credit-note route already render from exactly these
 -- values, which is the bug. They freeze what is currently printed so the NEXT

@@ -161,7 +161,11 @@ function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; b
   const discount = order.discount_amount ?? 0;
   const advance = order.advance_amount ?? 0;
   const balance = Math.max(0, (order.total_amount ?? 0) - advance);
-  const showBreakdown = discount > 0 || (taxed && order.tax_mode === "exclusive");
+  // Any taxed document shows its breakdown, not just the exclusive ones. On a
+  // GST tax invoice the taxable value has to be legible on the page; under
+  // inclusive mode it used to be absent entirely, leaving the reader to
+  // subtract the footnote from the total to find it.
+  const showBreakdown = discount > 0 || taxed;
 
   return (
     <Document
@@ -246,7 +250,13 @@ function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; b
             <Text style={{ fontSize: 9 }}>- {inr(discount)}</Text>
           </View>
         )}
-        {taxed && order.tax_mode === "exclusive" && (
+        {taxed && order.tax_mode === "inclusive" && (
+          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 3 }}>
+            <Text style={{ fontSize: 9, color: C.greige }}>Taxable value</Text>
+            <Text style={{ fontSize: 9 }}>{inr(order.total_amount - order.tax_amount)}</Text>
+          </View>
+        )}
+        {taxed && (
           <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 3 }}>
             <Text style={{ fontSize: 9, color: C.greige }}>GST @ {order.tax_rate}%</Text>
             <Text style={{ fontSize: 9 }}>{inr(order.tax_amount)}</Text>

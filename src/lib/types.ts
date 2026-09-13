@@ -68,7 +68,7 @@ export interface DocumentBuyerSnapshot {
   buyer_address?: string | null;
   /** Null means "no snapshot on this row" — the only flag the render path branches on. */
   buyer_snapshot_at?: string | null;
-  buyer_snapshot_source?: "issue" | "issue_backdated" | "queued" | "backfill" | null;
+  buyer_snapshot_source?: "issue" | "issue_backdated" | "queued" | "backfill" | "recapture" | null;
 }
 
 // Every column a BUYER surface may select. select("*") on buyer pages ships

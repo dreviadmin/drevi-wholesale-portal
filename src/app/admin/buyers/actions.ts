@@ -319,36 +319,70 @@ export async function addBuyer(form: {
 
 // Full buyer profile edit from the admin buyer page. Email is deliberately
 // excluded — it's the login username and belongs to the credential flow.
+const PROFILE_FIELDS = [
+  "business_name", "owner_name", "phone", "city",
+  "gstin", "address", "transport_details", "broker_details", "other_details",
+] as const;
+type ProfileField = (typeof PROFILE_FIELDS)[number];
+
 export async function updateBuyerProfile(
   buyerId: string,
-  form: {
-    business_name?: string; owner_name?: string; phone?: string; city?: string;
-    gstin?: string; address?: string; transport_details?: string; broker_details?: string; other_details?: string;
-  },
+  form: Partial<Record<ProfileField, string>>,
 ): Promise<{ ok: boolean; error?: string }> {
-  try { await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
+  let staff;
+  try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
   if (!buyerId) return { ok: false, error: "No buyer to update." };
-  if (!form.business_name?.trim() && !form.owner_name?.trim() && !form.phone?.trim()) {
+
+  const admin = createAdminClient();
+  const { data: current } = await admin
+    .from("buyers")
+    .select(PROFILE_FIELDS.join(", "))
+    .eq("id", buyerId)
+    .maybeSingle();
+  if (!current) return { ok: false, error: "Buyer not found." };
+  const row = current as unknown as Record<ProfileField, string | null>;
+
+  // PATCH, not overwrite. Callers send only the fields their form owns — the
+  // order-page editor has no other_details, and BuyerDetail sends just the
+  // fields the admin actually edited — so writing the whole column set would
+  // NULL everything the caller left out. A staff member fixing a typo in the
+  // city would have wiped the buyer's GSTIN, address and phone, which now also
+  // means wiping what a buyer set for themselves at /account/details.
+  //
+  // Only genuinely-changed fields are written, so a save that touches nothing
+  // neither writes nor audits.
+  const next: Record<string, string | null> = {};
+  for (const k of PROFILE_FIELDS) {
+    if (!(k in form)) continue;
+    const value = form[k]?.trim() || null;
+    if (value !== (row[k] ?? null)) next[k] = value;
+  }
+
+  // The invariant holds over the RESULTING row, not over the patch: a patch of
+  // { city } says nothing about whether the buyer still has a name.
+  const merged = { ...row, ...next };
+  if (!merged.business_name?.trim() && !merged.owner_name?.trim() && !merged.phone?.trim()) {
     return { ok: false, error: "Keep at least one of business name, owner name, or phone." };
   }
-  const admin = createAdminClient();
-  const { error } = await admin
-    .from("buyers")
-    .update({
-      business_name: form.business_name?.trim() || null,
-      owner_name: form.owner_name?.trim() || null,
-      phone: form.phone?.trim() || null,
-      city: form.city?.trim() || null,
-      gstin: form.gstin?.trim() || null,
-      address: form.address?.trim() || null,
-      transport_details: form.transport_details?.trim() || null,
-      broker_details: form.broker_details?.trim() || null,
-      // The order-page editor has no other_details field; only a form that
-      // carries the key may overwrite it.
-      ...("other_details" in form ? { other_details: form.other_details?.trim() || null } : {}),
-    })
-    .eq("id", buyerId);
+
+  const changed = Object.keys(next);
+  if (changed.length === 0) return { ok: true };
+
+  const { error } = await admin.from("buyers").update(next).eq("id", buyerId);
   if (error) return { ok: false, error: error.message };
+
+  // Which fields moved, never their values — this log is read through a shared
+  // 300-row window and buyer identity is not the place for it.
+  const { ip, userAgent } = reqMeta();
+  await writeAuditEvent({
+    eventType: "buyer_profile_updated",
+    buyerId,
+    staffUserId: staff.id,
+    ipAddress: ip,
+    userAgent,
+    notes: `staff edit: ${changed.join(", ")}`,
+  });
+
   revalidate(buyerId);
   return { ok: true };
 }
