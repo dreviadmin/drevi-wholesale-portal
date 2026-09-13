@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Playfair_Display, Cormorant_Garamond, Montserrat } from "next/font/google";
 import { KeyboardInset } from "@/components/KeyboardInset";
+import { InstallPrompt } from "@/components/InstallPrompt";
 import "./globals.css";
 
 const playfair = Playfair_Display({
@@ -61,6 +62,7 @@ export default function RootLayout({
       <body className="font-body antialiased bg-page-bg text-black">
         <KeyboardInset />
         {children}
+        <InstallPrompt />
       </body>
     </html>
   );

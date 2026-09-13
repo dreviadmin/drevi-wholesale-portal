@@ -17,9 +17,11 @@
  * Rakesh through the Phase 3 credential modal.
  */
 import { createInterface } from "node:readline/promises";
+import crypto from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 
+const buyerOnly = process.argv.includes("--buyer-only");
 const target = process.argv.includes("--prod") || process.env.DB_TARGET === "prod" ? "prod" : "dev";
 const envFile = target === "prod" ? ".env.local" : ".env.development.local";
 dotenv.config({ path: envFile, override: true });
@@ -46,6 +48,19 @@ if (target === "prod") {
 }
 
 const admin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
+
+// Mirrors src/lib/crypto.ts: AES-256-GCM, payload = base64( iv[12] | tag[16] | ct ).
+// Must stay byte-compatible or /admin/buyers "reveal password" cannot decrypt it.
+function encryptPassword(plaintext) {
+  const raw = process.env.PORTAL_PASSWORD_MASTER_KEY;
+  if (!raw) throw new Error("PORTAL_PASSWORD_MASTER_KEY missing — buyer credentials cannot be written.");
+  const key = Buffer.from(raw, "base64");
+  if (key.length !== 32) throw new Error("PORTAL_PASSWORD_MASTER_KEY must decode to 32 bytes.");
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const enc = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), enc]).toString("base64");
+}
 
 async function findUserByEmail(email) {
   // Paginate listUsers (no direct get-by-email in the admin API).
@@ -93,7 +108,7 @@ const TEST_BUYER = {
 async function main() {
   console.log("Seeding auth users…\n");
 
-  for (const s of STAFF) {
+  for (const s of buyerOnly ? [] : STAFF) {
     const { created } = await ensureAuthUser(s.email, s.password);
     console.log(`  staff   ${s.email}  →  ${s.password}  (${created ? "created" : "updated"})`);
   }
@@ -105,20 +120,33 @@ async function main() {
     return;
   }
   const { created } = await ensureAuthUser(TEST_BUYER.email, TEST_BUYER.password);
-  const { error: upsertErr } = await admin.from("buyers").upsert(
-    {
-      email: TEST_BUYER.email,
-      business_name: TEST_BUYER.business_name,
-      owner_name: TEST_BUYER.owner_name,
-      phone: TEST_BUYER.phone,
-      city: TEST_BUYER.city,
-      status: "active",
-      source: "manual_admin",
-      approved_at: new Date().toISOString(),
-    },
-    { onConflict: "email" },
-  );
-  if (upsertErr) throw upsertErr;
+
+  // encrypted_password is NOT optional. login/actions.ts, /home, /cart and
+  // /account/orders all select buyers with .not("encrypted_password", "is", null),
+  // so a buyer row without it authenticates and then bounces straight back to
+  // /login — which is exactly what this script used to produce.
+  const row = {
+    email: TEST_BUYER.email,
+    business_name: TEST_BUYER.business_name,
+    owner_name: TEST_BUYER.owner_name,
+    phone: TEST_BUYER.phone,
+    city: TEST_BUYER.city,
+    status: "active",
+    source: "manual_admin",
+    encrypted_password: encryptPassword(TEST_BUYER.password),
+    approved_at: new Date().toISOString(),
+  };
+
+  // NOT upsert(onConflict:"email"): buyers.email has no unique constraint
+  // (duplicate buyer rows are legitimate), so that call errors outright.
+  const { data: existing } = await admin.from("buyers").select("id").eq("email", TEST_BUYER.email).limit(1);
+  if (existing && existing.length > 0) {
+    const { error } = await admin.from("buyers").update(row).eq("id", existing[0].id);
+    if (error) throw error;
+  } else {
+    const { error } = await admin.from("buyers").insert(row);
+    if (error) throw error;
+  }
   console.log(`\n  buyer   ${TEST_BUYER.email}  →  ${TEST_BUYER.password}  (${created ? "created" : "updated"}, status=active)`);
 
   console.log("\nDone. Log in at /login with any of the above.");
