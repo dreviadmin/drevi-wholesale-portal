@@ -26,8 +26,13 @@ export async function GET(req: Request) {
     status: 200,
     headers: {
       "Content-Type": img.contentType,
-      // Private cache: fine to reuse within the tab session; never on a CDN.
-      "Cache-Control": "private, max-age=3600",
+      // no-store, not "private, max-age=3600" (13 Sep). These are private
+      // vendor, visiting-card and note photos behind a staff session, and the
+      // response carries no Vary: Cookie — so the browser's own disk cache had
+      // no user dimension and would repaint them for the next person on a
+      // shared showroom tablet, for an hour, with no request reaching us.
+      // "private" only bars shared caches; it explicitly permits that one.
+      "Cache-Control": "private, no-store",
     },
   });
 }

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 // Public paths — no auth required. Everything else is gated.
-const PUBLIC_PATHS = ["/", "/login", "/forgot-password", "/wholesale"];
+const PUBLIC_PATHS = ["/", "/login", "/forgot-password", "/wholesale", "/~offline"];
 const PUBLIC_PREFIXES = ["/api/cron", "/api/dev", "/api/health"];
 
 function isPublic(pathname: string): boolean {
@@ -98,5 +98,16 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   // Run on everything except Next internals and static files.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
+  //
+  // The PWA files MUST be listed here (Ansh, 13 Sep). Until now /sw.js and
+  // /manifest.json fell through to the auth gate and 307'd to /login, which is
+  // a spec-level service-worker registration failure — so the PWA had never
+  // installed for anyone logged out, and /login is the only page a logged-out
+  // visitor sees. For signed-in users it was role-dependent: staff hit the
+  // buyer branch and got redirected to /admin, so registration failed for them
+  // too. workbox-*.js and fallback-*.js are importScripts'd BY the worker, so
+  // they need the same treatment. These are static build artefacts with no
+  // session to refresh, so skipping middleware entirely is both correct and
+  // cheaper than adding them to PUBLIC_PATHS (which still costs a getUser()).
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest\\.json|sw\\.js|workbox-[^/]+\\.js|fallback-[^/]+\\.js|swe-worker-[^/]+\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
 };
