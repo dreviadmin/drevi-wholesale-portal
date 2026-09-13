@@ -9,6 +9,7 @@ import { NotesPanel } from "@/components/admin/NotesPanel";
 import { listEntityNotes } from "@/lib/entity-notes";
 import { OrderActions } from "./OrderActions";
 import { EditBuyerButton } from "./EditBuyerButton";
+import { RecaptureParty } from "./RecaptureParty";
 import { LineHsnEditor } from "./LineHsnEditor";
 import { listKnownHsnCodes } from "@/lib/hsn";
 import { OrderEditor, type PickerProduct } from "./OrderEditor";
@@ -16,6 +17,7 @@ import { LineStateControls, GenerateBillBar } from "./LineBilling";
 import { ReturnPanel, ApplyCreditBar, type ReturnPanelLine } from "./ReturnPanel";
 import { effectiveLineState, billableLines, computeBillTotals } from "@/lib/order-lines-core";
 import { loadOrderCredit, loadBuyerWallet } from "@/lib/credit-load";
+import { resolveDocumentParty } from "@/lib/buyer-snapshot";
 import type { Order, OrderBill } from "@/lib/types";
 import { productionMoqFlag, supplyAge, type SupplyInput } from "@/lib/availability";
 
@@ -32,7 +34,7 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   const { data: order } = await admin.from("orders").select("*").eq("id", params.id).maybeSingle();
   if (!order) notFound();
   const o = order as Order;
-  const [{ data: buyer }, { data: takenBy }, { data: billRows }, credit, wallet] = await Promise.all([
+  const [{ data: buyer }, { data: takenBy }, { data: billRows }, credit, wallet, printedParty] = await Promise.all([
     admin.from("buyers").select("business_name, owner_name, phone, city, gstin, address, transport_details, broker_details").eq("id", o.buyer_id).maybeSingle(),
     o.assisted_by
       ? admin.from("staff_users").select("name, email").eq("id", o.assisted_by).maybeSingle()
@@ -40,6 +42,9 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
     admin.from("order_bills").select("*").eq("order_id", o.id).order("seq"),
     loadOrderCredit(o.id),
     loadBuyerWallet(o.buyer_id),
+    // What this order's documents PRINT today (0047) — the buyers row above is
+    // only what they would print after a correction. Never the same read.
+    resolveDocumentParty(admin, o, o.buyer_id),
   ]);
   const bills = (billRows ?? []) as OrderBill[];
   const billNumberById = new Map(bills.map((b) => [b.id, b.bill_number]));
@@ -165,6 +170,30 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
                   broker_details: buyer.broker_details ?? "",
                 }}
               />
+            )}
+            {/* Editing the buyer no longer reaches an issued document — the
+                party is frozen on it (0047). This is the only way back from a
+                party recorded wrong, so it sits next to Edit and looks nothing
+                like it. */}
+            {buyer && isAdminRole(staff.role) && (
+              <>
+                {" "}
+                <RecaptureParty
+                  orderId={o.id}
+                  orderNumber={o.order_number}
+                  billCount={bills.length}
+                  creditNoteCount={credit.notes.length}
+                  printed={printedParty}
+                  current={{
+                    business_name: buyer.business_name ?? null,
+                    owner_name: buyer.owner_name ?? null,
+                    phone: buyer.phone ?? null,
+                    city: buyer.city ?? null,
+                    gstin: buyer.gstin ?? null,
+                    address: buyer.address ?? null,
+                  }}
+                />
+              </>
             )}
           </div>
           <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige, letterSpacing: "0.04em" }}>
