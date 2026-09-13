@@ -87,6 +87,29 @@ const withPWA = withPWAInit({
       // against the webpack asset name ("static/chunks/app/admin/..."), which
       // has no /_next/ prefix, so a URL-shaped regex silently matches nothing.
       ({ asset }) => asset.name.startsWith("static/chunks/app/admin/"),
+
+      // Server-side build output must never reach a browser. next-pwa appends
+      // its own server/ exclusion, but empirically it does not catch these
+      // under this Next version — replacing the default exclude array left 51
+      // /_next/server/* client-reference manifests and the build-manifest JSONs
+      // in the precache, which the previous worker did not ship. Matched on the
+      // asset name in both possible shapes.
+      ({ asset }) => /(^|\/)server\//.test(asset.name),
+      ({ asset }) => /(^|\/)((app-)?build-manifest|react-loadable-manifest)\.json$/.test(asset.name),
+    ],
+
+    // Belt and braces: the same exclusion applied to the emitted manifest, so
+    // it holds regardless of the asset-name prefix webpack happens to use.
+    // Runs before next-pwa's own transform, hence the prefix-agnostic regexes.
+    manifestTransforms: [
+      (entries) => ({
+        manifest: entries.filter(
+          (e) =>
+            !/(^|\/)server\//.test(e.url) &&
+            !/(^|\/)((app-)?build-manifest|react-loadable-manifest)\.json$/.test(e.url),
+        ),
+        warnings: [],
+      }),
     ],
 
     runtimeCaching: [

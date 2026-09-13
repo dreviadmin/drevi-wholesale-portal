@@ -1,9 +1,11 @@
 // Regenerates the PWA icon set from the brand lockup.
 //
-// Source of truth: public/brand/drevi-lockup.png — artboard 1 of the master
+// Source of truth: assets/brand/drevi-lockup.png — artboard 1 of the master
 // Illustrator file (gold #C4A35A DREVI over letterspaced FASHION on Rich
 // Black #1A1A1A), cropped to the ink with a 6% margin. The master is committed
-// so the icons are reproducible without the .ai file.
+// so the icons are reproducible without the .ai file. It lives OUTSIDE public/
+// deliberately: it is a build-time source, and anything under public/ would be
+// served to the world and swept into the service worker precache.
 //
 // The lockup is ~2.7:1, so a square icon is necessarily letterboxed (Ansh's
 // call, 13 Sep). Two widths are used:
@@ -17,7 +19,7 @@ import sharp from "sharp";
 import { mkdir } from "node:fs/promises";
 
 const BG = "#1A1A1A";
-const SRC = "public/brand/drevi-lockup.png";
+const SRC = "assets/brand/drevi-lockup.png";
 const OUT = "public/icons";
 
 /** Letterbox the lockup on a square Rich Black field. */
