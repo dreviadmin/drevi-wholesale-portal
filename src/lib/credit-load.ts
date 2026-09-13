@@ -12,7 +12,8 @@ import {
   type WalletEntry,
   type WalletGrant,
 } from "@/lib/credit-core";
-import type { TaxMode } from "@/lib/types";
+
+import type { DocumentBuyerSnapshot, TaxMode } from "@/lib/types";
 
 // Server reads for every credit surface (11 Sep). One module so the register,
 // the order page, the buyer wallet and the dashboard all read the same shapes.
@@ -28,9 +29,15 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 const NOTE_COLUMNS =
   "id, note_number, kind, buyer_id, order_id, order_bill_id, source_bill_number, source_bill_date, items, " +
   "source_subtotal, discount_share, subtotal, tax_mode, tax_rate, tax_amount, total, reason, note_date, " +
-  "status, voided_at, void_reason, pdf_url, created_by, created_at";
+  "status, voided_at, void_reason, pdf_url, created_by, created_at, " +
+  // The 0047 party snapshot must travel with the row. Without it every note
+  // loaded through here arrives unsnapshotted, and resolveDocumentParty falls
+  // back to the live buyers read — silently re-introducing the exact bug 0047
+  // exists to fix.
+  "buyer_business_name, buyer_owner_name, buyer_phone, buyer_city, buyer_gstin, " +
+  "buyer_address, buyer_snapshot_at, buyer_snapshot_source";
 
-export interface CreditNoteRow {
+export interface CreditNoteRow extends DocumentBuyerSnapshot {
   id: string;
   note_number: string;
   kind: "return" | "manual";

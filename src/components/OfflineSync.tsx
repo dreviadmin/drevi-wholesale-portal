@@ -62,6 +62,8 @@ export function OfflineSync() {
         const buyerId = o.buyerId ?? (o.buyerClientRef ? refMap[o.buyerClientRef] : undefined);
         if (!buyerId) { await updateQueued({ ...item, attempts: item.attempts + 1, lastError: "buyer not synced yet" }); continue; }
         const res = await submitExhibitionOrder({
+          // Drained from the offline queue — see fromQueue in the action.
+          fromQueue: true,
           sessionId: o.sessionId, eventName: o.eventName, buyerId, items: o.items, clientRef: o.clientRef,
           staffNote: o.staffNote, buyerNote: o.buyerNote, takenBy: o.takenBy,
           taxMode: o.taxMode, taxRate: o.taxRate,

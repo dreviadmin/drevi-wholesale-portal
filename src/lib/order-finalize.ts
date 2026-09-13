@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { renderOrderPdf } from "@/lib/order-pdf";
+import { resolveDocumentParty } from "@/lib/buyer-snapshot";
 import { uploadOrderPdf } from "@/lib/storage";
 import { sendOrderConfirmation, sendOrderAlert } from "@/lib/interakt";
 import { formatINR } from "@/lib/format";
@@ -22,23 +23,28 @@ export async function finalizeOrder(orderId: string, opts: { notify?: boolean } 
     const { data: order } = await admin.from("orders").select("*").eq("id", orderId).maybeSingle();
     if (!order) return;
     const o = order as Order;
-    const { data: buyer } = await admin
-      .from("buyers")
-      .select("business_name, owner_name, phone, city")
-      .eq("id", o.buyer_id)
-      .maybeSingle();
+    // This overwrites the stored file at orders.pdf_url, so it has to reprint
+    // the party frozen at submission — a live read here would let one edit to a
+    // buyers row rewrite the invoice held against every past order.
+    const party = await resolveDocumentParty(admin, o, o.buyer_id);
 
-    const pdf = await renderOrderPdf(o, buyer ?? { business_name: null, owner_name: null, phone: null, city: null });
+    const pdf = await renderOrderPdf(o, party);
     const url = await uploadOrderPdf(o.id, o.order_number, pdf);
     await admin.from("orders").update({ pdf_url: url }).eq("id", o.id);
 
     if (!notify) return;
 
+    // A DOCUMENT prints who the party was; a MESSAGE has to reach who they are
+    // now. "Send Invoice" can fire months after submission, by which time the
+    // frozen number may be dead, so delivery reads the buyers row live.
+    const { data: contact } = await admin.from("buyers").select("phone").eq("id", o.buyer_id).maybeSingle();
+    const phone = contact?.phone ?? party.phone;
+
     const total = formatINR(o.total_amount);
-    const conf = buyer?.phone
-      ? await sendOrderConfirmation(buyer.phone, o.order_number, total, url)
+    const conf = phone
+      ? await sendOrderConfirmation(phone, o.order_number, total, url)
       : { sent: false };
-    await sendOrderAlert(o.order_number, buyer?.business_name ?? "-", total, o.source === "exhibition" ? "Exhibition" : "Portal");
+    await sendOrderAlert(o.order_number, party.business_name ?? "-", total, o.source === "exhibition" ? "Exhibition" : "Portal");
 
     if (conf.sent) {
       await admin.from("orders").update({ pdf_sent_via: conf.channel ?? "whatsapp", pdf_sent_at: new Date().toISOString() }).eq("id", o.id);

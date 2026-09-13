@@ -106,11 +106,18 @@ function stateLabel(it: OrderItem): string {
   return "Sold Out";
 }
 
+// The party a document is addressed to. Callers must hand over the identity
+// FROZEN at this document's issue date (resolveDocumentParty in
+// @/lib/buyer-snapshot), never a live buyers read — a BuyerParty satisfies this
+// shape as-is. gstin/address stay optional because retail bills (0043) address
+// a walk-in customer who has neither.
 export interface PdfBuyer {
   business_name: string | null;
   owner_name: string | null;
   phone: string | null;
   city: string | null;
+  gstin?: string | null;
+  address?: string | null;
 }
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -154,7 +161,11 @@ function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; b
   const discount = order.discount_amount ?? 0;
   const advance = order.advance_amount ?? 0;
   const balance = Math.max(0, (order.total_amount ?? 0) - advance);
-  const showBreakdown = discount > 0 || (taxed && order.tax_mode === "exclusive");
+  // Any taxed document shows its breakdown, not just the exclusive ones. On a
+  // GST tax invoice the taxable value has to be legible on the page; under
+  // inclusive mode it used to be absent entirely, leaving the reader to
+  // subtract the footnote from the total to find it.
+  const showBreakdown = discount > 0 || taxed;
 
   return (
     <Document
@@ -182,6 +193,12 @@ function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; b
           <Text style={s.sectionLabel}>{variant?.partyLabel ?? "Order For"}</Text>
           <Text style={s.buyerName}>{buyer.business_name ?? "-"}</Text>
           <Text style={s.meta}>{[buyer.owner_name, buyer.phone, buyer.city].filter(Boolean).join(" - ")}</Text>
+          {/* A B2B tax invoice has to carry the recipient's address and GSTIN.
+              Each is dropped entirely when we don't hold it — a bare "GSTIN"
+              with nothing after it reads like a missing number on a tax
+              document rather than a party who has none. */}
+          {buyer.address ? <Text style={s.meta}>{buyer.address}</Text> : null}
+          {buyer.gstin ? <Text style={s.meta}>GSTIN {buyer.gstin}</Text> : null}
         </View>
 
         <Text style={s.sectionLabel}>Items</Text>
@@ -233,7 +250,13 @@ function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; b
             <Text style={{ fontSize: 9 }}>- {inr(discount)}</Text>
           </View>
         )}
-        {taxed && order.tax_mode === "exclusive" && (
+        {taxed && order.tax_mode === "inclusive" && (
+          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 3 }}>
+            <Text style={{ fontSize: 9, color: C.greige }}>Taxable value</Text>
+            <Text style={{ fontSize: 9 }}>{inr(order.total_amount - order.tax_amount)}</Text>
+          </View>
+        )}
+        {taxed && (
           <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 3 }}>
             <Text style={{ fontSize: 9, color: C.greige }}>GST @ {order.tax_rate}%</Text>
             <Text style={{ fontSize: 9 }}>{inr(order.tax_amount)}</Text>

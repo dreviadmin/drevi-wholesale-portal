@@ -12,6 +12,11 @@ export type OrderSource = "portal_self_service" | "exhibition" | "in_store";
 export type TaxMode = "none" | "inclusive" | "exclusive";
 export type SessionType = "exhibition" | "in_store";
 
+// The Postgres enum, in the order the migrations grew it (0001, 0010, 0014,
+// 0015, 0016, 0018, 0019, 0047). An insert with a value missing from the
+// database enum fails at the database, so this union has to stay complete —
+// 0014's and 0015's values were never added here, which is why callers had
+// started casting their way past it.
 export type AuditEventType =
   | "credential_created"
   | "credential_viewed"
@@ -24,11 +29,47 @@ export type AuditEventType =
   | "account_reactivated"
   | "account_rejected"
   | "catalog_edit"
+  | "vendor_created"
+  | "vendor_updated"
+  | "receipt_created"
+  | "receipt_updated"
+  | "receipt_deleted"
+  | "staff_created"
+  | "staff_deactivated"
+  | "staff_reactivated"
+  | "buyer_created"
   | "studio_tier_set"
   | "studio_portal_toggled"
   | "studio_candidate_approved"
   | "studio_candidate_rejected"
-  | "studio_published";
+  | "studio_published"
+  | "buyer_profile_updated"
+  | "buyer_change_requested"
+  | "buyer_change_approved"
+  | "buyer_change_rejected"
+  | "document_party_recaptured";
+
+/**
+ * The buyer identity frozen onto a document at its issue date (0047) — carried
+ * by orders, order_bills and credit_notes alike.
+ *
+ * Optional because a row inserted by a pre-0047 instance during the deploy
+ * window carries none. Nothing should read these fields directly to decide what
+ * to PRINT: resolveDocumentParty in @/lib/buyer-snapshot owns that branch, and
+ * this module stays free of server-only imports so client surfaces can keep
+ * importing it.
+ */
+export interface DocumentBuyerSnapshot {
+  buyer_business_name?: string | null;
+  buyer_owner_name?: string | null;
+  buyer_phone?: string | null;
+  buyer_city?: string | null;
+  buyer_gstin?: string | null;
+  buyer_address?: string | null;
+  /** Null means "no snapshot on this row" — the only flag the render path branches on. */
+  buyer_snapshot_at?: string | null;
+  buyer_snapshot_source?: "issue" | "issue_backdated" | "queued" | "backfill" | "recapture" | null;
+}
 
 // Every column a BUYER surface may select. select("*") on buyer pages ships
 // internal fields (location, cost provenance) into the page payload — caught
@@ -161,7 +202,7 @@ export interface RetailBill {
 }
 
 /** One generated bill against an order (0041) — lines are snapshotted. */
-export interface OrderBill {
+export interface OrderBill extends DocumentBuyerSnapshot {
   id: string;
   order_id: string;
   bill_number: string;
@@ -182,7 +223,7 @@ export interface OrderBill {
 
 export type DiscountType = "percent" | "absolute";
 
-export interface Order {
+export interface Order extends DocumentBuyerSnapshot {
   id: string;
   order_number: string;
   buyer_id: string;

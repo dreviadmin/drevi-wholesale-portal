@@ -1,13 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { Menu, X, Search, ShoppingBag, LogOut, ClipboardList, Store } from "lucide-react";
-import { logout } from "@/app/actions";
+import { Menu, X, Search, ShoppingBag } from "lucide-react";
+import { BuyerNavDrawer } from "@/components/BuyerNavDrawer";
 import { palette } from "@/lib/palette";
 
 // Buyer/mobile top bar + identity sub-bar, ported from the prototype. The
-// hamburger opens a small menu (navigation + sign out).
+// hamburger opens BuyerNavDrawer, which the home and cart bars open too.
 export function DreviHeader({
   businessName,
   cartCount = 0,
@@ -22,7 +21,7 @@ export function DreviHeader({
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <div className="sticky top-0 z-20">
+    <BuyerNavDrawer open={menuOpen} onClose={() => setMenuOpen(false)} cartCount={cartCount} className="sticky top-0 z-20">
       <div
         className="flex items-center justify-between px-4 py-3.5"
         style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.08)" }}
@@ -73,29 +72,6 @@ export function DreviHeader({
           </div>
         </div>
       )}
-
-      {/* Menu drawer */}
-      {menuOpen && (
-        <div
-          className="absolute left-0 right-0 flex flex-col"
-          style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.12)", boxShadow: "0 16px 40px rgba(26,26,26,0.12)" }}
-        >
-          <Link href="/catalog" onClick={() => setMenuOpen(false)} className="flex items-center gap-2.5 font-body uppercase px-5 py-3.5" style={{ fontSize: 11, letterSpacing: "0.16em", color: palette.black, borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
-            <Store size={15} strokeWidth={1.7} /> Catalog
-          </Link>
-          <Link href="/cart" onClick={() => setMenuOpen(false)} className="flex items-center gap-2.5 font-body uppercase px-5 py-3.5" style={{ fontSize: 11, letterSpacing: "0.16em", color: palette.black, borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
-            <ShoppingBag size={15} strokeWidth={1.7} /> Cart{cartCount > 0 ? ` (${cartCount})` : ""}
-          </Link>
-          <Link href="/account/orders" onClick={() => setMenuOpen(false)} className="flex items-center gap-2.5 font-body uppercase px-5 py-3.5" style={{ fontSize: 11, letterSpacing: "0.16em", color: palette.black, borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
-            <ClipboardList size={15} strokeWidth={1.7} /> My Orders
-          </Link>
-          <form action={logout}>
-            <button type="submit" className="w-full flex items-center gap-2.5 font-body uppercase px-5 py-3.5" style={{ fontSize: 11, letterSpacing: "0.16em", color: palette.crimsonText }}>
-              <LogOut size={15} strokeWidth={1.7} /> Sign Out
-            </button>
-          </form>
-        </div>
-      )}
-    </div>
+    </BuyerNavDrawer>
   );
 }

@@ -19,6 +19,8 @@ export interface BuyerRowDTO {
   source: BuyerSource;
   created_at: string;
   ordersCount: number;
+  /** Has an undecided business_name / gstin change request. */
+  pendingIdentity?: boolean;
   lastOrder: string | null;
 }
 
@@ -56,22 +58,37 @@ const ACCESSORS: Record<string, SortAccessor<BuyerRowDTO>> = {
   created: (r) => ts(r.created_at),
 };
 
-export function BuyersTable({ rows }: { rows: BuyerRowDTO[] }) {
+export function BuyersTable({
+  rows,
+  initialStatus = null,
+  initialRequestsOnly = false,
+}: {
+  rows: BuyerRowDTO[];
+  initialStatus?: string | null;
+  initialRequestsOnly?: boolean;
+}) {
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<Set<BuyerStatus>>(new Set());
+  // Seeded from the URL so the cockpit's deep links actually land somewhere
+  // useful. Staff can clear the chips as normal afterwards.
+  const [statusFilter, setStatusFilter] = useState<Set<BuyerStatus>>(
+    () => (initialStatus ? new Set([initialStatus as BuyerStatus]) : new Set()),
+  );
+  const [requestsOnly, setRequestsOnly] = useState(initialRequestsOnly);
   const [sourceFilter, setSourceFilter] = useState<Set<BuyerSource>>(new Set());
 
   const pendingCount = useMemo(() => rows.filter((r) => r.status === "pending").length, [rows]);
+  const identityWaiting = useMemo(() => rows.filter((r) => r.pendingIdentity).length, [rows]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows.filter((r) => {
+      if (requestsOnly && !r.pendingIdentity) return false;
       if (statusFilter.size && !statusFilter.has(r.status)) return false;
       if (sourceFilter.size && !sourceFilter.has(r.source)) return false;
       if (!q) return true;
       return [r.business_name, r.owner_name, r.phone, r.email].some((v) => v?.toLowerCase().includes(q));
     });
-  }, [rows, query, statusFilter, sourceFilter]);
+  }, [rows, query, statusFilter, sourceFilter, requestsOnly]);
 
   function toggle<T>(set: Set<T>, value: T, setter: (s: Set<T>) => void) {
     const next = new Set(set);
@@ -131,6 +148,21 @@ export function BuyersTable({ rows }: { rows: BuyerRowDTO[] }) {
           {SOURCES.map((s) => (
             <button key={s} type="button" onClick={() => toggle(sourceFilter, s, setSourceFilter)} className="font-body uppercase" style={chip(sourceFilter.has(s))}>{SOURCE_LABEL[s]}</button>
           ))}
+          {identityWaiting > 0 && (
+            <>
+              <span style={{ width: 1, background: "rgba(26,26,26,0.15)", margin: "0 4px" }} />
+              {/* Visible and toggleable, so a filter arriving from the cockpit's
+                  deep link can always be cleared without editing the URL. */}
+              <button
+                type="button"
+                onClick={() => setRequestsOnly((v) => !v)}
+                className="font-body uppercase"
+                style={chip(requestsOnly)}
+              >
+                Identity {identityWaiting}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -166,7 +198,18 @@ export function BuyersTable({ rows }: { rows: BuyerRowDTO[] }) {
                     </span>
                   </td>
                   <td className="font-body" style={{ fontSize: 12, color: palette.softBlack, padding: "10px" }}>{r.city ?? "—"}</td>
-                  <td style={{ padding: "10px" }}><StatusPill status={r.status} /></td>
+                  <td style={{ padding: "10px" }}>
+                    <StatusPill status={r.status} />
+                    {r.pendingIdentity && (
+                      <span
+                        className="font-body uppercase"
+                        style={{ marginLeft: 6, fontSize: 8.5, letterSpacing: "0.14em", color: palette.goldDeep }}
+                        title="Business name or GSTIN change waiting on a decision"
+                      >
+                        Identity
+                      </span>
+                    )}
+                  </td>
                   <td style={{ padding: "10px" }}><SourcePill source={r.source} /></td>
                   <td className="font-body" style={{ fontSize: 12, color: palette.softBlack, padding: "10px" }}>{r.ordersCount}</td>
                   <td className="font-body" style={{ fontSize: 12, color: palette.softBlack, padding: "10px" }}>{fmtDate(r.lastOrder)}</td>

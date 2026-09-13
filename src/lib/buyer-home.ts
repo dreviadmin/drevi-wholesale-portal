@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { WholesaleProduct } from "@/lib/types";
+import { BUYER_PRODUCT_COLUMNS, type WholesaleProduct } from "@/lib/types";
 
 // Buyer storefront home data (build guide §13). PRICING FIREWALL: everything
 // returned here is buyer-safe — list wholesale prices only, never cost,
@@ -39,7 +39,12 @@ export async function loadBuyerHome(buyerId: string): Promise<BuyerHomeData> {
       .order("submitted_at", { ascending: false }),
     admin
       .from("wholesale_products")
-      .select("*")
+      // NOT select("*"): newThisWeek is built by filtering these rows and is
+      // handed straight to a client component, so a raw row would put rack
+      // location and the cost/override pricing columns into the buyer page
+      // payload. Same leak that put "Rack B2" in the product page RSC stream
+      // on 2 Aug, which is why BUYER_PRODUCT_COLUMNS exists.
+      .select(BUYER_PRODUCT_COLUMNS)
       .eq("wholesale_visible", true),
     admin.from("notify_me").select("sku_base, color").eq("buyer_id", buyerId).is("fulfilled_at", null),
   ]);

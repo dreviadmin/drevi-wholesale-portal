@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, Copy, MessageCircle, RefreshCw, UserPlus, Pencil, ImageOff, Undo2 } from "lucide-react";
+import { Eye, EyeOff, Copy, MessageCircle, RefreshCw, UserPlus, Pencil, ImageOff, Undo2, Clock3 } from "lucide-react";
 import { BackLink, withFrom } from "@/components/BackLink";
 import { DraftNotice } from "@/components/DraftNotice";
 import { StatusPill } from "@/components/admin/Pills";
@@ -18,6 +18,8 @@ import {
   addNote,
   updateBuyerProfile,
   uploadBuyerCard,
+  decideChangeRequest,
+  type ChangeRequestRow,
 } from "@/app/admin/buyers/actions";
 import { buyerEditDraftKey, buyerEditSignature, type BuyerEditFields } from "@/app/admin/orders/[id]/EditBuyerButton";
 import { unapplyCredit } from "@/app/admin/credit-notes/actions";
@@ -84,13 +86,16 @@ const EVENT_LABEL: Record<string, string> = {
   account_suspended: "Suspended", account_reactivated: "Reactivated", account_rejected: "Rejected",
 };
 const SOURCE_LABEL: Record<BuyerSource, string> = { inquiry_form: "Inquiry", exhibition: "Exhibition", manual_admin: "Manual" };
+// Same wording the buyer sees on /account/details, so both sides name the same thing.
+const IDENTITY_LABEL: Record<ChangeRequestRow["field"], string> = { business_name: "Business name", gstin: "GSTIN" };
+const DECISION_LABEL: Record<ChangeRequestRow["status"], string> = { pending: "Waiting", approved: "Approved", rejected: "Refused", withdrawn: "Withdrawn by the buyer" };
 function fmt(iso: string | null) { return iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"; }
 function fmtTime(iso: string) { return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }); }
 // note_date / effective_date are DATE columns — pinned to IST noon so a device
 // behind UTC doesn't render the day before.
 function fmtDay(day: string) { return new Date(`${day}T12:00:00+05:30`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }); }
 
-export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet }: { isAdmin: boolean; buyer: BuyerDTO; orders: OrderDTO[]; activity: ActivityDTO[]; wallet: WalletDTO }) {
+export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet, changeRequests }: { isAdmin: boolean; buyer: BuyerDTO; orders: OrderDTO[]; activity: ActivityDTO[]; wallet: WalletDTO; changeRequests: ChangeRequestRow[] }) {
   const router = useRouter();
   const [isPending, start] = useTransition();
   const [showModal, setShowModal] = useState(false);
@@ -134,9 +139,22 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet }: { isAd
   }
   // Discard / Use server keep the modal open on the current server values.
   const editNotice = { ...editMeta, discard: () => { editMeta.clear(); setEdit({ open: true, form: editSeed }); } };
+  // Only the fields the staff ACTUALLY edited are sent. The form is seeded from
+  // the row as it was rendered, so posting the whole form pushes those stale
+  // values back — silently reverting a change the buyer got approved while this
+  // page sat open (migration 0048). Trimmed both sides: whitespace is not an edit.
+  function editedFields(form: BuyerEditForm): Partial<BuyerEditForm> {
+    const patch: Partial<BuyerEditForm> = {};
+    for (const key of Object.keys(editSeed) as (keyof BuyerEditForm)[]) {
+      if (form[key].trim() !== editSeed[key].trim()) patch[key] = form[key];
+    }
+    return patch;
+  }
   function saveEdit() {
+    const patch = editedFields(edit.form);
+    if (Object.keys(patch).length === 0) { closeEdit(); flash("Nothing changed"); return; }
     start(async () => {
-      const r = await updateBuyerProfile(buyer.id, edit.form);
+      const r = await updateBuyerProfile(buyer.id, patch);
       if (!r.ok) { flash(r.error ?? "Failed"); return; }
       closeEdit();
       flash("Details saved");
@@ -220,6 +238,41 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet }: { isAd
   function sendLoginLink() { share("WhatsApp"); }
 
   const totalSpend = orders.reduce((s, o) => s + o.total_amount, 0);
+
+  // ---- Identity change requests --------------------------------------------
+  // business_name and gstin print on every GST tax invoice, so the buyer may
+  // ask for them but only staff may set them (migration 0048). Every guard —
+  // already decided, buyer suspended, the value having drifted since they
+  // asked — lives in the server RPC, and its refusals are sentences written
+  // for a person, so they are shown word for word instead of being replaced.
+  const [requestError, setRequestError] = useState<string | null>(null);
+  const pendingRequests = changeRequests.filter((r) => r.status === "pending");
+  // Withdrawn ones are the buyer changing their mind, not a decision staff made,
+  // so they sit at the bottom of the settled list and read muted.
+  const settledRequests = changeRequests
+    .filter((r) => r.status !== "pending")
+    .sort((a, b) => Number(a.status === "withdrawn") - Number(b.status === "withdrawn"))
+    .slice(0, 6);
+
+  function decideRequest(req: ChangeRequestRow, decision: "approved" | "rejected") {
+    const label = IDENTITY_LABEL[req.field];
+    let note: string | undefined;
+    if (decision === "rejected") {
+      const reason = window.prompt(`Why is the ${label} change to "${req.requested_value}" being refused? (the buyer sees this)`);
+      if (reason === null) return;
+      if (!reason.trim()) { setRequestError("Give a reason — the buyer sees it."); return; }
+      note = reason.trim();
+    } else if (!window.confirm(`Set ${label} to "${req.requested_value}"? Every invoice issued from now on carries it.`)) {
+      return;
+    }
+    setRequestError(null);
+    start(async () => {
+      const r = await decideChangeRequest(req.id, decision, note);
+      if (!r.ok) { setRequestError(r.error ?? "Failed"); return; }
+      flash(decision === "approved" ? `${label} updated` : "Request refused");
+      router.refresh();
+    });
+  }
 
   // ---- Wallet ---------------------------------------------------------------
   const here = `/admin/buyers/${buyer.id}`;
@@ -327,6 +380,113 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet }: { isAd
           </div>
         )}
       </div>
+
+      {/* Identity changes the buyer asked for on /account/details. Only shown
+          when there is something to show — most parties never ask. */}
+      {(pendingRequests.length > 0 || settledRequests.length > 0) && (
+        <section
+          className="mt-6"
+          style={{
+            border: `1px solid ${pendingRequests.length > 0 ? palette.champagne : "rgba(26,26,26,0.14)"}`,
+            background: pendingRequests.length > 0 ? palette.amberSoft : palette.ivoryDeep,
+            padding: "14px 16px",
+          }}
+        >
+          <div className="font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.2em", color: palette.gold }}>
+            Identity Changes
+          </div>
+
+          {pendingRequests.length === 0 ? (
+            <p className="font-body mt-1.5" style={{ fontSize: 11.5, color: palette.mutedGreige }}>
+              Nothing waiting.
+            </p>
+          ) : (
+            <>
+              <p className="font-body mt-1.5" style={{ fontSize: 11, color: palette.goldDeep, lineHeight: 1.6, maxWidth: 460 }}>
+                These print on every GST tax invoice. Decide them here — editing the same field through Edit Details
+                leaves the request stale and the server then refuses it.
+              </p>
+              {pendingRequests.map((r) => (
+                <div key={r.id} className="mt-3 pt-3" style={{ borderTop: "1px solid rgba(26,26,26,0.1)" }}>
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.softBlack }}>
+                      {IDENTITY_LABEL[r.field]}
+                    </div>
+                    <div className="flex items-center gap-1.5 font-body" style={{ fontSize: 10.5, color: palette.mutedGreige }}>
+                      <Clock3 size={11} strokeWidth={1.8} /> Asked {fmtTime(r.requested_at)}
+                    </div>
+                  </div>
+                  <div className="font-body mt-1.5" style={{ fontSize: 12, color: palette.mutedGreige }}>
+                    Now: {r.before_value || "not on file"}
+                  </div>
+                  <div className="font-body mt-0.5" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>
+                    Asked for: {r.requested_value}
+                  </div>
+                  {r.buyer_note && (
+                    <div className="font-body mt-1.5" style={{ fontSize: 12, color: palette.softBlack, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                      “{r.buyer_note}”
+                    </div>
+                  )}
+                  {isAdmin ? (
+                    <div className="flex gap-2 mt-3 flex-wrap">
+                      <button
+                        type="button"
+                        disabled={isPending}
+                        onClick={() => decideRequest(r, "approved")}
+                        className="font-body uppercase disabled:opacity-40"
+                        style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isPending}
+                        onClick={() => decideRequest(r, "rejected")}
+                        className="font-body uppercase disabled:opacity-40"
+                        style={{ border: `1px solid ${palette.crimsonText}`, color: palette.crimsonText, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="font-body mt-2" style={{ fontSize: 10.5, color: palette.mutedGreige }}>
+                      An admin decides this one.
+                    </p>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+
+          {/* The server writes these for a human — drift, suspension — so they
+              are printed as they arrive rather than flattened into a toast. */}
+          {requestError && (
+            <p className="font-body mt-3" style={{ fontSize: 11.5, color: palette.crimsonText, lineHeight: 1.6, maxWidth: 460 }}>
+              {requestError}
+            </p>
+          )}
+
+          {settledRequests.length > 0 && (
+            <div className="mt-4">
+              <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.16em", color: palette.mutedGreige }}>Already handled</div>
+              {settledRequests.map((r) => (
+                <div
+                  key={r.id}
+                  className="font-body py-1.5"
+                  style={{ fontSize: 11, color: palette.softBlack, lineHeight: 1.6, borderBottom: "1px solid rgba(26,26,26,0.07)", opacity: r.status === "withdrawn" ? 0.5 : 1 }}
+                >
+                  <b style={{ fontWeight: 600, color: r.status === "approved" ? palette.goldDeep : r.status === "rejected" ? palette.crimsonText : palette.mutedGreige }}>
+                    {DECISION_LABEL[r.status]}
+                  </b>
+                  {" · "}{IDENTITY_LABEL[r.field]} → {r.requested_value}
+                  {r.decision_note ? ` · ${r.decision_note}` : ""}
+                  <span style={{ color: palette.mutedGreige }}> · {fmtTime(r.decided_at ?? r.requested_at)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Wallet — credit this party holds. The balance is derived from issued
           notes less consumption, so it can never drift from the documents. */}

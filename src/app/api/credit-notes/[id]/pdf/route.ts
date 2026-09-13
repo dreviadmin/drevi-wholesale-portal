@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/staff";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { renderCreditNotePdf, type PdfBuyer } from "@/lib/order-pdf";
+import { renderCreditNotePdf } from "@/lib/order-pdf";
+import { resolveDocumentParty } from "@/lib/buyer-snapshot";
 import { creditNoteFileName } from "@/lib/share";
 import type { CreditNoteRow } from "@/lib/credit-load";
+import type { DocumentBuyerSnapshot } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,7 +23,9 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   const admin = createAdminClient();
   const { data: note } = await admin.from("credit_notes").select("*").eq("id", params.id).maybeSingle();
   if (!note) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const n = note as CreditNoteRow;
+  // select("*") carries the 0047 snapshot columns; CreditNoteRow is the shape
+  // credit-load hands around and does not declare them yet.
+  const n = note as CreditNoteRow & DocumentBuyerSnapshot;
 
   let allowed = true;
   try {
@@ -42,17 +46,11 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   }
   if (!allowed) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  // A note without a party (never a wholesale one — orders.buyer_id is not
-  // null) still has to print; it just has no party block to fill.
-  let buyer: PdfBuyer = { business_name: null, owner_name: null, phone: null, city: null };
-  if (n.buyer_id) {
-    const { data } = await admin
-      .from("buyers")
-      .select("business_name, owner_name, phone, city")
-      .eq("id", n.buyer_id)
-      .maybeSingle();
-    if (data) buyer = data as PdfBuyer;
-  }
+  // The party frozen onto the note when it was issued — the same rule its items
+  // and source bill already follow. A note without a party (never a wholesale
+  // one — orders.buyer_id is not null) still has to print; it just has no party
+  // block to fill.
+  const buyer = await resolveDocumentParty(admin, n, n.buyer_id);
 
   const pdf = await renderCreditNotePdf(n, buyer);
   return new NextResponse(pdf as unknown as BodyInit, {

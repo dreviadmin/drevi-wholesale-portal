@@ -11,6 +11,7 @@ import { syncCustomToCatalog } from "@/lib/custom-catalog";
 import { uploadCustomItemImage } from "@/lib/storage";
 import { sendPendingReviewAlert } from "@/lib/interakt";
 import { writeAuditEvent } from "@/lib/audit";
+import { captureBuyerSnapshot, snapshotSourceForDate } from "@/lib/buyer-snapshot";
 import type { AuditEventType, WholesaleProduct, OrderItem, SessionType, TaxMode, DiscountType } from "@/lib/types";
 
 export async function startSession(
@@ -165,6 +166,10 @@ export async function submitExhibitionOrder(input: {
   /** Past-dated billing (18 Aug) — YYYY-MM-DD, today or earlier. Drives the
    * order number's day AND submitted_at, so dashboards bucket it correctly. */
   billDate?: string;
+  /** Set by the offline drainer (components/OfflineSync.tsx). The party
+   * snapshot is captured at DRAIN time, not sale time, so it is recorded as
+   * "queued" rather than pretending to be contemporaneous with the sale. */
+  fromQueue?: boolean;
 }): Promise<{ ok: boolean; orderId?: string; orderNumber?: string; pdfUrl?: string; error?: string }> {
   let staff;
   try { staff = await requireStaff(); } catch { return { ok: false, error: "Not authorized." }; }
@@ -332,6 +337,15 @@ export async function submitExhibitionOrder(input: {
   }
   const ymd = (billDate ?? todayIst).replace(/-/g, "");
 
+  // Freeze the party onto the order (migration 0047). Without this every
+  // exhibition and in-store order would render its party from the LIVE buyers
+  // row, which is exactly the bug 0047 exists to fix.
+  const partySnapshot = await captureBuyerSnapshot(
+    admin,
+    input.buyerId,
+    input.fromQueue ? "queued" : snapshotSourceForDate(billDate, todayIst),
+  );
+
   // Gapless, race-safe numbering: next_order_number() reserves each number
   // atomically (see migration 0008). A 23505 can now only mean a genuine
   // duplicate from a retry, so we re-reserve and try again a couple of times.
@@ -354,6 +368,7 @@ export async function submitExhibitionOrder(input: {
       .insert({
         order_number,
         buyer_id: input.buyerId,
+        ...partySnapshot,
         status: "submitted",
         source: sessionType,
         assisted_by: assistedBy,

@@ -21,7 +21,7 @@ export interface AttentionItem {
 export async function computeAttention(): Promise<AttentionItem[]> {
   const admin = createAdminClient();
 
-  const [submitted, pendingBuyers, soldOutBest, orderedItems] = await Promise.all([
+  const [submitted, pendingBuyers, identityRequests, soldOutBest, orderedItems] = await Promise.all([
     // 1. Money-blocking: submitted orders whose balance hasn't been collected.
     //    credit_applied is settled money too — chasing it would ask the buyer
     //    to pay twice for what their own credit note already covered.
@@ -31,6 +31,11 @@ export async function computeAttention(): Promise<AttentionItem[]> {
       .eq("status", "submitted"),
     // 2. Buyers waiting for approval.
     admin.from("buyers").select("id", { count: "exact", head: true }).eq("status", "pending"),
+
+    // 2b. Buyer-requested changes to business_name / gstin. These print on GST
+    //     tax invoices, so they wait for a person — and nothing else in the app
+    //     would ever tell that person they are waiting.
+    admin.from("buyer_change_requests").select("id", { count: "exact", head: true }).eq("status", "pending"),
     // 5. Sold-out BEST-SELLERS: sold out AND actually ordered at least once —
     //    the whole catalog being qty-0 must not flood the inbox.
     admin.from("wholesale_products").select("sku").lte("current_qty", 0).eq("wholesale_visible", true),
@@ -70,6 +75,18 @@ export async function computeAttention(): Promise<AttentionItem[]> {
       count: pending,
       severity: "medium",
       href: "/admin/buyers?status=pending",
+    });
+  }
+
+  const identity = identityRequests.count ?? 0;
+  if (identity > 0) {
+    items.push({
+      key: "buyer_identity_requests",
+      title: `${identity} identity change${identity === 1 ? "" : "s"} to review`,
+      sub: "Business name or GSTIN — these print on invoices",
+      count: identity,
+      severity: "medium",
+      href: "/admin/buyers?requests=pending",
     });
   }
 

@@ -4,8 +4,9 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { ShoppingCart, ChevronRight, ScanLine, X, Bell, ImageOff } from "lucide-react";
+import { ShoppingCart, ChevronRight, ScanLine, Menu, X, Bell, ImageOff } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
+import { BuyerNavDrawer } from "@/components/BuyerNavDrawer";
 import { palette } from "@/lib/palette";
 import { formatINR } from "@/lib/format";
 import type { BuyerHomeData } from "@/lib/buyer-home";
@@ -21,6 +22,14 @@ const STRIP_LABEL: Record<string, string> = {
   submitted: "received", confirmed: "confirmed", packed: "being packed", out_for_delivery: "out for delivery",
 };
 
+// The credit door shows the live balance in place of a caption; the other two
+// say what is behind them.
+const ACCOUNT_DOORS = [
+  { href: "/account/credit", label: "Credit", caption: null },
+  { href: "/account/orders", label: "My orders", caption: "Invoices" },
+  { href: "/account/details", label: "My details", caption: "Name, GSTIN" },
+] as const;
+
 export function BuyerHome({ businessName, city, cartCount, data, wallet }: {
   businessName: string;
   city: string | null;
@@ -30,6 +39,7 @@ export function BuyerHome({ businessName, city, cartCount, data, wallet }: {
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [menuOpen, setMenuOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [scanned, setScanned] = useState<{ sku: string; known: boolean; title?: string | null; thumb?: string | null; message?: string; actions: { key: string; label: string; href?: string }[] } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -62,26 +72,57 @@ export function BuyerHome({ businessName, city, cartCount, data, wallet }: {
   return (
     <div className="min-h-screen pb-24" style={{ background: palette.pageBg }}>
       {/* Brand bar */}
-      <div className="sticky top-0 z-30 flex items-center justify-between px-4 py-3" style={{ background: palette.black }}>
-        <div>
-          <div className="font-display" style={{ fontSize: 14, letterSpacing: "0.28em", color: palette.ivory, fontWeight: 600 }}>
-            DREVI <span className="font-body" style={{ fontSize: 8, letterSpacing: "0.2em", color: palette.gold }}>WHOLESALE</span>
+      <BuyerNavDrawer open={menuOpen} onClose={() => setMenuOpen(false)} cartCount={cartCount} className="sticky top-0 z-30">
+        <div className="flex items-center justify-between px-4 py-3" style={{ background: palette.black }}>
+          <div className="flex items-center gap-3">
+            <button type="button" onClick={() => setMenuOpen((v) => !v)} aria-label="Menu">
+              {menuOpen ? <X size={20} color={palette.ivory} strokeWidth={1.5} /> : <Menu size={20} color={palette.ivory} strokeWidth={1.5} />}
+            </button>
+            <div>
+              <div className="font-display" style={{ fontSize: 14, letterSpacing: "0.28em", color: palette.ivory, fontWeight: 600 }}>
+                DREVI <span className="font-body" style={{ fontSize: 8, letterSpacing: "0.2em", color: palette.gold }}>WHOLESALE</span>
+              </div>
+              <div className="font-body mt-0.5" style={{ fontSize: 10.5, color: palette.champagne }}>
+                {businessName}{city ? ` · ${city}` : ""}
+              </div>
+            </div>
           </div>
-          <div className="font-body mt-0.5" style={{ fontSize: 10.5, color: palette.champagne }}>
-            {businessName}{city ? ` · ${city}` : ""}
-          </div>
+          <Link href="/cart" className="relative" aria-label="Cart">
+            <ShoppingCart size={19} color={palette.ivory} />
+            {cartCount > 0 && (
+              <span className="absolute -top-1.5 -right-2 flex items-center justify-center rounded-full font-body" style={{ minWidth: 16, height: 16, fontSize: 9, fontWeight: 700, background: palette.gold, color: palette.black }}>
+                {cartCount}
+              </span>
+            )}
+          </Link>
         </div>
-        <Link href="/cart" className="relative" aria-label="Cart">
-          <ShoppingCart size={19} color={palette.ivory} />
-          {cartCount > 0 && (
-            <span className="absolute -top-1.5 -right-2 flex items-center justify-center rounded-full font-body" style={{ minWidth: 16, height: 16, fontSize: 9, fontWeight: 700, background: palette.gold, color: palette.black }}>
-              {cartCount}
-            </span>
-          )}
-        </Link>
-      </div>
+      </BuyerNavDrawer>
 
       <div className="px-4 py-4 max-w-3xl mx-auto">
+        {/* The buyer's own three doors, always here. The wallet hero below
+            tells the credit story and hides itself when there is none, so this
+            states the balance only in passing — same ivory and gold so the two
+            read as one block when both are on screen. */}
+        <section className="flex" style={{ background: palette.ivory, border: `1px solid ${palette.gold}` }}>
+          {ACCOUNT_DOORS.map(({ href, label, caption }, i) => (
+            <Link
+              key={href}
+              href={href}
+              className="flex-1 min-w-0 px-3 py-2.5"
+              style={{ borderLeft: i === 0 ? undefined : "1px solid rgba(26,26,26,0.08)" }}
+            >
+              <span className="font-body uppercase block" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.goldDeep }}>
+                {label}
+              </span>
+              {/* Wraps rather than truncates: three doors across a 320px
+                  phone leave ~71px, which "Name, GSTIN" just overruns. */}
+              <span className="font-body block mt-0.5" style={{ fontSize: 12.5, lineHeight: 1.25, color: palette.black }}>
+                {caption ?? formatINR(wallet?.balance ?? 0)}
+              </span>
+            </Link>
+          ))}
+        </section>
+
         {/* Credit held with Drevi — renders nothing unless there is some. */}
         <BuyerWalletCard wallet={wallet ?? null} />
 
@@ -213,7 +254,7 @@ export function BuyerHome({ businessName, city, cartCount, data, wallet }: {
       </div>
 
       {/* Buyer scan FAB */}
-      <button type="button" onClick={() => { setScanned(null); setScanOpen(true); }} aria-label="Scan a tag" className="fixed rounded-full flex items-center justify-center z-40" style={{ right: 18, bottom: 22, width: 56, height: 56, background: palette.gold, boxShadow: "0 4px 16px rgba(196,163,90,0.55)" }}>
+      <button type="button" onClick={() => { setMenuOpen(false); setScanned(null); setScanOpen(true); }} aria-label="Scan a tag" className="fixed rounded-full flex items-center justify-center z-40" style={{ right: 18, bottom: 22, width: 56, height: 56, background: palette.gold, boxShadow: "0 4px 16px rgba(196,163,90,0.55)" }}>
         <ScanLine size={23} strokeWidth={2.2} color={palette.black} />
       </button>
 
