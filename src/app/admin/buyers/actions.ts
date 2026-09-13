@@ -308,7 +308,7 @@ export async function addBuyer(form: {
     return { ok: false, error: error.message };
   }
   await writeAuditEvent({
-    eventType: "buyer_created" as AuditEventType,
+    eventType: "buyer_created",
     staffUserId: staff.id,
     buyerId: data.id,
     notes: form.business_name?.trim() || form.owner_name?.trim() || email || "buyer",
@@ -383,4 +383,109 @@ export async function addNote(buyerId: string, note: string): Promise<void> {
   const admin = createAdminClient();
   await admin.from("buyers").update({ notes: note }).eq("id", buyerId);
   revalidate(buyerId);
+}
+
+// ── Buyer-requested identity changes (13 Sep) ───────────────────────────────
+// business_name and gstin print on every GST tax invoice, so a buyer may ask
+// for them but not set them (migration 0048). The decision is one RPC because
+// two writes must land together — flip the request, write the buyers column —
+// and PostgREST offers no transaction across two calls. Every guard lives in
+// decide_buyer_change: already-decided, buyer-not-active, and before_value
+// drift all raise there, under a row lock. Its message is written for a human,
+// so it is surfaced verbatim rather than translated.
+
+export interface ChangeRequestRow {
+  id: string;
+  buyer_id: string;
+  field: "business_name" | "gstin";
+  before_value: string | null;
+  requested_value: string;
+  buyer_note: string | null;
+  status: "pending" | "approved" | "rejected" | "withdrawn";
+  requested_at: string;
+  decided_at: string | null;
+  decision_note: string | null;
+}
+
+/** Every request for one buyer, newest first — pending ones are actionable. */
+export async function loadChangeRequests(buyerId: string): Promise<ChangeRequestRow[]> {
+  try {
+    await requireStaff();
+  } catch {
+    return [];
+  }
+  const { data } = await createAdminClient()
+    .from("buyer_change_requests")
+    .select("id, buyer_id, field, before_value, requested_value, buyer_note, status, requested_at, decided_at, decision_note")
+    .eq("buyer_id", buyerId)
+    .order("requested_at", { ascending: false })
+    .limit(20);
+  return (data ?? []) as ChangeRequestRow[];
+}
+
+/** How many are waiting across all buyers — for the admin cockpit count. */
+export async function countPendingChangeRequests(): Promise<number> {
+  try {
+    await requireStaff();
+  } catch {
+    return 0;
+  }
+  const { count } = await createAdminClient()
+    .from("buyer_change_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "pending");
+  return count ?? 0;
+}
+
+export async function decideChangeRequest(
+  requestId: string,
+  decision: "approved" | "rejected",
+  note?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  let staff;
+  try {
+    staff = await requireAdmin();
+  } catch {
+    return { ok: false, error: "Not authorized." };
+  }
+
+  const trimmed = (note ?? "").trim();
+  // Enforced by bcr_reject_has_reason too, but failing here gives the person a
+  // sentence instead of a constraint name.
+  if (decision === "rejected" && !trimmed) {
+    return { ok: false, error: "Give a reason — the buyer sees it." };
+  }
+
+  const admin = createAdminClient();
+  const { data: req } = await admin
+    .from("buyer_change_requests")
+    .select("buyer_id, field, before_value, requested_value")
+    .eq("id", requestId)
+    .maybeSingle();
+  if (!req) return { ok: false, error: "That request no longer exists." };
+
+  const { data: replaced, error } = await admin.rpc("decide_buyer_change", {
+    p_request: requestId,
+    p_decision: decision,
+    p_staff: staff.id,
+    p_note: trimmed || null,
+  });
+  if (error) return { ok: false, error: error.message };
+
+  const { ip, userAgent } = reqMeta();
+  await writeAuditEvent({
+    eventType: decision === "approved" ? "buyer_change_approved" : "buyer_change_rejected",
+    buyerId: req.buyer_id as string,
+    staffUserId: staff.id,
+    ipAddress: ip,
+    userAgent,
+    notes:
+      decision === "approved"
+        ? `${req.field}: ${replaced ?? "(empty)"} -> ${req.requested_value}`
+        : `${req.field}: refused (${trimmed})`,
+  });
+
+  revalidate(req.buyer_id as string);
+  revalidatePath("/admin/home");
+  return { ok: true };
 }

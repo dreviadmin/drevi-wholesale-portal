@@ -3,9 +3,6 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight, LogOut } from "lucide-react";
 import { logout } from "@/app/actions";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { loadBuyerWalletPublic } from "@/lib/credit-load";
-import { BuyerWalletCard, type BuyerWallet } from "@/components/BuyerWalletCard";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { Order } from "@/lib/types";
@@ -39,25 +36,12 @@ export default async function OrderHistoryPage() {
     .select("id, order_number, total_amount, status, submitted_at")
     .order("submitted_at", { ascending: false });
 
-  // Credit lives behind RLS-with-no-policies, so it is read with the admin
-  // client against the buyer row this session authenticated as.
-  let wallet: BuyerWallet | null = null;
-  if (user.email) {
-    const { data: rows } = await createAdminClient()
-      .from("buyers")
-      .select("id")
-      .eq("email", user.email)
-      .not("encrypted_password", "is", null)
-      .limit(1);
-    if (rows?.[0]) wallet = await loadBuyerWalletPublic(rows[0].id as string);
-  }
-
   const list = (orders ?? []) as Pick<Order, "id" | "order_number" | "total_amount" | "status" | "submitted_at">[];
 
   return (
     <div className="min-h-screen" style={{ background: palette.ivory }}>
       <div className="flex items-center justify-between px-4 py-3.5 sticky top-0 z-10" style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
-        <Link href="/catalog" aria-label="Back to catalog" style={{ color: palette.black }}>
+        <Link href="/account" aria-label="Back to my account" style={{ color: palette.black }}>
           <ChevronLeft size={22} strokeWidth={1.5} />
         </Link>
         <div className="font-body uppercase" style={{ fontSize: 12, letterSpacing: "0.3em", color: palette.black }}>My Orders</div>
@@ -69,8 +53,8 @@ export default async function OrderHistoryPage() {
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-5">
-        <BuyerWalletCard wallet={wallet} />
-
+        {/* The wallet card used to open this page as well as /home. It belongs
+            to /account/credit now — one hero, one surface. */}
         {list.length === 0 ? (
           <div className="text-center py-20 font-body" style={{ color: palette.mutedGreige, fontSize: 12, letterSpacing: "0.1em", lineHeight: 1.8 }}>
             No orders yet.

@@ -8,6 +8,7 @@ import { DEFAULT_HSN } from "@/lib/hsn-default";
 import { getRawCart, getDetailedCart, type RawCartItem } from "@/lib/cart";
 import { getStockState, qtyCap } from "@/lib/stock";
 import { finalizeOrder } from "@/lib/order-finalize";
+import { captureBuyerSnapshot } from "@/lib/buyer-snapshot";
 import type { WholesaleProduct, OrderItem } from "@/lib/types";
 import { BUYER_PRODUCT_COLUMNS } from "@/lib/types";
 
@@ -182,6 +183,11 @@ export async function submitOrder(_prev: SubmitState, formData: FormData): Promi
   // Day string in IST — a 1 am order must carry today's Indian date, not UTC's.
   const ymd = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }).replace(/-/g, "");
 
+  // The party is frozen onto the order now, at issue — a later edit to the
+  // buyers row must not rewrite a document already sent (migration 0047).
+  // Captured once, outside the retry loop: every attempt writes the same order.
+  const party = await captureBuyerSnapshot(admin, buyer.id);
+
   let orderId: string | null = null;
   for (let attempt = 1; attempt <= 3 && !orderId; attempt++) {
     const { data: numData, error: numErr } = await admin.rpc("next_order_number", { p_prefix: "DW", p_day: ymd });
@@ -198,6 +204,7 @@ export async function submitOrder(_prev: SubmitState, formData: FormData): Promi
         total_amount: cart.subtotal,
         notes: note,
         client_ref: clientRef,
+        ...party,
       })
       .select("id")
       .single();

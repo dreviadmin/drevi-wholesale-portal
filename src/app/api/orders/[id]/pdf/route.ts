@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { renderOrderPdf } from "@/lib/order-pdf";
+import { resolveDocumentParty } from "@/lib/buyer-snapshot";
 import type { Order } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -18,19 +19,19 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
   const { data: order } = await supabase.from("orders").select("*").eq("id", params.id).maybeSingle();
   if (!order) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const o = order as Order;
 
+  // The party frozen onto the order when it was issued (select("*") carries the
+  // snapshot columns), NOT whoever the buyers row names today — this route is
+  // the permanent address of a document that must reprint identically forever.
   const admin = createAdminClient();
-  const { data: buyer } = await admin
-    .from("buyers")
-    .select("business_name, owner_name, phone, city")
-    .eq("id", (order as Order).buyer_id)
-    .maybeSingle();
+  const buyer = await resolveDocumentParty(admin, o, o.buyer_id);
 
-  const pdf = await renderOrderPdf(order as Order, buyer ?? { business_name: null, owner_name: null, phone: null, city: null });
+  const pdf = await renderOrderPdf(o, buyer);
   return new NextResponse(pdf as unknown as BodyInit, {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="${(order as Order).order_number}.pdf"`,
+      "Content-Disposition": `inline; filename="${o.order_number}.pdf"`,
     },
   });
 }

@@ -11,7 +11,9 @@ import { refreshOrderFromCatalog } from "@/lib/order-catalog-sync";
 import { billableLines, pendingLines, computeBillTotals, validateBillDate, billDateToIso, effectiveLineState } from "@/lib/order-lines-core";
 import { renderOrderPdf } from "@/lib/order-pdf";
 import { uploadOrderPdf } from "@/lib/storage";
-import type { DiscountType, Order, OrderItem, OrderStatus, TaxMode, WholesaleProduct } from "@/lib/types";
+import { writeAuditEvent } from "@/lib/audit";
+import { captureBuyerSnapshot, resolveDocumentParty, snapshotSourceForDate, type BuyerParty } from "@/lib/buyer-snapshot";
+import type { DiscountType, Order, OrderBill, OrderItem, OrderStatus, TaxMode, WholesaleProduct } from "@/lib/types";
 
 export interface StageDetails {
   courier?: string;
@@ -639,6 +641,50 @@ export async function setLineState(
   return { ok: true };
 }
 
+/** A bill as stored — everything renderOrderPdf needs, nothing recomputed. */
+type BillForPdf = Pick<
+  OrderBill,
+  "id" | "bill_number" | "seq" | "bill_date" | "items" | "discount_amount" | "tax_mode" | "tax_rate" | "tax_amount" | "total" | "advance_applied"
+>;
+
+/**
+ * Render + store one bill's PDF. Best-effort: the bill row already stands, so a
+ * render failure is logged and never rolls anything back. Shared with
+ * recaptureDocumentParty so a corrected party reaches the FILE the buyer was
+ * sent, not only the columns.
+ */
+async function renderAndStoreBillPdf(order: Order, bill: BillForPdf, party: BuyerParty): Promise<string | undefined> {
+  const admin = createAdminClient();
+  try {
+    const after = { ...order, items: (await admin.from("orders").select("items").eq("id", order.id).single()).data?.items ?? order.items };
+    const synthetic: Order = {
+      ...order,
+      order_number: bill.bill_number,
+      items: bill.items,
+      total_amount: bill.total,
+      discount_type: bill.discount_amount > 0 ? order.discount_type : null,
+      discount_value: bill.discount_amount > 0 ? order.discount_value : null,
+      discount_amount: bill.discount_amount,
+      tax_mode: bill.tax_mode,
+      tax_rate: bill.tax_rate,
+      tax_amount: bill.tax_amount,
+      advance_amount: bill.advance_applied,
+      submitted_at: billDateToIso(bill.bill_date),
+    };
+    const pdf = await renderOrderPdf(synthetic, party, {
+      seq: bill.seq,
+      orderNumber: order.order_number,
+      pendingCount: pendingLines(after as Order).length,
+    });
+    const pdfUrl = await uploadOrderPdf(order.id, bill.bill_number, pdf);
+    await admin.from("order_bills").update({ pdf_url: pdfUrl }).eq("id", bill.id);
+    return pdfUrl;
+  } catch (e) {
+    console.error("bill PDF failed (bill stands; regenerate from the order page):", (e as Error).message);
+    return undefined;
+  }
+}
+
 /**
  * Bill every confirmed-and-unbilled line as one new bill. `billDate` may be a
  * past date (never future). The order itself keeps its status — billing and
@@ -676,6 +722,15 @@ export async function generateOrderBill(
   const lines = billable.map((b) => b.item);
   const totals = computeBillTotals(lines, o, prior);
 
+  // Freeze the party onto THIS bill (migration 0047). B2 legitimately differs
+  // from B1 if the party changed in between — each bill states who was billed
+  // on its own date, and no later edit to the buyers row moves it. A bill dated
+  // to the past stamps today's identity on an earlier date, so it says so.
+  // snapshotSourceForDate only ever returns the two issue sources; its declared
+  // return type is the wider union (buyer-snapshot.ts).
+  const source = snapshotSourceForDate(billDate, todayIst) as "issue" | "issue_backdated";
+  const party = await captureBuyerSnapshot(admin, o.buyer_id, source);
+
   // Reserve the bill row (unique (order_id, seq) absorbs races).
   let bill: { id: string; bill_number: string; seq: number } | null = null;
   for (let attempt = 0; attempt < 3 && !bill; attempt++) {
@@ -689,6 +744,7 @@ export async function generateOrderBill(
         tax_mode: totals.taxMode, tax_rate: totals.taxRate, tax_amount: totals.taxAmount,
         total: totals.total, advance_applied: totals.advanceApplied,
         bill_date: billDate, created_by: staff.email,
+        ...party,
       })
       .select("id, bill_number, seq")
       .single();
@@ -716,40 +772,104 @@ export async function generateOrderBill(
     marked.push(index);
   }
 
-  // Render + store the bill PDF (best-effort — the bill row already stands).
-  let pdfUrl: string | undefined;
-  try {
-    const { data: buyer } = await admin
-      .from("buyers").select("business_name, owner_name, phone, city").eq("id", o.buyer_id).maybeSingle();
-    const after = { ...o, items: (await admin.from("orders").select("items").eq("id", orderId).single()).data?.items ?? o.items };
-    const stillPending = pendingLines(after as Order).length;
-    const synthetic: Order = {
-      ...o,
-      order_number: bill.bill_number,
-      items: lines,
-      total_amount: totals.total,
-      discount_type: totals.discountAmount > 0 ? o.discount_type : null,
-      discount_value: totals.discountAmount > 0 ? o.discount_value : null,
-      discount_amount: totals.discountAmount,
-      tax_mode: totals.taxMode,
-      tax_rate: totals.taxRate,
-      tax_amount: totals.taxAmount,
-      advance_amount: totals.advanceApplied,
-      submitted_at: billDateToIso(billDate),
-    };
-    const pdf = await renderOrderPdf(synthetic, buyer ?? { business_name: null, owner_name: null, phone: null, city: null }, {
-      seq: bill.seq,
-      orderNumber: o.order_number,
-      pendingCount: stillPending,
-    });
-    pdfUrl = await uploadOrderPdf(o.id, bill.bill_number, pdf);
-    await admin.from("order_bills").update({ pdf_url: pdfUrl }).eq("id", bill.id);
-  } catch (e) {
-    console.error("bill PDF failed (bill stands; regenerate from the order page):", (e as Error).message);
-  }
+  // Print what was just frozen, never a live buyers read — that read was the
+  // whole bug: it rewrote every bill this party had ever been issued.
+  const pdfUrl = await renderAndStoreBillPdf(
+    o,
+    {
+      id: bill.id, bill_number: bill.bill_number, seq: bill.seq, bill_date: billDate, items: lines,
+      discount_amount: totals.discountAmount, tax_mode: totals.taxMode, tax_rate: totals.taxRate,
+      tax_amount: totals.taxAmount, total: totals.total, advance_applied: totals.advanceApplied,
+    },
+    await resolveDocumentParty(admin, party, o.buyer_id),
+  );
 
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
   revalidatePath("/admin/dashboard");
   return { ok: true, billNumber: bill.bill_number, pdfUrl };
+}
+
+// ---- Correcting a frozen party (13 Sep) ------------------------------------
+//
+// Freezing the party at issue is right for an identity that CHANGED, and wrong
+// for one that was simply typed wrong — and a frozen column removes the only
+// way staff had to fix that. This is the way back: an admin corrects the buyers
+// row (Edit Details), then re-stamps this order and its bills from it. It is
+// deliberately per-order and audited, because it rewrites what a tax document
+// says its recipient was.
+
+/** The six party fields, in the order the audit note reads them out. */
+const PARTY_FIELD_LABELS: [keyof BuyerParty, string][] = [
+  ["business_name", "business"],
+  ["owner_name", "owner"],
+  ["phone", "phone"],
+  ["city", "city"],
+  ["gstin", "GSTIN"],
+  ["address", "address"],
+];
+
+export async function recaptureDocumentParty(
+  orderId: string,
+  reason: string,
+): Promise<{ ok: boolean; error?: string; bills?: number }> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
+
+  const clean = (reason ?? "").trim().slice(0, 300);
+  if (!clean) return { ok: false, error: "Say what was wrong with the party on this document." };
+
+  const admin = createAdminClient();
+  const { data: orderRow } = await admin.from("orders").select("*").eq("id", orderId).maybeSingle();
+  if (!orderRow) return { ok: false, error: "Order not found." };
+  const o = orderRow as Order;
+  if (!o.buyer_id) return { ok: false, error: "This order has no party to re-read." };
+
+  // What the documents print TODAY — the honest "before" for the audit note,
+  // including the live fallback for a row that predates its snapshot.
+  const before = await resolveDocumentParty(admin, o, o.buyer_id);
+  const party = await captureBuyerSnapshot(admin, o.buyer_id, "issue");
+  const after: BuyerParty = {
+    business_name: party.buyer_business_name,
+    owner_name: party.buyer_owner_name,
+    phone: party.buyer_phone,
+    city: party.buyer_city,
+    gstin: party.buyer_gstin,
+    address: party.buyer_address,
+  };
+  const replaced =
+    PARTY_FIELD_LABELS.filter(([k]) => (before[k] ?? "") !== (after[k] ?? ""))
+      .map(([k, label]) => `${label}: ${before[k] ?? "(empty)"} -> ${after[k] ?? "(empty)"}`)
+      .join("; ") || "no field differed";
+
+  const { error } = await admin.from("orders").update(party).eq("id", orderId);
+  if (error) return { ok: false, error: error.message };
+
+  // The bills carry their own copy, so they have to be re-stamped too —
+  // otherwise the order says one party and its invoices say another.
+  const { data: billRows, error: billErr } = await admin
+    .from("order_bills")
+    .update(party)
+    .eq("order_id", orderId)
+    .select("id, bill_number, seq, bill_date, items, discount_amount, tax_mode, tax_rate, tax_amount, total, advance_applied");
+  if (billErr) return { ok: false, error: billErr.message };
+  const bills = (billRows ?? []) as BillForPdf[];
+
+  await writeAuditEvent({
+    eventType: "document_party_recaptured",
+    buyerId: o.buyer_id,
+    staffUserId: staff.id,
+    notes: `${o.order_number}${bills.length > 0 ? ` + ${bills.length} bill${bills.length === 1 ? "" : "s"}` : ""} — ${clean} — ${replaced}`,
+  });
+
+  // Re-render the files themselves: a corrected column the buyer never sees is
+  // not a correction. Silent — a staff fix must not re-fire the buyer's invoice.
+  const fixed = { ...o, ...party };
+  for (const bill of bills) await renderAndStoreBillPdf(fixed, bill, after);
+  await finalizeOrder(orderId, { notify: false });
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+  revalidatePath(`/admin/buyers/${o.buyer_id}`);
+  return { ok: true, bills: bills.length };
 }

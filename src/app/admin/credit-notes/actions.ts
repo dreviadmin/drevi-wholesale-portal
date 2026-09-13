@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/staff";
 import { applyMovement } from "@/lib/stock-ledger";
 import { validateBillDate } from "@/lib/order-lines-core";
+import { captureBuyerSnapshot, snapshotSourceForDate } from "@/lib/buyer-snapshot";
 import { formatINR } from "@/lib/format";
 import {
   computeCreditTotals,
@@ -162,7 +163,7 @@ export async function createReturnCreditNote(input: {
 
   const { data: bill } = await admin
     .from("order_bills")
-    .select("id, order_id, bill_number, bill_date, items, subtotal, discount_amount, tax_mode, tax_rate")
+    .select("id, order_id, bill_number, bill_date, items, subtotal, discount_amount, tax_mode, tax_rate, buyer_business_name, buyer_owner_name, buyer_phone, buyer_city, buyer_gstin, buyer_address, buyer_snapshot_at, buyer_snapshot_source")
     .eq("id", input.orderBillId)
     .maybeSingle();
   if (!bill || bill.order_id !== order.id) return { ok: false, error: "That bill is not on this order — reload and retry." };
@@ -269,6 +270,19 @@ export async function createReturnCreditNote(input: {
         order_bill_id: bill.id,
         source_bill_number: bill.bill_number,
         source_bill_date: bill.bill_date,
+        // The party is INHERITED from the bill being reversed, not read live: a
+        // note against a six-month-old bill must be addressed to whoever THAT
+        // bill was addressed to, or the credit note contradicts the invoice it
+        // reverses. The source rides along too — this capture happened at the
+        // bill's issue, not at this note's.
+        buyer_business_name: bill.buyer_business_name,
+        buyer_owner_name: bill.buyer_owner_name,
+        buyer_phone: bill.buyer_phone,
+        buyer_city: bill.buyer_city,
+        buyer_gstin: bill.buyer_gstin,
+        buyer_address: bill.buyer_address,
+        buyer_snapshot_at: bill.buyer_snapshot_at,
+        buyer_snapshot_source: bill.buyer_snapshot_source,
         items: totals.items,
         source_subtotal: totals.sourceSubtotal,
         discount_share: totals.discountShare,
@@ -370,6 +384,14 @@ export async function createManualCreditNote(input: {
   const { data: buyer } = await admin.from("buyers").select("id").eq("id", input.buyerId).maybeSingle();
   if (!buyer) return { ok: false, error: "Pick a party for this credit." };
 
+  // No source bill to inherit from, so a manual note captures the party live —
+  // the one credit-note path that does. A back-dated note stamps today's
+  // identity on an earlier date, which the source flags rather than hides.
+  // snapshotSourceForDate only ever returns the two issue sources; its declared
+  // return type is the wider union (buyer-snapshot.ts).
+  const source = snapshotSourceForDate(noteDate, today) as "issue" | "issue_backdated";
+  const party = await captureBuyerSnapshot(admin, buyer.id, source);
+
   const ymd = noteDate.replace(/-/g, "");
   let note: { id: string; note_number: string } | null = null;
   for (let attempt = 1; attempt <= 3 && !note; attempt++) {
@@ -393,6 +415,7 @@ export async function createManualCreditNote(input: {
         note_date: noteDate,
         client_ref: clientRef,
         created_by: staff.email,
+        ...party,
       })
       .select("id, note_number")
       .single();

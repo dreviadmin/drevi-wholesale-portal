@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useFormState, useFormStatus } from "react-dom";
-import { ChevronLeft, Minus, Plus, X } from "lucide-react";
+import { ChevronLeft, Menu, Minus, Plus, X } from "lucide-react";
+import { BuyerNavDrawer } from "@/components/BuyerNavDrawer";
 import { setQty, setSpecialQty, removeFromCart, submitOrder, type SubmitState } from "./actions";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -52,6 +53,7 @@ export function CartView({
   hasBlock: boolean;
 }) {
   const router = useRouter();
+  const [menuOpen, setMenuOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [state, formAction] = useFormState<SubmitState, FormData>(submitOrder, {});
   // One idempotency key per cart screen — retries of this submit resolve to
@@ -84,18 +86,24 @@ export function CartView({
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: palette.ivory }}>
-      <div
-        className="flex items-center justify-between px-4 py-3.5 sticky top-0 z-10"
-        style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.08)" }}
-      >
-        <Link href="/catalog" aria-label="Back to catalog" style={{ color: palette.black }}>
-          <ChevronLeft size={22} strokeWidth={1.5} />
-        </Link>
-        <div className="font-body uppercase" style={{ fontSize: 12, letterSpacing: "0.3em", color: palette.black }}>
-          Cart
+      {/* The menu takes the slot the layout already held open opposite the
+          back arrow, so the bar keeps its balance. */}
+      <BuyerNavDrawer open={menuOpen} onClose={() => setMenuOpen(false)} cartCount={lines.length} className="sticky top-0 z-10">
+        <div
+          className="flex items-center justify-between px-4 py-3.5"
+          style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.08)" }}
+        >
+          <Link href="/catalog" aria-label="Back to catalog" style={{ color: palette.black }}>
+            <ChevronLeft size={22} strokeWidth={1.5} />
+          </Link>
+          <div className="font-body uppercase" style={{ fontSize: 12, letterSpacing: "0.3em", color: palette.black }}>
+            Cart
+          </div>
+          <button type="button" onClick={() => setMenuOpen((v) => !v)} aria-label="Menu" style={{ width: 22, color: palette.black }}>
+            {menuOpen ? <X size={20} strokeWidth={1.5} /> : <Menu size={20} strokeWidth={1.5} />}
+          </button>
         </div>
-        <span style={{ width: 22 }} />
-      </div>
+      </BuyerNavDrawer>
 
       {lines.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">

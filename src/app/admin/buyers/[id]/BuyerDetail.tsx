@@ -134,9 +134,22 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet }: { isAd
   }
   // Discard / Use server keep the modal open on the current server values.
   const editNotice = { ...editMeta, discard: () => { editMeta.clear(); setEdit({ open: true, form: editSeed }); } };
+  // Only the fields the staff ACTUALLY edited are sent. The form is seeded from
+  // the row as it was rendered, so posting the whole form pushes those stale
+  // values back — silently reverting a change the buyer got approved while this
+  // page sat open (migration 0048). Trimmed both sides: whitespace is not an edit.
+  function editedFields(form: BuyerEditForm): Partial<BuyerEditForm> {
+    const patch: Partial<BuyerEditForm> = {};
+    for (const key of Object.keys(editSeed) as (keyof BuyerEditForm)[]) {
+      if (form[key].trim() !== editSeed[key].trim()) patch[key] = form[key];
+    }
+    return patch;
+  }
   function saveEdit() {
+    const patch = editedFields(edit.form);
+    if (Object.keys(patch).length === 0) { closeEdit(); flash("Nothing changed"); return; }
     start(async () => {
-      const r = await updateBuyerProfile(buyer.id, edit.form);
+      const r = await updateBuyerProfile(buyer.id, patch);
       if (!r.ok) { flash(r.error ?? "Failed"); return; }
       closeEdit();
       flash("Details saved");
