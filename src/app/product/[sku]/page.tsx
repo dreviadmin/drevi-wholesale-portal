@@ -1,7 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getDetailedCart } from "@/lib/cart";
-import { availabilityForSku } from "@/lib/availability-load";
 import { ProductDetailView } from "./ProductDetailView";
 import type { WholesaleProduct } from "@/lib/types";
 import { BUYER_PRODUCT_COLUMNS } from "@/lib/types";
@@ -24,10 +23,11 @@ export default async function ProductPage({ params }: { params: { sku: string } 
 
   if (!product) notFound();
   const p = product as WholesaleProduct;
-  const [cart, avail] = await Promise.all([
-    buyer ? getDetailedCart(buyer.id) : Promise.resolve(null),
-    availabilityForSku(p.sku, p.current_qty ?? 0, p.min_order_qty ?? 1),
-  ]);
+  const cart = buyer ? await getDetailedCart(buyer.id) : null;
 
-  return <ProductDetailView product={p} initialCartCount={cart?.count ?? 0} availability={avail.availability} />;
+  // No availability prop: the buyer surface shows no stock state, and passing it
+  // anyway put the literal on-hand count ("Limited - 1 left") into the RSC
+  // payload where devtools can read it. Staff surfaces still use
+  // availabilityForSku directly.
+  return <ProductDetailView product={p} initialCartCount={cart?.count ?? 0} />;
 }

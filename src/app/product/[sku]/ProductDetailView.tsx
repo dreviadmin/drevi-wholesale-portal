@@ -7,7 +7,6 @@ import { useRouter } from "next/navigation";
 import { ChevronLeft, ShoppingBag, Minus, Plus } from "lucide-react";
 import { ProductImage } from "@/components/ProductImage";
 import { addToCart } from "@/app/cart/actions";
-import type { Availability } from "@/lib/availability";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
@@ -23,7 +22,6 @@ export function ProductDetailView({
    * buyer page no longer states stock or lead time. Optional so the loader in
    * page.tsx can be dropped without touching this file again.
    */
-  availability?: Availability;
 }) {
   const router = useRouter();
   const images = product.image_urls ?? [];
