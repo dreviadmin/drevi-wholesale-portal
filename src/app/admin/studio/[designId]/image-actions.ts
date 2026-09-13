@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import { DETAIL_ANGLES } from "@/lib/studio/state";
 import { storeDesignImage, archiveImageFile, isStorageRef } from "@/lib/design-image-store";
+import { ensureDesignImagery } from "@/lib/design-imagery";
 
 // Retrofit R5 (§7) — four input modes per angle.
 //
@@ -77,6 +78,8 @@ export async function uploadSource(angleId: string, formData: FormData): Promise
   // source_ref is what the Workbench renders and generators read — keep it in
   // lockstep with source_image_id (historically only the sheet sync wrote it).
   await admin.from("design_angles").update({ source_image_id: row.id, source_ref: up.fileRef, updated_at: new Date().toISOString() }).eq("id", angleId);
+  // A photo has landed — the design's identifier and front must not be blank.
+  await ensureDesignImagery(admin, angle.design_id);
   revalidatePath(`/admin/studio/${angle.design_id}`);
   return { ok: true, imageId: row.id };
 }
@@ -103,6 +106,7 @@ export async function importFinished(angleId: string, formData: FormData): Promi
     .select("id")
     .single();
   if (error) return fail(error.message);
+  await ensureDesignImagery(admin, angle.design_id);
   revalidatePath(`/admin/studio/${angle.design_id}`);
   return { ok: true, imageId: row.id };
 }
@@ -131,6 +135,7 @@ export async function applyImageDirectly(angleId: string, imageId: string): Prom
     await admin.from("design_images").update({ status: "archived" }).eq("id", angle.approved_image_id);
   }
   await flipLive(angle.design_id);
+  await ensureDesignImagery(admin, angle.design_id);
   await writeAuditEvent({ eventType: "studio_candidate_approved", staffUserId: staff.id, notes: `mode B use-directly image ${imageId} on angle ${angleId}` });
   revalidatePath(`/admin/studio/${angle.design_id}`);
   revalidatePath("/admin/studio");
@@ -233,6 +238,7 @@ export async function saveCrop(
     .select("id")
     .single();
   if (error) return fail(error.message);
+  await ensureDesignImagery(admin, designId);
   revalidatePath(`/admin/studio/${designId}`);
   return { ok: true, imageId: row.id };
 }
@@ -262,6 +268,7 @@ export async function setAngleSource(angleId: string, imageId: string): Promise<
   await admin.from("design_images").update({ angle_id: angleId }).eq("id", imageId);
   const { error } = await admin.from("design_angles").update({ source_image_id: imageId, source_ref: img.file_ref, updated_at: new Date().toISOString() }).eq("id", angleId);
   if (error) return fail(error.message);
+  await ensureDesignImagery(admin, angle.design_id);
   revalidatePath(`/admin/studio/${angle.design_id}`);
   return { ok: true };
 }

@@ -1,8 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { LogOut } from "lucide-react";
-import { logout } from "@/app/actions";
+import { SignOutButton } from "@/components/SignOutButton";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ORDER_STATUS_LABEL } from "@/lib/order-status";
@@ -108,14 +107,15 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
 
   return (
     <div className="min-h-screen" style={{ background: palette.ivory }}>
-      <div className="px-4 py-3.5 sticky top-0 z-10 flex items-center justify-between" style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
-        <span style={{ width: 18 }} />
-        <div className="font-display" style={{ fontSize: 16, letterSpacing: "0.35em", color: palette.black, fontWeight: 600 }}>DREVI</div>
-        <form action={logout}>
-          <button type="submit" aria-label="Sign out" style={{ color: palette.mutedGreige }}>
-            <LogOut size={18} strokeWidth={1.6} />
-          </button>
-        </form>
+      {/* The left slot was an 18px spacer balancing an 18px icon. The sign-out
+          control carries words now, so both flanks grow instead — the wordmark
+          stays centred rather than drifting a thumb's width to the left. */}
+      <div className="px-4 py-3.5 sticky top-0 z-10 flex items-center" style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
+        <span className="flex-1" />
+        <div className="font-display whitespace-nowrap" style={{ fontSize: 16, letterSpacing: "0.35em", color: palette.black, fontWeight: 600 }}>DREVI</div>
+        <div className="flex-1 flex justify-end">
+          <SignOutButton />
+        </div>
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-8">
