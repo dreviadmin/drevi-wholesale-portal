@@ -9,7 +9,7 @@ import { writeAuditEvent } from "@/lib/audit";
 import { encryptPassword, decryptPassword } from "@/lib/crypto";
 import { generateMemorablePassword } from "@/lib/password";
 import { uploadBuyerCardImage } from "@/lib/storage";
-import type { AuditEventType, BuyerStatus } from "@/lib/types";
+import type { BuyerStatus } from "@/lib/types";
 
 function reqMeta() {
   const h = headers();
