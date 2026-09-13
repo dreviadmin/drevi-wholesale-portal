@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, LogOut } from "lucide-react";
-import { logout } from "@/app/actions";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { SignOutButton } from "@/components/SignOutButton";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadBuyerWalletPublic } from "@/lib/credit-load";
@@ -49,16 +49,21 @@ export default async function AccountPage() {
 
   return (
     <div className="min-h-screen" style={{ background: palette.ivory }}>
-      <div className="flex items-center justify-between px-4 py-3.5 sticky top-0 z-10" style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
-        <Link href="/home" aria-label="Back to home" style={{ color: palette.black }}>
-          <ChevronLeft size={22} strokeWidth={1.5} />
-        </Link>
-        <div className="font-body uppercase" style={{ fontSize: 12, letterSpacing: "0.3em", color: palette.black }}>My Account</div>
-        <form action={logout}>
-          <button type="submit" aria-label="Sign out" style={{ color: palette.mutedGreige }}>
-            <LogOut size={18} strokeWidth={1.6} />
-          </button>
-        </form>
+      {/* Equal flanks rather than justify-between: the sign-out control carries
+          words now, so a chevron on one side and a labelled button on the other
+          would drag the title ~26px off centre. Widest case is this title at
+          320px — 120px of label against 84px of flank, and the control needs
+          74px — so nothing wraps. */}
+      <div className="flex items-center px-4 py-3.5 sticky top-0 z-10" style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
+        <div className="flex-1 flex">
+          <Link href="/home" aria-label="Back to home" style={{ color: palette.black }}>
+            <ChevronLeft size={22} strokeWidth={1.5} />
+          </Link>
+        </div>
+        <div className="font-body uppercase whitespace-nowrap" style={{ fontSize: 12, letterSpacing: "0.3em", color: palette.black }}>My Account</div>
+        <div className="flex-1 flex justify-end">
+          <SignOutButton />
+        </div>
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-6">

@@ -5,6 +5,7 @@ import type { Order, OrderItem } from "@/lib/types";
 import type { CreditLineSnapshot } from "@/lib/credit-core";
 import type { CreditNoteRow } from "@/lib/credit-load";
 import { billDateToIso } from "@/lib/order-lines-core";
+import { SUPPLIER } from "@/lib/supplier";
 
 // Pre-fetched outfit thumbnails, keyed by SKU. Fetched OUTSIDE the renderer
 // (with timeouts + format sniffing) so a slow/broken CDN URL can never hang or
@@ -61,6 +62,13 @@ const s = StyleSheet.create({
   page: { padding: 40, fontFamily: "Helvetica", fontSize: 10, color: C.black, backgroundColor: "#FFFFFF" },
   wordmark: { fontFamily: "Times-Bold", fontSize: 22, letterSpacing: 6, color: C.black },
   tagline: { fontFamily: "Helvetica", fontSize: 7, letterSpacing: 3, color: C.gold, marginTop: 3 },
+  supplierName: { fontFamily: "Helvetica-Bold", fontSize: 7.5, color: C.black },
+  supplierLine: { fontFamily: "Helvetica", fontSize: 7, color: C.greige, marginTop: 1 },
+  supplierGstin: { fontFamily: "Helvetica-Bold", fontSize: 7.5, color: C.black, marginTop: 2 },
+  signBlock: { position: "absolute", bottom: 66, right: 40, width: 190, alignItems: "flex-end" },
+  signLine: { borderTopWidth: 0.5, borderTopColor: C.greige, width: 170, marginTop: 34, paddingTop: 4 },
+  signText: { fontFamily: "Helvetica", fontSize: 7.5, color: C.greige, textAlign: "right" },
+  signFor: { fontFamily: "Helvetica-Bold", fontSize: 8, color: C.black, textAlign: "right" },
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", borderBottomWidth: 1, borderBottomColor: C.gold, paddingBottom: 12, marginBottom: 16 },
   orderNo: { fontFamily: "Times-Bold", fontSize: 14, color: C.black },
   meta: { fontSize: 8, color: C.greige, marginTop: 2 },
@@ -177,9 +185,22 @@ function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; b
     >
       <Page size="A4" style={s.page}>
         <View style={s.headerRow}>
-          <View>
+          <View style={{ maxWidth: 300 }}>
             <Text style={s.wordmark}>DREVI</Text>
             <Text style={s.tagline}>{variant?.tagline ?? (isInvoice ? "WHOLESALE - INVOICE" : "WHOLESALE")}</Text>
+            {/* The supplier's own particulars. A tax invoice has to say who
+                issued it, not only who it is addressed to. Shown on invoices
+                only: an order request is not a tax document, and the footer
+                already carries the trading address for those. */}
+            {isInvoice && (
+              <View style={{ marginTop: 7 }}>
+                <Text style={s.supplierName}>{SUPPLIER.legalName}</Text>
+                {SUPPLIER.address.map((line) => (
+                  <Text key={line} style={s.supplierLine}>{line}</Text>
+                ))}
+                <Text style={s.supplierGstin}>GSTIN {SUPPLIER.gstin}</Text>
+              </View>
+            )}
           </View>
           <View style={{ alignItems: "flex-end" }}>
             <Text style={s.orderNo}>{order.order_number}</Text>
@@ -307,12 +328,28 @@ function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; b
           </View>
         )}
 
+        {/* Rule 46 wants a signature or digital signature of the supplier or
+            their authorised representative. The carve-out is for documents
+            issued WITH a digital signature under the IT Act — which a
+            server-rendered PDF is not — so the document carries a real
+            signatory block rather than a "computer generated" disclaimer.
+            Drop a scanned signature in as an Image above signLine when Ansh
+            provides one; the block is laid out to take it. */}
+        {isInvoice && (
+          <View style={s.signBlock}>
+            <Text style={s.signFor}>For {SUPPLIER.tradeName}</Text>
+            <View style={s.signLine}>
+              <Text style={s.signText}>Authorised Signatory</Text>
+            </View>
+          </View>
+        )}
+
         <Text style={s.footer}>
           {variant?.footerNote ??
             (isInvoice
               ? "Thank you for your business."
               : "This is an order request, not an invoice. Rakesh will confirm availability and billing.")}{"\n"}
-          Drevi Fashion - Dadar West, Mumbai - +91 88280 43555 - Dream Forward. Root Deep.
+          {SUPPLIER.tradeName} - {SUPPLIER.stateName} - {SUPPLIER.phone} - Dream Forward. Root Deep.
         </Text>
       </Page>
     </Document>

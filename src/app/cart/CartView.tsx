@@ -12,6 +12,9 @@ import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { StockState } from "@/lib/types";
 
+// cap / moq / stockState / restockDays / belowMoq are still sent by page.tsx
+// but nothing here renders them — the buyer cart states no stock, no lead time
+// and no minimum. They stay on the DTO so page.tsx keeps compiling.
 interface CartLineDTO {
   sku: string;
   title: string;
@@ -44,13 +47,17 @@ function SubmitButton({ disabled }: { disabled: boolean }) {
 export function CartView({
   lines,
   subtotal,
-  maxLeadDays,
-  hasBlock,
 }: {
   lines: CartLineDTO[];
   subtotal: number;
-  maxLeadDays: number;
-  hasBlock: boolean;
+  /**
+   * Both still accepted so page.tsx keeps compiling, but neither renders: the
+   * cart no longer quotes a lead time or gates the submit on a minimum. Rakesh
+   * confirms the whole request on the call. Optional so page.tsx can stop
+   * computing them without touching this file again.
+   */
+  maxLeadDays?: number;
+  hasBlock?: boolean;
 }) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -68,14 +75,6 @@ export function CartView({
       else await setQty(sku, qty);
       router.refresh();
     });
-  }
-  function requestSpecial(l: CartLineDTO) {
-    const suggestion = l.belowMoq ? l.qty : (l.cap ?? l.qty) + 1;
-    const answer = window.prompt("Special quantity request — how many pieces?", String(suggestion));
-    if (answer === null) return;
-    const wanted = Math.max(1, Math.floor(Number(answer) || 0));
-    if (!wanted) return;
-    editQty(l.sku, wanted, true);
   }
   function remove(sku: string) {
     startTransition(async () => {
@@ -117,75 +116,45 @@ export function CartView({
       ) : (
         <div className={`flex-1 px-4 py-4 ${isPending ? "opacity-90" : ""}`}>
           <div className="flex flex-col gap-3 max-w-2xl mx-auto">
-            {lines.map((l) => {
-              const atCap = !l.special && l.cap != null && l.qty >= l.cap;
-              return (
-                <div key={l.sku} className="flex gap-3 p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
-                  <Link href={`/product/${encodeURIComponent(l.sku)}`} className="relative flex-shrink-0" style={{ width: 96, height: 120, background: palette.ivoryDeep }}>
-                    {l.image && <Image src={l.image} alt={l.title} fill sizes="96px" className="object-cover" />}
-                  </Link>
+            {lines.map((l) => (
+              <div key={l.sku} className="flex gap-3 p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
+                <Link href={`/product/${encodeURIComponent(l.sku)}`} className="relative flex-shrink-0" style={{ width: 96, height: 120, background: palette.ivoryDeep }}>
+                  {l.image && <Image src={l.image} alt={l.title} fill sizes="96px" className="object-cover" />}
+                </Link>
 
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
-                      <Link href={`/product/${encodeURIComponent(l.sku)}`} className="font-display" style={{ color: palette.black, fontSize: 14, lineHeight: 1.25, fontWeight: 500 }}>
-                        {l.title}
-                      </Link>
-                      <button type="button" onClick={() => remove(l.sku)} aria-label="Remove" style={{ color: palette.mutedGreige }}>
-                        <X size={16} strokeWidth={1.8} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <Link href={`/product/${encodeURIComponent(l.sku)}`} className="font-display" style={{ color: palette.black, fontSize: 14, lineHeight: 1.25, fontWeight: 500 }}>
+                      {l.title}
+                    </Link>
+                    <button type="button" onClick={() => remove(l.sku)} aria-label="Remove" style={{ color: palette.mutedGreige }}>
+                      <X size={16} strokeWidth={1.8} />
+                    </button>
+                  </div>
+                  <div className="font-body mt-0.5" style={{ color: palette.mutedGreige, fontSize: 9, letterSpacing: "0.1em" }}>
+                    {l.sku}
+                  </div>
+
+                  {/* The stepper runs free in both directions. `l.special` is
+                      still forwarded so a line a buyer flagged before this
+                      change keeps its exact quantity on edit. */}
+                  <div className="flex items-center justify-between mt-2">
+                    <div className="flex items-center" style={{ border: `1px solid rgba(26,26,26,0.2)` }}>
+                      <button type="button" onClick={() => editQty(l.sku, l.qty - 1, l.special)} aria-label="Decrease" className="px-2.5 py-1.5" style={{ color: palette.black }}>
+                        <Minus size={13} strokeWidth={2} />
+                      </button>
+                      <span className="font-body" style={{ minWidth: 28, textAlign: "center", fontSize: 13 }}>{l.qty}</span>
+                      <button type="button" onClick={() => editQty(l.sku, l.qty + 1, l.special)} aria-label="Increase" className="px-2.5 py-1.5" style={{ color: palette.black }}>
+                        <Plus size={13} strokeWidth={2} />
                       </button>
                     </div>
-                    <div className="font-body mt-0.5" style={{ color: palette.mutedGreige, fontSize: 9, letterSpacing: "0.1em" }}>
-                      {l.sku}
+                    <div className="font-display" style={{ color: palette.black, fontSize: 15, fontWeight: 600 }}>
+                      {formatINR(l.lineTotal)}
                     </div>
-
-                    {l.stockState === "made_to_order" && (
-                      <div className="font-body mt-1" style={{ color: palette.goldDeep, fontSize: 10, letterSpacing: "0.04em" }}>
-                        Made to Order · {l.restockDays} days
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between mt-2">
-                      <div className="flex items-center" style={{ border: `1px solid rgba(26,26,26,0.2)` }}>
-                        <button type="button" onClick={() => editQty(l.sku, l.qty - 1, l.special)} aria-label="Decrease" className="px-2.5 py-1.5" style={{ color: palette.black }}>
-                          <Minus size={13} strokeWidth={2} />
-                        </button>
-                        <span className="font-body" style={{ minWidth: 28, textAlign: "center", fontSize: 13 }}>{l.qty}</span>
-                        <button type="button" onClick={() => editQty(l.sku, l.qty + 1, l.special)} disabled={atCap} aria-label="Increase" className="px-2.5 py-1.5 disabled:opacity-40" style={{ color: palette.black }}>
-                          <Plus size={13} strokeWidth={2} />
-                        </button>
-                      </div>
-                      <div className="font-display" style={{ color: palette.black, fontSize: 15, fontWeight: 600 }}>
-                        {formatINR(l.lineTotal)}
-                      </div>
-                    </div>
-
-                    {l.special ? (
-                      <div className="font-body mt-1.5" style={{ fontSize: 10, color: palette.goldDeep, letterSpacing: "0.03em" }}>
-                        Special quantity request — subject to Rakesh&apos;s confirmation.
-                      </div>
-                    ) : (
-                      <>
-                        {l.cap != null && (
-                          <div className="font-body mt-1.5" style={{ fontSize: 10, color: palette.crimsonText, letterSpacing: "0.03em" }}>
-                            Only {l.cap} available — not restockable.
-                          </div>
-                        )}
-                        {l.belowMoq && (
-                          <div className="font-body mt-1" style={{ fontSize: 10, color: palette.crimsonText, letterSpacing: "0.03em" }}>
-                            Minimum {l.moq} pieces — increase to submit.
-                          </div>
-                        )}
-                        {(l.belowMoq || atCap) && (
-                          <button type="button" onClick={() => requestSpecial(l)} className="font-body uppercase mt-1.5" style={{ fontSize: 9, letterSpacing: "0.14em", color: palette.goldDeep, borderBottom: `1px solid ${palette.gold}` }}>
-                            Request special quantity
-                          </button>
-                        )}
-                      </>
-                    )}
                   </div>
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
 
           {/* Summary + submit */}
@@ -194,11 +163,6 @@ export function CartView({
               <span className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.18em", color: palette.softBlack }}>Subtotal</span>
               <span className="font-display" style={{ fontSize: 20, fontWeight: 600, color: palette.black }}>{formatINR(subtotal)}</span>
             </div>
-            {maxLeadDays > 0 && (
-              <div className="font-body mt-1 text-right" style={{ fontSize: 10, color: palette.goldDeep, letterSpacing: "0.04em" }}>
-                Estimated availability: {maxLeadDays} days
-              </div>
-            )}
 
             <form action={formAction} className="mt-5">
               <input type="hidden" name="clientRef" value={clientRefRef.current} />
@@ -213,11 +177,6 @@ export function CartView({
                 />
               </label>
 
-              {hasBlock && (
-                <p className="font-body mt-2" style={{ fontSize: 11, color: palette.crimsonText }}>
-                  Some items are below their minimum order quantity. Adjust them to submit.
-                </p>
-              )}
               {state?.error && (
                 <p className="font-body mt-2" style={{ fontSize: 11, color: palette.crimsonText }}>{state.error}</p>
               )}
@@ -230,7 +189,7 @@ export function CartView({
                 </p>
               </div>
               <div className="mt-3">
-                <SubmitButton disabled={hasBlock || isPending} />
+                <SubmitButton disabled={isPending} />
               </div>
             </form>
           </div>

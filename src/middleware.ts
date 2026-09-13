@@ -17,6 +17,12 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      // Every session refresh rewrites the auth cookie here, so this is the
+      // call site that decides whether it carries Secure. Gated on the
+      // environment, not hardcoded, so http://localhost still works in dev
+      // (mirrors src/lib/supabase/server.ts). @supabase/ssr merges this over
+      // its defaults, so the 400-day maxAge is untouched.
+      cookieOptions: { secure: process.env.NODE_ENV === "production" },
       cookies: {
         getAll() {
           return request.cookies.getAll();

@@ -6,10 +6,8 @@ import { Search, QrCode } from "lucide-react";
 import { DreviHeader } from "@/components/DreviHeader";
 import { FilterChips } from "@/components/FilterChips";
 import { GroupedProductCard } from "@/components/GroupedProductCard";
-import type { Availability } from "@/lib/availability";
 import { QrScanner } from "@/components/QrScanner";
 import { setQty as setCartQty } from "@/app/cart/actions";
-import { qtyCap } from "@/lib/stock";
 import { groupByBase } from "@/lib/variants";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
@@ -28,12 +26,10 @@ export function CatalogView({
   businessName,
   products,
   initialCartBySku,
-  availabilityBySku,
 }: {
   businessName: string;
   products: WholesaleProduct[];
   initialCartBySku: Record<string, number>;
-  availabilityBySku: Record<string, Availability>;
 }) {
   const router = useRouter();
   const [category, setCategory] = useState("All");
@@ -77,17 +73,14 @@ export function CatalogView({
     const sku = text.trim().toUpperCase();
     const product = products.find((p) => p.sku.toUpperCase() === sku);
     if (!product) return { ok: false, message: `SKU not found: ${text.trim()}` };
-    const current = cartRef.current[product.sku] ?? 0;
-    const next = current === 0 ? (product.min_order_qty ?? 1) : current + 1;
+    const next = (cartRef.current[product.sku] ?? 0) + 1;
     changeQty(product, next);
     return { ok: true, message: `${product.title ?? product.sku} — ${next} in cart` };
   }
 
   function changeQty(product: WholesaleProduct, qty: number) {
-    // Optimistic update — server clamps and returns the canonical qty.
-    const cap = qtyCap(product);
-    const desired = cap != null ? Math.min(qty, cap) : qty;
-    const next = desired <= 0 ? 0 : desired;
+    // Optimistic update — server returns the canonical qty.
+    const next = qty <= 0 ? 0 : qty;
     setCart((c) => {
       const copy = { ...c };
       if (next === 0) delete copy[product.sku];
@@ -157,7 +150,7 @@ export function CatalogView({
                 onChangeQty={changeQty}
                 detailHrefFor={(sku) => `/product/${encodeURIComponent(sku)}`}
                 onGoToCart={() => router.push("/cart")}
-                availabilityBySku={availabilityBySku}
+                showStock={false}
               />
             ))}
           </div>

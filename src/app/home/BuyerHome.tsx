@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { ShoppingCart, ChevronRight, ScanLine, Menu, X, Bell, ImageOff } from "lucide-react";
+import { ShoppingCart, ChevronRight, ScanLine, Menu, X, ImageOff } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { BuyerNavDrawer } from "@/components/BuyerNavDrawer";
 import { palette } from "@/lib/palette";
@@ -12,7 +12,6 @@ import { formatINR } from "@/lib/format";
 import type { BuyerHomeData } from "@/lib/buyer-home";
 import { BuyerWalletCard, type BuyerWallet } from "@/components/BuyerWalletCard";
 import { addToCart } from "@/app/cart/actions";
-import { notifyMe, dismissNotify } from "./actions";
 
 // Buyer storefront home (§13). PRICING FIREWALL: list wholesale prices only —
 // never a personalised discount, cost, or vendor field. Final pricing wording
@@ -63,11 +62,6 @@ export function BuyerHome({ businessName, city, cartCount, data, wallet }: {
       if (res.ok) router.refresh();
     });
   }
-
-  const stockLabel = (qty: number, restockable: boolean) =>
-    qty > 0 ? { text: qty <= 5 ? `Limited · ${qty} left` : "In stock", bg: qty <= 5 ? "rgba(239,159,39,.92)" : "rgba(93,202,165,.92)", fg: qty <= 5 ? "#412402" : "#04342C" }
-            : restockable ? { text: "Made to order", bg: "rgba(90,122,154,.92)", fg: "#fff" }
-            : { text: "Sold out", bg: "rgba(201,123,123,.92)", fg: "#fff" };
 
   return (
     <div className="min-h-screen pb-24" style={{ background: palette.pageBg }}>
@@ -141,28 +135,11 @@ export function BuyerHome({ businessName, city, cartCount, data, wallet }: {
           </Link>
         )}
 
-        {/* Back in stock */}
-        {data.backInStock.length > 0 && (
-          <div className="mb-4 p-3.5" style={{ background: "#DFF0E4", borderRadius: 12 }}>
-            <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: "#1F6B45", fontWeight: 600 }}>Back in stock</div>
-            <div className="flex gap-2 mt-2 overflow-x-auto">
-              {data.backInStock.map((b) => (
-                <div key={b.sku} className="flex-shrink-0" style={{ width: 92 }}>
-                  <Link href={`/product/${encodeURIComponent(b.sku)}`}>
-                    {b.imageUrl ? (
-                      <Image src={b.imageUrl} alt={b.title ?? b.sku} width={92} height={115} className="object-cover" unoptimized />
-                    ) : (
-                      <div className="flex items-center justify-center" style={{ width: 92, height: 115, background: palette.ivoryDeep }}><ImageOff size={14} color={palette.mutedGreige} /></div>
-                    )}
-                  </Link>
-                  <button type="button" onClick={() => startTransition(async () => { await dismissNotify(b.sku); router.refresh(); })} className="font-body uppercase mt-1" style={{ fontSize: 7.5, letterSpacing: "0.1em", color: "#1F6B45" }}>
-                    Got it
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* The Back-in-stock strip is gone with the Notify-me button below it.
+            Notify-me only ever rendered on a sold-out tile, and sold-out is no
+            longer a state this portal shows a buyer — so the button could never
+            appear again, and it was the only thing that wrote notify_me rows.
+            The strip read nothing else, so it would have sat empty forever. */}
 
         {/* Reorder your usuals */}
         {data.reorder.length > 0 && (
@@ -172,40 +149,29 @@ export function BuyerHome({ businessName, city, cartCount, data, wallet }: {
               <Link href="/catalog" className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", color: palette.mutedGreige }}>See all</Link>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mt-2">
-              {data.reorder.map((r) => {
-                const badge = stockLabel(r.currentQty, r.restockable);
-                const soldOut = r.currentQty <= 0 && !r.restockable;
-                return (
-                  <div key={r.sku} style={{ background: "#fff", border: "1px solid rgba(26,26,26,0.08)" }}>
-                    <Link href={`/product/${encodeURIComponent(r.sku)}`} className="block relative">
-                      {r.imageUrl ? (
-                        <Image src={r.imageUrl} alt={r.title ?? r.sku} width={220} height={275} className="w-full object-cover" style={{ aspectRatio: "4/5" }} unoptimized />
-                      ) : (
-                        <div className="flex items-center justify-center w-full" style={{ aspectRatio: "4/5", background: palette.ivoryDeep }}><ImageOff size={16} color={palette.mutedGreige} /></div>
-                      )}
-                      <span className="absolute top-1.5 left-1.5 font-body px-1.5 py-0.5" style={{ fontSize: 8, fontWeight: 600, background: badge.bg, color: badge.fg }}>{badge.text}</span>
-                    </Link>
-                    <div className="p-2">
-                      <div className="font-body truncate" style={{ fontSize: 11.5, color: palette.black }}>{r.title ?? r.sku}</div>
-                      <div className="font-display mt-0.5" style={{ fontSize: 13, fontWeight: 600, color: palette.black }}>
-                        {formatINR(r.wholesalePrice)} <span className="font-body" style={{ fontSize: 9, color: palette.mutedGreige }}>/pc</span>
-                      </div>
-                      <div className="font-body" style={{ fontSize: 9, color: palette.mutedGreige }}>
-                        {r.minOrderQty ? `MOQ ${r.minOrderQty} · ` : ""}you took {r.pieces} pc
-                      </div>
-                      {soldOut ? (
-                        <button type="button" disabled={pending} onClick={() => startTransition(async () => { const res = await notifyMe(r.sku); flash(res.ok ? "We'll tell you when it's back" : res.error ?? "Failed"); router.refresh(); })} className="w-full mt-1.5 flex items-center justify-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 0" }}>
-                          <Bell size={10} /> Notify me
-                        </button>
-                      ) : (
-                        <button type="button" disabled={pending} onClick={() => add(r.sku)} className="w-full mt-1.5 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: palette.black, color: palette.gold, padding: "7px 0" }}>
-                          Add to cart
-                        </button>
-                      )}
+              {data.reorder.map((r) => (
+                <div key={r.sku} style={{ background: "#fff", border: "1px solid rgba(26,26,26,0.08)" }}>
+                  <Link href={`/product/${encodeURIComponent(r.sku)}`} className="block relative">
+                    {r.imageUrl ? (
+                      <Image src={r.imageUrl} alt={r.title ?? r.sku} width={220} height={275} className="w-full object-cover" style={{ aspectRatio: "4/5" }} unoptimized />
+                    ) : (
+                      <div className="flex items-center justify-center w-full" style={{ aspectRatio: "4/5", background: palette.ivoryDeep }}><ImageOff size={16} color={palette.mutedGreige} /></div>
+                    )}
+                  </Link>
+                  <div className="p-2">
+                    <div className="font-body truncate" style={{ fontSize: 11.5, color: palette.black }}>{r.title ?? r.sku}</div>
+                    <div className="font-display mt-0.5" style={{ fontSize: 13, fontWeight: 600, color: palette.black }}>
+                      {formatINR(r.wholesalePrice)} <span className="font-body" style={{ fontSize: 9, color: palette.mutedGreige }}>/pc</span>
                     </div>
+                    <div className="font-body" style={{ fontSize: 9, color: palette.mutedGreige }}>
+                      you took {r.pieces} pc
+                    </div>
+                    <button type="button" disabled={pending} onClick={() => add(r.sku)} className="w-full mt-1.5 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: palette.black, color: palette.gold, padding: "7px 0" }}>
+                      Add to cart
+                    </button>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           </>
         )}

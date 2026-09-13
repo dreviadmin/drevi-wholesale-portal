@@ -7,6 +7,7 @@ import { writeAuditEvent } from "@/lib/audit";
 import { ALL_ANGLES } from "@/lib/studio/state";
 import { applyMovement } from "@/lib/stock-ledger";
 import { storeDesignImage } from "@/lib/design-image-store";
+import { ensureDesignImagery } from "@/lib/design-imagery";
 import { exGstCost } from "@/lib/gst";
 
 // Retrofit R3 (§5) — "Log delivery": one screen, one motion per garment.
@@ -202,48 +203,30 @@ export async function uploadIdentPhoto(
     .single();
   if (error) return fail(error.message);
   // Previous ident row is archived, never deleted (§4.5).
-  if (design.ident_image_id) await admin.from("design_images").update({ status: "archived" }).eq("id", design.ident_image_id);
-  await admin.from("designs").update({ ident_image_id: row.id }).eq("id", designId);
-  await seedFrontFromIdent(admin, designId, up.fileRef);
-  return { ok: true, imageId: row.id, fileRef: up.fileRef };
-}
-
-/**
- * The rack photo taken at delivery becomes the FRONT angle's source until a
- * real front shot exists (Ansh, 12 Sep) — the Studio then opens with something
- * to work from instead of an empty card, and the board shows the garment.
- *
- * Only ever fills a gap: an angle that already has a source or an approved
- * image is left alone, so saving a proper front silently supersedes this. A
- * re-shot ident replaces a front that is still pointing at the old ident.
- */
-async function seedFrontFromIdent(
-  admin: ReturnType<typeof createAdminClient>,
-  designId: string,
-  identRef: string,
-): Promise<void> {
-  const { data: front } = await admin
-    .from("design_angles")
-    .select("id, source_ref, approved_image_id")
-    .eq("design_id", designId)
-    .eq("angle", "front")
-    .maybeSingle();
-  if (!front || front.approved_image_id) return;
-
-  if (front.source_ref) {
-    // Still the previous ident? Follow the re-shoot. A real front stays put.
-    const { data: prevIdent } = await admin
-      .from("design_images")
-      .select("file_ref")
+  if (design.ident_image_id) {
+    const { data: prev } = await admin.from("design_images").select("id, file_ref").eq("id", design.ident_image_id).maybeSingle();
+    await admin.from("design_images").update({ status: "archived" }).eq("id", design.ident_image_id);
+    // A front still showing the OLD rack photo follows the re-shoot: clear it
+    // so the imagery rule below re-seeds from the new ident. A real front — one
+    // with its own source, or an approved image — stays put.
+    const { data: front } = await admin
+      .from("design_angles")
+      .select("id, source_ref, source_image_id, approved_image_id")
       .eq("design_id", designId)
-      .eq("role", "ident")
-      .eq("status", "archived")
-      .order("created_at", { ascending: false })
-      .limit(1)
+      .eq("angle", "front")
       .maybeSingle();
-    if (!prevIdent || prevIdent.file_ref !== front.source_ref) return;
+    const seededFromPrev = !!prev && (front?.source_image_id === prev.id || front?.source_ref === prev.file_ref);
+    if (front && !front.approved_image_id && seededFromPrev) {
+      await admin.from("design_angles").update({ source_image_id: null, source_ref: null }).eq("id", front.id);
+    }
   }
-  await admin.from("design_angles").update({ source_ref: identRef }).eq("id", front.id);
+  await admin.from("designs").update({ ident_image_id: row.id }).eq("id", designId);
+  // The rack photo taken at delivery becomes the FRONT angle's source until a
+  // real front shot exists (Ansh, 12 Sep) — the Studio then opens with
+  // something to work from instead of an empty card, and the board shows the
+  // garment. One shared rule now, so a Drive or Studio photo seeds it too.
+  await ensureDesignImagery(admin, designId);
+  return { ok: true, imageId: row.id, fileRef: up.fileRef };
 }
 
 /**

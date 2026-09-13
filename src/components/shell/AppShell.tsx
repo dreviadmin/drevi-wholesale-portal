@@ -4,11 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  House, Store, Boxes, Palette, Briefcase, ScanLine, LogOut,
+  House, Store, Boxes, Palette, Briefcase, ScanLine,
   Tag, QrCode, LayoutGrid, Tent, Truck, PackageCheck, Users,
   ShoppingBag, ScrollText, Shield, BarChart3, SlidersHorizontal, RefreshCw,
 } from "lucide-react";
-import { logout } from "@/app/actions";
+import { SignOutButton } from "@/components/SignOutButton";
 import { palette } from "@/lib/palette";
 import { t } from "@/lib/strings";
 import { spacesForRole, spaceForPath, type Space } from "@/lib/nav";
@@ -131,11 +131,12 @@ export function AppShell({
           <div className="font-body mt-0.5" style={{ fontSize: 9, letterSpacing: "0.15em", color: palette.gold, textTransform: "uppercase" }}>
             {ROLE_LABEL[staff.role]}
           </div>
-          <form action={logout} className="mt-3">
-            <button type="submit" className="flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.champagne }}>
-              <LogOut size={12} strokeWidth={1.7} /> Sign Out
-            </button>
-          </form>
+          {/* The spacing sits on a wrapper, not the button: the control owns a
+              <form> of its own, so a margin on the button would be measured
+              inside it rather than under the name above. */}
+          <div className="mt-3">
+            <SignOutButton style={{ gap: 6, fontSize: 9, letterSpacing: "0.18em", color: palette.champagne }} iconSize={12} />
+          </div>
         </div>
       </aside>
 
@@ -148,11 +149,7 @@ export function AppShell({
           <Link href="/admin/home" className="font-display" style={{ fontSize: 14, letterSpacing: "0.3em", color: palette.ivory, fontWeight: 600 }}>
             DREVI
           </Link>
-          <form action={logout}>
-            <button type="submit" className="font-body" style={{ color: palette.champagne }} aria-label="Sign out">
-              <LogOut size={16} strokeWidth={1.7} />
-            </button>
-          </form>
+          <SignOutButton style={{ color: palette.champagne }} />
         </div>
         {subTabs.length > 1 && (
           <div

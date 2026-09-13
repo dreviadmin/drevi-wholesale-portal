@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ensureDesignImagery } from "@/lib/design-imagery";
 import { fetchDriveImage } from "@/lib/drive";
 import {
   uploadsEnabled as driveConfigured,
@@ -64,6 +65,9 @@ export interface StoredImage {
 /**
  * Store one design photo. `kind` follows the Drive naming convention
  * (src / import / crop / ident).
+ *
+ * Bytes only — the design_images row is the caller's to write, so the imagery
+ * rule (ensureDesignImagery) runs in the caller once that row exists.
  */
 export async function storeDesignImage(args: {
   designId: string;
@@ -225,24 +229,30 @@ export async function ingestDriveFolder(
   const { data: existing } = await admin.from("design_images").select("file_ref").eq("design_id", designId);
   const known = new Set((existing ?? []).map((r) => r.file_ref));
   const fresh = files.filter((f) => !known.has(f.id));
-  if (fresh.length === 0) return { ok: true, added: 0, folderId };
-  // Upsert-ignore + the 0040 unique index make this safe against a concurrent
-  // portal upload or a second sync; select() returns only the rows actually
-  // written, so `added` never overcounts.
-  const { data: written, error } = await admin
-    .from("design_images")
-    .upsert(
-      fresh.map((f) => ({
-        design_id: designId,
-        role: "source",
-        file_ref: f.id,
-        file_name: f.name,
-        status: "active",
-        created_by: "drive-sync",
-      })),
-      { onConflict: "design_id,file_ref", ignoreDuplicates: true },
-    )
-    .select("id");
-  if (error) return { ok: false, added: 0, error: error.message, folderId };
-  return { ok: true, added: (written ?? []).length, folderId };
+  let added = 0;
+  if (fresh.length > 0) {
+    // Upsert-ignore + the 0040 unique index make this safe against a concurrent
+    // portal upload or a second sync; select() returns only the rows actually
+    // written, so `added` never overcounts.
+    const { data: written, error } = await admin
+      .from("design_images")
+      .upsert(
+        fresh.map((f) => ({
+          design_id: designId,
+          role: "source",
+          file_ref: f.id,
+          file_name: f.name,
+          status: "active",
+          created_by: "drive-sync",
+        })),
+        { onConflict: "design_id,file_ref", ignoreDuplicates: true },
+      )
+      .select("id");
+    if (error) return { ok: false, added: 0, error: error.message, folderId };
+    added = (written ?? []).length;
+  }
+  // Runs even when nothing was fresh: a design whose photos an earlier sync
+  // already registered still needs its identifier and front filling in.
+  await ensureDesignImagery(admin, designId);
+  return { ok: true, added, folderId };
 }

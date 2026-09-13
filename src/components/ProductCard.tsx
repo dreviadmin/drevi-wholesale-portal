@@ -5,7 +5,6 @@ import { Plus, Minus } from "lucide-react";
 import { StockPill } from "@/components/StockPill";
 import { ProductImage } from "@/components/ProductImage";
 import { getStockState, qtyCap } from "@/lib/stock";
-import type { Availability } from "@/lib/availability";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
@@ -24,7 +23,7 @@ export function ProductCard({
   onGoToCart,
   variantBar,
   onOpenDetail,
-  availability,
+  showStock = true,
   readOnly = false,
 }: {
   product: WholesaleProduct;
@@ -40,14 +39,18 @@ export function ProductCard({
   onOpenDetail?: (product: WholesaleProduct) => void;
   // Browse-only surfaces (View Catalog): no Add button, no stepper.
   readOnly?: boolean;
-  /** R7 §9 — computed server-side, already stripped to the five buyer-safe keys. */
-  availability?: Availability;
+  /**
+   * The wholesale catalog passes false: buyers no longer see stock or MOQ, so
+   * there is no limit left to explain to them either. They ask for whatever
+   * they want and Rakesh settles each line on the call. Admin callers leave it
+   * on and keep today's pill, minimum and caps.
+   */
+  showStock?: boolean;
 }) {
-  const state = getStockState(product);
-  const canAdd = state !== "sold_out";
-  const cap = qtyCap(product);
+  const canAdd = !showStock || getStockState(product) !== "sold_out";
+  const cap = showStock ? qtyCap(product) : null;
   const atCap = enforceCaps && cap != null && cartQty >= cap;
-  const initialQty = product.min_order_qty ?? 1;
+  const initialQty = showStock ? (product.min_order_qty ?? 1) : 1;
 
   const titleBlock = (
     <>
@@ -62,11 +65,6 @@ export function ProductCard({
         <div className="font-body mt-0.5" style={{ color: palette.mutedGreige, fontSize: 9, letterSpacing: "0.1em" }}>
           {product.sku}
         </div>
-        {availability && (
-          <div className="font-body mt-1" style={{ fontSize: 9, letterSpacing: "0.06em", color: availability.orderable ? palette.goldDeep : palette.mutedGreige }}>
-            {availability.label}
-          </div>
-        )}
       </div>
     </>
   );
@@ -86,9 +84,11 @@ export function ProductCard({
       )}
 
       <div className={large ? "px-4 pb-4" : "px-3 pb-3"}>
-        <div className="mt-2.5">
-          <StockPill product={product} compact={!large} />
-        </div>
+        {showStock && (
+          <div className="mt-2.5">
+            <StockPill product={product} compact={!large} />
+          </div>
+        )}
 
         {variantBar}
 
@@ -102,7 +102,7 @@ export function ProductCard({
           )}
         </div>
 
-        {product.min_order_qty ? (
+        {showStock && product.min_order_qty ? (
           <div className="font-body mt-1" style={{ color: palette.goldDeep, fontSize: 10, letterSpacing: "0.05em" }}>
             Minimum {product.min_order_qty} pieces
           </div>

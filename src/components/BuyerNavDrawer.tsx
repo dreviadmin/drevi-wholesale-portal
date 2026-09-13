@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LogOut, ClipboardList, Store, ShoppingBag, Wallet, UserRound } from "lucide-react";
-import { logout } from "@/app/actions";
+import { ClipboardList, Store, ShoppingBag, Wallet, UserRound } from "lucide-react";
+import { SignOutButton } from "@/components/SignOutButton";
 import { palette } from "@/lib/palette";
 
 // The buyer's one navigation. It used to live inside DreviHeader, and
@@ -91,15 +91,11 @@ export function BuyerNavDrawer({
                 {href === "/cart" && cartCount > 0 ? ` (${cartCount})` : ""}
               </Link>
             ))}
-            <form action={logout}>
-              <button
-                type="submit"
-                className={`w-full ${ROW}`}
-                style={{ fontSize: 11, letterSpacing: "0.16em", color: palette.crimsonText }}
-              >
-                <LogOut size={15} strokeWidth={1.7} /> Sign Out
-              </button>
-            </form>
+            <SignOutButton
+              className="w-full px-5 py-3.5"
+              style={{ gap: 10, fontSize: 11, letterSpacing: "0.16em", color: palette.crimsonText }}
+              iconSize={15}
+            />
           </nav>
         </>
       )}
