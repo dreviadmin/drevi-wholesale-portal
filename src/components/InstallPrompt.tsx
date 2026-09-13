@@ -40,6 +40,14 @@ const SEEN_KEY = "drevi:install-prompt:v1";
 // real slot in AppShell, not a floating overlay.
 const LANDING_ROUTES = new Set(["/login"]);
 
+// The banner is ~125px tall and the login form is vertically centred, so on a
+// short viewport the two collide and the card — which owns its pointer events
+// — sits on top of the password field. Measured: at 317px tall the field is
+// unreachable. A phone in landscape is ~390px, so this is not a corner case.
+// Below this height the banner simply does not appear; installing is still
+// available from the browser's own menu.
+const MIN_VIEWPORT_HEIGHT = 680;
+
 type Mode = "none" | "prompt" | "ios";
 
 interface BIPEvent extends Event {
@@ -89,6 +97,7 @@ export function InstallPrompt() {
   // fixed element re-anchors ABOVE the keyboard — landing squarely on the Sign
   // In button while the user is typing. Suppress whenever a field has focus.
   const [typing, setTyping] = useState(false);
+  const [roomy, setRoomy] = useState(true);
 
   useEffect(() => {
     if (isStandalone() || alreadySeen()) return;
@@ -128,6 +137,11 @@ export function InstallPrompt() {
     };
     const onFocusIn = (e: FocusEvent) => { if (isField(e.target)) setTyping(true); };
     const onFocusOut = (e: FocusEvent) => { if (isField(e.target)) setTyping(false); };
+    const measure = () => setRoomy(window.innerHeight >= MIN_VIEWPORT_HEIGHT);
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("orientationchange", measure);
+
     document.addEventListener("focusin", onFocusIn);
     document.addEventListener("focusout", onFocusOut);
 
@@ -140,6 +154,8 @@ export function InstallPrompt() {
     return () => {
       window.removeEventListener("beforeinstallprompt", onBip);
       window.removeEventListener("appinstalled", onInstalled);
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("orientationchange", measure);
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("focusout", onFocusOut);
       if (t) clearTimeout(t);
@@ -147,7 +163,7 @@ export function InstallPrompt() {
   }, []);
 
   // Never over the offline fallback — there is no network to install over.
-  if (mode === "none" || typing || !LANDING_ROUTES.has(pathname)) return null;
+  if (mode === "none" || typing || !roomy || !LANDING_ROUTES.has(pathname)) return null;
 
   const dismiss = () => {
     handledRef.current = true;
