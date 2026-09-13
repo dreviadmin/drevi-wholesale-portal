@@ -387,9 +387,7 @@ export async function createManualCreditNote(input: {
   // No source bill to inherit from, so a manual note captures the party live —
   // the one credit-note path that does. A back-dated note stamps today's
   // identity on an earlier date, which the source flags rather than hides.
-  // snapshotSourceForDate only ever returns the two issue sources; its declared
-  // return type is the wider union (buyer-snapshot.ts).
-  const source = snapshotSourceForDate(noteDate, today) as "issue" | "issue_backdated";
+  const source = snapshotSourceForDate(noteDate, today);
   const party = await captureBuyerSnapshot(admin, buyer.id, source);
 
   const ymd = noteDate.replace(/-/g, "");

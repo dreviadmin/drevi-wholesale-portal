@@ -726,9 +726,7 @@ export async function generateOrderBill(
   // from B1 if the party changed in between — each bill states who was billed
   // on its own date, and no later edit to the buyers row moves it. A bill dated
   // to the past stamps today's identity on an earlier date, so it says so.
-  // snapshotSourceForDate only ever returns the two issue sources; its declared
-  // return type is the wider union (buyer-snapshot.ts).
-  const source = snapshotSourceForDate(billDate, todayIst) as "issue" | "issue_backdated";
+  const source = snapshotSourceForDate(billDate, todayIst);
   const party = await captureBuyerSnapshot(admin, o.buyer_id, source);
 
   // Reserve the bill row (unique (order_id, seq) absorbs races).

@@ -71,7 +71,10 @@ export async function captureBuyerSnapshot(
 }
 
 /** True when the document carries a date earlier than today (IST). */
-export function snapshotSourceForDate(documentDate: string | null | undefined, todayIst: string): SnapshotSource {
+export function snapshotSourceForDate(
+  documentDate: string | null | undefined,
+  todayIst: string,
+): "issue" | "issue_backdated" {
   if (!documentDate) return "issue";
   return documentDate < todayIst ? "issue_backdated" : "issue";
 }
