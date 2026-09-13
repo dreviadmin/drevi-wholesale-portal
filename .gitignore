@@ -37,9 +37,13 @@ drevi-pipeline-sa.json
 # vercel
 .vercel
 
-# next-pwa generated service worker (rebuilt on each build)
-public/sw.js
-public/sw.js.map
+# next-pwa generated service worker (rebuilt on each build).
+# GLOB, not the literal path: the literal 'public/sw.js' let macOS Finder
+# duplicates ('sw 2.js' … 'sw 6.js') escape the ignore and get committed five
+# separate times, where next-pwa then precached them as app assets. Commit
+# 6ff3720 cleaned them once; the hole let them straight back.
+public/sw*.js
+public/sw*.js.map
 public/swe-worker-*.js
 public/workbox-*.js
 public/workbox-*.js.map
