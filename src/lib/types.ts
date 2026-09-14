@@ -47,7 +47,8 @@ export type AuditEventType =
   | "buyer_change_requested"
   | "buyer_change_approved"
   | "buyer_change_rejected"
-  | "document_party_recaptured";
+  | "document_party_recaptured"
+  | "document_date_corrected";
 
 /**
  * The buyer identity frozen onto a document at its issue date (0047) — carried
