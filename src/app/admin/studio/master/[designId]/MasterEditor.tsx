@@ -5,11 +5,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { palette } from "@/lib/palette";
+import { formatINR } from "@/lib/format";
 import { useDraft } from "@/lib/useDraft";
 import { supplyAge } from "@/lib/availability";
+import { autoMrpFrom, autoWholesaleFrom, clampMultiplier, DEFAULT_MARKUP_MULTIPLIER, DEFAULT_WHOLESALE_MULTIPLIER } from "@/lib/pricing";
+import { ORIGIN_OPTIONS } from "@/lib/studio/copy-prompt";
 import type { BoardRow } from "@/lib/studio/load";
 import type { SupplyBlock } from "@/app/admin/receipts/new/delivery-actions";
-import { saveSpecs, savePricing, setGroupWholesalePrice, saveVariant, setStockForSku, saveDesignHsn, togglePortal } from "./actions";
+import { saveSpecs, savePricing, saveVariant, setStockForSku, saveDesignHsn, togglePortal } from "./actions";
 import { HsnInput } from "@/components/admin/HsnInput";
 import { BackLink } from "@/components/BackLink";
 import { DraftNotice } from "@/components/DraftNotice";
@@ -22,6 +25,7 @@ import { DraftNotice } from "@/components/DraftNotice";
 interface DesignFields {
   fabric: string; handwork: string; origin: string; colorName?: string | null; specsVerified: boolean;
   tier: string; markupMultiplier: number; autoMrp: number | null; mrpOverride: number | null;
+  wholesaleMultiplier: number; autoWholesale: number | null; wholesaleOverride: number | null;
   vendorSku?: string | null;
   supply?: SupplyBlock;
   supplyUpdatedAt?: string | null;
@@ -54,24 +58,23 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
     supply: design.supply ?? {},
   };
   // One wholesale price for every size, beside the MRP — both prices belong in
-  // one place (Ansh, 12 Sep). Pre-filled only when the sizes already agree, so
-  // a blank box never flattens per-size prices by accident.
+  // one place (Ansh, 12 Sep). The sizes only get flattened onto one number
+  // when they already agree or someone types an override, so a save that only
+  // touched the MRP never collapses a deliberate per-size spread.
   const wsPrices = variants.map((v) => Number(v.wholesale_price) || 0);
   const wsUniform = wsPrices.length > 0 && wsPrices.every((p) => p === wsPrices[0]);
-  const wsInitial = wsUniform && wsPrices[0] > 0 ? String(wsPrices[0]) : "";
   const pricingSeed = {
     markupMultiplier: design.markupMultiplier,
     mrpOverride: design.mrpOverride?.toString() ?? "",
-    // null = untouched: the box shows the live server value, so a draft
-    // restored after someone repriced elsewhere never re-submits a stale one.
-    wholesale: null as string | null,
+    wholesaleMultiplier: design.wholesaleMultiplier,
+    wholesaleOverride: design.wholesaleOverride?.toString() ?? "",
   };
   const specsSig = JSON.stringify(specsSeed);
   const pricingSig = JSON.stringify(pricingSeed);
   const [specs, setSpecs, specsMeta] = useDraft(`${draftKey}:specs`, specsSeed, { base: design.updatedAt ?? specsSig, hasContent: (s) => JSON.stringify(s) !== specsSig, onRestore: (d) => ({ ...specsSeed, ...d }) });
-  const [pricing, setPricing, pricingMeta] = useDraft(`${draftKey}:pricing`, pricingSeed, { base: `${design.updatedAt ?? pricingSig}|${wsInitial}`, hasContent: (p) => JSON.stringify(p) !== pricingSig, onRestore: (d) => ({ ...pricingSeed, ...d }) });
-  const wholesaleValue = pricing.wholesale ?? wsInitial;
-  const setWholesale = (v: string) => setPricing((p) => ({ ...p, wholesale: v }));
+  // version 2: the wholesale half moved from a free price box onto the design
+  // row (0050), so a v1 draft holds a key this form no longer submits.
+  const [pricing, setPricing, pricingMeta] = useDraft(`${draftKey}:pricing`, pricingSeed, { version: 2, base: design.updatedAt ?? pricingSig, hasContent: (p) => JSON.stringify(p) !== pricingSig, onRestore: (d) => ({ ...pricingSeed, ...d }) });
   const setSupply = (fn: (s: SupplyBlock) => SupplyBlock) => setSpecs((s) => ({ ...s, supply: fn(s.supply ?? {}) }));
   const [hsnValue, setHsnValue, hsnMeta] = useDraft(`${draftKey}:hsn`, hsn, { base: hsn, hasContent: (h) => h !== hsn });
   // Row edits keyed by SKU, merged over the server variants on render. An
@@ -106,8 +109,16 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
     });
   }
 
-  const previewAuto = lastCost > 0 ? Math.max(99, Math.round((lastCost * (Number(pricing.markupMultiplier) || 2.5)) / 100) * 100 - 1) : null;
-  const effectiveMrp = pricing.mrpOverride ? Number(pricing.mrpOverride) : previewAuto ?? design.autoMrp;
+  // Previews come from the same helpers savePricing uses, so what the screen
+  // promises is exactly what lands. The cost under them is sheet-synced with
+  // no lock, though — it can move between visits (see src/lib/pricing.ts).
+  const previewAutoMrp = autoMrpFrom(lastCost, clampMultiplier(Number(pricing.markupMultiplier), DEFAULT_MARKUP_MULTIPLIER));
+  const effectiveMrp = pricing.mrpOverride ? Number(pricing.mrpOverride) : previewAutoMrp ?? design.autoMrp;
+  const previewAutoWholesale = autoWholesaleFrom(lastCost, clampMultiplier(Number(pricing.wholesaleMultiplier), DEFAULT_WHOLESALE_MULTIPLIER));
+  const effectiveWholesale = pricing.wholesaleOverride ? Number(pricing.wholesaleOverride) : previewAutoWholesale ?? design.autoWholesale;
+  // Mirrors the server rule in savePricing: an auto price is only pushed onto
+  // every size when the sizes already agree.
+  const willFlatten = variants.length > 0 && !!effectiveWholesale && (!!pricing.wholesaleOverride || wsUniform);
 
   const section = (title: string) => (
     <div className="font-body uppercase mt-6" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>{title}</div>
@@ -131,12 +142,24 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
       {/* Specs */}
       {section("Specs")}
       <div className="mt-2 p-3.5 flex flex-col gap-2" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
-        {(["fabric", "handwork", "origin"] as const).map((f) => (
+        {(["fabric", "handwork"] as const).map((f) => (
           <label key={f} className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
             <span className="uppercase" style={{ letterSpacing: "0.14em" }}>{f}</span>
             <input value={specs[f]} onChange={(e) => setSpecs((s) => ({ ...s, [f]: e.target.value }))} className="w-full mt-1 font-body" style={inputStyle} />
           </label>
         ))}
+        {/* Ansh (14 Sep) — origin is two options, not free text. The stored
+            values are machine tokens; only these labels are ever shown, and
+            the copy prompt renders the same ones. */}
+        <label className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+          <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Origin</span>
+          <select value={specs.origin} onChange={(e) => setSpecs((s) => ({ ...s, origin: e.target.value }))} className="w-full mt-1 font-body" style={inputStyle}>
+            <option value="">Not set</option>
+            {ORIGIN_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
         <label className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
           <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Colour</span>
           <input
@@ -162,7 +185,7 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
         <div className="grid grid-cols-2 gap-3">
           <div className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
             <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Last cost (receipts/sheet)</span>
-            <div className="font-display mt-1" style={{ fontSize: 16, fontWeight: 600, color: palette.black }}>{lastCost > 0 ? `₹${lastCost.toLocaleString("en-IN")}` : "—"}</div>
+            <div className="font-display mt-1" style={{ fontSize: 16, fontWeight: 600, color: palette.black }}>{lastCost > 0 ? formatINR(lastCost) : "—"}</div>
           </div>
           <label className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
             <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Tier multiplier ({design.tier})</span>
@@ -170,7 +193,7 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
           </label>
           <div className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
             <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Auto-MRP (₹…99)</span>
-            <div className="font-display mt-1" style={{ fontSize: 16, fontWeight: 600, color: palette.goldDeep }}>{previewAuto ? `₹${previewAuto.toLocaleString("en-IN")}` : "needs a cost"}</div>
+            <div className="font-display mt-1" style={{ fontSize: 16, fontWeight: 600, color: palette.goldDeep }}>{previewAutoMrp ? formatINR(previewAutoMrp) : "needs a cost"}</div>
           </div>
           <label className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
             <span className="uppercase" style={{ letterSpacing: "0.14em" }}>MRP override</span>
@@ -178,50 +201,54 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
           </label>
         </div>
         <div className="font-body mt-2" style={{ fontSize: 11, color: palette.softBlack }}>
-          Effective MRP: <b style={{ color: palette.black }}>{effectiveMrp ? `₹${Number(effectiveMrp).toLocaleString("en-IN")}` : "—"}</b>
-          {sheetMrp > 0 && <span style={{ color: palette.mutedGreige }}> · sheet says ₹{sheetMrp.toLocaleString("en-IN")} (live until cutover)</span>}
+          Effective MRP: <b style={{ color: palette.black }}>{effectiveMrp ? formatINR(Number(effectiveMrp)) : "—"}</b>
+          {sheetMrp > 0 && <span style={{ color: palette.mutedGreige }}> · sheet says {formatINR(sheetMrp)} (live until cutover)</span>}
         </div>
-        <button type="button" disabled={pending} onClick={() => run(() => savePricing(board.id, { markupMultiplier: Number(pricing.markupMultiplier), mrpOverride: pricing.mrpOverride ? Number(pricing.mrpOverride) : null }), "Retail pricing saved", pricingMeta.clear)} className="mt-2 font-body uppercase disabled:opacity-40" style={{ fontSize: 9, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "8px 12px" }}>
-          Save retail pricing
-        </button>
 
-        {/* The buyer-facing price, next to the MRP — one place for both. */}
+        {/* The buyer-facing price, next to the MRP — one place for both, and
+            the same multiplier/override shape so the two read as siblings
+            (Ansh, 14 Sep: nobody should be doing this arithmetic by hand). */}
         <div className="mt-4 pt-3" style={{ borderTop: "1px solid rgba(26,26,26,0.12)" }}>
-          <div className="flex items-end gap-2 flex-wrap">
+          <div className="grid grid-cols-2 gap-3">
             <label className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
-              <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Wholesale price (all sizes)</span>
-              <input
-                type="number" inputMode="decimal" min="0" step="any"
-                value={wholesaleValue}
-                onChange={(e) => setWholesale(e.target.value)}
-                placeholder={variants.length === 0 ? "" : "₹ per piece"}
-                disabled={variants.length === 0}
-                className="w-full mt-1 font-body disabled:opacity-40"
-                style={{ ...inputStyle, width: 150 }}
-              />
+              <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Wholesale multiplier</span>
+              <input type="number" step="0.05" min="1" max="10" value={pricing.wholesaleMultiplier} onChange={(e) => setPricing((s) => ({ ...s, wholesaleMultiplier: Number(e.target.value) }))} className="w-full mt-1 font-body" style={inputStyle} />
             </label>
-            <button
-              type="button"
-              disabled={pending || variants.length === 0 || wholesaleValue.trim() === "" || wholesaleValue === wsInitial}
-              onClick={() => {
-                const n = Number(wholesaleValue);
-                if (!Number.isFinite(n) || n <= 0) { flash("Enter a price above ₹0"); return; }
-                run(() => setGroupWholesalePrice(board.id, n), `Wholesale price saved on ${variants.length} size(s)`, () => setPricing((p) => ({ ...p, wholesale: null })));
-              }}
-              className="font-body uppercase disabled:opacity-40"
-              style={{ fontSize: 9, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, padding: "8px 12px" }}
-            >
-              Save wholesale
-            </button>
+            <div className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+              <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Auto-wholesale (₹…50)</span>
+              <div className="font-display mt-1" style={{ fontSize: 16, fontWeight: 600, color: palette.goldDeep }}>{previewAutoWholesale ? formatINR(previewAutoWholesale) : "needs a cost"}</div>
+            </div>
+            <label className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+              <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Wholesale override</span>
+              <input type="number" inputMode="decimal" min="0" step="any" value={pricing.wholesaleOverride} placeholder="—" onChange={(e) => setPricing((s) => ({ ...s, wholesaleOverride: e.target.value }))} className="w-full mt-1 font-body" style={inputStyle} />
+            </label>
+          </div>
+          <div className="font-body mt-2" style={{ fontSize: 11, color: palette.softBlack }}>
+            Effective wholesale: <b style={{ color: palette.black }}>{effectiveWholesale ? formatINR(Number(effectiveWholesale)) : "—"}</b>
           </div>
           <div className="font-body mt-1.5" style={{ fontSize: 10.5, color: palette.mutedGreige, lineHeight: 1.5 }}>
             {variants.length === 0
               ? "No size variants yet — log a delivery first."
-              : wsUniform
-                ? `Applies to all ${variants.length} size${variants.length === 1 ? "" : "s"}. Buyers see this price; it prints on the tag.`
-                : `Sizes are priced differently right now (${wsPrices.map((p) => `₹${p.toLocaleString("en-IN")}`).join(" · ")}). Saving here sets every size to one price — for per-size prices use the Sizes section below.`}
+              : willFlatten
+                ? `Saving applies it to all ${variants.length} size${variants.length === 1 ? "" : "s"}. Buyers see this price; it prints on the tag.`
+                : `Sizes are priced differently right now (${wsPrices.map((p) => formatINR(p)).join(" · ")}), so saving leaves them alone. Type a wholesale override to put one price on every size, or price each size in Sizes below.`}
           </div>
         </div>
+
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => run(() => savePricing(board.id, {
+            markupMultiplier: Number(pricing.markupMultiplier),
+            mrpOverride: pricing.mrpOverride ? Number(pricing.mrpOverride) : null,
+            wholesaleMultiplier: Number(pricing.wholesaleMultiplier),
+            wholesaleOverride: pricing.wholesaleOverride ? Number(pricing.wholesaleOverride) : null,
+          }), willFlatten ? `Pricing saved on ${variants.length} size${variants.length === 1 ? "" : "s"}` : "Pricing saved", pricingMeta.clear)}
+          className="mt-3 font-body uppercase disabled:opacity-40"
+          style={{ fontSize: 9, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "8px 12px" }}
+        >
+          Save pricing
+        </button>
 
         {/* Ansh (31 Jul): one HSN across every size of the design. */}
         <div className="flex items-end gap-2 mt-3 flex-wrap">

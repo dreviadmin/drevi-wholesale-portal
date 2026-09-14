@@ -115,11 +115,15 @@ export function LineStateControls({
 }
 
 export function GenerateBillBar({
-  orderId, billableCount, billableTotal,
+  orderId, billableCount, billableTotal, orderClosed,
 }: {
   orderId: string;
   billableCount: number;
   billableTotal: string; // pre-formatted ₹
+  // Delivered / fulfilled (14 Sep). Billing is not part of the logistics
+  // lifecycle, so a closed order is still billable — it just needs to say why
+  // the bar is here at all, since the rest of the page has gone read-only.
+  orderClosed?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -171,6 +175,12 @@ export function GenerateBillBar({
       <div className="font-body mt-1" style={{ fontSize: 10, color: palette.mutedGreige }}>
         Bills only the confirmed lines — held and pending lines wait for their own bill. A past date is allowed; future dates are not.
       </div>
+      {orderClosed && (
+        <div className="font-body mt-1" style={{ fontSize: 10, lineHeight: 1.5, color: palette.goldDeep }}>
+          This order has already closed, and its lines can no longer change. Billing it is still correct — an invoice can be raised after
+          delivery, and a return can only be raised against a bill.
+        </div>
+      )}
       {toast && <div className="font-body mt-1.5" style={{ fontSize: 11, color: palette.goldDeep, fontWeight: 600 }}>{toast}</div>}
     </div>
   );

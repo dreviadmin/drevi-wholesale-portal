@@ -1,11 +1,19 @@
 import Link from "next/link";
 import { requireAdminOrRedirect } from "@/lib/staff";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { reconcile } from "@/lib/stock-ledger";
 import { palette } from "@/lib/palette";
 import { StockTake } from "./StockTake";
 import { DriftReport } from "../stock-check/DriftReport";
+import type { CountableProduct } from "./actions";
 
 export const dynamic = "force-dynamic";
+
+// Bulk count (14 Sep) — committing a selected-everything take is a serial loop
+// of ~3 Supabase round trips per SKU, which the 60s default would cut off part
+// way through with no transaction to roll back. StockTake ALSO chunks the
+// commit; this is the second belt, not the only one.
+export const maxDuration = 300;
 
 // UX sprint (29 Jul) — ONE stock screen. "Count" is the walk-the-rack flow;
 // "Check" is the ledger-vs-cache drift report that used to be its own nav
@@ -14,6 +22,7 @@ export default async function StockCountPage({ searchParams }: { searchParams?: 
   await requireAdminOrRedirect();
   const tab = searchParams?.tab === "check" ? "check" : "count";
   const drift = tab === "check" ? await reconcile() : null;
+  const catalog = tab === "count" ? await listCountable() : [];
 
   return (
     <div>
@@ -34,7 +43,29 @@ export default async function StockCountPage({ searchParams }: { searchParams?: 
           </Link>
         ))}
       </div>
-      {tab === "count" ? <StockTake /> : <DriftReport checked={drift!.checked} rows={drift!.drift} />}
+      {tab === "count" ? <StockTake catalog={catalog} /> : <DriftReport checked={drift!.checked} rows={drift!.drift} />}
     </div>
   );
+}
+
+// The whole catalog, so the bulk picker has a list to select from. Mirrors
+// manage-catalog/page.tsx, but mapped to the scanned-line shape rather than the
+// raw row — the count list has to treat a staged SKU and a scanned SKU alike.
+// Ordered by SKU so the variants of one design sit together in the picker AND
+// in the count list they are staged into, which is what makes correcting L, M
+// and XL one after the other possible.
+async function listCountable(): Promise<CountableProduct[]> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("wholesale_products")
+    .select("sku, title, current_qty, image_urls, location, category")
+    .order("sku");
+  return (data ?? []).map((p) => ({
+    sku: p.sku,
+    title: p.title,
+    systemQty: Number(p.current_qty) || 0,
+    thumb: (p.image_urls as string[] | null)?.[0] ?? null,
+    location: p.location ?? null,
+    category: p.category ?? null,
+  }));
 }

@@ -10,6 +10,12 @@ import { commitStockTake } from "@/lib/stock-ledger";
 // next. Commit writes ONE `reset` per counted SKU sharing a session note.
 // Uncounted SKUs are left completely untouched: a partial stock take is normal
 // and must never zero anything by omission.
+//
+// Bulk count (14 Sep) — the picker stages many SKUs at once, so commitCount is
+// now called once per CHUNK rather than once per take. It was already shaped
+// for that (an arbitrary array in, a per-SKU failure list out); the only
+// addition is the batch marker, so the audit trail reads as one take that
+// arrived in pieces rather than ten separate stock takes.
 
 type Res = { ok: boolean; error?: string };
 
@@ -19,6 +25,16 @@ export interface ScannedSku {
   systemQty: number;
   thumb: string | null;
   location: string | null;
+}
+
+/**
+ * A catalog row for the bulk picker, in EXACTLY the shape a scanned line takes,
+ * so a SKU staged from the picker and the same SKU scanned off the rack are
+ * indistinguishable once they are on the count list. `category` is extra only
+ * because the picker's search matches on it. Loaded in page.tsx.
+ */
+export interface CountableProduct extends ScannedSku {
+  category: string | null;
 }
 
 /** Resolve a scanned tag to the SKU and the quantity the system currently believes. */
@@ -48,6 +64,7 @@ export async function lookupSku(raw: string): Promise<{ ok: boolean; error?: str
 export async function commitCount(
   counts: { sku: string; countedQty: number }[],
   sessionNote: string,
+  batch?: { index: number; total: number },
 ): Promise<Res & { committed?: number; failed?: { sku: string; error: string }[] }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized" }; }
@@ -59,7 +76,7 @@ export async function commitCount(
   await writeAuditEvent({
     eventType: "catalog_edit",
     staffUserId: staff.id,
-    notes: `stock take committed — ${res.committed} SKU(s) reset · ${note}`,
+    notes: `stock take committed — ${res.committed} SKU(s) reset${batch && batch.total > 1 ? ` · batch ${batch.index}/${batch.total}` : ""} · ${note}`,
   });
   revalidatePath("/admin/stock-take");
   revalidatePath("/admin/dashboard");

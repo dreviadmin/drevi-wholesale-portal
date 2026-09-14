@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { Undo2 } from "lucide-react";
 import { BackLink } from "@/components/BackLink";
 import { ZoomImage } from "@/components/Lightbox";
 import { requireAdminOrRedirect, isAdminRole } from "@/lib/staff";
@@ -10,6 +11,7 @@ import { listEntityNotes } from "@/lib/entity-notes";
 import { OrderActions } from "./OrderActions";
 import { EditBuyerButton } from "./EditBuyerButton";
 import { RecaptureParty } from "./RecaptureParty";
+import { DateCorrection } from "./DateCorrection";
 import { LineHsnEditor } from "./LineHsnEditor";
 import { listKnownHsnCodes } from "@/lib/hsn";
 import { OrderEditor, type PickerProduct } from "./OrderEditor";
@@ -26,6 +28,10 @@ export const dynamic = "force-dynamic";
 const SOURCE_LABEL: Record<string, string> = { portal_self_service: "Portal", exhibition: "Exhibition", in_store: "In-store" };
 
 function fmt(iso: string) { return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }); }
+
+// The IST day a document belongs to — what the date controls edit, and what
+// every report buckets on. Never UTC's day.
+function istDay(iso: string) { return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); }
 
 export default async function AdminOrderDetail({ params }: { params: { id: string } }) {
   const staff = await requireAdminOrRedirect();
@@ -48,7 +54,15 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   ]);
   const bills = (billRows ?? []) as OrderBill[];
   const billNumberById = new Map(bills.map((b) => [b.id, b.bill_number]));
-  const lineFlowLocked = ["cancelled", "delivered", "fulfilled"].includes(o.status);
+  // Two different questions, and conflating them WAS the bug. Line editing
+  // stops at a terminal status (setLineState refuses those server-side), but
+  // billing does not belong to the logistics lifecycle at all: returns are
+  // raised against a bill, so an order that can never be billed can never be
+  // returned either — and goods come back precisely after delivery. Billing
+  // follows generateOrderBill's own rule, which refuses cancelled and nothing
+  // else.
+  const lineEditLocked = ["cancelled", "delivered", "fulfilled"].includes(o.status);
+  const billingLocked = o.status === "cancelled";
   // Maintained by the apply/unapply RPCs (0046) as a read cache of the
   // consumption rows, so every balance-due surface can subtract it without a join.
   const creditApplied = Number((order as Record<string, unknown>).credit_applied ?? 0) || 0;
@@ -87,6 +101,23 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
     tax_mode: b.tax_mode ?? null,
     tax_rate: b.tax_rate == null ? null : Number(b.tax_rate),
   });
+  // A return is raised against a BILL, so "can anything still come back" is a
+  // per-bill question — and it is the one the order-level entry point answers.
+  const returnableBills = bills
+    .map((b) => ({
+      bill: b,
+      remaining: (b.items ?? []).reduce((s, it, k) => s + Math.max(0, (Number(it.qty) || 0) - returnedOf(b.id, k)), 0),
+    }))
+    .filter((r) => r.remaining > 0);
+  const billedPieces = bills.reduce((s, b) => s + (b.items ?? []).reduce((t, it) => t + (Number(it.qty) || 0), 0), 0);
+  const returnedPieces = bills.reduce((s, b) => s + (b.items ?? []).reduce((t, _it, k) => t + returnedOf(b.id, k), 0), 0);
+
+  // Date corrections (14 Sep). A bill may not predate its order, and an order
+  // may not start after the first bill raised against it — the same two bounds
+  // the actions enforce, shown to the picker so it never offers a refusal.
+  const orderDay = istDay(o.submitted_at);
+  const earliestBillDate = bills.reduce<string | null>((min, b) => (min == null || b.bill_date < min ? b.bill_date : min), null);
+
   const billable = billableLines(o);
   const billableTotals = computeBillTotals(billable.map((b) => b.item), o, {
     discountApplied: bills.reduce((s, b) => s + (Number(b.discount_amount) || 0), 0),
@@ -197,7 +228,22 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
             )}
           </div>
           <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige, letterSpacing: "0.04em" }}>
-            {fmt(o.submitted_at)} · Source: {SOURCE_LABEL[o.source] ?? o.source} · Status: {o.status.replace(/_/g, " ")}
+            {fmt(o.submitted_at)}
+            {/* Sits on the date it corrects, next to Edit and Correct party —
+                a back-dated entry typed wrong has had no way back until now. */}
+            {isAdminRole(staff.role) && o.status !== "cancelled" && (
+              <>
+                {" "}
+                <DateCorrection
+                  kind="order"
+                  targetId={o.id}
+                  documentNumber={o.order_number}
+                  currentDate={orderDay}
+                  ceilingDate={earliestBillDate}
+                />
+              </>
+            )}
+            {" · "}Source: {SOURCE_LABEL[o.source] ?? o.source} · Status: {o.status.replace(/_/g, " ")}
             {takenBy ? ` · Taken by ${takenBy.name ?? takenBy.email}` : ""}
           </div>
         </div>
@@ -217,6 +263,18 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
               paymentMethod={o.payment_method}
               paymentNotes={o.payment_notes}
             />
+            {/* The return control the owner never found lived per billed line,
+                below the fold, on a page that goes read-only after delivery.
+                This is the order-level door to the very same panel. */}
+            {returnableBills.length > 0 && (
+              <a
+                href="#returns"
+                className="flex items-center gap-1.5 font-body uppercase"
+                style={{ fontSize: 9, letterSpacing: "0.15em", padding: "7px 12px", color: palette.crimsonText, border: `1px solid ${palette.crimsonBorder}` }}
+              >
+                <Undo2 size={12} /> Create return
+              </a>
+            )}
           </div>
         )}
       </div>
@@ -283,7 +341,7 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
                 state={effectiveLineState(it, o.status)}
                 holdNote={it.hold_note ?? null}
                 billNumber={it.billed_in ? billNumberById.get(it.billed_in) ?? null : null}
-                locked={lineFlowLocked}
+                locked={lineEditLocked}
                 returnedQty={returnedQty}
                 billedQty={billedQty || undefined}
               />
@@ -350,8 +408,13 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
       )}
 
       {/* Split billing (18 Aug) — bill the confirmed lines; hold the rest. */}
-      {!lineFlowLocked && billable.length > 0 && (
-        <GenerateBillBar orderId={o.id} billableCount={billable.length} billableTotal={formatINR(billableTotals.total)} />
+      {!billingLocked && billable.length > 0 && (
+        <GenerateBillBar
+          orderId={o.id}
+          billableCount={billable.length}
+          billableTotal={formatINR(billableTotals.total)}
+          orderClosed={lineEditLocked}
+        />
       )}
       {bills.length > 0 && (
         <div className="mt-5">
@@ -364,6 +427,18 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
                   {new Date(b.bill_date + "T12:00:00+05:30").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                   {" · "}{(b.items ?? []).length} line{(b.items ?? []).length === 1 ? "" : "s"}
                   {b.advance_applied > 0 ? ` · advance ${formatINR(b.advance_applied)} applied` : ""}
+                  {isAdminRole(staff.role) && o.status !== "cancelled" && (
+                    <>
+                      {" "}
+                      <DateCorrection
+                        kind="bill"
+                        targetId={b.id}
+                        documentNumber={b.bill_number}
+                        currentDate={b.bill_date}
+                        floorDate={orderDay}
+                      />
+                    </>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -374,6 +449,35 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
                   </a>
                 )}
               </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Returns were reachable only from a per-line control on a billed line,
+          which is not where anyone looks once a parcel comes back. The entry
+          point belongs with the bills — a return is raised against one — and
+          each row routes into the SAME ReturnPanel the line control opens, so
+          there is one return flow, not two. */}
+      {isAdminRole(staff.role) && returnableBills.length > 0 && (
+        <div id="returns" className="mt-5 p-3" style={{ background: palette.ivory, border: `1px solid ${palette.crimsonBorder}` }}>
+          <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.crimsonText }}>Create a return</div>
+          <p className="font-body mt-1" style={{ fontSize: 11, lineHeight: 1.6, color: palette.softBlack }}>
+            Goods come back against the bill they went out on. The credit note prices them the way that bill priced the sale, puts the
+            pieces back into stock, and credits the party&apos;s wallet.
+          </p>
+          {returnableBills.map(({ bill: b, remaining }) => (
+            <div key={b.id} className="mt-2.5 pt-2.5" style={{ borderTop: "1px solid rgba(26,26,26,0.08)" }}>
+              <div className="font-body" style={{ fontSize: 11.5, color: palette.softBlack }}>
+                <b style={{ color: palette.black }}>{b.bill_number}</b> · {remaining} pc still returnable
+              </div>
+              <ReturnPanel
+                orderId={o.id}
+                billId={b.id}
+                billNumber={b.bill_number}
+                bill={sourceBillOf(b)}
+                lines={returnLinesFor(b)}
+              />
             </div>
           ))}
         </div>
@@ -413,6 +517,13 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
               </div>
             );
           })}
+          {/* "Sale records updated" has to be legible on the ORDER, not only
+              as a chip beside whichever line it happened on. */}
+          {returnedPieces > 0 && (
+            <div className="flex justify-between font-body mt-2" style={{ fontSize: 12, color: palette.softBlack }}>
+              <span>Pieces returned</span><span>{returnedPieces} of {billedPieces} billed</span>
+            </div>
+          )}
           {credit.creditTotal > 0 && (
             <div className="flex justify-between font-body mt-2" style={{ fontSize: 12, color: palette.softBlack }}>
               <span>Credited against this order</span><span>{formatINR(credit.creditTotal)}</span>

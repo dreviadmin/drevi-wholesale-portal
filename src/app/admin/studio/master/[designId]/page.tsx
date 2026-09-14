@@ -6,6 +6,7 @@ import { NotesPanel } from "@/components/admin/NotesPanel";
 import { listEntityNotes } from "@/lib/entity-notes";
 import { MasterEditor } from "./MasterEditor";
 import { listKnownHsnCodes } from "@/lib/hsn";
+import { DEFAULT_WHOLESALE_MULTIPLIER } from "@/lib/pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ export default async function MasterPage({ params }: { params: { designId: strin
 
   const { data: design } = await admin
     .from("designs")
-    .select("fabric, handwork, origin, color_name, specs_verified, tier, markup_multiplier, auto_mrp, mrp_override, supply_mode, vendor_stock_qty, making_days, making_moq, delivery_days, supply_note, supply_updated_at, vendor_sku, ident_image_id, updated_at")
+    .select("fabric, handwork, origin, color_name, specs_verified, tier, markup_multiplier, auto_mrp, mrp_override, wholesale_multiplier, auto_wholesale, wholesale_override, supply_mode, vendor_stock_qty, making_days, making_moq, delivery_days, supply_note, supply_updated_at, vendor_sku, ident_image_id, updated_at")
     .eq("id", params.designId)
     .single();
   const { data: allVariants } = await admin
@@ -51,6 +52,9 @@ export default async function MasterPage({ params }: { params: { designId: strin
         markupMultiplier: Number(design?.markup_multiplier ?? 2.5),
         autoMrp: design?.auto_mrp != null ? Number(design.auto_mrp) : null,
         mrpOverride: design?.mrp_override != null ? Number(design.mrp_override) : null,
+        wholesaleMultiplier: Number(design?.wholesale_multiplier ?? DEFAULT_WHOLESALE_MULTIPLIER),
+        autoWholesale: design?.auto_wholesale != null ? Number(design.auto_wholesale) : null,
+        wholesaleOverride: design?.wholesale_override != null ? Number(design.wholesale_override) : null,
         vendorSku: design?.vendor_sku ?? null,
         supply: {
           supplyMode: (design?.supply_mode ?? "") as "" | "ready_stock" | "made_to_order" | "both" | "discontinued",

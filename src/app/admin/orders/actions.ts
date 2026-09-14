@@ -13,7 +13,7 @@ import { renderOrderPdf } from "@/lib/order-pdf";
 import { uploadOrderPdf } from "@/lib/storage";
 import { writeAuditEvent } from "@/lib/audit";
 import { captureBuyerSnapshot, resolveDocumentParty, snapshotSourceForDate, type BuyerParty } from "@/lib/buyer-snapshot";
-import type { DiscountType, Order, OrderBill, OrderItem, OrderStatus, TaxMode, WholesaleProduct } from "@/lib/types";
+import type { AuditEventType, DiscountType, Order, OrderBill, OrderItem, OrderStatus, TaxMode, WholesaleProduct } from "@/lib/types";
 
 export interface StageDetails {
   courier?: string;
@@ -870,4 +870,191 @@ export async function recaptureDocumentParty(
   revalidatePath("/admin/orders");
   revalidatePath(`/admin/buyers/${o.buyer_id}`);
   return { ok: true, bills: bills.length };
+}
+
+
+// ---- Date corrections (14 Sep) ---------------------------------------------
+//
+// Back-dated entry (18 Aug) lets a sale be recorded on the day it happened.
+// These two are the way back when that day was recorded wrong, and they are two
+// actions rather than one because the documents are not symmetric: a bill
+// number encodes no date and can simply be re-dated, while an order number
+// encodes its own day and cannot be reissued at all.
+
+/** IST day string — the day a document belongs to, never UTC's. */
+function istDay(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
+/**
+ * audit_event_type is a Postgres ENUM (0001_init), so a dedicated
+ * 'document_date_corrected' value needs a migration this change does not own.
+ * Until that lands both corrections are written under the nearest existing
+ * document-correction value with the kind leading the note, because a row
+ * inserted under an unknown label is rejected and writeAuditEvent swallows the
+ * failure — a mandatory audit trail would go missing silently.
+ */
+const DATE_CORRECTION_EVENT: AuditEventType = "document_date_corrected";
+
+/**
+ * Re-date one bill. The safe half of the pair: a bill number carries no date,
+ * so nothing printed contradicts the new one.
+ *
+ * Two bounds hold it inside its own lineage — it may not predate the sale it
+ * bills, and it may not outlive a credit note that reverses it — and the
+ * denormalised copy the credit note PRINTS (source_bill_date) moves with it.
+ */
+export async function setBillDate(
+  billId: string,
+  newDate: string,
+  reason: string,
+): Promise<{ ok: boolean; error?: string; billDate?: string; notes?: number }> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
+
+  const clean = (reason ?? "").trim().slice(0, 300);
+  if (!clean) return { ok: false, error: "Say why this bill's date is being corrected." };
+
+  const admin = createAdminClient();
+  const { data: billRow } = await admin.from("order_bills").select("*").eq("id", billId).maybeSingle();
+  if (!billRow) return { ok: false, error: "Bill not found." };
+  const b = billRow as OrderBill;
+
+  const todayIst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const billDate = validateBillDate(newDate, todayIst);
+  if (!billDate) return { ok: false, error: "Bill date must be a valid date, today or earlier." };
+  if (billDate === b.bill_date) return { ok: false, error: "That is already this bill's date." };
+
+  const { data: orderRow } = await admin.from("orders").select("*").eq("id", b.order_id).maybeSingle();
+  if (!orderRow) return { ok: false, error: "Order not found." };
+  const o = orderRow as Order;
+  if (o.status === "cancelled") return { ok: false, error: "Cancelled orders are history — their bills keep their dates." };
+
+  const orderDay = istDay(o.submitted_at);
+  if (billDate < orderDay) {
+    return { ok: false, error: `${o.order_number} is dated ${orderDay} — a bill cannot be dated before its own sale.` };
+  }
+
+  // credit_notes carries source_bill_date denormalised because the note PRINTS
+  // it ("Against invoice ... dated ..."), so that copy has to travel with the
+  // bill. A note that reverses this bill cannot predate it either.
+  const { data: noteRows } = await admin
+    .from("credit_notes")
+    .select("id, note_number, note_date, status")
+    .eq("order_bill_id", billId);
+  const notes = (noteRows ?? []) as { id: string; note_number: string; note_date: string; status: string }[];
+  const reversedEarlier = notes.find((n) => n.status === "issued" && n.note_date < billDate);
+  if (reversedEarlier) {
+    return {
+      ok: false,
+      error: `${reversedEarlier.note_number} credits this bill on ${reversedEarlier.note_date} — the bill cannot be dated after the note that reverses it.`,
+    };
+  }
+
+  const { error } = await admin.from("order_bills").update({ bill_date: billDate }).eq("id", billId);
+  if (error) return { ok: false, error: error.message };
+
+  if (notes.length > 0) {
+    const { error: cascadeErr } = await admin
+      .from("credit_notes")
+      .update({ source_bill_date: billDate })
+      .eq("order_bill_id", billId);
+    // Half a correction is worse than none: a note quoting a date its bill no
+    // longer states reads as two different invoices. Put the bill back.
+    if (cascadeErr) {
+      await admin.from("order_bills").update({ bill_date: b.bill_date }).eq("id", billId);
+      return { ok: false, error: `The credit notes quoting this bill could not be re-dated (${cascadeErr.message}) — nothing was changed.` };
+    }
+  }
+
+  await writeAuditEvent({
+    eventType: DATE_CORRECTION_EVENT,
+    buyerId: o.buyer_id,
+    staffUserId: staff.id,
+    notes:
+      `bill date corrected — ${b.bill_number}: ${b.bill_date} -> ${billDate}` +
+      `${notes.length > 0 ? ` · ${notes.length} credit note${notes.length === 1 ? "" : "s"} re-referenced` : ""} — ${clean}`,
+  });
+
+  // The date is printed, so a corrected column the buyer never sees is not a
+  // correction (the same rule 0047's party re-stamp follows). Reprints the
+  // party frozen on the BILL, never a live buyers read.
+  await renderAndStoreBillPdf(o, { ...b, bill_date: billDate }, await resolveDocumentParty(admin, b, o.buyer_id));
+
+  revalidatePath(`/admin/orders/${b.order_id}`);
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/credit-notes");
+  return { ok: true, billDate, notes: notes.length };
+}
+
+/**
+ * Re-date one order. Allowed, but honest about what it cannot do: the order
+ * number encodes the day (DX-20260717-014), is issued gaplessly by
+ * next_order_number (0008) and is already printed on PDFs the buyer holds, so
+ * it is NOT reissued — the order ends up dated differently from its own number.
+ * Moving it across an IST day also moves it between dashboard and report
+ * buckets, which key on submitted_at. The dialog states both before the call;
+ * the audit note records old -> new -> reason.
+ */
+export async function setOrderDate(
+  orderId: string,
+  newDate: string,
+  reason: string,
+): Promise<{ ok: boolean; error?: string; orderDate?: string }> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
+
+  const clean = (reason ?? "").trim().slice(0, 300);
+  if (!clean) return { ok: false, error: "Say why this order's date is being corrected." };
+
+  const admin = createAdminClient();
+  const { data: orderRow } = await admin.from("orders").select("*").eq("id", orderId).maybeSingle();
+  if (!orderRow) return { ok: false, error: "Order not found." };
+  const o = orderRow as Order;
+  if (o.status === "cancelled") return { ok: false, error: "Cancelled orders are history — their date stands." };
+
+  const todayIst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const orderDate = validateBillDate(newDate, todayIst);
+  if (!orderDate) return { ok: false, error: "Order date must be a valid date, today or earlier." };
+  const before = istDay(o.submitted_at);
+  if (orderDate === before) return { ok: false, error: "That is already this order's date." };
+
+  // A bill is dated on or after the sale it bills, so the order can only move
+  // forward as far as the first bill raised against it — setBillDate is how
+  // that ceiling itself gets moved.
+  const { data: billRows } = await admin
+    .from("order_bills")
+    .select("bill_number, bill_date")
+    .eq("order_id", orderId)
+    .order("bill_date")
+    .limit(1);
+  const firstBill = billRows?.[0] as { bill_number: string; bill_date: string } | undefined;
+  if (firstBill && orderDate > firstBill.bill_date) {
+    return { ok: false, error: `${firstBill.bill_number} is dated ${firstBill.bill_date} — the order cannot start after the first bill raised against it.` };
+  }
+
+  // Noon IST, exactly as back-dated entry stores it, so IST day-bucketing
+  // cannot drift by a timezone hour.
+  const { error } = await admin.from("orders").update({ submitted_at: billDateToIso(orderDate) }).eq("id", orderId);
+  if (error) return { ok: false, error: error.message };
+
+  await writeAuditEvent({
+    eventType: DATE_CORRECTION_EVENT,
+    buyerId: o.buyer_id,
+    staffUserId: staff.id,
+    notes:
+      `order date corrected — ${o.order_number}: ${before} -> ${orderDate} — ${clean} — ` +
+      "the order number encodes its original day, is gapless and was already printed, so it was not reissued; " +
+      "dashboard and report buckets move with submitted_at",
+  });
+
+  // submitted_at is what the order's own PDF prints as its date. Silent: a
+  // staff correction must not re-fire the buyer's confirmation message.
+  await finalizeOrder(orderId, { notify: false });
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/dashboard");
+  revalidatePath(`/admin/buyers/${o.buyer_id}`);
+  return { ok: true, orderDate };
 }
