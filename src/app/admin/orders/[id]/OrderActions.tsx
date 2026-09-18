@@ -6,6 +6,7 @@ import { setOrderStatus, sendInvoice, uploadTrackingSheet, syncOrderFromCatalog,
 import { sharePdfFile, downloadPdfFile, invoiceFileName, waPhone } from "@/lib/share";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { downscalePhoto } from "@/lib/downscale-photo";
 import type { OrderStatus } from "@/lib/types";
 
 export function OrderActions({
@@ -56,7 +57,7 @@ export function OrderActions({
       if (!res.ok) { flash(res.error ?? "Failed"); return; }
       if (sheet) {
         const fd = new FormData();
-        fd.set("photo", sheet);
+        fd.set("photo", await downscalePhoto(sheet));
         const up = await uploadTrackingSheet(orderId, fd);
         if (!up.ok) flash(up.error ?? "Stage saved, but the tracking sheet failed to upload");
       }

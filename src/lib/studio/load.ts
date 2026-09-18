@@ -25,8 +25,9 @@ export interface BoardRow {
   specsVerified: boolean;
   badge: DesignBadge;
   badgeLabel: string;
-  approvedAiCount: number; // of the 4 AI-eligible angles
+  filledCount: number; // of all 6 angles — effective image present (approved candidate, else source)
   copyStatus: "none" | "draft" | "approved";
+  copyPresent: boolean; // non-empty title AND description — draft is enough now
   targets: { portal: PortalKey; enabled: boolean; state: TargetState }[];
   gates: Record<PortalKey, { ready: boolean; blockers: string[] }>;
   thumb: string | null;
@@ -37,7 +38,7 @@ export interface BoardRow {
 
 export async function loadBoard(): Promise<BoardRow[]> {
   const admin = createAdminClient();
-  const [designs, angles, generatedAngleIds, copies, targets, products, notifies] = await Promise.all([
+  const [designs, angles, activeImages, copies, targets, products, notifies] = await Promise.all([
     fetchAll<{ id: string; base_sku: string; color: string; title: string | null; category: string | null; tier: "standard" | "hero"; specs_verified: boolean; created_at: string | null }>(
       admin, "designs", "id, base_sku, color, title, category, tier, specs_verified, created_at",
       // Board default: newest design first (§7.4 / Item 4). nullsFirst:false —
@@ -46,8 +47,13 @@ export async function loadBoard(): Promise<BoardRow[]> {
       (q) => q.order("created_at", { ascending: false, nullsFirst: false }).order("id", { ascending: false })),
     fetchAll<{ id: string; design_id: string; angle: Angle; approved_image_id: string | null; source_ref: string | null }>(
       admin, "design_angles", "id, design_id, angle, approved_image_id, source_ref"),
-    fetchAll<{ angle_id: string }>(admin, "design_images", "angle_id", (q) => q.eq("status", "active")),
-    fetchAll<{ design_id: string; status: "none" | "draft" | "approved" }>(admin, "design_copy", "design_id, status"),
+    // id + file_ref so a board tile can fall back to the design's own front
+    // image when the wholesale group has no published photo yet; role so a
+    // source row never reads as a candidate awaiting review.
+    fetchAll<{ id: string; angle_id: string | null; file_ref: string; role: string }>(
+      admin, "design_images", "id, angle_id, file_ref, role", (q) => q.eq("status", "active")),
+    fetchAll<{ design_id: string; status: "none" | "draft" | "approved"; title: string | null; description: string | null }>(
+      admin, "design_copy", "design_id, status, title, description"),
     fetchAll<{ design_id: string; portal: PortalKey; enabled: boolean; state: TargetState }>(
       admin, "publish_targets", "design_id, portal, enabled, state"),
     fetchAll<{ sku: string; wholesale_price: number; image_urls: string[] | null }>(
@@ -60,14 +66,24 @@ export async function loadBoard(): Promise<BoardRow[]> {
     notifyByGroup.set(key, (notifyByGroup.get(key) ?? 0) + 1);
   }
 
-  const reviewAngles = new Set(generatedAngleIds.map((c) => c.angle_id));
+  const imageRefById = new Map(activeImages.map((c) => [c.id, c.file_ref]));
+  // Candidates awaiting a look: active, attached to an angle, and NOT a source
+  // row (sources are inputs — under effective semantics they already count as
+  // filled, so only generated/imported/cropped output waits for eyes).
+  const reviewImagesByAngle = new Map<string, string[]>();
+  for (const c of activeImages) {
+    if (!c.angle_id || c.role === "source") continue;
+    const list = reviewImagesByAngle.get(c.angle_id) ?? [];
+    list.push(c.id);
+    reviewImagesByAngle.set(c.angle_id, list);
+  }
   const anglesByDesign = new Map<string, typeof angles>();
   for (const a of angles) {
     const list = anglesByDesign.get(a.design_id) ?? [];
     list.push(a);
     anglesByDesign.set(a.design_id, list);
   }
-  const copyByDesign = new Map(copies.map((c) => [c.design_id, c.status]));
+  const copyByDesign = new Map(copies.map((c) => [c.design_id, c]));
   const targetsByDesign = new Map<string, BoardRow["targets"]>();
   for (const t of targets) {
     const list = targetsByDesign.get(t.design_id) ?? [];
@@ -89,17 +105,24 @@ export async function loadBoard(): Promise<BoardRow[]> {
   return designs.map((d) => {
     const key = `${d.base_sku}|${d.color}`;
     const dAngles = anglesByDesign.get(d.id) ?? [];
-    const approvedAngles: Partial<Record<Angle, boolean>> = {};
+    const filledAngles: Partial<Record<Angle, boolean>> = {};
     const review: Partial<Record<Angle, boolean>> = {};
+    let frontRef: string | null = null;
     for (const a of dAngles) {
-      if (a.approved_image_id) approvedAngles[a.angle] = true;
-      if (reviewAngles.has(a.id)) review[a.angle] = true;
+      // Effective image = approved candidate, else the angle's source.
+      if (a.approved_image_id || a.source_ref) filledAngles[a.angle] = true;
+      if ((reviewImagesByAngle.get(a.id) ?? []).some((id) => id !== a.approved_image_id)) review[a.angle] = true;
+      if (a.angle === "front") {
+        frontRef = (a.approved_image_id ? imageRefById.get(a.approved_image_id) : null) ?? a.source_ref ?? null;
+      }
     }
+    const copyRow = copyByDesign.get(d.id);
     const input: DesignStateInput = {
       specsVerified: d.specs_verified,
-      approvedAngles,
+      filledAngles,
       reviewAngles: review,
-      copyStatus: copyByDesign.get(d.id) ?? "none",
+      copyStatus: copyRow?.status ?? "none",
+      copyPresent: (copyRow?.status ?? "none") !== "none" && !!copyRow?.title?.trim() && !!copyRow?.description?.trim(),
       targets: targetsByDesign.get(d.id) ?? [],
       wholesalePriceSet: priceSet.has(key),
       tier: d.tier,
@@ -115,14 +138,18 @@ export async function loadBoard(): Promise<BoardRow[]> {
       specsVerified: d.specs_verified,
       badge,
       badgeLabel: badgeLabelWithPortals(badge, portals),
-      approvedAiCount: (["front", "back", "side", "lifestyle"] as Angle[]).filter((a) => approvedAngles[a]).length,
+      filledCount: (Object.keys(filledAngles) as Angle[]).filter((a) => filledAngles[a]).length,
       copyStatus: input.copyStatus,
+      copyPresent: input.copyPresent,
       targets: input.targets,
       gates: {
         wholesale: gateFor("wholesale", input),
         shopify: gateFor("shopify", input),
       },
-      thumb: groupThumb.get(key) ?? null,
+      // Published group photo first; otherwise the design's own front image —
+      // /api/drive-photo is staff-gated, cookie-authed and next/image renders
+      // it `unoptimized`, so a root-relative URL needs no loader config.
+      thumb: groupThumb.get(key) ?? (frontRef ? `/api/drive-photo?id=${encodeURIComponent(frontRef)}&s=200` : null),
       wholesalePriceSet: input.wholesalePriceSet,
       notifyCount: notifyByGroup.get(key.toUpperCase()) ?? 0,
       createdAt: d.created_at ?? "",

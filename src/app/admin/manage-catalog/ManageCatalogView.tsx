@@ -11,6 +11,7 @@ import {
 } from "./actions";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { tooLargeMessage } from "@/lib/downscale-photo";
 import { useDraft } from "@/lib/useDraft";
 import { HsnInput } from "@/components/admin/HsnInput";
 import type { WholesaleProduct } from "@/lib/types";
@@ -216,6 +217,10 @@ function EditModal({ product, hsnOptions, onClose, onSaved }: { product: Wholesa
   function onPhoto(file: File | null) {
     if (!file) return;
     setError(null);
+    // Published catalogue imagery, so full resolution is kept; an oversized
+    // file gets a real explanation rather than a failed action.
+    const tooBig = tooLargeMessage(file);
+    if (tooBig) { setError(tooBig); return; }
     start(async () => {
       const fd = new FormData();
       fd.append("image", file);

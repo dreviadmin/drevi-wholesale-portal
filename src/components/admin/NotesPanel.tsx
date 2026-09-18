@@ -6,6 +6,7 @@ import { Camera, Image as ImageIcon, StickyNote, Trash2, X } from "lucide-react"
 import { addEntityNote, deleteEntityNote } from "@/app/admin/notes-actions";
 import { ZoomImage } from "@/components/Lightbox";
 import { palette } from "@/lib/palette";
+import { downscalePhoto } from "@/lib/downscale-photo";
 import { useDraft } from "@/lib/useDraft";
 import type { EntityNote, NoteEntityType } from "@/lib/entity-notes";
 
@@ -46,7 +47,7 @@ export function NotesPanel({
     startTransition(async () => {
       const fd = new FormData();
       fd.set("note", text);
-      for (const p of photos) fd.append("photos", p);
+      for (const p of photos) fd.append("photos", await downscalePhoto(p));
       const res = await addEntityNote(entityType, entityId, revalidate, fd);
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
       draft.clear();

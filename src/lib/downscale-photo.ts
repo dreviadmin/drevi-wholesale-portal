@@ -23,3 +23,21 @@ export async function downscalePhoto(file: File): Promise<File> {
     return file;
   }
 }
+
+// The ceiling a server action can actually receive. next.config.mjs sets
+// serverActions.bodySizeLimit to 4mb, and Vercel rejects a serverless request
+// body over ~4.5 MB before Next even sees it — so this is a platform floor, not
+// a tunable. Over it, the action never runs and resolves to undefined, which
+// callers historically reported as "session expired".
+//
+// Snapshot photos (ident, visiting cards, tracking sheets, notes) go through
+// downscalePhoto and never approach this. PRODUCTION imagery — studio sources
+// and catalog photos that get published — must keep full resolution, so those
+// call sites check this instead and say plainly what went wrong.
+export const UPLOAD_LIMIT_BYTES = 4 * 1024 * 1024;
+
+export function tooLargeMessage(file: File): string | null {
+  if (file.size <= UPLOAD_LIMIT_BYTES) return null;
+  const mb = (file.size / 1024 / 1024).toFixed(1);
+  return `That image is ${mb} MB and the upload limit is 4 MB. Resize it, or put it in the design's Drive folder and sync.`;
+}

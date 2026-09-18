@@ -11,8 +11,11 @@ import { ensureDesignImagery } from "@/lib/design-imagery";
 // Retrofit R5 (§7) — four input modes per angle.
 //
 //   A · Shoot / upload    → new role='source' image, becomes source_image_id
+//                           (counts as filled at once — effective semantics)
 //   B · Use input directly→ existing image becomes source AND approved, raw
-//   C · Import a finished → role='import', immediately approvable
+//   C · Import a finished → role='import', auto-approved on arrival (17 Sep —
+//                           it was finished elsewhere; a second stamp added
+//                           nothing, and the push stays the human control)
 //   D · Generate          → pipeline job → role='candidate' for review
 //
 // detail_1 / detail_2 accept A, B, C only — never D (§7.1). Enforced HERE as
@@ -84,7 +87,7 @@ export async function uploadSource(angleId: string, formData: FormData): Promise
   return { ok: true, imageId: row.id };
 }
 
-/** Mode C — import an externally finished image, immediately approvable. */
+/** Mode C — import an externally finished image; approved the moment it lands. */
 export async function importFinished(angleId: string, formData: FormData): Promise<Res & { imageId?: string }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
@@ -106,6 +109,11 @@ export async function importFinished(angleId: string, formData: FormData): Promi
     .select("id")
     .single();
   if (error) return fail(error.message);
+  // Auto-approve through the ONE approval path so the previous production
+  // image is archived, live targets flip to changes_pending and the audit
+  // trail says what replaced what — not a bare column write.
+  const promoted = await approveImage(angleId, row.id);
+  if (!promoted.ok) return fail(promoted.error ?? "Imported, but could not make it the production image");
   await ensureDesignImagery(admin, angle.design_id);
   revalidatePath(`/admin/studio/${angle.design_id}`);
   return { ok: true, imageId: row.id };

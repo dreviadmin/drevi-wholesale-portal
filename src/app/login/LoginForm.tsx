@@ -40,10 +40,13 @@ export function LoginForm() {
         <form action={formAction} className="flex flex-col gap-4" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)", padding: 28 }}>
           <label className="flex flex-col gap-1.5">
             <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>
-              Email or Username
+              Username or Email
             </span>
-            {/* type=text (not email) so staff can log in with just their name;
-                the server maps a bare username to @drevifashion.com */}
+            {/* type=text (not email): buyers sign in with a bare username (the
+                first word of their business name) and staff with just their
+                name. The server resolves a bare id lookup-first — staff domain
+                when staff_users knows it, else the synthetic buyer domain —
+                and full emails pass through as-is. */}
             <input
               type="text"
               name="email"

@@ -40,7 +40,7 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  // D8 confirm sheets: FASHN spend (count + credits) and batch-approve (thumbnails).
+  // D8 confirm sheets: FASHN spend (count + credits) and use-candidates (thumbnails).
   const [confirm, setConfirm] = useState<
     | { kind: "fashn"; jobs: number; credits: number }
     | { kind: "approve"; items: { candidateId: string; fileRef: string; label: string }[] }
@@ -72,7 +72,7 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
     sku: (r) => `${r.baseSku}-${r.color}`,
     title: (r) => r.title ?? "",
     badge: (r) => r.badgeLabel,
-    photos: (r) => r.approvedAiCount,
+    photos: (r) => r.filledCount,
     tier: (r) => r.tier,
     // Numeric on purpose: useSort compares strings with localeCompare({numeric:true}),
     // which mis-orders ISO fractional seconds of unequal length.
@@ -126,7 +126,7 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
           </span>
           <span className="font-body block truncate" style={{ fontSize: 11.5, color: palette.softBlack }}>{r.title ?? "—"}</span>
           <span className="font-mono block mt-0.5" style={{ fontSize: 9.5, color: palette.mutedGreige }}>
-            {dot(r.specsVerified)} specs · ◑ {r.approvedAiCount}/4 · {dot(r.copyStatus === "approved")} copy ·{" "}
+            {dot(r.specsVerified)} specs · ◑ {r.filledCount}/6 · {dot(r.copyPresent)} copy ·{" "}
             {r.targets.map((t) => `${t.state === "live" ? "▪" : "▫"}${t.portal === "wholesale" ? "WS" : "SH"}`).join(" ")}
             {` · added ${fmtAdded(r.createdAt)}`}
             {r.notifyCount > 0 ? ` · 🔔 ${r.notifyCount}` : ""}
@@ -248,7 +248,7 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
                 <td style={{ padding: "8px 6px" }}>
                   <span className="font-body uppercase px-2 py-1" style={{ fontSize: 8.5, letterSpacing: "0.1em", fontWeight: 600, background: BADGE_STYLE[r.badge].bg, color: BADGE_STYLE[r.badge].fg }}>{r.badgeLabel}</span>
                 </td>
-                <td className="font-mono text-right" style={{ fontSize: 11.5, color: palette.softBlack, padding: "8px 6px" }}>{r.approvedAiCount}/4</td>
+                <td className="font-mono text-right" style={{ fontSize: 11.5, color: palette.softBlack, padding: "8px 6px" }}>{r.filledCount}/6</td>
                 <td className="font-body uppercase" style={{ fontSize: 10, color: r.tier === "hero" ? palette.goldDeep : palette.mutedGreige, padding: "8px 6px" }}>{r.tier}</td>
                 <td className="font-mono text-right" style={{ fontSize: 10.5, color: palette.mutedGreige, padding: "8px 6px", whiteSpace: "nowrap" }}>{fmtAdded(r.createdAt)}</td>
               </tr>
@@ -289,14 +289,14 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               onClick={() => {
                 startTransition(async () => {
                   const pre = await approveAllPreflight(ids);
-                  if (!pre.ok || !pre.items?.length) { flash(pre.error ?? "Nothing awaiting review in the selection"); return; }
+                  if (!pre.ok || !pre.items?.length) { flash(pre.error ?? "No new candidates in the selection"); return; }
                   setConfirm({ kind: "approve", items: pre.items });
                 });
               }}
               className="font-body uppercase disabled:opacity-50"
               style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}
             >
-              Approve all
+              Use candidates
             </button>
             <button
               type="button"
@@ -356,8 +356,11 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               </>
             ) : (
               <>
+                {/* Approval is no longer a gate (17 Sep) — this promotes each
+                    angle's newest candidate to its production image, replacing
+                    the source in the published set. Labelled for what it does. */}
                 <div className="font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.2em", color: palette.softBlack }}>
-                  Approve {confirm.items.length} candidate{confirm.items.length === 1 ? "" : "s"}
+                  Use {confirm.items.length} candidate{confirm.items.length === 1 ? "" : "s"} as production
                 </div>
                 <div className="grid grid-cols-4 gap-2 mt-3">
                   {confirm.items.map((it) => (
@@ -371,11 +374,11 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
                 <button
                   type="button"
                   disabled={pending}
-                  onClick={() => { const idsToApprove = confirm.items.map((i) => i.candidateId); setConfirm(null); runBatch(() => approveAllBatch(idsToApprove).then((r) => ({ ok: r.ok, error: r.error })), "Batch approved"); }}
+                  onClick={() => { const idsToApprove = confirm.items.map((i) => i.candidateId); setConfirm(null); runBatch(() => approveAllBatch(idsToApprove).then((r) => ({ ok: r.ok, error: r.error })), "Candidates set as production"); }}
                   className="mt-4 w-full font-body uppercase disabled:opacity-50"
                   style={{ fontSize: 10.5, letterSpacing: "0.18em", background: "#1F6B45", color: "#fff", fontWeight: 600, padding: "12px 0" }}
                 >
-                  Approve all shown
+                  Use all shown
                 </button>
               </>
             )}

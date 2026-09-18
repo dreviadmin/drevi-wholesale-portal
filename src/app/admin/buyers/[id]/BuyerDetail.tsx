@@ -26,6 +26,7 @@ import { unapplyCredit } from "@/app/admin/credit-notes/actions";
 import { buildWhatsAppMessage, shareWhatsApp, buildVCard, downloadVCard } from "@/lib/share";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { downscalePhoto } from "@/lib/downscale-photo";
 import { useDraft } from "@/lib/useDraft";
 import { ORDER_STATUS_LABEL } from "@/lib/order-status";
 import type { BuyerStatus, BuyerSource, OrderStatus, AuditEventType } from "@/lib/types";
@@ -166,7 +167,7 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet, changeRe
     setUploadingPhoto(true);
     try {
       const fd = new FormData();
-      fd.append("card", file);
+      fd.append("card", await downscalePhoto(file));
       const r = await uploadBuyerCard(buyer.id, fd);
       flash(r.ok ? "Photo updated" : r.error ?? "Upload failed");
       if (r.ok) router.refresh();

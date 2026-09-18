@@ -191,8 +191,11 @@ export async function computeAttention(): Promise<AttentionItem[]> {
     if (inReview > 0) {
       items.push({
         key: "studio_in_review",
-        title: `${inReview} design${inReview === 1 ? "" : "s"} need photo review`,
-        sub: "Candidates waiting for approval",
+        // 17 Sep — approval no longer gates anything: these designs have
+        // generated candidates worth a look, or sit one price/portal short
+        // of ready. Nothing publishes without a manual push either way.
+        title: `${inReview} design${inReview === 1 ? "" : "s"} worth a look`,
+        sub: "New candidates or a missing price — pushing stays manual",
         count: inReview,
         severity: "medium",
         href: "/admin/studio?state=in_review",

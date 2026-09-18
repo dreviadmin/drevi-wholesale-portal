@@ -8,12 +8,13 @@ import { ZoomImage } from "@/components/Lightbox";
 import { BackLink, withFrom, useHere } from "@/components/BackLink";
 import { DraftNotice } from "@/components/DraftNotice";
 import { palette } from "@/lib/palette";
+import { tooLargeMessage } from "@/lib/downscale-photo";
 import { useDraft } from "@/lib/useDraft";
 import { COPY_MODELS, estimateLabel } from "@/lib/studio/copy-models";
 import type { BoardRow, AngleDetail, CopyDetail, DesignImage } from "@/lib/studio/load";
 import { AI_ANGLES } from "@/lib/studio/state";
 import { JobsTicker } from "../JobsTicker";
-import { setBrandModel, setBgStyle, setCopyPrompt as setCopyPromptAction, setCopyModel, approveAsIs, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, approveCopy, pushWholesale, pushShopify } from "./actions";
+import { setBrandModel, setBgStyle, setCopyPrompt as setCopyPromptAction, setCopyModel, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, pushWholesale, pushShopify } from "./actions";
 import { BG_PRESETS, resolveBgPreset } from "@/lib/studio/backgrounds";
 import { uploadSource, importFinished, applyImageDirectly, approveImage, rejectImage, saveCrop, setAngleSource, syncDrivePhotos } from "./image-actions";
 import { ImagePicker, CropSheet, CompareSheet } from "./ImageTools";
@@ -21,15 +22,22 @@ import { ImagePicker, CropSheet, CompareSheet } from "./ImageTools";
 // Workbench client (§9). Card per angle: source vs current candidate (both
 // zoomable — golden rule 2), engine chips (D4; seedream disabled; openai_bg
 // behind ANSH-06), collapsed prompt box (hidden for raw; editing marks
-// prompt_edited_by_human), Approve · Reject · Regen (credit estimate inline,
+// prompt_edited_by_human), Use this · Reject · Regen (credit estimate inline,
 // D8), and the D1 "Previous attempts" history strip.
+//
+// 17 Sep — the approval STEP is retired: a slot counts once it holds an
+// effective image and copy counts as a real draft; the manual push is the
+// human control. What remains of "Approve" is choosing which generated
+// candidate ships instead of the source — kept, but labelled "Use this"
+// because that is all it does now. approveImage/approveCopy stay exported
+// from the action modules for back-compat.
 
 const ENGINE_LABEL: Record<string, string> = { fashn: "fashn", seedream: "seedream", openai_bg: "OpenAI", raw: "raw" };
 const ENGINE_HINT: Record<string, string> = {
   fashn: "Model-swap onto the brand model — keeps garment and pose",
   seedream: "Seedream v4 edit via fal.ai — grey-studio background",
   openai_bg: "OpenAI image edit — background normalisation",
-  raw: "No generation — approve the source as-is",
+  raw: "No generation — the source publishes as-is",
 };
 const ENGINE_ESTIMATE: Record<string, string> = { fashn: "~2 credits", seedream: "~$0.03", openai_bg: "~$0.22" };
 
@@ -128,6 +136,11 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
 
   function uploadFor(angleId: string, kind: "source" | "import", file: File) {
     if (!uploadsOk) { flash(uploadsMessage); return; }
+    // Deliberately NOT downscaled: these are the production images that get
+    // published to wholesale and Shopify, so resizing them here would quietly
+    // degrade the catalogue. Instead say why an oversized file cannot be sent.
+    const tooBig = tooLargeMessage(file);
+    if (tooBig) { flash(tooBig); return; }
     startTransition(async () => {
       const fd = new FormData();
       fd.set("photo", file);
@@ -379,8 +392,8 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
         {/* Review actions */}
         <div className="flex flex-wrap gap-1.5 mt-2">
           {current && current.id !== a.approvedImageId && (
-            <button type="button" disabled={pending} onClick={() => run(() => approveImage(a.id, current.id), "Approved")} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: "#1F6B45", color: "#fff", padding: "7px 10px" }}>
-              <Check size={11} /> Approve
+            <button type="button" disabled={pending} onClick={() => run(() => approveImage(a.id, current.id), "Set as production")} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: "#1F6B45", color: "#fff", padding: "7px 10px" }} title="Make this candidate the image that publishes — otherwise the source ships">
+              <Check size={11} /> Use this
             </button>
           )}
           {current && (
@@ -388,11 +401,9 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               <XIcon size={11} /> Reject
             </button>
           )}
-          {(isDetail || a.engine === "raw") && a.sourceRef && !a.approvedImageId && (
-            <button type="button" disabled={pending} onClick={() => run(() => approveAsIs(a.id), "Approved as-is")} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: palette.black, color: palette.ivory, padding: "7px 10px" }}>
-              <Check size={11} /> Approve as-is
-            </button>
-          )}
+          {/* Approve-as-is retired (17 Sep): the source already counts as
+              filled and publishes as the effective image, so the stamp was a
+              no-op. approveAsIs stays exported for back-compat. */}
           {!isDetail && a.engine !== "raw" && a.sourceRef && !jobFor(a.id) && (
             <button type="button" disabled={pending} onClick={() => generate(a.id)} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }} title={ENGINE_HINT[a.engine]}>
               <RefreshCw size={11} /> {current ? "Regen" : "Generate"} · {ENGINE_ESTIMATE[a.engine] ?? ""}
@@ -414,8 +425,8 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
                     <ZoomImage src={drivePhoto(c.fileRef, 300)} alt="attempt" width={84} height={105} />
                     <div className="font-mono" style={{ fontSize: 7.5, color: palette.mutedGreige }}>{c.engine} · {c.status}</div>
                     {c.id !== a.approvedImageId && (
-                      <button type="button" disabled={pending} onClick={() => run(() => approveImage(a.id, c.id), "Approved from history")} className="font-body uppercase mt-0.5" style={{ fontSize: 7.5, letterSpacing: "0.08em", color: "#1F6B45" }}>
-                        Approve this
+                      <button type="button" disabled={pending} onClick={() => run(() => approveImage(a.id, c.id), "Set as production")} className="font-body uppercase mt-0.5" style={{ fontSize: 7.5, letterSpacing: "0.08em", color: "#1F6B45" }}>
+                        Use this
                       </button>
                     )}
                   </div>
@@ -655,11 +666,9 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
                     Save edit
                   </button>
                 )}
-                {copy.status === "draft" && !copyDirty && (
-                  <button type="button" disabled={pending} onClick={() => run(() => approveCopy(board.id), "Copy approved", copyMeta.clear)} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", background: "#1F6B45", color: "#fff", padding: "7px 10px" }}>
-                    <Check size={11} /> Approve copy
-                  </button>
-                )}
+                {/* Approve-copy retired (17 Sep) — a saved draft with a title
+                    and description already satisfies every gate; whoever
+                    pushes reads it on the way. approveCopy stays exported. */}
                 <button type="button" disabled={pending || !board.specsVerified} onClick={() => run(() => generateCopy(board.id), "Copy regenerated", copyRegenerated)} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }} title={`One vision call · ${estimateLabel(copy.effectiveModel)}`}>
                   <RefreshCw size={11} /> Regen · {estimateLabel(copy.effectiveModel)}
                 </button>
@@ -693,7 +702,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           onPick={(img) => {
             const { angleId, intent } = picker;
             setPicker(null);
-            run(() => (intent === "use" ? applyImageDirectly(angleId, img.id) : setAngleSource(angleId, img.id)), intent === "use" ? "Approved as-is" : "Source set");
+            run(() => (intent === "use" ? applyImageDirectly(angleId, img.id) : setAngleSource(angleId, img.id)), intent === "use" ? "Set as production" : "Source set");
           }}
         />
       )}

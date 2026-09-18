@@ -2,6 +2,11 @@
 // board, its filter chips, the cockpit inbox and (Stage 7) the publish gates.
 // Pure functions over plain inputs: no imports from server-only modules so
 // both server components and unit tests can consume it.
+//
+// 17 Sep (owner): the approval step is no longer a gate. A slot counts the
+// moment it holds an EFFECTIVE image — the approved candidate if one exists,
+// else the angle's source. A human still looks before pushing; the push
+// itself stays a manual act, which is where that control lives now.
 
 export const AI_ANGLES = ["front", "back", "side", "lifestyle"] as const;
 export const DETAIL_ANGLES = ["detail_1", "detail_2"] as const;
@@ -13,11 +18,13 @@ export type TargetState = "not_ready" | "ready" | "pushing" | "live" | "changes_
 
 export interface DesignStateInput {
   specsVerified: boolean;
-  /** angle -> has an approved candidate */
-  approvedAngles: Partial<Record<Angle, boolean>>;
-  /** angle -> has at least one candidate awaiting review (status 'generated') */
+  /** angle -> has an effective image (approved candidate, else a source) */
+  filledAngles: Partial<Record<Angle, boolean>>;
+  /** angle -> has a generated/imported candidate that nobody has looked at */
   reviewAngles?: Partial<Record<Angle, boolean>>;
   copyStatus: "none" | "draft" | "approved";
+  /** copy exists with a non-empty title AND description — draft is enough */
+  copyPresent: boolean;
   targets: { portal: PortalKey; enabled: boolean; state: TargetState }[];
   /** from wholesale_products for the group */
   wholesalePriceSet: boolean;
@@ -48,20 +55,22 @@ export interface GateResult {
   blockers: string[];
 }
 
-// Wholesale gate: ≥1 approved image AND a wholesale price on the group.
+// Wholesale gate: ≥1 filled slot AND a wholesale price on the group.
 export function wholesaleGate(s: DesignStateInput): GateResult {
   const blockers: string[] = [];
-  if (!Object.values(s.approvedAngles).some(Boolean)) blockers.push("No approved image yet");
+  if (!Object.values(s.filledAngles).some(Boolean)) blockers.push("No image yet");
   if (!s.wholesalePriceSet) blockers.push("Wholesale price not set");
   return { ready: blockers.length === 0, blockers };
 }
 
-// Shopify gate: front + back approved AND copy approved AND tier set.
+// Shopify gate: front + back filled AND copy present AND tier set. Copy no
+// longer needs the approved stamp — a real draft (title AND description)
+// publishes; whoever pushes reads it on the way.
 export function shopifyGate(s: DesignStateInput): GateResult {
   const blockers: string[] = [];
-  if (!s.approvedAngles.front) blockers.push("Front image not approved");
-  if (!s.approvedAngles.back) blockers.push("Back image not approved");
-  if (s.copyStatus !== "approved") blockers.push("Copy not approved");
+  if (!s.filledAngles.front) blockers.push("Front image missing");
+  if (!s.filledAngles.back) blockers.push("Back image missing");
+  if (!s.copyPresent) blockers.push("Copy not written");
   if (!s.tier) blockers.push("Tier not set");
   return { ready: blockers.length === 0, blockers };
 }
@@ -83,16 +92,20 @@ export function deriveBadge(s: DesignStateInput): { badge: DesignBadge; portals:
 
   if (!s.specsVerified) return { badge: "awaiting_specs", portals: [] };
 
-  const anyApproved = Object.values(s.approvedAngles).some(Boolean);
+  const anyFilled = Object.values(s.filledAngles).some(Boolean);
   const anyInReview = Object.values(s.reviewAngles ?? {}).some(Boolean);
-  if (!anyApproved && !anyInReview) return { badge: "needs_photos", portals: [] };
-  if (!anyApproved && anyInReview) return { badge: "in_review", portals: [] };
+  // needs_photos = zero slots filled. A candidate implies its angle had a
+  // source (so it is filled) — the 0-filled in_review arm survives only for
+  // legacy rows whose candidate outlived its source.
+  if (!anyFilled && !anyInReview) return { badge: "needs_photos", portals: [] };
+  if (!anyFilled) return { badge: "in_review", portals: [] };
 
   const readyPortals = enabled.filter((t) => gateFor(t.portal, s).ready).map((t) => t.portal);
   if (readyPortals.length > 0) return { badge: "ready", portals: readyPortals };
 
-  // Photos exist but no portal is ready — copy is the usual missing piece.
-  if (s.copyStatus !== "approved") return { badge: "needs_copy", portals: [] };
+  // Photos exist but no portal is ready — copy is the usual missing piece;
+  // otherwise something still needs a look or a price before pushing.
+  if (!s.copyPresent) return { badge: "needs_copy", portals: [] };
   return { badge: "in_review", portals: [] };
 }
 

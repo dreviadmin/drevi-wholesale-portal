@@ -530,7 +530,7 @@ export function ExhibitionWizard({
       captureRefRef.current = null; // consumed — next capture gets a fresh key
       if (cardFile) {
         const fd = new FormData();
-        fd.append("card", cardFile);
+        fd.append("card", await downscalePhoto(cardFile));
         try {
           await uploadBuyerCard(res.id!, fd); // best-effort
         } catch { /* photo can be re-added from the buyer page */ }

@@ -6,6 +6,16 @@ const nextConfig = {
   // .next directory a running dev server is serving from. Vercel/`next dev`
   // use the default.
   distDir: process.env.NEXT_BUILD_DIR || ".next",
+  experimental: {
+    // Server actions carry camera photos (ident shots, custom-item photos).
+    // The default 1 MB cap rejected a raw phone photo BEFORE the action ran,
+    // and a rejected action resolves to undefined client-side — which every
+    // caller reports as "session expired". Clients downscale to ~1200px first;
+    // this is the floor under that. It cannot go much higher: Vercel rejects a
+    // serverless request body over ~4.5 MB before Next ever sees it, so full-size
+    // production photos need direct-to-storage uploads, not a bigger number here.
+    serverActions: { bodySizeLimit: "4mb" },
+  },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "cdn.shopify.com" },

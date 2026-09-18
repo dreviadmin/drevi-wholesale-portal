@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { deriveBadge, shopifyGate, wholesaleGate, type DesignStateInput } from "./state";
 
-// Gates are the contract Stage 7 pushes will call — pin them down (guide §7.2).
+// Gates are the contract Stage 7 pushes call — pin them down (guide §7.2).
+// 17 Sep semantics: a slot counts once it holds an EFFECTIVE image (approved
+// candidate, else a source) and copy counts once a real draft exists. The
+// approval stamp gates nothing any more — the manual push is the control.
 
 const base: DesignStateInput = {
   specsVerified: false,
-  approvedAngles: {},
+  filledAngles: {},
   reviewAngles: {},
   copyStatus: "none",
+  copyPresent: false,
   targets: [
     { portal: "wholesale", enabled: true, state: "not_ready" },
     { portal: "shopify", enabled: true, state: "not_ready" },
@@ -17,23 +21,28 @@ const base: DesignStateInput = {
 };
 
 describe("wholesaleGate", () => {
-  it("blocks with no approved image and no price", () => {
+  it("blocks with no image and no price", () => {
     const g = wholesaleGate(base);
     expect(g.ready).toBe(false);
     expect(g.blockers).toHaveLength(2);
   });
-  it("passes with one approved image + price (raw-only design publishes)", () => {
-    const g = wholesaleGate({ ...base, approvedAngles: { detail_1: true }, wholesalePriceSet: true });
+  it("passes with one filled slot + price — an unapproved source is enough", () => {
+    const g = wholesaleGate({ ...base, filledAngles: { detail_1: true }, wholesalePriceSet: true });
     expect(g.ready).toBe(true);
   });
 });
 
 describe("shopifyGate", () => {
-  it("requires front AND back, approved copy, and a tier", () => {
-    expect(shopifyGate({ ...base, approvedAngles: { front: true } }).blockers).toContain("Back image not approved");
-    expect(shopifyGate({ ...base, approvedAngles: { front: true, back: true }, copyStatus: "draft" }).blockers).toContain("Copy not approved");
-    expect(shopifyGate({ ...base, approvedAngles: { front: true, back: true }, copyStatus: "approved", tier: null }).blockers).toEqual(["Tier not set"]);
-    expect(shopifyGate({ ...base, approvedAngles: { front: true, back: true }, copyStatus: "approved" }).ready).toBe(true);
+  it("requires front AND back filled, copy present, and a tier", () => {
+    expect(shopifyGate({ ...base, filledAngles: { front: true } }).blockers).toContain("Back image missing");
+    expect(shopifyGate({ ...base, filledAngles: { front: true, back: true } }).blockers).toContain("Copy not written");
+    expect(shopifyGate({ ...base, filledAngles: { front: true, back: true }, copyStatus: "draft", copyPresent: true, tier: null }).blockers).toEqual(["Tier not set"]);
+    expect(shopifyGate({ ...base, filledAngles: { front: true, back: true }, copyStatus: "draft", copyPresent: true }).ready).toBe(true);
+  });
+  it("a draft with empty title or description does not pass (copyPresent is the contract)", () => {
+    // loadBoard only sets copyPresent when title AND description are non-empty.
+    const g = shopifyGate({ ...base, filledAngles: { front: true, back: true }, copyStatus: "draft", copyPresent: false });
+    expect(g.blockers).toEqual(["Copy not written"]);
   });
 });
 
@@ -42,10 +51,16 @@ describe("deriveBadge", () => {
     expect(deriveBadge(base).badge).toBe("awaiting_specs");
     const specs = { ...base, specsVerified: true };
     expect(deriveBadge(specs).badge).toBe("needs_photos");
+    // Legacy arm: a candidate whose source vanished still reads in_review.
     expect(deriveBadge({ ...specs, reviewAngles: { front: true } }).badge).toBe("in_review");
-    expect(deriveBadge({ ...specs, approvedAngles: { front: true } }).badge).toBe("needs_copy");
-    const ready = { ...specs, approvedAngles: { front: true }, wholesalePriceSet: true };
+    expect(deriveBadge({ ...specs, filledAngles: { front: true } }).badge).toBe("needs_copy");
+    const ready = { ...specs, filledAngles: { front: true }, wholesalePriceSet: true };
     expect(deriveBadge(ready)).toEqual({ badge: "ready", portals: ["wholesale"] });
+  });
+  it("an unapproved candidate no longer blocks — its filled slot drives the badge", () => {
+    const specs = { ...base, specsVerified: true };
+    const withCandidate = { ...specs, filledAngles: { front: true }, reviewAngles: { front: true }, wholesalePriceSet: true };
+    expect(deriveBadge(withCandidate)).toEqual({ badge: "ready", portals: ["wholesale"] });
   });
   it("live and changes_pending outrank everything", () => {
     const live = { ...base, targets: [{ portal: "wholesale" as const, enabled: true, state: "live" as const }] };

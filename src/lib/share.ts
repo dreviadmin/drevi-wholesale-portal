@@ -5,12 +5,31 @@
 const PORTAL_URL = "wholesale.drevifashion.com";
 const RAKESH_PHONE = "+91 88280 43555";
 
+// Buyers sign in with a bare username (first word of the business name).
+// Supabase Auth still requires an email, so the portal stores
+// <username>@buyers.drevifashion.com behind the scenes — an address the buyer
+// never sees. Anything user-facing must therefore show the username, never
+// the synthetic address. The login action resolves bare ids to this domain.
+export const BUYER_LOGIN_DOMAIN = "buyers.drevifashion.com";
+
+// How to present a stored login identity: a synthetic buyer-domain address
+// shows as its local part labelled "Username"; a real email (e.g. a buyer
+// credentialed on their own address) passes through labelled "Email".
+export function loginDisplay(email: string): { label: "Username" | "Email"; value: string } {
+  const suffix = `@${BUYER_LOGIN_DOMAIN}`;
+  if (email.toLowerCase().endsWith(suffix)) {
+    return { label: "Username", value: email.slice(0, email.length - suffix.length) };
+  }
+  return { label: "Email", value: email };
+}
+
 export function buildWhatsAppMessage(email: string, password: string): string {
+  const login = loginDisplay(email);
   return [
     "Welcome to Drevi Wholesale Portal",
     "",
     `Link: ${PORTAL_URL}`,
-    `Email: ${email}`,
+    `${login.label}: ${login.value}`,
     `Password: ${password}`,
     "",
     "Save this message. Tap the link anytime to",
