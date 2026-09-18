@@ -18,6 +18,7 @@ import { formatINR } from "@/lib/format";
 import type { LiveVocab } from "@/lib/sku/vocab-live";
 import { queueTray } from "@/app/admin/sku-generator/labels";
 import { resolveGarmentDesign, uploadIdentPhoto, saveDelivery, quickAddVendor, type SupplyBlock, type SavedDesign } from "./delivery-actions";
+import { downscalePhoto } from "@/lib/downscale-photo";
 
 // Retrofit R3 (§5) — "Log delivery". One screen: vendor block that collapses,
 // a list of garment cards (one per DESIGN, not per size), and a full-screen
@@ -552,10 +553,18 @@ function GarmentSheet({
   function onPhoto(file: File) {
     if (!g.designId) { flash("Mint the SKU first — the photo is filed under it"); return; }
     startTransition(async () => {
+      // Downscale BEFORE sending. A phone photo is 3-8 MB and a Next server
+      // action body is capped (1 MB by default), so the raw file was rejected
+      // before the action ever ran — which surfaced as the undefined return
+      // below and told the operator their session had expired. It had not.
+      // Every other camera flow here already downscales; this one was missed.
       const fd = new FormData();
-      fd.set("photo", file);
+      fd.set("photo", await downscalePhoto(file));
       const res = await uploadIdentPhoto(g.designId!, fd);
-      if (!res) { flash("Session expired — sign in again; your garment is kept as a draft"); return; }
+      // Undefined means the action never returned: an expired session (auth
+      // redirect) OR a body the server refused. Name both, so a size problem
+      // is never again read as a login problem.
+      if (!res) { flash("Photo not accepted — if it is very large try again, or sign in again. Your garment is kept as a draft"); return; }
       if (!res.ok) { flash(res.error ?? "Upload failed"); return; }
       setG((s) => ({ ...s, identImageId: res.imageId, identRef: res.fileRef ?? null }));
       flash("Ident photo saved");

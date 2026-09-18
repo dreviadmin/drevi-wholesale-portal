@@ -10,6 +10,7 @@ import { uuid } from "@/lib/uuid";
 import { CredentialModal } from "@/components/admin/CredentialModal";
 import { PhoneInput } from "@/components/PhoneInput";
 import { palette } from "@/lib/palette";
+import { downscalePhoto } from "@/lib/downscale-photo";
 
 const EMPTY = {
   business_name: "", owner_name: "", email: "", phone: "", city: "", gstin: "",
@@ -46,7 +47,7 @@ export default function AddBuyerPage() {
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
       if (cardFile) {
         const fd = new FormData();
-        fd.append("card", cardFile);
+        fd.append("card", await downscalePhoto(cardFile));
         await uploadBuyerCard(res.id!, fd); // best-effort; buyer exists either way
       }
       draft.clear();

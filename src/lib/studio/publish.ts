@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { fetchDriveImage } from "@/lib/drive";
+import { fetchImageByRef } from "@/lib/design-image-store";
 import { uploadPublishedImage } from "@/lib/storage";
 import { writeAuditEvent } from "@/lib/audit";
 import { loadDesignDetail } from "./load";
@@ -11,11 +11,13 @@ import { ALL_ANGLES } from "./state";
 // the exact same routine over the same deterministic storage paths.
 //
 // 1. Hard gate (same function the UI chips show) — fail with the reasons.
-// 2. Copy every approved candidate from Drive into the public product-images
-//    bucket (s1200 web + s800 thumb) and upsert the product_images registry.
+// 2. Copy every angle's EFFECTIVE image (approved candidate, else its source
+//    — 17 Sep semantics) into the public product-images bucket (s1200 web +
+//    s800 thumb) and upsert the product_images registry.
 // 3. Point wholesale_products.image_urls for ALL size variants of the group
-//    at the published set (front first), write the approved description, and
-//    LOCK those fields — the sheet sync must never claw them back.
+//    at the published set (front first), write the description whenever real
+//    copy exists (draft included — whoever pushed has read it), and LOCK
+//    those fields — the sheet sync must never claw them back.
 // 4. Flip the target live (+last_pushed_at) and audit.
 
 export interface PublishResult {
@@ -40,21 +42,25 @@ export async function publishWholesale(designId: string, staffId: string, staffE
   await admin.from("publish_targets").update({ state: "pushing", error: null }).eq("design_id", designId).eq("portal", "wholesale");
 
   try {
-    // Approved candidates in display order (front → … → detail_2).
-    const approved: { angle: string; fileRef: string; candidateId: string }[] = [];
+    // The EFFECTIVE set in display order (front → … → detail_2): the approved
+    // candidate where one exists, else the angle's source.
+    const publishSet: { angle: string; fileRef: string; imageId: string | null }[] = [];
     for (const angleName of ALL_ANGLES) {
       const a = angles.find((x) => x.angle === angleName);
-      if (!a?.approvedImageId) continue;
-      const cand = a.candidates.find((c) => c.id === a.approvedImageId);
-      if (cand) approved.push({ angle: a.angle, fileRef: cand.fileRef, candidateId: cand.id });
+      if (!a) continue;
+      const cand = a.approvedImageId ? a.candidates.find((c) => c.id === a.approvedImageId) : undefined;
+      if (cand) publishSet.push({ angle: a.angle, fileRef: cand.fileRef, imageId: cand.id });
+      else if (a.sourceRef) publishSet.push({ angle: a.angle, fileRef: a.sourceRef, imageId: a.sourceImageId });
     }
-    if (approved.length === 0) return { ok: false, error: "No approved images (gate should have caught this)" };
+    if (publishSet.length === 0) return { ok: false, error: "No images to publish (gate should have caught this)" };
 
     const webUrls: string[] = [];
     const nowIso = new Date().toISOString();
-    for (const item of approved) {
-      const [web, thumb] = await Promise.all([fetchDriveImage(item.fileRef, 1200), fetchDriveImage(item.fileRef, 800)]);
-      if (!web || !thumb) throw new Error(`Could not fetch ${item.angle} image from Drive`);
+    for (const item of publishSet) {
+      // fetchImageByRef serves Drive ids AND the portal-storage sb: refs —
+      // fetchDriveImage alone broke on backfilled sb: fronts.
+      const [web, thumb] = await Promise.all([fetchImageByRef(item.fileRef, 1200), fetchImageByRef(item.fileRef, 800)]);
+      if (!web || !thumb) throw new Error(`Could not fetch the ${item.angle} image`);
       const webUp = await uploadPublishedImage(board.baseSku, board.color, item.angle, 1200, Buffer.from(web.body), web.contentType);
       await uploadPublishedImage(board.baseSku, board.color, item.angle, 800, Buffer.from(thumb.body), thumb.contentType);
       webUrls.push(webUp.url);
@@ -64,7 +70,7 @@ export async function publishWholesale(designId: string, staffId: string, staffE
           color: board.color,
           angle: item.angle,
           storage_path: webUp.path,
-          source_candidate_id: item.candidateId,
+          source_candidate_id: item.imageId,
           published_at: nowIso,
         },
         { onConflict: "sku_base,color,angle" },
@@ -88,7 +94,9 @@ export async function publishWholesale(designId: string, staffId: string, staffE
         images_fetched_at: nowIso,
         locked_fields: [...locks],
       };
-      if (copy?.status === "approved" && copy.description) {
+      // Copy presence (not the approved stamp) writes the description — the
+      // same contract the shopify gate uses now.
+      if (board.copyPresent && copy?.description) {
         patch.description = copy.description;
         locks.add("description");
         patch.locked_fields = [...locks];
@@ -106,9 +114,9 @@ export async function publishWholesale(designId: string, staffId: string, staffE
     await writeAuditEvent({
       eventType: "studio_published",
       staffUserId: staffId,
-      notes: `wholesale push ${board.baseSku}·${board.color}: ${approved.length} image(s) → ${updated} variant(s) by ${staffEmail}`,
+      notes: `wholesale push ${board.baseSku}·${board.color}: ${publishSet.length} image(s) → ${updated} variant(s) by ${staffEmail}`,
     });
-    return { ok: true, published: approved.length, variants: updated };
+    return { ok: true, published: publishSet.length, variants: updated };
   } catch (err) {
     const message = (err as Error).message;
     await admin

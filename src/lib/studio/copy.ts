@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { fetchDriveImage } from "@/lib/drive";
+import { fetchImageByRef } from "@/lib/design-image-store";
 import { loadVocab } from "@/lib/sku/vocab-live";
 import { defaultCopyModel } from "./copy-models";
 import { defaultCopyPrompt } from "./copy-prompt";
@@ -67,7 +67,9 @@ export async function generateCopyForDesign(designId: string, requestedBy: strin
 
   const images: { type: "image"; source: { type: "base64"; media_type: string; data: string } }[] = [];
   for (const ref of refs.slice(0, 3)) {
-    const img = await fetchDriveImage(ref, 800);
+    // fetchImageByRef handles Drive ids AND portal-storage sb: refs — a
+    // backfilled sb: front used to kill copy generation here.
+    const img = await fetchImageByRef(ref, 800);
     if (!img) continue;
     images.push({
       type: "image",
@@ -78,7 +80,7 @@ export async function generateCopyForDesign(designId: string, requestedBy: strin
       },
     });
   }
-  if (images.length === 0) return { ok: false, error: "Could not fetch any design image from Drive" };
+  if (images.length === 0) return { ok: false, error: "Could not fetch any design image" };
 
   // An edited prompt wins; otherwise the default is rebuilt from the specs, so
   // a spec correction flows through without anyone re-saving the prompt (§8).

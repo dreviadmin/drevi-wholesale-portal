@@ -9,6 +9,7 @@ import { useSort, SortTh, type SortAccessor } from "@/components/sortable";
 import { DraftNotice } from "@/components/DraftNotice";
 import { createVendor, updateVendor, uploadVendorPhoto, type VendorForm } from "./actions";
 import { palette } from "@/lib/palette";
+import { downscalePhoto } from "@/lib/downscale-photo";
 import { useDraft, isDraftOlderThan, DRAFT_NOTICE_AFTER_MS } from "@/lib/useDraft";
 
 export interface VendorRow {
@@ -242,7 +243,7 @@ export function VendorModal({ vendor, onClose, onSaved }: {
     setError(null);
     try {
       const fd = new FormData();
-      fd.set("photo", file);
+      fd.set("photo", await downscalePhoto(file));
       const res = await uploadVendorPhoto(vendor.id, kind, fd);
       if (!res.ok) setError(res.error ?? "Upload failed");
       else setPhotos((p) => ({ ...p, [kind]: res.ref ?? null }));

@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { RefreshCw, Eye, EyeOff, Copy, MessageCircle, X } from "lucide-react";
 import { setCredentials } from "@/app/admin/buyers/actions";
-import { buildWhatsAppMessage, shareWhatsApp } from "@/lib/share";
+import { buildWhatsAppMessage, loginDisplay, shareWhatsApp } from "@/lib/share";
 import { palette } from "@/lib/palette";
 
 const WORDS = ["Tulip","Lotus","Jasmine","Marigold","Saffron","Indigo","Amber","Coral","Maroon","Ivory","Crimson","Emerald","Champagne","Velvet","Silk","Brocade","Mirror","Pearl","Mango","Peacock","Lantern","Monsoon","Henna","Paisley","Garnet","Topaz","Lilac","Cobalt","Bronze","Copper","Mauve","Sage"];
@@ -32,6 +32,9 @@ export function CredentialModal({
   const [isPending, start] = useTransition();
 
   const password = mode === "auto" ? generated : custom;
+  // Synthetic buyer-domain addresses must surface as the bare username — a
+  // buyer should never receive "royal@buyers.drevifashion.com".
+  const login = loginDisplay(email);
 
   function save() {
     setError(null);
@@ -64,11 +67,11 @@ export function CredentialModal({
               Account activated. Credentials:
             </p>
             <div className="mt-3 p-3 font-body" style={{ background: palette.ivoryDeep, fontSize: 13 }}>
-              <div>{email}</div>
-              <div style={{ fontWeight: 600, marginTop: 4 }}>{activated.password}</div>
+              <div>{login.label}: {login.value}</div>
+              <div style={{ fontWeight: 600, marginTop: 4 }}>Password: {activated.password}</div>
             </div>
             <div className="flex gap-2 mt-4">
-              <button type="button" onClick={() => navigator.clipboard?.writeText(`${email}\n${activated.password}`)} className="flex items-center gap-1.5 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 10, letterSpacing: "0.15em", padding: "8px 14px" }}>
+              <button type="button" onClick={() => navigator.clipboard?.writeText(`${login.label}: ${login.value}\nPassword: ${activated.password}`)} className="flex items-center gap-1.5 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 10, letterSpacing: "0.15em", padding: "8px 14px" }}>
                 <Copy size={12} /> Copy
               </button>
               <button type="button" onClick={() => shareWhatsApp(buildWhatsAppMessage(email, activated.password), buyer.phone)} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.15em", padding: "8px 14px" }}>

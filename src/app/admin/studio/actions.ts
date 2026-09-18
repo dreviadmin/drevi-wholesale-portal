@@ -119,8 +119,12 @@ export async function runFashnBatch(
   return { ok: true, jobs: rows.length, credits: rows.length * CREDITS_EACH };
 }
 
-// Approve-all preflight: the CURRENT generated candidate per angle across the
-// selection — the confirm sheet shows these as thumbnails (guide §9).
+// Use-candidates preflight (formerly approve-all): the CURRENT candidate per
+// angle across the selection — the confirm sheet shows these as thumbnails
+// (guide §9). 17 Sep: approval no longer gates anything, so this batch is a
+// promotion — each listed candidate becomes its angle's production image.
+// Source rows are excluded: they already publish as the effective image, so
+// promoting them would be a no-op dressed as work.
 export async function approveAllPreflight(
   designIds: string[],
 ): Promise<{ ok: boolean; error?: string; items?: { candidateId: string; fileRef: string; label: string }[] }> {
@@ -134,13 +138,13 @@ export async function approveAllPreflight(
   const byId = new Map((designs ?? []).map((d) => [d.id, `${d.base_sku}·${d.color}`]));
   const { data: angles } = await admin
     .from("design_angles")
-    .select("id, design_id, angle, approved_image_id, design_images!angle_id(id, file_ref, status, created_at)")
+    .select("id, design_id, angle, approved_image_id, design_images!angle_id(id, role, file_ref, status, created_at)")
     .in("design_id", designIds.slice(0, 500));
   const items: { candidateId: string; fileRef: string; label: string }[] = [];
   for (const a of angles ?? []) {
     if (a.approved_image_id) continue;
-    const cands = ((a.design_images as { id: string; file_ref: string; status: string; created_at: string }[] | null) ?? [])
-      .filter((c) => c.status === "active")
+    const cands = ((a.design_images as { id: string; role: string; file_ref: string; status: string; created_at: string }[] | null) ?? [])
+      .filter((c) => c.status === "active" && c.role !== "source")
       .sort((x, y) => y.created_at.localeCompare(x.created_at));
     if (cands[0]) items.push({ candidateId: cands[0].id, fileRef: cands[0].file_ref, label: `${byId.get(a.design_id) ?? "?"} ${a.angle}` });
   }
@@ -179,7 +183,7 @@ export async function approveAllBatch(candidateIds: string[]): Promise<{ ok: boo
   for (const designId of flippedDesigns) {
     await admin.from("publish_targets").update({ state: "changes_pending" }).eq("design_id", designId).eq("state", "live");
   }
-  await writeAuditEvent({ eventType: "studio_candidate_approved", staffUserId: staff.id, notes: `batch approve: ${approved} candidate(s)` });
+  await writeAuditEvent({ eventType: "studio_candidate_approved", staffUserId: staff.id, notes: `batch use-candidates: ${approved} promoted to production` });
   revalidatePath("/admin/studio");
   return { ok: true, approved };
 }

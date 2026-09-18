@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
+import { BUYER_LOGIN_DOMAIN } from "@/lib/share";
 
 export interface LoginState {
   error?: string;
@@ -21,15 +22,32 @@ function requestMeta() {
 
 export async function login(_prev: LoginState, formData: FormData): Promise<LoginState> {
   const rawId = (formData.get("email")?.toString() ?? "").trim().toLowerCase();
-  // Staff shorthand: a bare username ("ansh") is their @drevifashion.com login.
-  // Buyers always type full emails, so anything with an @ passes through as-is.
-  const email = rawId && !rawId.includes("@") ? `${rawId}@drevifashion.com` : rawId;
   const password = formData.get("password")?.toString() ?? "";
-  if (!email || !password) return { error: "Enter your email and password." };
+  if (!rawId || !password) return { error: "Enter your username and password." };
 
   const { ip, userAgent } = requestMeta();
   const admin = createAdminClient();
   const supabase = createServerSupabase();
+
+  // A bare id (no "@") is either staff shorthand ("ansh") or a buyer username
+  // ("royal"). Staff are the small known set, so LOOK UP first: if staff_users
+  // has ${rawId}@drevifashion.com the id is theirs, else it resolves to the
+  // synthetic buyer domain. Existence (not active) decides — an inactive staff
+  // member must still land on the staff path below, not probe the buyer
+  // domain. Never try both domains against Auth: a failed staff-domain attempt
+  // per buyer login would spray buyer passwords at potential staff accounts,
+  // risk GoTrue rate limits, double latency, and leak which usernames are
+  // staff through timing. Full emails pass through as-is.
+  let email = rawId;
+  if (!rawId.includes("@")) {
+    const staffEmail = `${rawId}@drevifashion.com`;
+    const { data: staffRow } = await admin
+      .from("staff_users")
+      .select("id")
+      .eq("email", staffEmail)
+      .maybeSingle();
+    email = staffRow ? staffEmail : `${rawId}@${BUYER_LOGIN_DOMAIN}`;
+  }
 
   const { error } = await supabase.auth.signInWithPassword({ email, password });
 
@@ -42,7 +60,7 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
       userAgent,
       notes: `email=${email}`,
     });
-    return { error: "Invalid email or password." };
+    return { error: "Invalid username or password." };
   }
 
   // Auth succeeded. Decide destination by which table the email belongs to.
@@ -88,5 +106,5 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   if (buyer?.status === "suspended") {
     return { error: `Your account is inactive. Please contact Rakesh: ${RAKESH_PHONE}.` };
   }
-  return { error: "Invalid email or password." };
+  return { error: "Invalid username or password." };
 }
