@@ -5,6 +5,8 @@ import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import { ALL_ANGLES } from "@/lib/studio/state";
+import { BASE_SKU_RE } from "@/lib/sku/vocab";
+import { validCodes } from "@/lib/sku/vocab-live";
 import { applyMovement } from "@/lib/stock-ledger";
 import { storeDesignImage } from "@/lib/design-image-store";
 import { ensureDesignImagery } from "@/lib/design-imagery";
@@ -35,7 +37,7 @@ export interface GarmentInput {
   cat?: string;
   sub?: string;
   color?: string;
-  /** resolved/base SKU for a reorder */
+  /** resolved base SKU — of a reorder, or of the base a new colour is added to */
   baseSku?: string;
   description?: string;
   vendorSku?: string;
@@ -230,6 +232,33 @@ export async function uploadIdentPhoto(
 }
 
 /**
+ * The design group for one (base SKU, colour): the designs row, its six angles
+ * and both publish targets (§5.7). Lifted out of the new-design path (19 Sep)
+ * so a colour added to an existing base is as complete a record as a design
+ * born here — that completeness is exactly what the SKU generator's "variant
+ * of existing" never produced.
+ */
+async function ensureDesignGroup(opts: {
+  baseSku: string; color: string; cat: string; sub: string; title?: string;
+}): Promise<{ ok: true; designId: string } | { ok: false; error: string }> {
+  const admin = createAdminClient();
+  const { data: design, error } = await admin
+    .from("designs")
+    .upsert({ base_sku: opts.baseSku, color: opts.color, origin_source: "app", title: opts.title?.trim() || null, category: opts.cat, sub_category: opts.sub }, { onConflict: "base_sku,color" })
+    .select("id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+  const { data: haveAngles } = await admin.from("design_angles").select("angle").eq("design_id", design.id);
+  const existing = new Set((haveAngles ?? []).map((a) => a.angle));
+  const missing = ALL_ANGLES.filter((a) => !existing.has(a)).map((angle) => ({ design_id: design.id, angle }));
+  if (missing.length) await admin.from("design_angles").insert(missing);
+  for (const portal of ["wholesale", "shopify"]) {
+    await admin.from("publish_targets").upsert({ design_id: design.id, portal }, { onConflict: "design_id,portal" });
+  }
+  return { ok: true, designId: design.id };
+}
+
+/**
  * Mint (or resolve) the design group for one garment so the capture sheet can
  * bind a photo to a real SKU before the delivery is saved (§5.3a/b).
  * Sizes drive minting: the first size mints the base, the rest are variants.
@@ -265,6 +294,69 @@ export async function resolveGarmentDesign(input: {
     return { ok: true, designId: d.id, baseSku: d.base_sku, color: d.color, variantSkus, created: false };
   }
 
+  // New COLOUR of an existing base (19 Sep) — the third way a garment arrives.
+  // DD-LEH-FLR-115 exists in GRN, the same garment turns up in RED: the number
+  // stays, the colour is new. The SKU generator can already mint that variant,
+  // but it writes only a sku_registry row — no designs row, no angles, no
+  // publish targets, no receipt line — so the colour never reached the Studio
+  // or the board. Here the mint runs with every side effect the new-design
+  // path has. Ordered after the reorder branch: designId always wins.
+  if (input.baseSku) {
+    const baseSku = input.baseSku.trim().toUpperCase();
+    const color = (input.color ?? "").trim().toUpperCase();
+    if (!BASE_SKU_RE.test(baseSku)) return fail(`"${baseSku}" is not a valid base SKU`);
+    if (!color) return fail("Pick the new colour");
+    // Same merged vocab /api/sku/generate validates against, so a colour
+    // Rakesh added in /admin/lovs mints here too.
+    const { colors } = await validCodes();
+    if (!colors.has(color)) return fail(`Unknown colour code "${color}"`);
+
+    // This path extends a number that exists; it never invents one.
+    const { data: registered } = await admin.from("sku_registry").select("base_sku").ilike("base_sku", baseSku).limit(1).maybeSingle();
+    if (!registered) return fail(`${baseSku} is not in the registry — use New design instead`);
+
+    // Already a design in this colour — that is the reorder path. Falling
+    // through would re-stamp the group's title and category from this sheet:
+    // ensureDesignGroup's upsert conflicts on (base_sku, colour) and UPDATES.
+    // So the check has to fail CLOSED — an unreadable answer is not "no
+    // duplicate", it is "do not touch a group we cannot see".
+    const { data: dupe, error: dupeErr } = await admin.from("designs").select("id").ilike("base_sku", baseSku).ilike("color", color).maybeSingle();
+    if (dupeErr) return fail(`Could not check whether ${baseSku} already exists in ${color} — retry (${dupeErr.message})`);
+    if (dupe) return fail(`${baseSku} already exists in ${color} — search for that design instead of adding the colour`);
+
+    // Category/sub follow a sibling colour of the same base when there is one;
+    // the SKU segments are the fallback (the RPC derives them the same way),
+    // so a base minted in the SKU generator — registry row, no design at all —
+    // still lands correctly classified.
+    // Inherited VERBATIM. designs.category is a display NAME on most rows
+    // ("Lehenga", 215 of 279 on prod) and a CODE on the rest ("LEH") — the
+    // sheet era left both shapes in the column. Upper-casing what a sibling
+    // holds turns "Lehenga" into "LEHENGA", which resolves through no vocab
+    // entry and reaches the Shopify metafield shouting. Only the SKU-segment
+    // fallback is a real code, so only that one is upper-cased.
+    const { data: sibling } = await admin.from("designs").select("category, sub_category").ilike("base_sku", baseSku).limit(1).maybeSingle();
+    const inheritedCat = sibling?.category?.trim() || (baseSku.split("-")[1] ?? "").toUpperCase();
+    const inheritedSub = sibling?.sub_category?.trim() || (baseSku.split("-")[2] ?? "").toUpperCase();
+
+    // Idempotent like the reorder path: a variant already in the registry is
+    // adopted, never minted twice. That also ADOPTS SKUs the SKU generator
+    // minted earlier for this colour and left stranded without a design.
+    const variantSkus: string[] = [];
+    for (const size of sizes) {
+      const wanted = `${baseSku}-${size}-${color}`;
+      const { data: existing } = await admin.from("sku_registry").select("variant_sku").ilike("variant_sku", wanted).maybeSingle();
+      if (existing) { variantSkus.push(existing.variant_sku); continue; }
+      const m = await mintSku("variant", { baseSku, color, size, description: input.description ?? "", staffEmail: staff.email });
+      if (!m.ok) return fail(m.error);
+      variantSkus.push(m.variantSku);
+    }
+
+    const group = await ensureDesignGroup({ baseSku, color, cat: inheritedCat, sub: inheritedSub, title: input.description });
+    if (!group.ok) return fail(group.error);
+    // created: the (base, colour) group is new even though the number is not.
+    return { ok: true, designId: group.designId, baseSku, color, variantSkus, created: true };
+  }
+
   // New design — mint base from the first size, variants for the rest (§5.4).
   const cat = (input.cat ?? "").trim().toUpperCase();
   const sub = (input.sub ?? "").trim().toUpperCase();
@@ -281,20 +373,9 @@ export async function resolveGarmentDesign(input: {
   }
 
   // Design group + its six angles (§5.7).
-  const { data: design, error } = await admin
-    .from("designs")
-    .upsert({ base_sku: first.baseSku, color, origin_source: "app", title: input.description?.trim() || null, category: cat, sub_category: sub }, { onConflict: "base_sku,color" })
-    .select("id")
-    .single();
-  if (error) return fail(error.message);
-  const { data: haveAngles } = await admin.from("design_angles").select("angle").eq("design_id", design.id);
-  const existing = new Set((haveAngles ?? []).map((a) => a.angle));
-  const missing = ALL_ANGLES.filter((a) => !existing.has(a)).map((angle) => ({ design_id: design.id, angle }));
-  if (missing.length) await admin.from("design_angles").insert(missing);
-  for (const portal of ["wholesale", "shopify"]) {
-    await admin.from("publish_targets").upsert({ design_id: design.id, portal }, { onConflict: "design_id,portal" });
-  }
-  return { ok: true, designId: design.id, baseSku: first.baseSku, color, variantSkus, created: true };
+  const group = await ensureDesignGroup({ baseSku: first.baseSku, color, cat, sub, title: input.description });
+  if (!group.ok) return fail(group.error);
+  return { ok: true, designId: group.designId, baseSku: first.baseSku, color, variantSkus, created: true };
 }
 
 /**
