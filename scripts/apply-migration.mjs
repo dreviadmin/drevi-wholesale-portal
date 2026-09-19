@@ -42,7 +42,26 @@ if (target === "prod") {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(__dirname, "..", "supabase", "migrations");
-const files = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
+// --only=0054,0055 applies just those files, in sorted order.
+//
+// Re-applying all 55 every run is the default and stays the default — it is
+// what makes "idempotent" a guarantee rather than a hope. But it also means
+// ONE transient failure anywhere in the list blocks every file after it, which
+// is exactly what happened on 20 Sep: the Management API returned a 500
+// ("Failed to retrieve the requested resource") re-running 0053, an already
+// applied migration, and 0054/0055 behind it never ran. When you already know
+// which files are outstanding, naming them skips that exposure.
+const onlyArg = process.argv.find((a) => a.startsWith("--only="));
+const only = onlyArg ? onlyArg.slice("--only=".length).split(",").map((s) => s.trim()).filter(Boolean) : null;
+const files = readdirSync(migrationsDir)
+  .filter((f) => f.endsWith(".sql"))
+  .filter((f) => !only || only.some((o) => f === o || f.startsWith(`${o}_`) || f.startsWith(o)))
+  .sort();
+if (only && files.length === 0) {
+  console.error(`--only=${only.join(",")} matched no migration file.`);
+  process.exit(1);
+}
+if (only) console.log(`--only: ${files.join(", ")}`);
 if (files.length === 0) {
   console.error("No .sql files found in supabase/migrations.");
   process.exit(1);

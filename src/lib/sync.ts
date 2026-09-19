@@ -192,7 +192,10 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
   const products: ProductRow[] = [];
   const included = new Set<string>();
   // Vendor/procurement columns for the admin dashboard's reorder table —
-  // separate table, sheet is the source of truth (no locked_fields).
+  // separate table. The sheet owns these columns EXCEPT where the row locks
+  // one: since 0055 product_vendor_info has locked_fields too, and last_cost
+  // can be pinned by hand in the Product Master. The upsert below is where
+  // that is honoured — this array is built straight from the sheet.
   const vendorInfo: Array<Record<string, unknown>> = [];
   const seenVendor = new Set<string>();
 
@@ -409,10 +412,59 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
   }
 
   // Vendor info is best-effort — a failure here must not abort the product sync.
+  //
+  // last_cost can be typed by hand in the Product Master since 20 Sep (a
+  // delivery is often logged before anyone knows the price), and this upsert
+  // used to push the sheet's value over it every ten minutes. The §3.7
+  // app-owned guard is no help: 213 of the 281 live designs are sheet-born, so
+  // for the majority the typed number would just disappear. So the same
+  // mechanism wholesale_products has had since 0010 — a locked field keeps its
+  // DB value, while every other vendor column on the row still follows the
+  // sheet (vendor_name, vendor_id, vendor_sku, last_receipt_date, retail_price).
   if (vendorInfo.length > 0) {
-    const stamped = vendorInfo.map((v) => ({ ...v, updated_at: nowIso }));
-    const { error } = await supabase.from("product_vendor_info").upsert(stamped, { onConflict: "sku" });
-    if (error) warnings.push(`Vendor-info upsert failed: ${error.message}`);
+    // Only the locked rows, not the whole table: a `.in()` over every synced
+    // SKU would be a multi-kilobyte query string for a handful of matches.
+    //
+    // PAGED, because PostgREST silently caps an un-ranged select at 1000 rows
+    // and a truncated answer here reads as "not locked" — i.e. the sync would
+    // revert exactly the costs it could not see. fetchAll() would do this, but
+    // it throws away the error CODE and the 42703 branch below depends on it.
+    const lockedRows: { sku: string; last_cost: number }[] = [];
+    let lockedErr: { code?: string; message: string } | null = null;
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await supabase
+        .from("product_vendor_info")
+        .select("sku, last_cost")
+        .contains("locked_fields", ["last_cost"])
+        .range(from, from + 999);
+      if (error) { lockedErr = error; break; }
+      lockedRows.push(...(data ?? []));
+      if (!data || data.length < 1000) break;
+    }
+    // 42703 = the column isn't there yet (0055 not applied on this database):
+    // nothing can be locked, so the sheet still owns the cost exactly as it
+    // did before this change, and deploy order stops mattering. Any OTHER
+    // read failure means locks may exist and we could not see them — skip the
+    // upsert rather than silently undo the one thing the lock is for.
+    const preLocks = lockedErr?.code === "42703";
+    if (lockedErr && !preLocks) {
+      warnings.push(`Vendor-info upsert SKIPPED — could not read cost locks: ${lockedErr.message}`);
+    } else {
+      const lockedCost = new Map(lockedRows.map((r) => [r.sku, Number(r.last_cost) || 0]));
+      let kept = 0;
+      const stamped = vendorInfo.map((v) => {
+        const pinned = lockedCost.get(v.sku as string);
+        if (pinned === undefined) return { ...v, updated_at: nowIso };
+        kept++;
+        return { ...v, last_cost: pinned, updated_at: nowIso };
+      });
+      // locked_fields is deliberately absent from the payload: PostgREST only
+      // updates the columns it carries, so existing locks survive and brand-new
+      // rows take the column default ('{}').
+      const { error } = await supabase.from("product_vendor_info").upsert(stamped, { onConflict: "sku" });
+      if (error) warnings.push(`Vendor-info upsert failed: ${error.message}`);
+      else if (kept > 0) warnings.push(`Sync kept ${kept} hand-set cost(s) — locked in the Product Master.`);
+    }
   }
 
   // Studio ingest (Stage 3, §7.3): keep the designs board scaffolded for every
