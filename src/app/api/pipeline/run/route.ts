@@ -2,20 +2,18 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchImageByRef } from "@/lib/design-image-store";
-import { runEngine, submitFashn, seedFor, fashnEnabled, type EngineKind } from "@/lib/pipeline/engines";
+import { runEngine, submitFashn, seedFor, fashnEnabled, JOB_TYPE_ENGINE } from "@/lib/pipeline/engines";
 import { finishGenerationJob } from "@/lib/pipeline/finish";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// FASHN submits and returns immediately (poll route finishes it); seedream and
-// openai fit comfortably. Hobby's 60s ceiling is fine for all of them.
+// FASHN submits and returns immediately (poll route finishes it); seedream,
+// nano_banana and openai all render synchronously inside this request. Hobby's
+// Measured on the bench: Seedream v5 Pro ~36s, Nano Banana ~14s, both at fal's
+// 1K default. 2K is NOT yet timed, and it is what this ships with — if it runs
+// past the ceiling the symptom is a job stuck in 'running' until regenAngle's
+// 15-minute sweep, not a wrong image. Worth one real 2K Generate to confirm.
 export const maxDuration = 60;
-
-const TYPE_TO_ENGINE: Record<string, EngineKind> = {
-  tryon: "fashn",
-  seedream: "seedream",
-  openai_bg: "openai_bg",
-};
 
 // UX sprint (29 Jul) — run one queued pipeline job IN-PROCESS. The hosted
 // runner (ANSH-04) stays parked; the Workbench queues a job via regenAngle and
@@ -58,7 +56,9 @@ export async function POST(request: Request) {
   };
 
   try {
-    const engine = TYPE_TO_ENGINE[claimed.type];
+    // The inverse of the table regenAngle queued this job with — one source,
+    // so a new engine cannot be routable on one side and not the other.
+    const engine = JOB_TYPE_ENGINE[claimed.type];
     if (!engine) return await failJob(`Job type ${claimed.type} has no in-process engine`);
     // A 'tryon' row queued before 19 Sep can still be sitting here. Fail it
     // with the reason rather than sending it to a parked provider.

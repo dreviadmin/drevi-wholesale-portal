@@ -2,7 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { storeDesignImage } from "@/lib/design-image-store";
-import { ENGINE_COST } from "@/lib/pipeline/engines";
+import { engineCost } from "@/lib/pipeline/engines";
 
 // Shared tail of every generation: store the output, register the candidate,
 // close the job. Used by /api/pipeline/run (sync engines) and
@@ -42,7 +42,7 @@ export async function finishGenerationJob(args: {
       file_ref: stored.fileRef,
       file_name: stored.fileName,
       status: "active",
-      cost_credits: ENGINE_COST[args.engine] ?? 0,
+      cost_credits: engineCost(args.engine),
       created_by: args.createdBy,
     })
     .select("id")
@@ -51,7 +51,7 @@ export async function finishGenerationJob(args: {
 
   await admin
     .from("pipeline_jobs")
-    .update({ status: "done", progress: 100, cost_credits: ENGINE_COST[args.engine] ?? 0, finished_at: new Date().toISOString() })
+    .update({ status: "done", progress: 100, cost_credits: engineCost(args.engine), finished_at: new Date().toISOString() })
     .eq("id", args.jobId);
   return { ok: true, imageId: row.id };
 }

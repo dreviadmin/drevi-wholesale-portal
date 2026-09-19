@@ -7,7 +7,7 @@ import { writeAuditEvent } from "@/lib/audit";
 import { defaultAnglePrompt } from "@/lib/studio/prompts";
 import { promptDesignFrom } from "@/lib/studio/facts";
 import { loadVocab } from "@/lib/sku/vocab-live";
-import { engineConfigured } from "@/lib/pipeline/engines";
+import { engineConfigured, ENGINE_JOB_TYPE, type EngineKind } from "@/lib/pipeline/engines";
 import { resolveBackground, isBgStyle, BG_STYLES, BG_PLATE_BUCKET } from "@/lib/studio/backgrounds";
 import { COPY_MODELS } from "@/lib/studio/copy-models";
 import { DETAIL_ANGLES } from "@/lib/studio/state";
@@ -153,21 +153,29 @@ export async function setAnglePrompt(angleId: string, prompt: string): Promise<R
   return error ? fail(error.message) : { ok: true };
 }
 
-export async function setAngleEngine(angleId: string, engine: "fashn" | "seedream" | "openai_bg" | "raw"): Promise<Res> {
+// 'raw' is not an EngineKind — it is the "never generate on this angle" marker
+// — but it is a legal design_angles.engine value, so it rides alongside.
+export async function setAngleEngine(angleId: string, engine: EngineKind | "raw"): Promise<Res> {
   try { await requireAdmin(); } catch { return fail("Not authorized"); }
   const admin = createAdminClient();
   const { data: angle } = await admin.from("design_angles").select("angle").eq("id", angleId).maybeSingle();
   if (!angle) return fail("Angle not found");
-  // Ansh (3 Sep): detail shots may be background-cleaned by the EDIT engines.
-  // Model swap stays banned — it would re-synthesise the embroidery.
+  // Ansh (3 Sep): detail shots may be background-cleaned by the EDIT engines —
+  // seedream, nano_banana and openai_bg all only replace the backdrop. Model
+  // swap stays banned there: it would re-synthesise the embroidery.
   if ((DETAIL_ANGLES as readonly string[]).includes(angle.angle) && engine === "fashn") {
     return fail("Model swap never runs on detail shots — embroidery must stay real.");
   }
-  // 19 Sep — the chips no longer offer fashn; this makes the server agree, so
-  // a stale tab cannot park an angle on an engine nothing will run.
-  if (engine === "fashn") {
-    const conf = engineConfigured("fashn");
-    if (!conf.ok) return fail(`Model swap is parked — ${conf.missing}`);
+  // 19 Sep — the chips grey out an engine whose key is absent (and fashn,
+  // which is parked outright). This makes the server agree for EVERY engine
+  // rather than only fashn, so a stale tab cannot park an angle on something
+  // nothing will run: the failure then arrives at Generate time, one step
+  // further from the click that caused it.
+  if (engine !== "raw") {
+    const conf = engineConfigured(engine);
+    if (!conf.ok) {
+      return fail(engine === "fashn" ? `Model swap is parked — ${conf.missing}` : `${engine} is unavailable — ${conf.missing} is not set`);
+    }
   }
   const { error } = await admin.from("design_angles").update({ engine, updated_at: new Date().toISOString() }).eq("id", angleId);
   return error ? fail(error.message) : { ok: true };
@@ -191,9 +199,15 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
   if (angle.engine === "raw") return fail("Raw angles use Approve as-is — nothing to generate");
   {
     // UX sprint — engines run in-process now; the only gate is a key.
-    const conf = engineConfigured(angle.engine as "fashn" | "seedream" | "openai_bg");
+    const conf = engineConfigured(angle.engine as EngineKind);
     if (!conf.ok) return fail(`${angle.engine} needs ${conf.missing} in the environment`);
   }
+  // Which pipeline_jobs.type carries this engine. Read from the shared table in
+  // engines.ts, not re-derived here — the run route reads the same table
+  // backwards, and the two drifting is how a nano_banana angle used to be
+  // queued as a 'tryon' and handed to the parked fashn provider.
+  const jobType = ENGINE_JOB_TYPE[angle.engine as EngineKind];
+  if (!jobType) return fail(`${angle.engine} has no job type — nothing would pick this job up`);
   if (!angle.source_ref) return fail("No source image on this angle yet");
 
   const [{ data: dRow }, vocab] = await Promise.all([
@@ -246,7 +260,7 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
   const { data: job, error } = await admin
     .from("pipeline_jobs")
     .insert({
-      type: angle.engine === "openai_bg" ? "openai_bg" : angle.engine === "seedream" ? "seedream" : "tryon",
+      type: jobType,
       design_id: angle.design_id,
       angle_id: angle.id,
       // The runner needs the prompt the operator actually saw (§7.1).

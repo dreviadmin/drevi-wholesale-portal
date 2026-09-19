@@ -5,8 +5,12 @@ import { DETAIL_ANGLES } from "@/lib/studio/state";
 
 export const dynamic = "force-dynamic";
 
-const TYPES = ["preprocess", "vision", "tryon", "openai_bg", "scan_drive", "copy"] as const;
-const AI_ENGINE_TYPES = new Set(["tryon", "openai_bg"]);
+// 20 Sep: this list had drifted behind the engines. 'seedream' has been a
+// legal pipeline_jobs.type since 0029 and is what almost every angle runs,
+// yet this route could not queue one — it accepted only 'tryon', which is
+// the parked model swap. nano_banana joins at the same time.
+const TYPES = ["preprocess", "vision", "tryon", "openai_bg", "seedream", "nano_banana", "scan_drive", "copy"] as const;
+const AI_ENGINE_TYPES = new Set(["tryon", "openai_bg", "seedream", "nano_banana"]);
 
 // Create a pipeline job (build guide §8.3, admin+). Validates D5 (detail
 // angles never receive AI engines) server-side, inserts the row, then fires

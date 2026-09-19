@@ -8,27 +8,103 @@ import { listFolderImages, listSubfolders } from "@/lib/drive";
 // Ported from pipeline/scripts/image_providers.py + 03_fashn_runner.py so the
 // portal no longer depends on the parked hosted runner (ANSH-04):
 //
-//   fashn      FASHN model-swap — keeps the garment + pose from the source
-//              photo, swaps identity to a brand-model reference. Async API:
-//              submit /v1/run → poll /v1/status/<id>.
-//              PARKED since 19 Sep — see fashnEnabled() below.
-//   seedream   ByteDance Seedream v4 edit via fal.ai. Synchronous.
-//   openai     gpt-image-2 /v1/images/edits. Synchronous.
+//   fashn        FASHN model-swap — keeps the garment + pose from the source
+//                photo, swaps identity to a brand-model reference. Async API:
+//                submit /v1/run → poll /v1/status/<id>.
+//                PARKED since 19 Sep — see fashnEnabled() below.
+//   seedream     ByteDance Seedream edit via fal.ai. Synchronous.
+//   nano_banana  Nano Banana 2 edit via fal.ai. Synchronous. Added 20 Sep.
+//   openai       gpt-image-2 /v1/images/edits. Synchronous.
 //
-// All three accept the source photo as bytes and return image bytes; callers
-// never learn which HTTP shape each provider speaks. Since 19 Sep the two
-// live ones also accept an optional coloured-background PLATE (see Plate) —
-// a second image, sent after the garment, that shows the model the backdrop
+// All of them accept the source photo as bytes and return image bytes; callers
+// never learn which HTTP shape each provider speaks. Since 19 Sep the live
+// ones also accept an optional coloured-background PLATE (see Plate) — a
+// second image, sent after the garment, that shows the model the backdrop
 // instead of describing it.
+//
+// 20 Sep, after a 38-render bench (Ansh): seedream moves from v4 to v5 Pro,
+// and Nano Banana 2 joins it. The two are NOT interchangeable in one respect
+// that the studio has to surface rather than hide — v5 Pro's content checker
+// refuses part of this catalogue and Nano Banana does not. See refusalMessage.
 
 const FASHN_BASE = "https://api.fashn.ai/v1";
-const FAL_SYNC = "https://fal.run/fal-ai/bytedance/seedream/v4/edit";
+// v5 Pro's endpoint id carries NO `fal-ai/` prefix — bytedance publishes this
+// one under its own namespace. The prefix that every other fal model wants is
+// a 404 here, so the two ids are written out rather than templated.
+const FAL_SEEDREAM = "https://fal.run/bytedance/seedream/v5/pro/edit";
+const FAL_NANO = "https://fal.run/fal-ai/nano-banana-2/edit";
 
 // Approx cost per output image, for the credits column (₹-agnostic units the
-// studio already displays; matches image_providers.PRICE_PER_IMAGE).
-export const ENGINE_COST: Record<string, number> = { fashn: 2, seedream: 0.03, openai_bg: 0.22 };
+// studio already displays; matches image_providers.PRICE_PER_IMAGE). From
+// fal's own listing, 20 Sep:
+//
+//   seedream (v5 Pro)  $0.0675 at or below 1536² (2,359,296 px), $0.135 above
+//                      it. 0.0675 is the COMMON band, not a guaranteed one —
+//                      seedreamSize asks for the source's own pixels, capped at
+//                      DREVI_SEEDREAM_MAX_PX (4096), and the fetch bound is not
+//                      the backstop it looks like:
+//                        · fetchImageByRef ignores `size` for sb: storage refs
+//                          (design-image-store.ts) — a phone capture arrives at
+//                          its full 3024×4032 and bills $0.135;
+//                        · fetchDriveImage falls back to alt:media, unbounded,
+//                          whenever the =s1600 thumbnail fetch misses;
+//                        · even bounded, 1600 caps the LONG edge — anything
+//                          squarer than ~1600×1475 (a macro detail crop) is over
+//                          1536² on its own.
+//                      So a seedream render costs $0.0675 OR $0.135, and the
+//                      figure below is the lower one. v4 was $0.03 — this change
+//                      at least doubles the bill, and can quadruple it.
+//   nano_banana        $0.08 at 1K, ×1.5 at 2K, ×2 at 4K. We default to 2K
+//                      (see nanoResolution), so $0.12 is the honest number.
+//
+// The Workbench estimate chips quote these same figures — if one moves, move
+// both, because an estimate nobody trusts is worse than no estimate.
+export const ENGINE_COST: Record<string, number> = { fashn: 2, seedream: 0.0675, nano_banana: 0.12, openai_bg: 0.22 };
 
-export type EngineKind = "fashn" | "seedream" | "openai_bg";
+/** fal's own multipliers off Nano Banana's 1K base of $0.08. */
+const NANO_RESOLUTION_COST: Record<string, number> = { "0.5K": 0.06, "1K": 0.08, "2K": 0.12, "4K": 0.16 };
+
+/**
+ * What one render of `engine` actually costs, now — not what the table says.
+ *
+ * ENGINE_COST is a flat lookup, which is a lie for Nano Banana the moment
+ * DREVI_NANO_RESOLUTION moves off 2K: the render bills 0.75x to 2x the 1K base
+ * and every cost_credits row would keep recording $0.12. The credits column is
+ * the only spend record this app keeps, so it follows the env, not the table.
+ */
+export function engineCost(engine: string): number {
+  if (engine === "nano_banana") return NANO_RESOLUTION_COST[nanoResolution()] ?? ENGINE_COST.nano_banana;
+  return ENGINE_COST[engine] ?? 0;
+}
+
+export type EngineKind = "fashn" | "seedream" | "nano_banana" | "openai_bg";
+
+/**
+ * engine ⇄ pipeline_jobs.type, in ONE place.
+ *
+ * This used to be two hand-kept ternaries facing each other — regenAngle's
+ * engine → type, and the run route's TYPE_TO_ENGINE — and they drifted the
+ * moment a fourth engine arrived: a nano_banana angle fell through
+ * regenAngle's final `: "tryon"` and was queued as a try-on, which the route
+ * then handed to the PARKED fashn provider. The operator's chip said Nano
+ * Banana and the job died saying FASHN_ENABLED. A table both halves read
+ * cannot drift like that.
+ *
+ * 'tryon' is fashn's historical type name and stays as-is: job rows on both
+ * databases carry it, and renaming a stored enum value to tidy a map is not
+ * worth a migration.
+ */
+export const ENGINE_JOB_TYPE: Record<EngineKind, string> = {
+  fashn: "tryon",
+  seedream: "seedream",
+  nano_banana: "nano_banana",
+  openai_bg: "openai_bg",
+};
+
+/** The same table read backwards, derived so it cannot fall out of step. */
+export const JOB_TYPE_ENGINE: Record<string, EngineKind> = Object.fromEntries(
+  Object.entries(ENGINE_JOB_TYPE).map(([engine, type]) => [type, engine as EngineKind]),
+);
 
 /**
  * FASHN model-swap is PARKED (Ansh, 19 Sep: "disable fashn and RAW for now:
@@ -46,8 +122,10 @@ export function engineConfigured(engine: EngineKind): { ok: boolean; missing?: s
   // in its environment reports the engine as unavailable rather than offering
   // a button that the UI no longer draws.
   if (engine === "fashn" && !fashnEnabled()) return { ok: false, missing: "FASHN_ENABLED=true (model swap is parked)" };
+  // seedream and nano_banana are both fal models on the same account, so one
+  // key lights both chips — there is no separate Nano Banana credential.
   const need =
-    engine === "fashn" ? "FASHN_API_KEY" : engine === "seedream" ? "FAL_KEY" : "OPENAI_API_KEY";
+    engine === "fashn" ? "FASHN_API_KEY" : engine === "openai_bg" ? "OPENAI_API_KEY" : "FAL_KEY";
   return process.env[need] ? { ok: true } : { ok: false, missing: need };
 }
 
@@ -183,11 +261,73 @@ async function runOpenAi(source: Buffer, contentType: string, prompt: string, pl
   return Buffer.from(b64, "base64");
 }
 
-// ── Seedream (fal.ai) ─────────────────────────────────────────────────────
-// Seedream v4 accepts width/height between these bounds; outside them the call
+// ── fal.ai: Seedream v5 Pro and Nano Banana 2 ─────────────────────────────
+//
+// Two models, one account, one key, and (below) one calling path. They differ
+// in exactly two places: how you ask for an output size, and which photos they
+// agree to look at.
+//
+// Seedream accepts width/height between these bounds; outside them the call
 // is rejected, so a small source is scaled up and a huge one down — always
-// along its OWN aspect ratio.
+// along its OWN aspect ratio. v5 Pro takes the same input shape v4 did, so
+// everything below carried over untouched when the endpoint moved.
 const SEEDREAM_MIN_PX = 1024;
+
+/** Human name per engine, for job logs an operator reads. */
+const FAL_LABEL: Record<string, string> = { seedream: "Seedream v5 Pro", nano_banana: "Nano Banana 2" };
+
+/**
+ * Does this fal response body say "I refused to look at your photograph"?
+ *
+ * The live shape (v5 Pro, HTTP 422):
+ *   {"detail":[{"loc":["body","image"],
+ *     "msg":"The content could not be processed because it contained material
+ *            flagged by a content checker.",
+ *     "type":"content_policy_violation"}]}
+ *
+ * Both the machine-readable `type` and the human sentence are matched, because
+ * either one alone is a string fal could re-word.
+ */
+function isContentRefusal(text: string): boolean {
+  return /content_policy_violation|flagged by a content checker/i.test(text);
+}
+
+/**
+ * A content refusal, said to a shop operator instead of at one.
+ *
+ * THIS IS THE LINE THAT MUST NOT BE SWALLOWED. Seedream v5 Pro's content
+ * checker refuses part of this catalogue: DD-LEH-MRM-076·BLK, a black net
+ * mermaid lehenga photographed on the brand's own model, comes back 422 on
+ * BOTH the full-length frame and the macro crop. It is not a bad photo and it
+ * is not a bad prompt — the same two files went through Nano Banana 2 without
+ * a murmur. `enable_safety_checker:false` does not clear it either; fal's own
+ * schema says disabling the checker needs account authorization we do not
+ * have.
+ *
+ * The owner picked v5 Pro on 20 Sep knowing this, which makes hiding the
+ * refusal the one unacceptable outcome. A raw 422 body in the job log tells a
+ * shop operator nothing they can do; this tells them the engine refused the
+ * photo, that the garment is not the problem, and which chip to press next.
+ */
+function refusalMessage(engine: EngineKind): string {
+  const label = FAL_LABEL[engine] ?? engine;
+  const remedy =
+    engine === "seedream"
+      ? "Switch this angle to the Nano Banana chip and generate again — it renders the photos Seedream refuses."
+      : "Try the Seedream or OpenAI chip on this angle instead.";
+  return (
+    `${label} refused this photo: its content checker flagged the source image, so nothing was rendered. ` +
+    `Nothing is wrong with the garment or the prompt — this is the engine's own filter, and it cannot be ` +
+    `switched off on our fal account. ${remedy}`
+  );
+}
+
+/** Turn a failed fal response into a sentence, refusal-aware. */
+async function falFailure(engine: EngineKind, r: Response): Promise<string> {
+  const text = (await r.text().catch(() => "")).slice(0, 400);
+  if (isContentRefusal(text)) return refusalMessage(engine);
+  return `${FAL_LABEL[engine] ?? engine} HTTP ${r.status}: ${text.slice(0, 300)}`;
+}
 
 /**
  * The output size for a source photo.
@@ -240,11 +380,48 @@ async function seedreamSize(source: Buffer): Promise<{ width: number; height: nu
   }
 }
 
-async function runSeedream(source: Buffer, contentType: string, prompt: string, plate?: Plate | null): Promise<Buffer> {
+/**
+ * Nano Banana's output resolution — deliberately NOT fal's 1K default.
+ *
+ * At 1K a 900×1600 source came back 768×1376. That is a DOWNSCALE, and it does
+ * not stay hidden: publishWholesale derives s1200 and s800 from whatever it is
+ * handed, so a 768-wide render is stretched back up into the published web
+ * image and visibly softens. 2K costs 1.5× ($0.12 against $0.08) and is the
+ * cheapest size that does not throw away pixels the camera actually caught.
+ *
+ * DREVI_NANO_RESOLUTION overrides for a one-off experiment.
+ */
+const NANO_RESOLUTIONS = ["0.5K", "1K", "2K", "4K"] as const;
+const NANO_DEFAULT_RESOLUTION = "2K";
+
+function nanoResolution(): string {
+  const want = (process.env.DREVI_NANO_RESOLUTION ?? "").trim();
+  if (!want) return NANO_DEFAULT_RESOLUTION;
+  // fal rejects anything off this enum, and it would do so mid-Generate with a
+  // 422 the operator cannot read. A typo in the environment is not worth a
+  // failed job — fall back to the default and say so in the server log.
+  if ((NANO_RESOLUTIONS as readonly string[]).includes(want)) return want;
+  console.warn(`DREVI_NANO_RESOLUTION="${want}" is not one of ${NANO_RESOLUTIONS.join(", ")} — using ${NANO_DEFAULT_RESOLUTION}`);
+  return NANO_DEFAULT_RESOLUTION;
+}
+
+/**
+ * The half of a fal call that both models share: the plate, the image order,
+ * the prompt fallback, the refusal-aware failure. `extra` supplies the fields
+ * they disagree about — Seedream's image_size, Nano Banana's aspect_ratio +
+ * resolution — and is the ONLY place a model-specific field belongs.
+ */
+async function runFal(
+  cfg: { endpoint: string; engine: EngineKind; extra: (source: Buffer) => Promise<Record<string, unknown>> },
+  source: Buffer,
+  contentType: string,
+  prompt: string,
+  plate?: Plate | null,
+): Promise<Buffer> {
   const key = process.env.FAL_KEY!;
-  // GARMENT FIRST, PLATE SECOND. That order is what the bench validated: with
-  // the plate first, the model treats the garment as the reference and the
-  // empty backdrop as the thing to keep.
+  // GARMENT FIRST, PLATE SECOND. That order is what the bench validated on
+  // both models: with the plate first, the model treats the garment as the
+  // reference and the empty backdrop as the thing to keep.
   const imageUrls = [dataUri(source, contentType)];
   // Inlined, not handed over as a URL: fal would have to reach our storage
   // itself, and a plate that is missing or unreachable would surface as an
@@ -256,24 +433,68 @@ async function runSeedream(source: Buffer, contentType: string, prompt: string, 
     if (bytes) { imageUrls.push(dataUri(bytes, "image/jpeg")); plateOk = true; }
   }
   const effectivePrompt = plate && !plateOk ? plateInWords(prompt, plate) : prompt;
-  const r = await fetch(FAL_SYNC, {
+  const r = await fetch(cfg.endpoint, {
     method: "POST",
     headers: { Authorization: `Key ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       prompt: effectivePrompt,
       image_urls: imageUrls,
-      image_size: await seedreamSize(source),
       num_images: 1,
-      // Off by default: fal's checker false-positives on fitted ethnic wear
-      // (these are the brand's own catalog photos) — same call as the pipeline.
-      enable_safety_checker: process.env.DREVI_SEEDREAM_SAFETY === "1",
+      ...(await cfg.extra(source)),
     }),
   });
-  if (!r.ok) throw new Error(`fal HTTP ${r.status}: ${(await r.text()).slice(0, 300)}`);
+  if (!r.ok) throw new Error(await falFailure(cfg.engine, r));
   const body = await r.json();
   const url = body?.images?.[0]?.url;
-  if (!url) throw new Error(`fal returned no images: ${JSON.stringify(body).slice(0, 200)}`);
+  if (!url) {
+    // A refusal has only ever arrived as a 422, but a 200 carrying the same
+    // `detail` and no images would otherwise read as "no images" — a message
+    // that sends the operator looking for a fault that is not theirs.
+    const raw = JSON.stringify(body).slice(0, 300);
+    throw new Error(isContentRefusal(raw) ? refusalMessage(cfg.engine) : `${FAL_LABEL[cfg.engine] ?? cfg.engine} returned no images: ${raw}`);
+  }
   return download(url);
+}
+
+function runSeedream(source: Buffer, contentType: string, prompt: string, plate?: Plate | null): Promise<Buffer> {
+  return runFal(
+    {
+      endpoint: FAL_SEEDREAM,
+      engine: "seedream",
+      extra: async (src) => ({
+        image_size: await seedreamSize(src),
+        // Kept because v4's input shape is v5 Pro's input shape and the call
+        // still accepts the field — but it no longer buys anything. v5 Pro's
+        // refusals come from a checker this flag does not reach ("Disabling it
+        // requires account authorization"), which is why refusalMessage exists
+        // rather than a quiet retry with the checker off.
+        enable_safety_checker: process.env.DREVI_SEEDREAM_SAFETY === "1",
+      }),
+    },
+    source, contentType, prompt, plate,
+  );
+}
+
+function runNanoBanana(source: Buffer, contentType: string, prompt: string, plate?: Plate | null): Promise<Buffer> {
+  return runFal(
+    {
+      endpoint: FAL_NANO,
+      engine: "nano_banana",
+      extra: async () => ({
+        // There is NO image_size on this model, so seedreamSize has nothing to
+        // bite on. 'auto' follows the input frame — which is the entire job
+        // seedreamSize was written to do: keep a 9:16 catalogue capture at 9:16
+        // instead of letting the model decide it would rather be 3:4.
+        aspect_ratio: "auto",
+        resolution: nanoResolution(),
+        // PNG, not the lossy default: publishWholesale re-encodes into s1200
+        // and s800 anyway, so a JPEG here would just be a generation of loss
+        // ahead of the one that actually ships.
+        output_format: "png",
+      }),
+    },
+    source, contentType, prompt, plate,
+  );
 }
 
 // ── FASHN model-swap ──────────────────────────────────────────────────────
@@ -443,5 +664,6 @@ export async function runEngine(args: {
     : null;
   if (args.engine === "openai_bg") return runOpenAi(args.source, args.contentType, args.prompt, plate);
   if (args.engine === "seedream") return runSeedream(args.source, args.contentType, args.prompt, plate);
+  if (args.engine === "nano_banana") return runNanoBanana(args.source, args.contentType, args.prompt, plate);
   return runFashn(args.source, args.contentType, args.angle, args.prompt, args.seed, args.brandModel);
 }
