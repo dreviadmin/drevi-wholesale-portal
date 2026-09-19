@@ -19,7 +19,7 @@ import { JobsTicker } from "../JobsTicker";
 import { setBgStyle, setCopyPrompt as setCopyPromptAction, setCopyModel, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, pushWholesale, pushShopify } from "./actions";
 import { BG_COLOURS, BG_MODE_DEFAULT, BG_MODE_LABEL, resolveBackground, type BgMode } from "@/lib/studio/backgrounds";
 import { uploadSource, importFinished, applyImageDirectly, approveImage, rejectImage, saveCrop, setAngleSource, syncDrivePhotos } from "./image-actions";
-import { ImagePicker, CropSheet, CompareSheet } from "./ImageTools";
+import { ImagePicker, CropSheet, CompareSheet, drivePhotoDownload } from "./ImageTools";
 
 // Workbench client (§9). Card per angle: source vs current candidate (both
 // zoomable — golden rule 2), engine chips (D4; seedream disabled; openai_bg
@@ -85,6 +85,10 @@ const ENGINE_ESTIMATE: Record<string, string> = { fashn: "~2 credits", seedream:
 interface Job { angleId: string | null; type: string; status: string; progress: number }
 
 const drivePhoto = (id: string, s = 600) => `/api/drive-photo?id=${encodeURIComponent(id)}&s=${s}`;
+// Downloads (20 Sep) ride the zoom every photo on this page already opens —
+// see Lightbox. The card keeps its 8pt button row; the overlay, which was
+// empty, gains one icon. drivePhotoDownload lives in ImageTools next to its
+// thumbnail sibling so the picker and the compare sheet share one URL rule.
 
 // brandModels / brandModel stay in the prop TYPE and are still passed by
 // page.tsx, but are not destructured: the only UI that read them was the
@@ -297,7 +301,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           <div>
             <div className="font-body uppercase mb-1" style={{ fontSize: 7.5, letterSpacing: "0.14em", color: palette.mutedGreige }}>Source</div>
             {a.sourceRef ? (
-              <ZoomImage src={drivePhoto(a.sourceRef)} alt={`${a.angle} source`} width={150} height={188} />
+              <ZoomImage src={drivePhoto(a.sourceRef)} downloadHref={drivePhotoDownload(a.sourceRef)} alt={`${a.angle} source`} width={150} height={188} />
             ) : (
               <div className="flex items-center justify-center font-body" style={{ height: 188, background: palette.ivoryDeep, fontSize: 10, color: palette.mutedGreige }}>no source</div>
             )}
@@ -307,7 +311,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               {current && current.id === a.approvedImageId ? "Production" : "Candidate"}
             </div>
             {current ? (
-              <ZoomImage src={drivePhoto(current.fileRef)} alt={`${a.angle} candidate`} width={150} height={188} />
+              <ZoomImage src={drivePhoto(current.fileRef)} downloadHref={drivePhotoDownload(current.fileRef)} alt={`${a.angle} ${current.id === a.approvedImageId ? "production" : "candidate"}`} width={150} height={188} />
             ) : (
               <div className="flex items-center justify-center font-body" style={{ height: 188, background: palette.ivoryDeep, fontSize: 10, color: palette.mutedGreige }}>none yet</div>
             )}
@@ -488,7 +492,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               <div className="flex gap-2 mt-1.5 overflow-x-auto">
                 {history.map((c) => (
                   <div key={c.id} className="flex-shrink-0" style={{ width: 84 }}>
-                    <ZoomImage src={drivePhoto(c.fileRef, 300)} alt="attempt" width={84} height={105} />
+                    <ZoomImage src={drivePhoto(c.fileRef, 300)} downloadHref={drivePhotoDownload(c.fileRef)} alt={`${a.angle} previous attempt`} width={84} height={105} />
                     <div className="font-mono" style={{ fontSize: 7.5, color: palette.mutedGreige }}>{c.engine} · {c.status}</div>
                     {c.id !== a.approvedImageId && (
                       <button type="button" disabled={pending} onClick={() => run(() => approveImage(a.id, c.id), "Set as production")} className="font-body uppercase mt-0.5" style={{ fontSize: 7.5, letterSpacing: "0.08em", color: "#1F6B45" }}>

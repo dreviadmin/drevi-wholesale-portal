@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Crop as CropIcon, Columns2, MoveHorizontal, RotateCcw, RotateCw } from "lucide-react";
+import { X, Crop as CropIcon, Columns2, MoveHorizontal, RotateCcw, RotateCw, Download } from "lucide-react";
 import { palette } from "@/lib/palette";
 import type { DesignImage } from "@/lib/studio/load";
 
@@ -11,6 +11,10 @@ import type { DesignImage } from "@/lib/studio/load";
 //   §7.4 CompareSheet · side-by-side (default) and slider overlay, both zoomable
 
 export const drivePhoto = (id: string, s = 600) => `/api/drive-photo?id=${encodeURIComponent(id)}&s=${s}`;
+// Same staff-gated route, asked to send the file as an attachment. Deliberately
+// NO &s: a saved photo is the original, not the tile size the card happened to
+// render (the route drops `s` on a download anyway — this just says so here).
+export const drivePhotoDownload = (id: string) => `/api/drive-photo?id=${encodeURIComponent(id)}&dl=1`;
 
 const ROLE_ORDER = ["source", "candidate", "import", "crop", "ident"] as const;
 const ROLE_LABEL: Record<string, string> = {
@@ -50,16 +54,38 @@ export function ImagePicker({
               </div>
               <div className="grid grid-cols-4 gap-2 mt-1.5">
                 {items.map((img) => (
-                  <button key={img.id} type="button" onClick={() => onPick(img)} className="text-left">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={drivePhoto(img.fileRef, 300)} alt={img.role} style={{ width: "100%", aspectRatio: "4/5", objectFit: "cover", background: palette.ivoryDeep, opacity: img.status === "active" ? 1 : 0.45 }} />
-                    <span className="font-mono block truncate" style={{ fontSize: 7.5, color: palette.mutedGreige }}>
-                      {img.angle ?? "design"}{img.engine && img.engine !== "raw" ? ` · ${img.engine}` : ""}
-                    </span>
-                    <span className="font-body block" style={{ fontSize: 7, color: palette.mutedGreige }}>
-                      {new Date(img.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}{img.status !== "active" ? ` · ${img.status}` : ""}
-                    </span>
-                  </button>
+                  <div key={img.id} style={{ position: "relative" }}>
+                    <button type="button" onClick={() => onPick(img)} className="text-left w-full">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={drivePhoto(img.fileRef, 300)} alt={img.role} style={{ width: "100%", aspectRatio: "4/5", objectFit: "cover", background: palette.ivoryDeep, opacity: img.status === "active" ? 1 : 0.45 }} />
+                      <span className="font-mono block truncate" style={{ fontSize: 7.5, color: palette.mutedGreige }}>
+                        {img.angle ?? "design"}{img.engine && img.engine !== "raw" ? ` · ${img.engine}` : ""}
+                      </span>
+                      <span className="font-body block" style={{ fontSize: 7, color: palette.mutedGreige }}>
+                        {new Date(img.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}{img.status !== "active" ? ` · ${img.status}` : ""}
+                      </span>
+                    </button>
+                    {/* The only surface where the download is not inside the
+                        zoom: a tile here already MEANS something — it picks —
+                        and there is no zoom to hang it off without fighting
+                        that. Sibling of the button, never a child: an <a>
+                        inside a <button> is invalid and eats the pick.
+                        Sized to a 28px target, not the 21px the icon needs:
+                        the tile's own click is applyImageDirectly, which
+                        archives the old production image and flips the design
+                        live with no confirm. The two mis-taps are not equal —
+                        landing on the download by mistake costs nothing, so
+                        the harmless control gets the generous edge. */}
+                    <a
+                      href={drivePhotoDownload(img.fileRef)}
+                      download
+                      aria-label={`Download ${img.angle ?? "design"} ${img.role}`}
+                      title="Download the full-resolution file"
+                      style={{ position: "absolute", top: 0, right: 0, width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 0, background: "rgba(26,26,26,0.62)", color: palette.ivory }}
+                    >
+                      <Download size={12} />
+                    </a>
+                  </div>
                 ))}
               </div>
             </div>
@@ -220,6 +246,17 @@ export function CompareSheet({
 }) {
   const [mode, setMode] = useState<"side" | "slider">("side");
   const [pos, setPos] = useState(50);
+  // The pane label doubles as its download — whoever is comparing two renders
+  // is exactly who wants to keep one, and both modes already draw this label,
+  // so neither gains a control row.
+  const paneLabel = (text: string, ref: string, className = "") => (
+    <span className={`font-body uppercase flex items-center gap-1.5 ${className}`} style={{ fontSize: 8.5, letterSpacing: "0.14em", color: palette.champagne }}>
+      {text}
+      <a href={drivePhotoDownload(ref)} download aria-label={`Download ${text}`} title="Download the full-resolution file" style={{ color: palette.champagne, lineHeight: 0 }}>
+        <Download size={12} />
+      </a>
+    </span>
+  );
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -245,7 +282,7 @@ export function CompareSheet({
           <div className="h-full grid grid-cols-2 gap-2">
             {[{ r: leftRef, l: leftLabel }, { r: rightRef, l: rightLabel }].map((x, i) => (
               <div key={i} className="flex flex-col min-h-0">
-                <span className="font-body uppercase text-center" style={{ fontSize: 8.5, letterSpacing: "0.14em", color: palette.champagne, marginBottom: 4 }}>{x.l}</span>
+                {paneLabel(x.l, x.r, "justify-center mb-1")}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={drivePhoto(x.r, 1200)} alt={x.l} style={{ flex: 1, minHeight: 0, width: "100%", objectFit: "contain" }} />
               </div>
@@ -263,8 +300,8 @@ export function CompareSheet({
               <div style={{ position: "absolute", top: 0, bottom: 0, left: `${pos}%`, width: 2, background: palette.gold }} />
             </div>
             <input type="range" min="0" max="100" value={pos} onChange={(e) => setPos(Number(e.target.value))} className="w-full mt-3" style={{ accentColor: palette.gold }} />
-            <div className="flex justify-between font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.14em", color: palette.champagne }}>
-              <span>{leftLabel}</span><span>{rightLabel}</span>
+            <div className="flex justify-between">
+              {paneLabel(leftLabel, leftRef)}{paneLabel(rightLabel, rightRef)}
             </div>
           </div>
         )}
