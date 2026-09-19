@@ -2,6 +2,7 @@ import "server-only";
 
 import { fetchImageByRef } from "@/lib/design-image-store";
 import { listFolderImages, listSubfolders } from "@/lib/drive";
+import type { BgMode } from "@/lib/studio/backgrounds";
 
 // UX sprint (29 Jul) — the three working generation engines, run in-process.
 //
@@ -15,6 +16,9 @@ import { listFolderImages, listSubfolders } from "@/lib/drive";
 //   seedream     ByteDance Seedream edit via fal.ai. Synchronous.
 //   nano_banana  Nano Banana 2 edit via fal.ai. Synchronous. Added 20 Sep.
 //   openai       gpt-image-2 /v1/images/edits. Synchronous.
+//   matte        NOT a generative engine. fal-ai/birefnet/v2 cuts the garment
+//                out and src/lib/pipeline/matte.ts composites it onto a ground
+//                built locally with sharp. Added 20 Sep.
 //
 // All of them accept the source photo as bytes and return image bytes; callers
 // never learn which HTTP shape each provider speaks. Since 19 Sep the live
@@ -26,6 +30,14 @@ import { listFolderImages, listSubfolders } from "@/lib/drive";
 // and Nano Banana 2 joins it. The two are NOT interchangeable in one respect
 // that the studio has to surface rather than hide — v5 Pro's content checker
 // refuses part of this catalogue and Nano Banana does not. See refusalMessage.
+//
+// 20 Sep, later the same day: matte joins them, and it is a different KIND of
+// engine rather than a fourth flavour of the same one. The three above hand a
+// model the photograph and ask for a new photograph back; matte extracts an
+// alpha channel and composites the ORIGINAL pixels onto a ground it draws
+// itself. Invented handwork and colour drift are impossible by construction,
+// and so is colour correction — see the Workbench hint, which says that out
+// loud, and matte.ts, which does the pixel work.
 
 const FASHN_BASE = "https://api.fashn.ai/v1";
 // v5 Pro's endpoint id carries NO `fal-ai/` prefix — bytedance publishes this
@@ -33,6 +45,9 @@ const FASHN_BASE = "https://api.fashn.ai/v1";
 // a 404 here, so the two ids are written out rather than templated.
 const FAL_SEEDREAM = "https://fal.run/bytedance/seedream/v5/pro/edit";
 const FAL_NANO = "https://fal.run/fal-ai/nano-banana-2/edit";
+// Background removal, not editing: this one returns the SAME photograph with a
+// real alpha channel, which is the whole point of the matte engine.
+const FAL_BIREFNET = "https://fal.run/fal-ai/birefnet/v2";
 
 // Approx cost per output image, for the credits column (₹-agnostic units the
 // studio already displays; matches image_providers.PRICE_PER_IMAGE). From
@@ -56,10 +71,16 @@ const FAL_NANO = "https://fal.run/fal-ai/nano-banana-2/edit";
 //                      at least doubles the bill, and can quadruple it.
 //   nano_banana        $0.08 at 1K, ×1.5 at 2K, ×2 at 4K. We default to 2K
 //                      (see nanoResolution), so $0.12 is the honest number.
+//   matte              $0.0023. MEASURED, not quoted: three birefnet calls off
+//                      the fal balance before and after settled at $0.00222
+//                      each. One segmentation call is the engine's whole spend
+//                      — the compositing is local sharp — so unlike seedream
+//                      this figure has no upper band. It is ~30x cheaper than
+//                      seedream's floor and ~50x cheaper than Nano Banana.
 //
 // The Workbench estimate chips quote these same figures — if one moves, move
 // both, because an estimate nobody trusts is worse than no estimate.
-export const ENGINE_COST: Record<string, number> = { fashn: 2, seedream: 0.0675, nano_banana: 0.12, openai_bg: 0.22 };
+export const ENGINE_COST: Record<string, number> = { fashn: 2, seedream: 0.0675, nano_banana: 0.12, openai_bg: 0.22, matte: 0.0022 };
 
 /** fal's own multipliers off Nano Banana's 1K base of $0.08. */
 const NANO_RESOLUTION_COST: Record<string, number> = { "0.5K": 0.06, "1K": 0.08, "2K": 0.12, "4K": 0.16 };
@@ -77,7 +98,7 @@ export function engineCost(engine: string): number {
   return ENGINE_COST[engine] ?? 0;
 }
 
-export type EngineKind = "fashn" | "seedream" | "nano_banana" | "openai_bg";
+export type EngineKind = "fashn" | "seedream" | "nano_banana" | "openai_bg" | "matte";
 
 /**
  * engine ⇄ pipeline_jobs.type, in ONE place.
@@ -99,6 +120,7 @@ export const ENGINE_JOB_TYPE: Record<EngineKind, string> = {
   seedream: "seedream",
   nano_banana: "nano_banana",
   openai_bg: "openai_bg",
+  matte: "matte",
 };
 
 /** The same table read backwards, derived so it cannot fall out of step. */
@@ -122,8 +144,10 @@ export function engineConfigured(engine: EngineKind): { ok: boolean; missing?: s
   // in its environment reports the engine as unavailable rather than offering
   // a button that the UI no longer draws.
   if (engine === "fashn" && !fashnEnabled()) return { ok: false, missing: "FASHN_ENABLED=true (model swap is parked)" };
-  // seedream and nano_banana are both fal models on the same account, so one
-  // key lights both chips — there is no separate Nano Banana credential.
+  // seedream, nano_banana and matte are all fal models on the same account, so
+  // one key lights all three chips — there is no separate Nano Banana or
+  // birefnet credential. matte's compositing is local, but the cut-out it
+  // composites is a fal call, so without FAL_KEY it has nothing to composite.
   const need =
     engine === "fashn" ? "FASHN_API_KEY" : engine === "openai_bg" ? "OPENAI_API_KEY" : "FAL_KEY";
   return process.env[need] ? { ok: true } : { ok: false, missing: need };
@@ -140,6 +164,11 @@ export function engineConfigured(engine: EngineKind): { ok: boolean; missing?: s
 export interface Plate {
   url: string;
   promptFallback: string;
+}
+
+/** params.bgMode arrives off a job row as untyped JSON — narrow it, never cast it. */
+function isBgMode(v: unknown): v is BgMode {
+  return v === "minimal" || v === "grey" || v === "coloured";
 }
 
 function dataUri(bytes: Buffer, contentType: string): string {
@@ -274,7 +303,7 @@ async function runOpenAi(source: Buffer, contentType: string, prompt: string, pl
 const SEEDREAM_MIN_PX = 1024;
 
 /** Human name per engine, for job logs an operator reads. */
-const FAL_LABEL: Record<string, string> = { seedream: "Seedream v5 Pro", nano_banana: "Nano Banana 2" };
+const FAL_LABEL: Record<string, string> = { seedream: "Seedream v5 Pro", nano_banana: "Nano Banana 2", matte: "Matte composite" };
 
 /**
  * Does this fal response body say "I refused to look at your photograph"?
@@ -497,6 +526,77 @@ function runNanoBanana(source: Buffer, contentType: string, prompt: string, plat
   );
 }
 
+// ── Matte composite ───────────────────────────────────────────────────────
+//
+// Two halves, deliberately in two files. The network half is here, beside the
+// other fal calls; the pixel half is matte.ts, which never touches a socket.
+
+/**
+ * One birefnet call: the same photograph, with a real alpha channel.
+ *
+ * `refine_foreground` is what makes this usable on a catalogue: without it the
+ * matte is a hard binary mask and a chiffon dupatta comes back opaque. With
+ * it, sheer net keeps its transparency and the backdrop reads through — better
+ * than expected on the hardest garment in the bench (the black net lehenga
+ * Seedream's checker refuses outright).
+ *
+ * `operating_resolution` is the size the SEGMENTER works at, not the output
+ * size: the returned PNG carries the source's own dimensions either way.
+ * 2048x2048 buys a cleaner edge on hems and costs nothing extra.
+ */
+async function birefnetCutout(source: Buffer, contentType: string): Promise<Buffer> {
+  const key = process.env.FAL_KEY!;
+  const r = await fetch(FAL_BIREFNET, {
+    method: "POST",
+    headers: { Authorization: `Key ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      image_url: dataUri(source, contentType),
+      refine_foreground: true,
+      // PNG is not a preference here, it is the requirement — a JPEG has no
+      // alpha channel and there would be nothing to composite.
+      output_format: "png",
+      operating_resolution: "2048x2048",
+    }),
+  });
+  if (!r.ok) throw new Error(await falFailure("matte", r));
+  const body = await r.json();
+  const url = body?.image?.url; // birefnet returns a single `image`, not `images[]`
+  if (!url) {
+    const raw = JSON.stringify(body).slice(0, 300);
+    throw new Error(isContentRefusal(raw) ? refusalMessage("matte") : `Matte composite returned no cut-out: ${raw}`);
+  }
+  return download(url);
+}
+
+/**
+ * Cut the garment out and composite it onto this design's background.
+ *
+ * NO PROMPT. Nothing here reads one, and defaultAnglePrompt returns '' for
+ * this engine on purpose (src/lib/studio/prompts.ts) — there is no model being
+ * instructed, so a prompt box would be a lie about what the chip does.
+ *
+ * The ground depends on the design's background MODE, not just on whether a
+ * plate arrived, which is why runEngine now carries bgMode: minimal and grey
+ * are prompt-only for the generative engines and so send no plate, but matte
+ * still has to draw something under the figure, and white and studio grey are
+ * different somethings.
+ */
+async function runMatte(source: Buffer, contentType: string, bgMode: BgMode, plate?: Plate | null): Promise<Buffer> {
+  const cutout = await birefnetCutout(source, contentType);
+  let plateBytes: Buffer | null = null;
+  if (bgMode === "coloured" && plate) {
+    plateBytes = await fetchPlate(plate);
+    if (!plateBytes) {
+      // The generative engines fall back to describing the backdrop in words.
+      // This one has no words — it falls back to the white ground, which is
+      // the same thing minimal mode ships and is never wrong-looking.
+      console.warn("Matte: coloured plate unreadable — compositing onto white instead");
+    }
+  }
+  const { compositeMatte } = await import("./matte");
+  return compositeMatte({ cutout, mode: plateBytes ? "coloured" : bgMode === "coloured" ? "minimal" : bgMode, plate: plateBytes });
+}
+
 // ── FASHN model-swap ──────────────────────────────────────────────────────
 /**
  * Brand-model face reference: a pose image from DREVI_BRAND_MODEL_FOLDER_ID.
@@ -650,6 +750,13 @@ export async function runEngine(args: {
   plateUrl?: string | null;
   /** That plate said in words, for a provider that cannot take a second image. */
   platePrompt?: string | null;
+  /**
+   * The design's background MODE. The generative engines carry the mode inside
+   * their prompt and only ever needed the plate; matte draws the ground itself
+   * and has to be told whether minimal (white) or grey was chosen. Absent on
+   * job rows queued before 20 Sep — see the fallback below.
+   */
+  bgMode?: string | null;
 }): Promise<Buffer> {
   // Parked, and loudly: a caller that still asks for model swap should get a
   // sentence it can act on, not "FASHN_API_KEY missing".
@@ -665,5 +772,12 @@ export async function runEngine(args: {
   if (args.engine === "openai_bg") return runOpenAi(args.source, args.contentType, args.prompt, plate);
   if (args.engine === "seedream") return runSeedream(args.source, args.contentType, args.prompt, plate);
   if (args.engine === "nano_banana") return runNanoBanana(args.source, args.contentType, args.prompt, plate);
+  if (args.engine === "matte") {
+    // A job queued before bgMode existed still has to render. A plate only
+    // ever travels in coloured mode, so its presence identifies that mode; no
+    // plate means prompt-only, and minimal is the studio default (0053).
+    const mode: BgMode = isBgMode(args.bgMode) ? args.bgMode : plate ? "coloured" : "minimal";
+    return runMatte(args.source, args.contentType, mode, plate);
+  }
   return runFashn(args.source, args.contentType, args.angle, args.prompt, args.seed, args.brandModel);
 }

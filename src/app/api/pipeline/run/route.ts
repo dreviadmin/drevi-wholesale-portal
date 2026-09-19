@@ -8,7 +8,9 @@ import { finishGenerationJob } from "@/lib/pipeline/finish";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // FASHN submits and returns immediately (poll route finishes it); seedream,
-// nano_banana and openai all render synchronously inside this request. Hobby's
+// nano_banana, matte and openai all render synchronously inside this request.
+// matte is the fast one by a wide margin: one ~5s birefnet call plus local
+// sharp work, against 14s and 36s for the two generative engines. Hobby's
 // Measured on the bench: Seedream v5 Pro ~36s, Nano Banana ~14s, both at fal's
 // 1K default. 2K is NOT yet timed, and it is what this ships with — if it runs
 // past the ceiling the symptom is a job stuck in 'running' until regenAngle's
@@ -107,6 +109,11 @@ export async function POST(request: Request) {
     // background". Absent for minimal and grey, which are prompt-only.
     const plateUrl = typeof params.plateUrl === "string" ? params.plateUrl : null;
     const platePrompt = typeof params.platePrompt === "string" ? params.platePrompt : null;
+    // The background MODE, frozen into the job the same way and for the same
+    // reason. Only matte reads it — the generative engines carry their mode
+    // inside the prompt — but it travels on every job so a row can be replayed
+    // on a different engine without losing what background was chosen.
+    const bgMode = typeof params.bgMode === "string" ? params.bgMode : null;
 
     // FASHN runs 2–4 min — beyond Vercel Hobby's 60s. Submit here, poll from
     // /api/pipeline/poll in short separate requests (Ansh's decision, 2 Aug).
@@ -135,6 +142,7 @@ export async function POST(request: Request) {
       seed,
       plateUrl,
       platePrompt,
+      bgMode,
     });
     await admin.from("pipeline_jobs").update({ progress: 80 }).eq("id", jobId);
 

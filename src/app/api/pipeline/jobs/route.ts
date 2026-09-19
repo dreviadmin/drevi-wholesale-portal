@@ -8,8 +8,17 @@ export const dynamic = "force-dynamic";
 // 20 Sep: this list had drifted behind the engines. 'seedream' has been a
 // legal pipeline_jobs.type since 0029 and is what almost every angle runs,
 // yet this route could not queue one — it accepted only 'tryon', which is
-// the parked model swap. nano_banana joins at the same time.
-const TYPES = ["preprocess", "vision", "tryon", "openai_bg", "seedream", "nano_banana", "scan_drive", "copy"] as const;
+// the parked model swap. nano_banana joins at the same time, and 'matte'
+// later the same day.
+const TYPES = ["preprocess", "vision", "tryon", "openai_bg", "seedream", "nano_banana", "matte", "scan_drive", "copy"] as const;
+
+// D5 is an EMBROIDERY FIDELITY rule — "no engine may re-draw a macro shot of
+// handwork" — so the set below is the engines that can, not the engines that
+// call a model. 'matte' calls one (birefnet) and is still not in it: that model
+// emits an alpha channel, never a pixel of garment, and the composite puts the
+// SOURCE pixels back down unchanged. There is nothing on a detail crop for it
+// to invent. Leaving it out also keeps this route agreeing with setAngleEngine
+// and regenAngle, which have allowed matte on detail angles from the start.
 const AI_ENGINE_TYPES = new Set(["tryon", "openai_bg", "seedream", "nano_banana"]);
 
 // Create a pipeline job (build guide §8.3, admin+). Validates D5 (detail

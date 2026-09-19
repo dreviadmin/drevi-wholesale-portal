@@ -34,11 +34,15 @@ import { ImagePicker, CropSheet, CompareSheet } from "./ImageTools";
 // because that is all it does now. approveImage/approveCopy stay exported
 // from the action modules for back-compat.
 
-const ENGINE_LABEL: Record<string, string> = { fashn: "fashn", seedream: "seedream", nano_banana: "nano banana", openai_bg: "OpenAI", raw: "raw" };
+const ENGINE_LABEL: Record<string, string> = { fashn: "fashn", seedream: "seedream", nano_banana: "nano banana", matte: "matte", openai_bg: "OpenAI", raw: "raw" };
 const ENGINE_HINT: Record<string, string> = {
   fashn: "Model-swap onto the brand model — parked (FASHN_ENABLED)",
   seedream: "Seedream v5 Pro edit via fal.ai — background change at the source's own size. Its content checker refuses some catalogue photos; when it does, the job says so and Nano Banana is the fix.",
   nano_banana: "Nano Banana 2 edit via fal.ai — background change at 2K, so the published s1200 is never upscaled. Renders the photos Seedream's checker refuses.",
+  // The one thing an operator cannot see from four chips is what this engine
+  // does NOT do, so the hint leads with it. Matte keeps the photograph's own
+  // pixels, which is also why it can never correct them.
+  matte: "Cuts the garment out and composites it onto the background locally — the photo's own pixels, so nothing is re-drawn and no colour can drift. NO COLOUR CORRECTION: a flat or colour-cast source stays flat, and that is the reason to pick a generative chip instead. Sheer hems can come back with small holes. ~50x cheaper and a few seconds.",
   openai_bg: "OpenAI image edit — background normalisation",
   raw: "No generation — the source publishes as-is",
 };
@@ -50,7 +54,11 @@ const ENGINE_HINT: Record<string, string> = {
 // 20 Sep — nano banana joins the two edit engines (Ansh, after a 38-render
 // bench). seedream stays the default; this adds a chip, it does not re-point
 // any angle already set.
-const ENGINE_CHIPS = ["seedream", "nano_banana", "openai_bg"] as const;
+// 20 Sep, later — matte joins as a fourth chip of a different KIND: it never
+// asks a model for a new photograph, it composites the existing one. It sits
+// last because it is the fallback when a generative render invented something,
+// not the default anyone should reach for first.
+const ENGINE_CHIPS = ["seedream", "nano_banana", "openai_bg", "matte"] as const;
 
 /** What each background mode actually does, in the operator's terms. */
 const BG_CAPTION: Record<BgMode, string> = {
@@ -69,7 +77,10 @@ const BG_CAPTION: Record<BgMode, string> = {
 // $0.08 × 1.5 because we render at 2K rather than the 1K default — change
 // DREVI_NANO_RESOLUTION and this figure stops being true. Mirrors ENGINE_COST
 // in engines.ts — move both together.
-const ENGINE_ESTIMATE: Record<string, string> = { fashn: "~2 credits", seedream: "~$0.07–$0.14", nano_banana: "~$0.12", openai_bg: "~$0.22" };
+// matte's figure is the only MEASURED one here (fal balance before/after on
+// three real renders, $0.00222 each) and the only one with no upper band: one
+// segmentation call is the whole spend, the compositing is local.
+const ENGINE_ESTIMATE: Record<string, string> = { fashn: "~2 credits", seedream: "~$0.07–$0.14", nano_banana: "~$0.12", matte: "~$0.0022", openai_bg: "~$0.22" };
 
 interface Job { angleId: string | null; type: string; status: string; progress: number }
 
@@ -85,7 +96,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
   copy: CopyDetail;
   pool: DesignImage[];
   activeJobs: Job[];
-  enginesEnabled: { fashn: boolean; seedream: boolean; nano_banana: boolean; openai_bg: boolean };
+  enginesEnabled: { fashn: boolean; seedream: boolean; nano_banana: boolean; matte: boolean; openai_bg: boolean };
   brandModels: string[];
   brandModel: string;
   bgStyle: string;
@@ -318,7 +329,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               <button
                 type="button"
                 disabled
-                title={`${ENGINE_LABEL[a.engine] ?? a.engine} is retired — pick seedream, nano banana or OpenAI to generate this angle`}
+                title={`${ENGINE_LABEL[a.engine] ?? a.engine} is retired — pick seedream, nano banana, OpenAI or matte to generate this angle`}
                 className="font-body uppercase"
                 style={{ ...chipStyle(true, true), textDecoration: "line-through" }}
               >
@@ -357,8 +368,11 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           </div>
         )}
 
-        {/* Prompt (hidden for raw) */}
-        {a.engine !== "raw" && (
+        {/* Prompt (hidden for raw — and for matte, which sends no prompt
+            anywhere: it composites the source pixels onto a ground drawn
+            locally, so a box the operator could type into would be a lie
+            about what the chip does. defaultAnglePrompt returns '' for it). */}
+        {a.engine !== "raw" && a.engine !== "matte" && (
           <div className="mt-2">
             <button type="button" onClick={() => setPromptOpen((s) => ({ ...s, [a.id]: !s[a.id] }))} className="flex items-center gap-1 font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.mutedGreige }}>
               <ChevronDown size={11} style={{ transform: promptOpen[a.id] ? "rotate(180deg)" : "none" }} />

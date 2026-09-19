@@ -19,6 +19,11 @@ import { resolveBackground } from "./backgrounds";
 //             that names the garment and ends "Background only." Kept verbatim
 //             so anything approved under it can be reproduced.
 //
+// The matte engine (20 Sep) sits outside all three: it composites the source
+// pixels onto a ground it draws itself and never sends a prompt anywhere, so
+// defaultAnglePrompt returns '' for it. The guard at the top of the function
+// is that contract.
+//
 // Saved prompts always win — editing one sets prompt_edited_by_human so
 // nothing regenerates over it.
 
@@ -81,6 +86,19 @@ function isDetailAngle(angle: Angle | string): boolean {
 export function defaultAnglePrompt(angle: Angle | string, engine: string | null, d: PromptDesign): string {
   const bg = background(d);
   const isDetail = isDetailAngle(angle);
+
+  // ── matte: no model is being instructed, so there is no prompt ───────────
+  // This returns '' DELIBERATELY, and it is tested FIRST so the engine can
+  // never reach either branch below. Falling through to the model-swap brief
+  // is the exact failure the review caught on nano_banana the same day (an
+  // empty string on a detail angle, "worn on a model" on the rest), and on
+  // matte it would be silent: nothing reads matte's params.prompt, so a wrong
+  // prompt would simply sit in the job row and in the operator's prompt box
+  // describing work the engine does not do. The Workbench hides that box for
+  // matte the way it already does for 'raw', so the empty string is never
+  // shown either.
+  if (engine === "matte") return "";
+
   const isEditEngine = engine === "openai_bg" || engine === "seedream" || engine === "nano_banana";
 
   // ── The selectable edit engines: openai_bg, seedream, nano_banana ───────

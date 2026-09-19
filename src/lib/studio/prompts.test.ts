@@ -136,6 +136,33 @@ describe("detail angles are treated exactly like the other four (Ansh, 19 Sep)",
   });
 });
 
+describe("matte sends no prompt at all (20 Sep)", () => {
+  // The whole point of this block is the trap the 20-Sep review caught on
+  // nano_banana: an engine missing from defaultAnglePrompt's test falls
+  // through to the PARKED model-swap brief and ships an empty string on a
+  // detail and "worn on a model" on everything else. matte's '' is a
+  // deliberate return, not a fall-through, and these assertions are what tell
+  // the two apart.
+  it("is empty on every angle and every background mode", () => {
+    for (const angle of [...MODEL_ANGLES, ...DETAILS]) {
+      for (const style of [...BG_STYLES, "", "nonsense"]) {
+        expect(defaultAnglePrompt(angle, "matte", { ...design, bgStyle: style })).toBe("");
+      }
+    }
+  });
+
+  it("never reaches the model-swap brief — no framing, no garment, no backdrop prose", () => {
+    for (const angle of MODEL_ANGLES) {
+      const p = defaultAnglePrompt(angle, "matte", { ...design, bgStyle: "auto" });
+      expect(p).not.toContain("worn on a model");
+      expect(p).not.toContain("chanderi");
+      expect(p.toLowerCase()).not.toContain("contact shadow");
+      expect(p).not.toBe(COLOURED);
+      expect(p).not.toBe(MINIMAL);
+    }
+  });
+});
+
 describe("the parked model-swap brief is untouched", () => {
   it("still describes the garment and the backdrop in words (no plate to point at)", () => {
     const p = defaultAnglePrompt("front", "fashn", { ...design, bgStyle: "auto" });
