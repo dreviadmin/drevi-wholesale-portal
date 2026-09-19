@@ -121,8 +121,15 @@ export async function importFinished(angleId: string, formData: FormData): Promi
 
 /**
  * Mode B — use an existing image (source, ident, import, crop, or a detached
- * closeup) directly: it becomes the angle's source AND its approved image,
- * engine 'raw'. No generation, no cost (§7.1).
+ * closeup) directly: it becomes the angle's source AND its approved image.
+ * No generation, no cost (§7.1).
+ *
+ * It used to stamp design_angles.engine = 'raw' as well. That was harmless
+ * while 'raw' was an offered engine meaning "do not generate" — but since
+ * 19 Sep raw is retired, so the stamp left the angle showing a struck-through
+ * chip and NO Generate button. Using a photo as-is is not a statement about
+ * which engine should run if you later change your mind, so the engine is
+ * left exactly as it was.
  */
 export async function applyImageDirectly(angleId: string, imageId: string): Promise<Res> {
   let staff;
@@ -137,7 +144,7 @@ export async function applyImageDirectly(angleId: string, imageId: string): Prom
   await admin.from("design_images").update({ angle_id: angleId, status: "active" }).eq("id", imageId);
   await admin
     .from("design_angles")
-    .update({ source_image_id: imageId, source_ref: img.file_ref, approved_image_id: imageId, engine: "raw", updated_at: new Date().toISOString() })
+    .update({ source_image_id: imageId, source_ref: img.file_ref, approved_image_id: imageId, updated_at: new Date().toISOString() })
     .eq("id", angleId);
   if (angle.approved_image_id && angle.approved_image_id !== imageId) {
     await admin.from("design_images").update({ status: "archived" }).eq("id", angle.approved_image_id);
