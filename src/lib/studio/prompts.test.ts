@@ -108,14 +108,16 @@ describe("mode-aware angle prompts — the owner's own wordings", () => {
   });
 });
 
-describe("detail angles never get a plate — the bench's hard-won carve-out", () => {
-  it("falls back to the MINIMAL prompt in coloured mode", () => {
+describe("detail angles are treated exactly like the other four (Ansh, 19 Sep)", () => {
+  it("takes the coloured prompt in coloured mode, same as a model angle", () => {
     for (const engine of EDIT_ENGINES) {
       for (const angle of DETAILS) {
         for (const style of ["auto", "ivory", "sand", "stone", "blush", "midnight"]) {
           const p = defaultAnglePrompt(angle, engine, { ...design, bgStyle: style });
-          expect(p).toBe(MINIMAL);
-          expect(p).not.toContain("attached background"); // the plate is not sent
+          expect(p).toBe(COLOURED);
+          expect(p).toContain("attached background"); // the plate rides along
+          // ...and it is word-for-word what a model angle gets.
+          expect(p).toBe(defaultAnglePrompt("front", engine, { ...design, bgStyle: style }));
         }
       }
     }

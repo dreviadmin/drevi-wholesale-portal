@@ -209,18 +209,23 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
 
   // Coloured mode ships a PLATE — the empty backdrop as a second image — and
   // the prompt is only "use the attached background", so the two must travel
-  // together. Two conditions, both hard:
-  //   1 the design is in coloured mode ('auto' or one of the five keys);
-  //   2 this is NOT a detail angle. A macro close-up handed a full-length
-  //     backdrop plate comes back as a re-invented full-length photo (the
-  //     bench result prompts.ts documents), so details fall back to the
-  //     minimal white treatment and get no plate at all.
+  // together. One condition: the design is in coloured mode ('auto' or one of
+  // the five colour keys).
+  //
+  // Detail angles used to be carved out of this. Ansh, 19 Sep: "They shall be
+  // treated exactly like the other 4." So they are — same chips, same Generate
+  // button, same plate. The carve-out existed because one bench render handed
+  // a macro crop a full-length cyclorama and got back a re-invented full-length
+  // photo; that run also went through auto_2K, which has since been replaced
+  // by the source's own dimensions, so the framing pressure that produced it is
+  // no longer there. If a close-up still pulls back, the fix is the prompt, not
+  // a rule that makes two of the six slots behave differently from the rest.
+  //
   // The URL is resolved through storage, never the filesystem: assets/ is a
   // build-time source and Vercel does not trace it into the function bundle.
   const bg = resolveBackground(promptDesign.bgStyle, promptDesign.bgSeed);
-  const isDetail = (DETAIL_ANGLES as readonly string[]).includes(angle.angle);
   const plate =
-    bg.mode === "coloured" && !isDetail && bg.platePath
+    bg.mode === "coloured" && bg.platePath
       ? {
           plateUrl: admin.storage.from(BG_PLATE_BUCKET).getPublicUrl(bg.platePath).data.publicUrl,
           // Words for the same backdrop — only ever used if a provider refuses
