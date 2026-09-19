@@ -1,0 +1,24 @@
+-- 0054 — the 42 angles "Use directly" stamped as 'raw' after 0053 retired it.
+--
+-- 0053 remapped every fashn/raw angle to seedream and stopped offering raw as
+-- a choice. What it could not know is that applyImageDirectly (mode B, the
+-- "Use directly" button) WRITES engine = 'raw' every time someone approves a
+-- photo as-is — so the count started climbing again the moment 0053 landed:
+-- 1 row an hour after the migration, 42 by the end of the same evening.
+--
+-- On a retired engine the Workbench shows a struck-through chip and hides
+-- Generate, so every photo used as-is looked like a broken angle. The write
+-- is removed in the same change as this migration (image-actions.ts); this
+-- sweeps up what it already stamped.
+--
+-- Choosing seedream rather than "leave it": these rows have no meaningful
+-- engine — nobody picked one, the button wrote it — and seedream is the
+-- column default since 0053, so this is the same answer a fresh angle gets.
+-- Nothing regenerates as a result: engine says what Generate WOULD run, and
+-- publishing has always used (approved candidate ?? source).
+--
+-- Reversal: none worth writing — 'raw' here was never a decision to preserve.
+--
+-- Idempotent: safe to re-run, and safe on either database.
+
+update design_angles set engine = 'seedream' where engine = 'raw';
