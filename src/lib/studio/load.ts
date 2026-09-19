@@ -165,7 +165,7 @@ export interface AngleDetail {
   sourceRef: string | null;
   prompt: string;
   promptEditedByHuman: boolean;
-  engine: "fashn" | "openai_bg" | "raw" | "seedream";
+  engine: "fashn" | "openai_bg" | "raw" | "seedream" | "nano_banana";
   approvedImageId: string | null;
   sourceImageId: string | null;
   candidates: { id: string; role: string; engine: string; fileRef: string; status: string; createdAt: string; costCredits: number }[];

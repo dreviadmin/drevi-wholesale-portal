@@ -81,9 +81,14 @@ function isDetailAngle(angle: Angle | string): boolean {
 export function defaultAnglePrompt(angle: Angle | string, engine: string | null, d: PromptDesign): string {
   const bg = background(d);
   const isDetail = isDetailAngle(angle);
-  const isEditEngine = engine === "openai_bg" || engine === "seedream";
+  const isEditEngine = engine === "openai_bg" || engine === "seedream" || engine === "nano_banana";
 
-  // ── The two selectable engines (19 Sep): openai_bg and seedream ──────────
+  // ── The selectable edit engines: openai_bg, seedream, nano_banana ───────
+  // Miss one out of this test and its angles fall through to the PARKED
+  // model-swap brief below — an empty string on a detail angle, and
+  // "worn on a model" on the rest, i.e. the engine is asked to synthesise
+  // a person instead of replacing a wall. Adding an engine means adding it
+  // here too (20 Sep, caught in review before nano_banana shipped).
   if (isEditEngine) {
     const mode = bg.mode;
     if (mode === "minimal") return MINIMAL_LINE;

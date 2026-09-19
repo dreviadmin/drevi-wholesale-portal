@@ -34,10 +34,11 @@ import { ImagePicker, CropSheet, CompareSheet } from "./ImageTools";
 // because that is all it does now. approveImage/approveCopy stay exported
 // from the action modules for back-compat.
 
-const ENGINE_LABEL: Record<string, string> = { fashn: "fashn", seedream: "seedream", openai_bg: "OpenAI", raw: "raw" };
+const ENGINE_LABEL: Record<string, string> = { fashn: "fashn", seedream: "seedream", nano_banana: "nano banana", openai_bg: "OpenAI", raw: "raw" };
 const ENGINE_HINT: Record<string, string> = {
   fashn: "Model-swap onto the brand model — parked (FASHN_ENABLED)",
-  seedream: "Seedream v4 edit via fal.ai — background change at the source's own size",
+  seedream: "Seedream v5 Pro edit via fal.ai — background change at the source's own size. Its content checker refuses some catalogue photos; when it does, the job says so and Nano Banana is the fix.",
+  nano_banana: "Nano Banana 2 edit via fal.ai — background change at 2K, so the published s1200 is never upscaled. Renders the photos Seedream's checker refuses.",
   openai_bg: "OpenAI image edit — background normalisation",
   raw: "No generation — the source publishes as-is",
 };
@@ -46,7 +47,10 @@ const ENGINE_HINT: Record<string, string> = {
 // (its code is intact, nothing routes to it); raw was only ever a "do not
 // offer Generate" marker, and publishing has always used the approved
 // candidate ?? the source, so dropping the chip changes nothing that ships.
-const ENGINE_CHIPS = ["seedream", "openai_bg"] as const;
+// 20 Sep — nano banana joins the two edit engines (Ansh, after a 38-render
+// bench). seedream stays the default; this adds a chip, it does not re-point
+// any angle already set.
+const ENGINE_CHIPS = ["seedream", "nano_banana", "openai_bg"] as const;
 
 /** What each background mode actually does, in the operator's terms. */
 const BG_CAPTION: Record<BgMode, string> = {
@@ -54,7 +58,18 @@ const BG_CAPTION: Record<BgMode, string> = {
   grey: "The original seamless grey studio treatment, described to the model in words.",
   coloured: "The chosen backdrop is sent to the model as a reference image, not described in words.",
 };
-const ENGINE_ESTIMATE: Record<string, string> = { fashn: "~2 credits", seedream: "~$0.03", openai_bg: "~$0.22" };
+// Per OUTPUT IMAGE, from fal's and OpenAI's own listings (20 Sep). These are
+// the real prices at the settings we actually send, not the headline rate.
+//
+// seedream is a RANGE, not a number: v5 Pro bills $0.0675 at or below 1536²
+// and $0.135 above it, and we ask for the source's own pixel dimensions — a
+// storage-hosted capture (fetchImageByRef does not bound those) or a squarish
+// macro crop lands in the upper band. Quoting only $0.07 would understate a
+// real render by 2×, which is worse than a wider estimate. Nano banana is
+// $0.08 × 1.5 because we render at 2K rather than the 1K default — change
+// DREVI_NANO_RESOLUTION and this figure stops being true. Mirrors ENGINE_COST
+// in engines.ts — move both together.
+const ENGINE_ESTIMATE: Record<string, string> = { fashn: "~2 credits", seedream: "~$0.07–$0.14", nano_banana: "~$0.12", openai_bg: "~$0.22" };
 
 interface Job { angleId: string | null; type: string; status: string; progress: number }
 
@@ -70,7 +85,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
   copy: CopyDetail;
   pool: DesignImage[];
   activeJobs: Job[];
-  enginesEnabled: { fashn: boolean; seedream: boolean; openai_bg: boolean };
+  enginesEnabled: { fashn: boolean; seedream: boolean; nano_banana: boolean; openai_bg: boolean };
   brandModels: string[];
   brandModel: string;
   bgStyle: string;
@@ -288,9 +303,9 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           </div>
         </div>
 
-        {/* Engine chips. Both angle kinds now get the SAME two edit engines
-            (Ansh, 19 Sep) — the detail/model split existed only because model
-            swap was in the model-angle list, and model swap is parked. */}
+        {/* Engine chips. Both angle kinds get the SAME edit engines (Ansh,
+            19 Sep) — the detail/model split existed only because model swap
+            was in the model-angle list, and model swap is parked. */}
         {(
           <div className="flex gap-1 mt-2.5 flex-wrap">
             {/* An angle still stored on a retired engine gets a chip of its
@@ -303,7 +318,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               <button
                 type="button"
                 disabled
-                title={`${ENGINE_LABEL[a.engine] ?? a.engine} is retired — pick seedream or OpenAI to generate this angle`}
+                title={`${ENGINE_LABEL[a.engine] ?? a.engine} is retired — pick seedream, nano banana or OpenAI to generate this angle`}
                 className="font-body uppercase"
                 style={{ ...chipStyle(true, true), textDecoration: "line-through" }}
               >
