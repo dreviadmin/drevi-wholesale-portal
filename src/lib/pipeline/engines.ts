@@ -11,11 +11,15 @@ import { listFolderImages, listSubfolders } from "@/lib/drive";
 //   fashn      FASHN model-swap — keeps the garment + pose from the source
 //              photo, swaps identity to a brand-model reference. Async API:
 //              submit /v1/run → poll /v1/status/<id>.
+//              PARKED since 19 Sep — see fashnEnabled() below.
 //   seedream   ByteDance Seedream v4 edit via fal.ai. Synchronous.
 //   openai     gpt-image-2 /v1/images/edits. Synchronous.
 //
 // All three accept the source photo as bytes and return image bytes; callers
-// never learn which HTTP shape each provider speaks.
+// never learn which HTTP shape each provider speaks. Since 19 Sep the two
+// live ones also accept an optional coloured-background PLATE (see Plate) —
+// a second image, sent after the garment, that shows the model the backdrop
+// instead of describing it.
 
 const FASHN_BASE = "https://api.fashn.ai/v1";
 const FAL_SYNC = "https://fal.run/fal-ai/bytedance/seedream/v4/edit";
@@ -26,10 +30,38 @@ export const ENGINE_COST: Record<string, number> = { fashn: 2, seedream: 0.03, o
 
 export type EngineKind = "fashn" | "seedream" | "openai_bg";
 
+/**
+ * FASHN model-swap is PARKED (Ansh, 19 Sep: "disable fashn and RAW for now:
+ * they are of no use currently"). The code below stays — the bench may want it
+ * back, and deleting a working provider integration to express a product
+ * decision is how integrations rot — but nothing may reach it unless this flag
+ * is explicitly on. Same shape as SHOPIFY_ENABLED: a string 'true', default off.
+ */
+export function fashnEnabled(): boolean {
+  return (process.env.FASHN_ENABLED ?? "").toLowerCase() === "true";
+}
+
 export function engineConfigured(engine: EngineKind): { ok: boolean; missing?: string } {
+  // The flag is checked BEFORE the key, so a studio that still has a FASHN key
+  // in its environment reports the engine as unavailable rather than offering
+  // a button that the UI no longer draws.
+  if (engine === "fashn" && !fashnEnabled()) return { ok: false, missing: "FASHN_ENABLED=true (model swap is parked)" };
   const need =
     engine === "fashn" ? "FASHN_API_KEY" : engine === "seedream" ? "FAL_KEY" : "OPENAI_API_KEY";
   return process.env[need] ? { ok: true } : { ok: false, missing: need };
+}
+
+/**
+ * A coloured-background plate (Ansh, 19 Sep) — the empty backdrop the engine
+ * attaches ALONGSIDE the garment photo, resolved by the caller through
+ * supabase storage getPublicUrl. `promptFallback` is the same backdrop said in
+ * words (src/lib/studio/backgrounds.ts), for the one provider path that may
+ * refuse a second image part; it is never the primary mechanism, because words
+ * are exactly what the bench proved unreliable.
+ */
+export interface Plate {
+  url: string;
+  promptFallback: string;
 }
 
 function dataUri(bytes: Buffer, contentType: string): string {
@@ -47,30 +79,103 @@ async function download(url: string): Promise<Buffer> {
 }
 
 // ── OpenAI ────────────────────────────────────────────────────────────────
-async function runOpenAi(source: Buffer, contentType: string, prompt: string): Promise<Buffer> {
-  const key = process.env.OPENAI_API_KEY!;
-  // The edits endpoint on this account accepts PNG only (verified live:
-  // JPEG → "Invalid image file or mode"; the pipeline always sent PNG too).
-  let png = source;
-  if (!contentType.includes("png")) {
-    const sharp = (await import("sharp")).default;
-    png = await sharp(source).png().toBuffer();
+/** PNG-ify once: the edits endpoint on this account accepts PNG only. */
+async function toPng(bytes: Buffer, contentType: string): Promise<Buffer> {
+  // Verified live: JPEG → "Invalid image file or mode"; the pipeline always
+  // sent PNG too.
+  if (contentType.includes("png")) return bytes;
+  const sharp = (await import("sharp")).default;
+  return sharp(bytes).png().toBuffer();
+}
+
+/**
+ * Fetch a plate's bytes, or null if it is not there.
+ *
+ * A plate lives in Supabase storage and is uploaded per PROJECT, so a deploy
+ * can reach an environment whose bucket is still empty. Before this, that was
+ * a catalogue-wide outage: every coloured-mode Generate on that project failed
+ * on a 404. A background is not worth failing a render over — if the plate
+ * cannot be read the engines fall back to describing it in words, which is
+ * what the 'grey' mode has always done, and the job log says so.
+ */
+async function fetchPlate(plate: Plate): Promise<Buffer | null> {
+  try {
+    const r = await fetch(plate.url, { cache: "no-store" });
+    if (!r.ok) {
+      console.warn(`Background plate ${plate.url} unavailable (HTTP ${r.status}) — falling back to the prompt-only backdrop`);
+      return null;
+    }
+    return Buffer.from(await r.arrayBuffer());
+  } catch (err) {
+    console.warn(`Background plate ${plate.url} unreachable (${(err as Error).message}) — falling back to the prompt-only backdrop`);
+    return null;
   }
-  const form = new FormData();
-  form.set("image", new Blob([new Uint8Array(png)], { type: "image/png" }), "input.png");
-  form.set("model", process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-2");
-  form.set("prompt", prompt);
-  form.set("size", "auto");
-  // 'medium' halves the render time vs 'high' with no visible loss on a
-  // background swap (the garment pixels are preserved, not re-drawn) — the
-  // slowness Ansh flagged was mostly this knob (3 Sep). Env overrides.
-  form.set("quality", process.env.OPENAI_IMAGE_QUALITY ?? "medium");
-  form.set("n", "1");
-  const r = await fetch("https://api.openai.com/v1/images/edits", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}` },
-    body: form,
-  });
+}
+
+/** The coloured prompt minus its attachment clause, plus the plate in words. */
+function plateInWords(prompt: string, plate: Plate): string {
+  return `${prompt.replace(/\s*Use the attached background\.?\s*$/i, "")} Background: ${plate.promptFallback}`;
+}
+
+async function runOpenAi(source: Buffer, contentType: string, prompt: string, plate?: Plate | null): Promise<Buffer> {
+  const key = process.env.OPENAI_API_KEY!;
+  const png = await toPng(source, contentType);
+
+  // The edits endpoint takes FILE PARTS, not URLs — the backdrop plate has to
+  // be fetched and uploaded as a second part. gpt-image models accept several
+  // reference images under the repeated `image[]` field; the single-image
+  // shape uses plain `image`. We send whichever matches what we have.
+  let plateBytes: Buffer | null = null;
+  if (plate) {
+    const raw = await fetchPlate(plate);
+    if (raw) plateBytes = await toPng(raw, "image/jpeg");
+  }
+  // No plate to attach — say it in words rather than send a prompt that points
+  // at an attachment that is not there.
+  const effectivePrompt = plate && !plateBytes ? plateInWords(prompt, plate) : prompt;
+
+  const build = (withPlate: boolean, promptText: string) => {
+    const form = new FormData();
+    if (withPlate && plateBytes) {
+      // Garment FIRST, plate second — the same order the bench validated on
+      // seedream, and the order the prompt's "the attached background" implies.
+      form.append("image[]", new Blob([new Uint8Array(png)], { type: "image/png" }), "input.png");
+      form.append("image[]", new Blob([new Uint8Array(plateBytes)], { type: "image/png" }), "background.png");
+    } else {
+      form.set("image", new Blob([new Uint8Array(png)], { type: "image/png" }), "input.png");
+    }
+    form.set("model", process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-2");
+    form.set("prompt", promptText);
+    form.set("size", "auto");
+    // 'medium' halves the render time vs 'high' with no visible loss on a
+    // background swap (the garment pixels are preserved, not re-drawn) — the
+    // slowness Ansh flagged was mostly this knob (3 Sep). Env overrides.
+    form.set("quality", process.env.OPENAI_IMAGE_QUALITY ?? "medium");
+    form.set("n", "1");
+    return form;
+  };
+
+  const post = (form: FormData) =>
+    fetch("https://api.openai.com/v1/images/edits", { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form });
+
+  let r = await post(build(!!plateBytes, effectivePrompt));
+
+  // If the installed API shape will not take a second image, the plate must
+  // NOT be silently dropped — "use the attached background" with nothing
+  // attached produces whatever wall the model feels like. Fall back to the
+  // plate's prompt-only description (backgrounds.ts keeps one per colour for
+  // exactly this) and say so in the job log via the thrown error if even that
+  // fails. This is a runtime probe rather than a version check because the
+  // account's model alias (OPENAI_IMAGE_MODEL) can move under us.
+  if (!r.ok && plateBytes && r.status === 400) {
+    const detail = (await r.text()).slice(0, 300);
+    if (/image/i.test(detail)) {
+      r = await post(build(false, plateInWords(prompt, plate!)));
+    } else {
+      throw new Error(`OpenAI HTTP 400: ${detail}`);
+    }
+  }
+
   if (!r.ok) throw new Error(`OpenAI HTTP ${r.status}: ${(await r.text()).slice(0, 300)}`);
   const body = await r.json();
   const b64 = body?.data?.[0]?.b64_json;
@@ -79,15 +184,85 @@ async function runOpenAi(source: Buffer, contentType: string, prompt: string): P
 }
 
 // ── Seedream (fal.ai) ─────────────────────────────────────────────────────
-async function runSeedream(source: Buffer, contentType: string, prompt: string): Promise<Buffer> {
+// Seedream v4 accepts width/height between these bounds; outside them the call
+// is rejected, so a small source is scaled up and a huge one down — always
+// along its OWN aspect ratio.
+const SEEDREAM_MIN_PX = 1024;
+
+/**
+ * The output size for a source photo.
+ *
+ * Replaces `image_size: "auto_2K"`, which was a live defect rather than a
+ * preference: "auto" let the model decide the frame, and on 9:16 phone
+ * captures it decided 3:4 — re-cropping the shot and PAINTING MORE ROOM IN,
+ * the precise opposite of what a background clean-up is for. Asking for the
+ * source's own pixel dimensions removes the decision. DREVI_SEEDREAM_MAX_PX
+ * caps the long edge (default 4096, fal's ceiling); DREVI_SEEDREAM_SIZE still
+ * wins outright for a one-off experiment.
+ *
+ * CONSEQUENCE worth knowing: the caller fetches the source through
+ * fetchImageByRef(ref, 1600), so a Drive-hosted photo arrives bounded to 1600
+ * on its long edge and the render now comes back at 1600 rather than ~2K.
+ * That is the honest trade — a correctly-framed 1600 beats a re-cropped 2K —
+ * and the lever is the fetch bound, not this function.
+ */
+async function seedreamSize(source: Buffer): Promise<{ width: number; height: number } | string> {
+  const override = process.env.DREVI_SEEDREAM_SIZE;
+  if (override) return override;
+  try {
+    const sharp = (await import("sharp")).default;
+    // EXIF-rotated phone photos report pre-rotation dimensions; `autoOrient`
+    // is what every decoder downstream applies, so measure the same way — or a
+    // portrait capture would be asked for as landscape.
+    const { width: w, height: h } = await sharp(source).autoOrient().metadata();
+    if (!w || !h) throw new Error("no dimensions");
+
+    // A non-numeric override would make every comparison below false and
+    // serialise width/height as null, which fal rejects — and the catch around
+    // this only guards a sharp throw, so the auto_2K net would never fire.
+    const rawMax = Number(process.env.DREVI_SEEDREAM_MAX_PX);
+    const max = Math.max(SEEDREAM_MIN_PX, Number.isFinite(rawMax) && rawMax > 0 ? rawMax : 4096);
+
+    // The two bounds COMPOSE. Assigning the second over the first (as this did)
+    // meant a 5000x800 crop asked for 4096x1024 — a 4:1 request for a 6.25:1
+    // source, i.e. exactly the re-framing that auto_2K was removed for. Past
+    // 4:1 the bounds genuinely cannot both hold; honour the long edge then,
+    // because shrinking the frame is safer than changing its shape.
+    const long = Math.max(w, h), short = Math.min(w, h);
+    let scale = Math.min(1, max / long);
+    if (short * scale < SEEDREAM_MIN_PX) scale = Math.min(SEEDREAM_MIN_PX / short, max / long);
+    const fit = (n: number) => Math.max(1, Math.min(max, Math.round(n * scale)));
+    return { width: fit(w), height: fit(h) };
+  } catch {
+    // Better a known-good enum than a failed job: auto_2K is the old default
+    // and it does render — it just re-frames, which the job log will show.
+    return "auto_2K";
+  }
+}
+
+async function runSeedream(source: Buffer, contentType: string, prompt: string, plate?: Plate | null): Promise<Buffer> {
   const key = process.env.FAL_KEY!;
+  // GARMENT FIRST, PLATE SECOND. That order is what the bench validated: with
+  // the plate first, the model treats the garment as the reference and the
+  // empty backdrop as the thing to keep.
+  const imageUrls = [dataUri(source, contentType)];
+  // Inlined, not handed over as a URL: fal would have to reach our storage
+  // itself, and a plate that is missing or unreachable would surface as an
+  // opaque fal error mid-render. Fetching it here means we find out before the
+  // call and can fall back to words.
+  let plateOk = false;
+  if (plate) {
+    const bytes = await fetchPlate(plate);
+    if (bytes) { imageUrls.push(dataUri(bytes, "image/jpeg")); plateOk = true; }
+  }
+  const effectivePrompt = plate && !plateOk ? plateInWords(prompt, plate) : prompt;
   const r = await fetch(FAL_SYNC, {
     method: "POST",
     headers: { Authorization: `Key ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      prompt,
-      image_urls: [dataUri(source, contentType)],
-      image_size: process.env.DREVI_SEEDREAM_SIZE ?? "auto_2K",
+      prompt: effectivePrompt,
+      image_urls: imageUrls,
+      image_size: await seedreamSize(source),
       num_images: 1,
       // Off by default: fal's checker false-positives on fitted ethnic wear
       // (these are the brand's own catalog photos) — same call as the pipeline.
@@ -250,10 +425,23 @@ export async function runEngine(args: {
   prompt: string;
   seed: number;
   brandModel?: string | null;
+  /** Public URL of the coloured-background plate — coloured mode, model angles only. */
+  plateUrl?: string | null;
+  /** That plate said in words, for a provider that cannot take a second image. */
+  platePrompt?: string | null;
 }): Promise<Buffer> {
+  // Parked, and loudly: a caller that still asks for model swap should get a
+  // sentence it can act on, not "FASHN_API_KEY missing".
+  if (args.engine === "fashn" && !fashnEnabled()) {
+    throw new Error("Model swap (fashn) is disabled — set FASHN_ENABLED=true to bring it back");
+  }
   const conf = engineConfigured(args.engine);
   if (!conf.ok) throw new Error(`${args.engine} is not configured — ${conf.missing} missing`);
-  if (args.engine === "openai_bg") return runOpenAi(args.source, args.contentType, args.prompt);
-  if (args.engine === "seedream") return runSeedream(args.source, args.contentType, args.prompt);
+
+  const plate: Plate | null = args.plateUrl
+    ? { url: args.plateUrl, promptFallback: args.platePrompt?.trim() || "a plain seamless studio backdrop" }
+    : null;
+  if (args.engine === "openai_bg") return runOpenAi(args.source, args.contentType, args.prompt, plate);
+  if (args.engine === "seedream") return runSeedream(args.source, args.contentType, args.prompt, plate);
   return runFashn(args.source, args.contentType, args.angle, args.prompt, args.seed, args.brandModel);
 }

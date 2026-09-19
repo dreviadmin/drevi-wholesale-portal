@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchImageByRef } from "@/lib/design-image-store";
-import { runEngine, submitFashn, seedFor, type EngineKind } from "@/lib/pipeline/engines";
+import { runEngine, submitFashn, seedFor, fashnEnabled, type EngineKind } from "@/lib/pipeline/engines";
 import { finishGenerationJob } from "@/lib/pipeline/finish";
 
 export const runtime = "nodejs";
@@ -60,6 +60,11 @@ export async function POST(request: Request) {
   try {
     const engine = TYPE_TO_ENGINE[claimed.type];
     if (!engine) return await failJob(`Job type ${claimed.type} has no in-process engine`);
+    // A 'tryon' row queued before 19 Sep can still be sitting here. Fail it
+    // with the reason rather than sending it to a parked provider.
+    if (engine === "fashn" && !fashnEnabled()) {
+      return await failJob("Model swap (fashn) is disabled — set FASHN_ENABLED=true to bring it back");
+    }
     if (!claimed.angle_id) return await failJob("Job has no angle");
 
     const { data: angle } = await admin
@@ -95,6 +100,13 @@ export async function POST(request: Request) {
     const params = (claimed.params as Record<string, unknown>) ?? {};
     const prompt = String(params.prompt ?? "");
     const seed = seedFor(`${design.base_sku}-${design.color}`);
+    // Coloured-background plate (19 Sep). regenAngle decided whether this
+    // angle gets one — coloured mode AND not a detail close-up — and froze the
+    // public URL into the job, so a background changed mid-flight cannot swap
+    // the backdrop out from under a prompt that already says "the attached
+    // background". Absent for minimal and grey, which are prompt-only.
+    const plateUrl = typeof params.plateUrl === "string" ? params.plateUrl : null;
+    const platePrompt = typeof params.platePrompt === "string" ? params.platePrompt : null;
 
     // FASHN runs 2–4 min — beyond Vercel Hobby's 60s. Submit here, poll from
     // /api/pipeline/poll in short separate requests (Ansh's decision, 2 Aug).
@@ -121,6 +133,8 @@ export async function POST(request: Request) {
       angle: angle.angle,
       prompt,
       seed,
+      plateUrl,
+      platePrompt,
     });
     await admin.from("pipeline_jobs").update({ progress: 80 }).eq("id", jobId);
 

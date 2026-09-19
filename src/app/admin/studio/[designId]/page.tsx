@@ -2,8 +2,9 @@ import { notFound } from "next/navigation";
 import { requireAdminOrRedirect } from "@/lib/staff";
 import { loadDesignDetail } from "@/lib/studio/load";
 import { captureEnabled, captureDestinationNote } from "@/lib/design-image-store";
-import { listBrandModels } from "@/lib/pipeline/engines";
+import { listBrandModels, fashnEnabled } from "@/lib/pipeline/engines";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { DEFAULT_BG_STYLE } from "@/lib/studio/backgrounds";
 import { Workbench } from "./Workbench";
 
 export const dynamic = "force-dynamic";
@@ -15,14 +16,19 @@ export default async function WorkbenchPage({ params }: { params: { designId: st
   await requireAdminOrRedirect();
   const detail = await loadDesignDetail(params.designId);
   if (!detail) notFound();
-  // Engine chips light up when their key is present (UX sprint).
+  // Engine chips light up when their key is present (UX sprint). fashn is
+  // parked (19 Sep) — the flag keeps it dark even where a key still exists,
+  // and the Workbench no longer draws its chip at all.
   const enginesEnabled = {
     // model-swap also needs the brand-model pose folder
-    fashn: !!process.env.FASHN_API_KEY && !!process.env.DREVI_BRAND_MODEL_FOLDER_ID,
+    fashn: fashnEnabled() && !!process.env.FASHN_API_KEY && !!process.env.DREVI_BRAND_MODEL_FOLDER_ID,
     seedream: !!process.env.FAL_KEY,
     openai_bg: !!process.env.OPENAI_API_KEY,
   };
-  const brandModels = await listBrandModels();
+  // Only model swap uses the brand-model folder, so while it is parked this
+  // Drive round-trip is pure latency on every Workbench load. The call comes
+  // back the moment FASHN_ENABLED does.
+  const brandModels = fashnEnabled() ? await listBrandModels() : [];
   const { data: designRow } = await createAdminClient().from("designs").select("brand_model, bg_style, base_sku, color").eq("id", params.designId).maybeSingle();
 
   return (
@@ -35,7 +41,7 @@ export default async function WorkbenchPage({ params }: { params: { designId: st
       enginesEnabled={enginesEnabled}
       brandModels={brandModels}
       brandModel={designRow?.brand_model ?? ""}
-      bgStyle={designRow?.bg_style ?? "auto"}
+      bgStyle={designRow?.bg_style ?? DEFAULT_BG_STYLE}
       bgSeed={`${designRow?.base_sku ?? ""}|${designRow?.color ?? ""}`}
       driveFolderId={detail.driveFolderId}
       uploadsOk={captureEnabled()}

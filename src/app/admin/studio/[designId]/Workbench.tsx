@@ -14,8 +14,10 @@ import { COPY_MODELS, estimateLabel } from "@/lib/studio/copy-models";
 import type { BoardRow, AngleDetail, CopyDetail, DesignImage } from "@/lib/studio/load";
 import { AI_ANGLES } from "@/lib/studio/state";
 import { JobsTicker } from "../JobsTicker";
-import { setBrandModel, setBgStyle, setCopyPrompt as setCopyPromptAction, setCopyModel, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, pushWholesale, pushShopify } from "./actions";
-import { BG_PRESETS, resolveBgPreset } from "@/lib/studio/backgrounds";
+// setBrandModel is deliberately absent: the picker it drove is not rendered
+// while fashn is parked (see the angle card). The action itself still exists.
+import { setBgStyle, setCopyPrompt as setCopyPromptAction, setCopyModel, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, pushWholesale, pushShopify } from "./actions";
+import { BG_COLOURS, BG_MODE_DEFAULT, BG_MODE_LABEL, resolveBackground, type BgMode } from "@/lib/studio/backgrounds";
 import { uploadSource, importFinished, applyImageDirectly, approveImage, rejectImage, saveCrop, setAngleSource, syncDrivePhotos } from "./image-actions";
 import { ImagePicker, CropSheet, CompareSheet } from "./ImageTools";
 
@@ -34,10 +36,23 @@ import { ImagePicker, CropSheet, CompareSheet } from "./ImageTools";
 
 const ENGINE_LABEL: Record<string, string> = { fashn: "fashn", seedream: "seedream", openai_bg: "OpenAI", raw: "raw" };
 const ENGINE_HINT: Record<string, string> = {
-  fashn: "Model-swap onto the brand model — keeps garment and pose",
-  seedream: "Seedream v4 edit via fal.ai — grey-studio background",
+  fashn: "Model-swap onto the brand model — parked (FASHN_ENABLED)",
+  seedream: "Seedream v4 edit via fal.ai — background change at the source's own size",
   openai_bg: "OpenAI image edit — background normalisation",
   raw: "No generation — the source publishes as-is",
+};
+
+// 19 Sep — fashn and raw are no longer offered. fashn is parked behind a flag
+// (its code is intact, nothing routes to it); raw was only ever a "do not
+// offer Generate" marker, and publishing has always used the approved
+// candidate ?? the source, so dropping the chip changes nothing that ships.
+const ENGINE_CHIPS = ["seedream", "openai_bg"] as const;
+
+/** What each background mode actually does, in the operator's terms. */
+const BG_CAPTION: Record<BgMode, string> = {
+  minimal: "White background, colour-corrected — the recommended look, and the one the bench preferred.",
+  grey: "The original seamless grey studio treatment, described to the model in words.",
+  coloured: "The chosen backdrop is sent to the model as a reference image, not described in words.",
 };
 const ENGINE_ESTIMATE: Record<string, string> = { fashn: "~2 credits", seedream: "~$0.03", openai_bg: "~$0.22" };
 
@@ -45,7 +60,11 @@ interface Job { angleId: string | null; type: string; status: string; progress: 
 
 const drivePhoto = (id: string, s = 600) => `/api/drive-photo?id=${encodeURIComponent(id)}&s=${s}`;
 
-export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnabled, brandModels, brandModel, bgStyle, bgSeed, driveFolderId, uploadsOk, uploadsMessage }: {
+// brandModels / brandModel stay in the prop TYPE and are still passed by
+// page.tsx, but are not destructured: the only UI that read them was the
+// fashn brand-model picker, parked on 19 Sep, and an unused binding is a lint
+// error here. Restoring the picker means adding both names back to this list.
+export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnabled, bgStyle, bgSeed, driveFolderId, uploadsOk, uploadsMessage }: {
   board: BoardRow;
   angles: AngleDetail[];
   copy: CopyDetail;
@@ -218,6 +237,10 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
     return a.candidates.find((c) => c.id === a.approvedImageId) ?? a.candidates.find((c) => c.status === "active") ?? null;
   }
 
+  // The design's background, with 'auto' already resolved — drives which mode
+  // button reads as active and whether the plate row is shown at all.
+  const bg = resolveBackground(bgStyle, bgSeed);
+
   const chipStyle = (active: boolean, disabled = false) => ({
     fontSize: 8.5, letterSpacing: "0.1em", padding: "5px 8px",
     background: active ? palette.black : "transparent",
@@ -265,12 +288,30 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           </div>
         </div>
 
-        {/* Engine chips — details get the EDIT engines only (Ansh, 3 Sep):
-            background clean-up is allowed, model swap never (embroidery). */}
+        {/* Engine chips. Both angle kinds now get the SAME two edit engines
+            (Ansh, 19 Sep) — the detail/model split existed only because model
+            swap was in the model-angle list, and model swap is parked. */}
         {(
           <div className="flex gap-1 mt-2.5 flex-wrap">
-            {(isDetail ? (["seedream", "openai_bg", "raw"] as const) : (["fashn", "seedream", "openai_bg", "raw"] as const)).map((e) => {
-              const off = e !== "raw" && !enginesEnabled[e];
+            {/* An angle still stored on a retired engine gets a chip of its
+                own, greyed and unclickable. Without it nothing on the card was
+                lit and the operator could not tell what the angle was set to —
+                which is 1,666 of prod's 1,674 angles until 0053 is applied,
+                and any angle at all if the code ships ahead of the migration.
+                Naming it is what makes "pick seedream" the obvious next move. */}
+            {!ENGINE_CHIPS.includes(a.engine as (typeof ENGINE_CHIPS)[number]) && (
+              <button
+                type="button"
+                disabled
+                title={`${ENGINE_LABEL[a.engine] ?? a.engine} is retired — pick seedream or OpenAI to generate this angle`}
+                className="font-body uppercase"
+                style={{ ...chipStyle(true, true), textDecoration: "line-through" }}
+              >
+                {ENGINE_LABEL[a.engine] ?? a.engine}
+              </button>
+            )}
+            {ENGINE_CHIPS.map((e) => {
+              const off = !enginesEnabled[e];
               return (
                 <button
                   key={e}
@@ -287,24 +328,17 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
             })}
           </div>
         )}
-        {!isDetail && a.engine === "fashn" && brandModels.length > 0 && (
-          <div className="flex items-center gap-1.5 mt-1.5">
-            <span className="font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.14em", color: palette.mutedGreige }}>Model</span>
-            <select
-              value={brandModel}
-              disabled={pending}
-              onChange={(e) => run(() => setBrandModel(board.id, e.target.value), `Model → ${e.target.value || "default"}`)}
-              className="font-body"
-              style={{ fontSize: 10, border: "1px solid rgba(26,26,26,0.15)", background: "#fff", color: palette.black, padding: "3px 6px" }}
-            >
-              <option value="">Default ({"Model-a"})</option>
-              {brandModels.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
-        )}
+        {/* The brand-model picker only ever applied to fashn's model swap, so
+            with fashn parked (19 Sep) it is dead UI and is not rendered. The
+            props, the action (setBrandModel, still exported from ./actions)
+            and designs.brand_model all stay — re-enabling FASHN_ENABLED should
+            be a small change here, not an archaeology exercise. Restore by
+            re-importing setBrandModel and gating a <select> of {brandModels}
+            (value={brandModel}) on:
+              !isDetail && a.engine === "fashn" && brandModels.length > 0 */}
         {isDetail && (
           <div className="font-body mt-2" style={{ fontSize: 9.5, color: palette.mutedGreige }}>
-            Macro fidelity — the edit engines only replace the background; embroidery is never re-generated. Model swap stays off.
+            Macro fidelity — the edit engines only replace the background; embroidery is never re-generated. A detail shot never gets a backdrop plate.
           </div>
         )}
 
@@ -404,7 +438,10 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           {/* Approve-as-is retired (17 Sep): the source already counts as
               filled and publishes as the effective image, so the stamp was a
               no-op. approveAsIs stays exported for back-compat. */}
-          {!isDetail && a.engine !== "raw" && a.sourceRef && !jobFor(a.id) && (
+          {/* Offered engines only. The old gate was `engine !== "raw"`, which still
+              rendered Generate for an angle on the parked fashn — a button whose
+              only outcome was an error naming an environment variable. */}
+          {!isDetail && ENGINE_CHIPS.includes(a.engine as (typeof ENGINE_CHIPS)[number]) && a.sourceRef && !jobFor(a.id) && (
             <button type="button" disabled={pending} onClick={() => generate(a.id)} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }} title={ENGINE_HINT[a.engine]}>
               <RefreshCw size={11} /> {current ? "Regen" : "Generate"} · {ENGINE_ESTIMATE[a.engine] ?? ""}
             </button>
@@ -536,23 +573,54 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
         })}
       </div>
 
-      {/* Background style (Ansh, 3 Sep) — ONE look per design. Auto picks
-          deterministically from the design itself, so every angle and every
-          regeneration match; the presets pin an explicit look. */}
+      {/* Background (Ansh, 19 Sep) — ONE look per design, in three modes.
+          Row 1 picks the mode; row 2 appears only for Coloured, where the six
+          chips are the deterministic Auto plus the five plates. Auto resolves
+          from the design itself, so every angle and every regeneration of one
+          outfit match; a plate chip pins it outright. */}
       <div className="mt-3 p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.mutedGreige }}>Background</span>
-          <button type="button" disabled={pending} onClick={() => run(() => setBgStyle(board.id, "auto"), "Background → auto")} className="font-body uppercase" style={chipStyle(bgStyle === "auto")}>
-            Auto · {resolveBgPreset("auto", bgSeed).label}
-          </button>
-          {BG_PRESETS.map((p) => (
-            <button key={p.key} type="button" disabled={pending} onClick={() => run(() => setBgStyle(board.id, p.key), `Background → ${p.label}`)} className="font-body uppercase" style={chipStyle(bgStyle === p.key)}>
-              {p.label}
+          {(["minimal", "grey", "coloured"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              // A mode button that is already lit must be a NO-OP. Coloured is
+              // the one that bites: its mode value is 'auto', so re-clicking
+              // the lit Coloured chip while the design sits on an explicit
+              // plate ('midnight', say) would silently throw that pick away
+              // and re-roll the backdrop. The pick lives one row down.
+              disabled={pending || bg.mode === m}
+              onClick={() => run(() => setBgStyle(board.id, BG_MODE_DEFAULT[m]), `Background → ${BG_MODE_LABEL[m]}`)}
+              className="font-body uppercase"
+              title={BG_CAPTION[m]}
+              style={chipStyle(bg.mode === m)}
+            >
+              {/* "rec" rather than "recommended": the chip row already wraps
+                  at this size, and the tooltip and caption both spell it out. */}
+              {BG_MODE_LABEL[m]}{m === "minimal" ? " · rec" : ""}
             </button>
           ))}
         </div>
-        <div className="font-body mt-1" style={{ fontSize: 9.5, color: palette.mutedGreige, lineHeight: 1.5 }}>
-          Applies to every AI-processed angle of this design — with a soft floor shadow, gradient toward the floor, catalogue-style. Changing it affects NEW generations; approved images stay as they are.
+
+        {/* Coloured only: Auto (deterministic) + the five plates. */}
+        {bg.mode === "coloured" && (
+          <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+            <button type="button" disabled={pending} onClick={() => run(() => setBgStyle(board.id, "auto"), "Background → auto")} className="font-body uppercase" style={chipStyle(bgStyle === "auto")}>
+              Auto · {resolveBackground("auto", bgSeed).label}
+            </button>
+            {BG_COLOURS.map((c) => (
+              <button key={c.key} type="button" disabled={pending} onClick={() => run(() => setBgStyle(board.id, c.key), `Background → ${c.label}`)} className="font-body uppercase" style={chipStyle(bgStyle === c.key)}>
+                {c.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="font-body mt-1.5" style={{ fontSize: 9.5, color: palette.mutedGreige, lineHeight: 1.5 }}>
+          {BG_CAPTION[bg.mode]}
+          {bg.mode === "coloured" && " Detail close-ups fall back to the white treatment and never get the backdrop image — handed a full-length plate, the model re-invents the shot instead of keeping the macro crop."}
+          {" "}Changing this affects NEW generations; images already in production stay as they are.
         </div>
       </div>
 
