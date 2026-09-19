@@ -99,9 +99,26 @@ export async function publishWholesale(designId: string, staffId: string, staffE
     for (const v of groupRows) {
       const locks = new Set<string>(Array.isArray(v.locked_fields) ? v.locked_fields : []);
       locks.add("image_urls"); // published set is app-owned now — sync keeps off
+      // AND MAKE IT VISIBLE (Ansh, 20 Sep: "the live designs pushed to Shopify
+      // and wholesale are still not visible in the catalog — why so?").
+      //
+      // Because nothing ever turned them on. Log delivery mints every SKU with
+      // wholesale_visible FALSE and locks it that way (delivery-actions §5.7),
+      // deliberately — a garment counted into stock is not automatically for
+      // sale. publishWholesale then wrote images, description and state='live'
+      // and never touched the flag, so the board said LIVE, the buyer catalog
+      // filters on wholesale_visible, and the design was invisible with no
+      // sign of why. All three wholesale-live designs on prod were in exactly
+      // that state, each fully priced and photographed.
+      //
+      // Pushing to the wholesale catalog IS the act of putting it on sale, so
+      // the push now says so. The lock stays: the flag is an app decision and
+      // the sheet must not move it back.
+      locks.add("wholesale_visible");
       const patch: Record<string, unknown> = {
         image_urls: webUrls,
         images_fetched_at: nowIso,
+        wholesale_visible: true,
         locked_fields: [...locks],
       };
       // Copy presence (not the approved stamp) writes the description — the
