@@ -26,4 +26,13 @@ describe("attachmentHeader", () => {
     expect(attachmentHeader("front-source", "image/jpeg; charset=binary")).toBe('attachment; filename="front-source.jpg"');
     expect(attachmentHeader("front-source", "application/octet-stream")).toBe('attachment; filename="front-source.jpg"');
   });
+  it("names a camera original .heic, not .jpg", () => {
+    // Drive reports the phone's originals as image/heif. Caught on dev: the
+    // first real source photo streamed as HEIF under a .jpg name, which opens
+    // on a Mac and fails on Windows and Shopify's uploader.
+    expect(attachmentHeader("front-source", "image/heif")).toBe('attachment; filename="front-source.heic"');
+    expect(attachmentHeader("front-source", "image/heic")).toBe('attachment; filename="front-source.heic"');
+    expect(attachmentHeader("front-source", "IMAGE/HEIF")).toBe('attachment; filename="front-source.heic"');
+    expect(attachmentHeader("front-production", "image/webp")).toBe('attachment; filename="front-production.webp"');
+  });
 });

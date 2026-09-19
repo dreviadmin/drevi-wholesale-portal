@@ -7,7 +7,24 @@
 // everything outside a conservative ASCII set is replaced and the length is
 // bounded. The worst a rogue column can do here is produce an ugly filename.
 
-const EXT: Record<string, string> = { "image/png": "png", "image/webp": "webp" };
+// The extension has to describe the BYTES, not the hope. Ayushi's camera
+// originals reach Drive as image/heif, and a HEIC file handed out as .jpg
+// opens on her Mac and fails everywhere the extension is trusted — Windows,
+// and Shopify's own uploader. Anything unrecognised still falls back to jpg,
+// which is what the generated candidates are.
+const EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/heif": "heic",
+  "image/heic": "heic",
+  "image/heif-sequence": "heic",
+  "image/heic-sequence": "heic",
+  "image/avif": "avif",
+  "image/gif": "gif",
+  "image/tiff": "tiff",
+};
 
 /** Filename stem, sanitised. Exported for the test; the route wants the header. */
 export function safeStem(stem: string): string {
