@@ -30,6 +30,10 @@ const SHEET_DRAFT_KEY = "drevi:delivery:sheet";
 
 interface Vendor { id: string; name: string; city: string | null }
 interface KnownDesign { id: string; baseSku: string; color: string; title: string | null; identRef: string | null; supply: SupplyBlock; supplyUpdatedAt: string | null; vendorSku: string | null; lastCost: number | null }
+// /api/sku/bases — every base NUMBER in the registry with the variants minted
+// under it. knownDesigns above is keyed by (base, colour) and only covers
+// numbers that have a design; this covers numbers that have only SKUs too.
+interface BaseEntry { base: string; catName: string; subName: string; desc: string; variantCount: number; variants: { sku: string; size: string; color: string }[] }
 
 interface Garment {
   key: string;
@@ -38,6 +42,8 @@ interface Garment {
   color?: string;
   cat?: string;
   sub?: string;
+  /** "New colour" path: the EXISTING base number this colour is added to. */
+  variantBase?: string;
   newColor?: string;
   title?: string;
   description: string;
@@ -108,7 +114,7 @@ export function DeliveryIntake({
   // Only a sheet with progress is worth restoring — an untouched blank one
   // would reopen on every reload with a "restored" notice.
   const [sheet, setSheet, sheetMeta] = useDraft<Garment | null>(SHEET_DRAFT_KEY, null, {
-    hasContent: (g) => !!g && (!!g.designId || !!g.baseSku || !!g.cat || g.sizes.length > 0 || !!g.description || !!g.unitCost || !!g.vendorSku),
+    hasContent: (g) => !!g && (!!g.designId || !!g.baseSku || !!g.cat || !!g.variantBase || !!g.newColor || g.sizes.length > 0 || !!g.description || !!g.unitCost || !!g.vendorSku),
   });
   const [toast, setToast] = useState<string | null>(null);
   // Save-only success step (§6.1): the form is replaced by a panel that points
@@ -236,7 +242,12 @@ export function DeliveryIntake({
         </div>
         <div className="mt-2 flex flex-col gap-1.5">
           {saved.designs.map((d) => {
-            const identRef = garments.find((g) => g.designId === d.id)?.identRef;
+            const src = garments.find((g) => g.designId === d.id);
+            const identRef = src?.identRef;
+            // created = the (base, colour) group was born on this receipt. That
+            // is true of a new colour too, but "New" alone reads as a new
+            // garment — so name what actually happened (19 Sep).
+            const kind = d.created ? (src?.variantBase ? "New colour" : "New") : "Reorder";
             return (
               <div key={d.id} className="p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
                 <div className="flex items-center gap-3">
@@ -250,7 +261,7 @@ export function DeliveryIntake({
                     <span className="font-mono block truncate" style={{ fontSize: 11.5, fontWeight: 700, color: palette.black }}>{d.baseSku}·{d.color}</span>
                     <span className="font-body block truncate" style={{ fontSize: 11, color: palette.softBlack }}>{d.title || "—"}</span>
                     <span className="font-body uppercase inline-block mt-1" style={{ fontSize: 8, letterSpacing: "0.12em", padding: "3px 6px", background: d.created ? palette.amberSoft : palette.ivoryDeep, color: d.created ? palette.goldDeep : palette.softBlack }}>
-                      {`${d.created ? "New" : "Reorder"} · ${d.specsVerified ? "specs confirmed" : "awaiting specs"}`}
+                      {`${kind} · ${d.specsVerified ? "specs confirmed" : "awaiting specs"}`}
                     </span>
                   </span>
                 </div>
@@ -487,10 +498,30 @@ function GarmentSheet({
   const [pending, startTransition] = useTransition();
   const [scanOpen, setScanOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [mintOpen, setMintOpen] = useState(!garment.designId && !garment.baseSku);
+  // Which identify path is open. Derived from the garment so a restored draft
+  // reopens where it was left; a blank garment starts on "New design", as it
+  // always has.
+  const [mode, setMode] = useState<"pick" | "new" | "newColor">(
+    garment.variantBase ? "newColor" : !garment.designId && !garment.baseSku ? "new" : "pick",
+  );
+  // "New colour" needs the registry's base NUMBERS — the same list the SKU
+  // generator's variant picker uses. Fetched only when that path is opened:
+  // the other two never need it, and this screen runs on a shop phone.
+  const [bases, setBases] = useState<BaseEntry[] | null>(null);
+  const [baseQuery, setBaseQuery] = useState(garment.variantBase ?? "");
   const [supplyOpen, setSupplyOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (mode !== "newColor" || bases) return;
+    let live = true;
+    fetch("/api/sku/bases")
+      .then((r) => r.json())
+      .then((d) => { if (live) setBases(d.bases ?? []); })
+      .catch(() => { if (live) setBases([]); }); // empty list, never a spinner that never ends
+    return () => { live = false; };
+  }, [mode, bases]);
 
   const staleMs = staleDays * 24 * 60 * 60 * 1000;
   useEffect(() => {
@@ -505,6 +536,17 @@ function GarmentSheet({
   // uploadIdentPhoto files the photo under base_sku+colour — no design, no photo.
   const photoDisabled = pending || !g.designId;
 
+  // The three identify paths are exclusive: switching drops whatever the
+  // previous one resolved, so a half-answered path can never mint.
+  function switchMode(next: "new" | "newColor") {
+    setMode(next);
+    setG((s) => ({
+      ...s,
+      designId: undefined, baseSku: undefined, isReorder: false, identRef: null, variantSkus: [],
+      ...(next === "new" ? { variantBase: undefined } : { cat: undefined, sub: undefined }),
+    }));
+  }
+
   function pickKnown(d: KnownDesign) {
     const stale = !d.supplyUpdatedAt || Date.now() - new Date(d.supplyUpdatedAt).getTime() > staleMs;
     setG((s) => ({
@@ -514,8 +556,9 @@ function GarmentSheet({
       vendorSku: s.vendorSku || d.vendorSku || "",
       unitCost: s.unitCost || (d.lastCost ? String(d.lastCost) : ""),
       identRef: d.identRef, identImageId: undefined, variantSkus: [], supply: { ...d.supply, ...s.supply }, isReorder: true, supplyStale: stale,
+      variantBase: undefined,
     }));
-    setMintOpen(false);
+    setMode("pick");
     setQuery("");
   }
 
@@ -538,6 +581,8 @@ function GarmentSheet({
     startTransition(async () => {
       const res = await resolveGarmentDesign({
         designId: g.designId,
+        // The new-colour path: an EXISTING base, a colour it has never been in.
+        baseSku: g.variantBase,
         cat: g.cat, sub: g.sub, color: g.newColor,
         description: g.description,
         sizes,
@@ -546,7 +591,9 @@ function GarmentSheet({
       if (!res) { flash("Session expired — sign in again; your garment is kept as a draft"); return; }
       if (!res.ok) { flash(res.error ?? "Could not mint"); return; }
       setG((s) => ({ ...s, designId: res.designId, baseSku: res.baseSku, color: res.color, variantSkus: res.variantSkus ?? [] }));
-      flash(res.created ? `Minted ${res.baseSku}` : `${res.variantSkus?.length} SKU(s) ready`);
+      // Name the colour too — on the new-colour path the base number alone
+      // would not say what was just minted.
+      flash(res.created ? `Minted ${res.baseSku}·${res.color}` : `${res.variantSkus?.length} SKU(s) ready`);
     });
   }
 
@@ -575,9 +622,35 @@ function GarmentSheet({
     ? knownDesigns.filter((d) => `${d.baseSku} ${d.color} ${d.title ?? ""}`.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 8)
     : [];
   const subs = g.cat ? Object.entries((vocab.categories as Record<string, { subs: Record<string, string> }>)[g.cat]?.subs ?? {}) : [];
+  const colorsOfBase = (b: BaseEntry) => [...new Set(b.variants.map((v) => v.color))];
+  const baseResults = useMemo(() => {
+    if (!bases) return [];
+    const q = baseQuery.trim().toUpperCase();
+    if (!q) return bases.slice(0, 8);
+    return bases.filter((b) => b.base.includes(q) || b.desc.toUpperCase().includes(q) || `${b.catName} ${b.subName}`.toUpperCase().includes(q)).slice(0, 8);
+  }, [bases, baseQuery]);
+  const selectedBase = useMemo(() => (g.variantBase ? bases?.find((b) => b.base === g.variantBase) ?? null : null), [bases, g.variantBase]);
+  // Colours this base is already a DESIGN in. Those are reorders and the server
+  // refuses them; knownDesigns is the same list the search above offers, so the
+  // block here and the refusal there agree.
+  const designColors = useMemo(
+    () => (g.variantBase ? [...new Set(knownDesigns.filter((d) => d.baseSku === g.variantBase).map((d) => d.color))].sort() : []),
+    [knownDesigns, g.variantBase],
+  );
+  // Colours that exist as SKUs but have no design — minted in the SKU generator
+  // and stranded there. Picking one here finally gives it a design group.
+  const orphanColors = useMemo(
+    () => (selectedBase ? [...new Set(selectedBase.variants.map((v) => v.color))].filter((c) => !designColors.includes(c)).sort() : []),
+    [selectedBase, designColors],
+  );
+  const colorTaken = !!g.newColor && designColors.includes(g.newColor);
   const sizeOrder = Object.keys(vocab.sizes);
   // Sizes show once the design is identified (scan/search) or fully described (new).
-  const identifyReady = !!g.baseSku || (mintOpen && !!g.cat && !!g.sub && !!g.newColor);
+  const identifyReady = !!g.baseSku
+    || (mode === "new" && !!g.cat && !!g.sub && !!g.newColor)
+    || (mode === "newColor" && !!g.variantBase && !!g.newColor);
+  // What the open path still owes before the mint button can fire.
+  const canMint = mode === "newColor" ? !!g.variantBase && !!g.newColor && !colorTaken : !!g.cat && !!g.sub && !!g.newColor;
   const unminted = g.baseSku && g.color
     ? g.sizes.filter((s) => !g.variantSkus.some((v) => v.toUpperCase() === `${g.baseSku}-${s.size}-${g.color}`.toUpperCase()))
     : [];
@@ -594,12 +667,17 @@ function GarmentSheet({
 
         {/* a. Identify */}
         <div className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>Identify</div>
-        <div className="flex gap-2 mt-2">
-          <button type="button" onClick={() => setScanOpen(true)} className="flex-1 flex items-center justify-center gap-1.5 font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.12em", background: palette.black, color: palette.ivory, padding: "12px 0" }}>
+        <div className="grid grid-cols-3 gap-1.5 mt-2">
+          <button type="button" onClick={() => setScanOpen(true)} className="flex items-center justify-center gap-1.5 font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.1em", background: palette.black, color: palette.ivory, padding: "12px 0" }}>
             <ScanLine size={14} /> Scan tag
           </button>
-          <button type="button" onClick={() => { setMintOpen(true); setG((s) => ({ ...s, designId: undefined, baseSku: undefined, isReorder: false, identRef: null, variantSkus: [] })); }} className="flex-1 font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, color: palette.black, padding: "12px 0" }}>
+          {/* Two minting paths now, so each shows whether it is the open one —
+              they ask for different things and the answers do not transfer. */}
+          <button type="button" onClick={() => switchMode("new")} className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, background: mode === "new" ? palette.ivoryDeep : "transparent", color: palette.black, padding: "12px 0" }}>
             New design
+          </button>
+          <button type="button" onClick={() => switchMode("newColor")} className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, background: mode === "newColor" ? palette.ivoryDeep : "transparent", color: palette.black, padding: "12px 0" }}>
+            New colour
           </button>
         </div>
         <div className="mt-2">
@@ -616,7 +694,7 @@ function GarmentSheet({
           )}
         </div>
 
-        {mintOpen && !g.baseSku && (
+        {mode === "new" && !g.baseSku && (
           <div className="mt-2 p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.12)" }}>
             {label("Category")}
             <div className="flex flex-wrap gap-1">
@@ -647,6 +725,77 @@ function GarmentSheet({
           </div>
         )}
 
+        {/* New colour of an existing base (19 Sep). The SKU generator could
+            already mint this variant, but it left nothing behind — no design,
+            no angles, no receipt line — so the colour never reached the Studio.
+            Minting it here files the photo, the stock and the tags with it. */}
+        {mode === "newColor" && !g.baseSku && (
+          <div className="mt-2 p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.12)" }}>
+            {label("Base design — same number, new colour")}
+            <div className="flex items-center gap-2" style={{ border: "1px solid rgba(26,26,26,0.2)", background: "#fff", padding: "7px 9px" }}>
+              <Search size={14} color={palette.mutedGreige} />
+              <input
+                value={baseQuery}
+                onChange={(e) => { setBaseQuery(e.target.value); setG((s) => ({ ...s, variantBase: undefined })); }}
+                placeholder="Search base SKU or description"
+                className="font-body flex-1 bg-transparent outline-none"
+                style={{ fontSize: 13, color: palette.black }}
+              />
+              {baseQuery && <button type="button" onClick={() => { setBaseQuery(""); setG((s) => ({ ...s, variantBase: undefined })); }} aria-label="Clear"><X size={14} color={palette.mutedGreige} /></button>}
+            </div>
+            {!g.variantBase && baseQuery.trim() !== "" && (
+              <div style={{ border: "1px solid rgba(26,26,26,0.12)", borderTop: "none", background: "#fff" }}>
+                {bases === null && <div className="font-body p-3" style={{ fontSize: 11.5, color: palette.mutedGreige }}>Loading registry…</div>}
+                {bases !== null && baseResults.length === 0 && <div className="font-body p-3" style={{ fontSize: 11.5, color: palette.mutedGreige }}>No base designs match.</div>}
+                {baseResults.map((b) => (
+                  <button key={b.base} type="button" onClick={() => { setG((s) => ({ ...s, variantBase: b.base, description: s.description || b.desc || "" })); setBaseQuery(b.base); }} className="w-full text-left px-3 py-2.5" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono" style={{ fontSize: 12.5, fontWeight: 700, color: palette.black }}>{b.base}</span>
+                      <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>{b.catName} · {b.subName}</span>
+                    </div>
+                    {b.desc && <div className="font-body truncate" style={{ fontSize: 10.5, color: palette.softBlack }}>{b.desc}</div>}
+                    <div className="flex gap-1 mt-1 flex-wrap">
+                      {colorsOfBase(b).map((c) => (
+                        <span key={c} className="font-mono" style={{ fontSize: 8.5, padding: "2px 6px", background: palette.ivoryDeep, color: palette.softBlack }}>{c}</span>
+                      ))}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            {g.variantBase && (
+              <>
+                <div className="mt-2 p-2.5" style={{ background: palette.ivoryDeep }}>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="font-mono" style={{ fontSize: 13, fontWeight: 700, color: palette.goldDeep }}>{g.variantBase}</span>
+                    {selectedBase && <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>{selectedBase.catName} · {selectedBase.subName} · {selectedBase.variantCount} SKU{selectedBase.variantCount === 1 ? "" : "s"}</span>}
+                  </div>
+                  {/* At a glance: the colours this number is already a design in
+                      (those are reorders), and the ones that have SKUs but no
+                      design yet — picking one of those adopts them. */}
+                  <div className="font-body mt-1.5" style={{ fontSize: 9.5, color: palette.mutedGreige }}>
+                    {designColors.length ? `Already a design in ${designColors.join(", ")}` : "No design on this number yet"}
+                  </div>
+                  {orphanColors.length > 0 && (
+                    <div className="font-body mt-0.5" style={{ fontSize: 9.5, color: palette.goldDeep }}>
+                      SKUs minted, no design: {orphanColors.join(", ")} — picking one files it properly.
+                    </div>
+                  )}
+                </div>
+                <div className="mt-2">
+                  {label("New colour")}
+                  <ColorCombobox value={g.newColor ?? ""} onChange={(code) => setG((s) => ({ ...s, newColor: code || undefined }))} groups={vocab.colorGroups} style={input} autoFocus />
+                  {colorTaken && (
+                    <div className="font-body mt-1.5 p-2" style={{ fontSize: 10, color: palette.crimsonText, background: palette.crimsonSoft, border: `1px solid ${palette.crimsonBorder}`, lineHeight: 1.5 }}>
+                      {g.variantBase}·{g.newColor} already exists — search for that design above and log it as a reorder.
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Sizes received → mint (§5.4: the first size mints the base SKU).
             Quantities are counted later, after the photo. */}
         {identifyReady && (
@@ -669,7 +818,7 @@ function GarmentSheet({
               <div className="font-body mt-2" style={{ fontSize: 9.5, color: palette.mutedGreige }}>{g.baseSku ? "Pick the sizes received to prepare the tags." : "Pick the sizes received to mint the SKU."}</div>
             )}
             {!g.baseSku && g.sizes.length > 0 && (
-              <button type="button" disabled={pending || !g.cat || !g.sub || !g.newColor} onClick={resolveDesign} className="mt-3 w-full font-body uppercase disabled:opacity-40" style={{ fontSize: 10.5, letterSpacing: "0.16em", background: palette.black, color: palette.ivory, padding: "13px 0" }}>
+              <button type="button" disabled={pending || !canMint} onClick={resolveDesign} className="mt-3 w-full font-body uppercase disabled:opacity-40" style={{ fontSize: 10.5, letterSpacing: "0.16em", background: palette.black, color: palette.ivory, padding: "13px 0" }}>
                 Mint SKU{g.sizes.length > 1 ? `s (${g.sizes.length})` : ""}
               </button>
             )}
