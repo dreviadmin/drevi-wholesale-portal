@@ -183,46 +183,66 @@ export async function publishShopify(designId: string, staffId: string, staffEma
       .sort((a, b) => sizeRank(a.size) - sizeRank(b.size) || a.size.localeCompare(b.size));
     if (!stocked.length) throw new Error("No size variants found for this design — mint its SKUs first");
 
-    // OFFERED SIZES (Ansh, 19 Sep). What the portal STOCKS and what the shop
-    // SELLS are not the same list any more. Every garment carries enough
-    // margin that the piece hanging in the showroom as an L is alterable to M,
-    // L or XL, so all three are offered whatever single size was received:
+    // OFFERED SIZES (Ansh, 19 Sep; the ladder revised 20 Sep). What the portal
+    // STOCKS and what the shop SELLS are not the same list. Every garment
+    // carries enough margin that the piece hanging in the showroom as an L is
+    // alterable, and a Drevi Original can be MADE to any size — so leaving
+    // sizes off the listing only costs the customer options, especially once
+    // they filter by size.
     //
-    //   Curated Collection   M · L · XL              all at the retail price
-    //   Drevi Originals      M · L · XL · Custom     Custom at +20%, floored
+    //   Curated Collection   M · L · XL                 all at the retail price
+    //   Drevi Originals      XXS · XS · S · M · L · XL · XXL · 3XL · Other
+    //                        with the price ladder below
     //
     // A design with no origin set keeps the old behaviour — exactly the sizes
-    // the portal holds. Nothing is invented for a garment nobody has
-    // classified, and on prod that is still most of them.
-    const OFFERED = ["M", "L", "XL"];
-    const CUSTOM_SIZE = "CTM"; // the vocab's "Custom / Made to Measure"
-    const CUSTOM_MULTIPLIER = 1.2;
+    // the portal holds, at one price. Nothing is invented for a garment nobody
+    // has classified, and on prod that is still 180 of 282.
+    //
+    // 'Other' REPLACES the Custom (CTM) variant that shipped on 19 Sep: it is
+    // the same made-to-measure idea at +30% instead of +20%, and it uses the
+    // vocab's OTH so the SKU keeps the familiar shape. A design pushed before
+    // today will drop its Custom variant on the next push, because productSet
+    // is a full sync — that is the intended reconcile, not a loss.
+    const CURATED_SIZES = [{ token: "M", label: "M" }, { token: "L", label: "L" }, { token: "XL", label: "XL" }];
+    // token = what goes in the SKU and barcode, label = what the customer sees.
+    // XXS has no vocab entry (the merged list runs XS…XXXL plus FS/CTM/OTH), so
+    // it is a Shopify-side token only — no different from M on a design the
+    // portal only ever received in L. Add it in /admin/lovs if it should ever
+    // be mintable. '3XL' shows the customer's spelling over the vocab's XXXL.
+    const ORIGINAL_SIZES = [
+      { token: "XXS", label: "XXS", mult: 1.1 },
+      { token: "XS", label: "XS", mult: 1.1 },
+      { token: "S", label: "S", mult: 1.1 },
+      { token: "M", label: "M", mult: 1 },
+      { token: "L", label: "L", mult: 1 },
+      { token: "XL", label: "XL", mult: 1 },
+      { token: "XXL", label: "XXL", mult: 1.2 },
+      { token: "XXXL", label: "3XL", mult: 1.2 },
+      { token: "OTH", label: "Other", mult: 1.3 },
+    ];
     const origin = designRow.origin?.trim() || null;
     const offersAlterationSizes = origin === "curated" || origin === "drevi_original";
 
-    // One physical garment backs all three sizes, so they share its stock
-    // rather than each claiming its own. Shopify will still let three people
-    // buy it — that is the trade for offering an alterable piece in every
-    // size, and it is the shop's call to make, not something to solve here.
+    // One physical garment backs every offered size, so they share its stock
+    // rather than each claiming its own. Shopify will still let several people
+    // buy it — that is the trade for listing an alterable piece in every size,
+    // and it is the shop's call to make, not something to solve here.
     const groupQty = stocked.reduce((sum, v) => sum + v.qty, 0);
     const skuFor = (size: string) => `${board.baseSku.toUpperCase()}-${size}-${board.color.toUpperCase()}`;
+    // Floored to the rupee, the same rule the +20% Custom variant used.
+    const priced = (mult: number) => (mult === 1 ? retail : Math.floor(retail * mult));
 
+    const ladder = origin === "drevi_original" ? ORIGINAL_SIZES : CURATED_SIZES.map((x) => ({ ...x, mult: 1 }));
     const sized: { sku: string; qty: number; size: string; label: string; price: number }[] = offersAlterationSizes
-      ? [
-          ...OFFERED.map((size) => ({
-            sku: skuFor(size),
-            // A size the portal actually holds keeps its own count; the other
-            // two ride on the group, because the same piece is what fills them.
-            qty: stocked.find((v) => v.size === size)?.qty ?? groupQty,
-            size,
-            label: size,
-            price: retail,
-          })),
-          // Made to measure, Drevi Originals only. Floored to the rupee, as asked.
-          ...(origin === "drevi_original"
-            ? [{ sku: skuFor(CUSTOM_SIZE), qty: groupQty, size: CUSTOM_SIZE, label: "Custom", price: Math.floor(retail * CUSTOM_MULTIPLIER) }]
-            : []),
-        ]
+      ? ladder.map((sz) => ({
+          sku: skuFor(sz.token),
+          // A size the portal actually holds keeps its own count; the rest ride
+          // on the group, because the same piece is what fills them.
+          qty: stocked.find((v) => v.size === sz.token)?.qty ?? groupQty,
+          size: sz.token,
+          label: sz.label,
+          price: priced(sz.mult),
+        }))
       : stocked.map((v) => ({ ...v, label: vocab.sizes[v.size] ?? v.size, price: retail }));
 
     const facts = describeDesignFacts(
