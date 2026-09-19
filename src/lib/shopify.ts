@@ -177,11 +177,53 @@ export async function publishShopify(designId: string, staffId: string, staffEma
       .select("sku, current_qty")
       .like("sku", `${board.baseSku}-%`);
     const group = (variantRows ?? []).filter((v) => v.sku.toUpperCase().endsWith(`-${board.color.toUpperCase()}`));
-    const sized = group
+    const stocked = group
       .map((v) => ({ sku: v.sku.trim().toUpperCase(), qty: Math.max(0, Number(v.current_qty) || 0), size: sizeCodeFrom(v.sku, board.baseSku, board.color) }))
       .filter((v): v is { sku: string; qty: number; size: string } => !!v.size)
       .sort((a, b) => sizeRank(a.size) - sizeRank(b.size) || a.size.localeCompare(b.size));
-    if (!sized.length) throw new Error("No size variants found for this design — mint its SKUs first");
+    if (!stocked.length) throw new Error("No size variants found for this design — mint its SKUs first");
+
+    // OFFERED SIZES (Ansh, 19 Sep). What the portal STOCKS and what the shop
+    // SELLS are not the same list any more. Every garment carries enough
+    // margin that the piece hanging in the showroom as an L is alterable to M,
+    // L or XL, so all three are offered whatever single size was received:
+    //
+    //   Curated Collection   M · L · XL              all at the retail price
+    //   Drevi Originals      M · L · XL · Custom     Custom at +20%, floored
+    //
+    // A design with no origin set keeps the old behaviour — exactly the sizes
+    // the portal holds. Nothing is invented for a garment nobody has
+    // classified, and on prod that is still most of them.
+    const OFFERED = ["M", "L", "XL"];
+    const CUSTOM_SIZE = "CTM"; // the vocab's "Custom / Made to Measure"
+    const CUSTOM_MULTIPLIER = 1.2;
+    const origin = designRow.origin?.trim() || null;
+    const offersAlterationSizes = origin === "curated" || origin === "drevi_original";
+
+    // One physical garment backs all three sizes, so they share its stock
+    // rather than each claiming its own. Shopify will still let three people
+    // buy it — that is the trade for offering an alterable piece in every
+    // size, and it is the shop's call to make, not something to solve here.
+    const groupQty = stocked.reduce((sum, v) => sum + v.qty, 0);
+    const skuFor = (size: string) => `${board.baseSku.toUpperCase()}-${size}-${board.color.toUpperCase()}`;
+
+    const sized: { sku: string; qty: number; size: string; label: string; price: number }[] = offersAlterationSizes
+      ? [
+          ...OFFERED.map((size) => ({
+            sku: skuFor(size),
+            // A size the portal actually holds keeps its own count; the other
+            // two ride on the group, because the same piece is what fills them.
+            qty: stocked.find((v) => v.size === size)?.qty ?? groupQty,
+            size,
+            label: size,
+            price: retail,
+          })),
+          // Made to measure, Drevi Originals only. Floored to the rupee, as asked.
+          ...(origin === "drevi_original"
+            ? [{ sku: skuFor(CUSTOM_SIZE), qty: groupQty, size: CUSTOM_SIZE, label: "Custom", price: Math.floor(retail * CUSTOM_MULTIPLIER) }]
+            : []),
+        ]
+      : stocked.map((v) => ({ ...v, label: vocab.sizes[v.size] ?? v.size, price: retail }));
 
     const facts = describeDesignFacts(
       { category: designRow.category, subCategory: designRow.sub_category, color: designRow.color, colorName: designRow.color_name },
@@ -263,10 +305,10 @@ export async function publishShopify(designId: string, staffId: string, staffEma
       title,
       descriptionHtml,
       tags,
-      productOptions: [{ name: SIZE_OPTION_NAME, values: sized.map((v) => ({ name: vocab.sizes[v.size] ?? v.size })) }],
+      productOptions: [{ name: SIZE_OPTION_NAME, values: sized.map((v) => ({ name: v.label })) }],
       variants: sized.map((v) => ({
-        optionValues: [{ optionName: SIZE_OPTION_NAME, name: vocab.sizes[v.size] ?? v.size }],
-        price: retail.toFixed(2),
+        optionValues: [{ optionName: SIZE_OPTION_NAME, name: v.label }],
+        price: v.price.toFixed(2),
         // Both carry the complete Drevi SKU, size and colour included (Ansh,
         // 19 Sep) — the barcode is what a scanner in the shop reads.
         sku: v.sku,
@@ -325,7 +367,8 @@ export async function publishShopify(designId: string, staffId: string, staffEma
       staffUserId: staffId,
       notes:
         `shopify draft push ${board.baseSku}·${board.color} → ${remoteId} by ${staffEmail} — ` +
-        `₹${retail} on ${sized.length} size(s) [${sized.map((v) => `${v.size}:${v.qty}`).join(" ")}], ` +
+        `₹${retail}${offersAlterationSizes ? ` (${originLabel(origin)} size set)` : ""} on ${sized.length} size(s) ` +
+        `[${sized.map((v) => `${v.label}:${v.qty}${v.price === retail ? "" : `@₹${v.price}`}`).join(" ")}], ` +
         `${mediaUnchanged ? "media unchanged" : `${ordered.length} image(s)`}`,
     });
     return { ok: true, remoteId, variants: sized.length, price: retail };

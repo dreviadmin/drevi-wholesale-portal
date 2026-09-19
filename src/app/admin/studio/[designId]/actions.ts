@@ -8,6 +8,7 @@ import { defaultAnglePrompt } from "@/lib/studio/prompts";
 import { promptDesignFrom } from "@/lib/studio/facts";
 import { loadVocab } from "@/lib/sku/vocab-live";
 import { engineConfigured } from "@/lib/pipeline/engines";
+import { resolveBackground, isBgStyle, BG_STYLES, BG_PLATE_BUCKET } from "@/lib/studio/backgrounds";
 import { COPY_MODELS } from "@/lib/studio/copy-models";
 import { DETAIL_ANGLES } from "@/lib/studio/state";
 
@@ -162,6 +163,12 @@ export async function setAngleEngine(angleId: string, engine: "fashn" | "seedrea
   if ((DETAIL_ANGLES as readonly string[]).includes(angle.angle) && engine === "fashn") {
     return fail("Model swap never runs on detail shots — embroidery must stay real.");
   }
+  // 19 Sep — the chips no longer offer fashn; this makes the server agree, so
+  // a stale tab cannot park an angle on an engine nothing will run.
+  if (engine === "fashn") {
+    const conf = engineConfigured("fashn");
+    if (!conf.ok) return fail(`Model swap is parked — ${conf.missing}`);
+  }
   const { error } = await admin.from("design_angles").update({ engine, updated_at: new Date().toISOString() }).eq("id", angleId);
   return error ? fail(error.message) : { ok: true };
 }
@@ -200,6 +207,28 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
   // Codes → names so the runner prompt reads "Gold georgette Pre-Draped", not "GLD georgette PRD".
   const promptDesign = promptDesignFrom(dRow, vocab);
 
+  // Coloured mode ships a PLATE — the empty backdrop as a second image — and
+  // the prompt is only "use the attached background", so the two must travel
+  // together. Two conditions, both hard:
+  //   1 the design is in coloured mode ('auto' or one of the five keys);
+  //   2 this is NOT a detail angle. A macro close-up handed a full-length
+  //     backdrop plate comes back as a re-invented full-length photo (the
+  //     bench result prompts.ts documents), so details fall back to the
+  //     minimal white treatment and get no plate at all.
+  // The URL is resolved through storage, never the filesystem: assets/ is a
+  // build-time source and Vercel does not trace it into the function bundle.
+  const bg = resolveBackground(promptDesign.bgStyle, promptDesign.bgSeed);
+  const isDetail = (DETAIL_ANGLES as readonly string[]).includes(angle.angle);
+  const plate =
+    bg.mode === "coloured" && !isDetail && bg.platePath
+      ? {
+          plateUrl: admin.storage.from(BG_PLATE_BUCKET).getPublicUrl(bg.platePath).data.publicUrl,
+          // Words for the same backdrop — only ever used if a provider refuses
+          // a second image part (see runOpenAi). Never the primary mechanism.
+          platePrompt: bg.prompt,
+        }
+      : {};
+
   // A server death mid-generation would strand the job in running forever
   // and permanently hide the Generate button — sweep anything older than 15m.
   await admin
@@ -217,7 +246,7 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
       angle_id: angle.id,
       // The runner needs the prompt the operator actually saw (§7.1).
       // prompt defaults to '' (0016) — trim-check, or the engines get an empty prompt.
-      params: { prompt: angle.prompt?.trim() ? angle.prompt : defaultAnglePrompt(angle.angle, angle.engine, promptDesign), angle: angle.angle, engine: angle.engine, brandModel: dRow?.brand_model ?? null },
+      params: { prompt: angle.prompt?.trim() ? angle.prompt : defaultAnglePrompt(angle.angle, angle.engine, promptDesign), angle: angle.angle, engine: angle.engine, brandModel: dRow?.brand_model ?? null, ...plate },
       requested_by: staff.email,
       log: "",
     })
@@ -365,13 +394,17 @@ export async function setBrandModel(designId: string, model: string): Promise<Re
   return { ok: true };
 }
 
-/** Ansh (3 Sep) — one background per design: 'auto' (deterministic) or a preset key. */
+/**
+ * Ansh (19 Sep) — one background per design, now in three modes:
+ * 'minimal' (white, recommended) · 'grey' · coloured ('auto' + five plates).
+ * The eight legal values live in backgrounds.ts and are mirrored by 0053's
+ * CHECK, so an unknown value is rejected here rather than by Postgres.
+ */
 export async function setBgStyle(designId: string, style: string): Promise<Res> {
   let staff;
   try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
   const admin = createAdminClient();
-  const allowed = ["auto", "grey", "ivory", "champagne", "taupe", "charcoal"];
-  if (!allowed.includes(style)) return fail("Unknown background style");
+  if (!isBgStyle(style)) return fail(`Unknown background style — expected one of ${BG_STYLES.join(", ")}`);
   const { error } = await admin.from("designs").update({ bg_style: style }).eq("id", designId);
   if (error) return fail(error.message);
   await writeAuditEvent({ eventType: "catalog_edit", staffUserId: staff.id, notes: `background → ${style} on design ${designId}` });
