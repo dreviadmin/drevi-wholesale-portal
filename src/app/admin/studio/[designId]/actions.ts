@@ -161,8 +161,9 @@ export async function setAngleEngine(angleId: string, engine: EngineKind | "raw"
   const { data: angle } = await admin.from("design_angles").select("angle").eq("id", angleId).maybeSingle();
   if (!angle) return fail("Angle not found");
   // Ansh (3 Sep): detail shots may be background-cleaned by the EDIT engines —
-  // seedream, nano_banana and openai_bg all only replace the backdrop. Model
-  // swap stays banned there: it would re-synthesise the embroidery.
+  // seedream, nano_banana and openai_bg all only replace the backdrop, and
+  // matte does not even do that much to the garment. Model swap stays banned
+  // there: it would re-synthesise the embroidery.
   if ((DETAIL_ANGLES as readonly string[]).includes(angle.angle) && engine === "fashn") {
     return fail("Model swap never runs on detail shots — embroidery must stay real.");
   }
@@ -248,6 +249,13 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
         }
       : {};
 
+  // The MODE travels too, on every job and not just coloured ones. matte draws
+  // its own ground and a missing plate cannot tell it apart minimal (white)
+  // from grey — both are prompt-only for the generative engines and so send
+  // nothing. Frozen at queue time for the same reason plateUrl is: a background
+  // changed mid-flight must not change what the running job renders.
+  const bgMode = bg.mode;
+
   // A server death mid-generation would strand the job in running forever
   // and permanently hide the Generate button — sweep anything older than 15m.
   await admin
@@ -265,7 +273,7 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
       angle_id: angle.id,
       // The runner needs the prompt the operator actually saw (§7.1).
       // prompt defaults to '' (0016) — trim-check, or the engines get an empty prompt.
-      params: { prompt: angle.prompt?.trim() ? angle.prompt : defaultAnglePrompt(angle.angle, angle.engine, promptDesign), angle: angle.angle, engine: angle.engine, brandModel: dRow?.brand_model ?? null, ...plate },
+      params: { prompt: angle.prompt?.trim() ? angle.prompt : defaultAnglePrompt(angle.angle, angle.engine, promptDesign), angle: angle.angle, engine: angle.engine, brandModel: dRow?.brand_model ?? null, bgMode, ...plate },
       requested_by: staff.email,
       log: "",
     })

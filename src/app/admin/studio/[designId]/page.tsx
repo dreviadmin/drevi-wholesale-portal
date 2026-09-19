@@ -22,10 +22,13 @@ export default async function WorkbenchPage({ params }: { params: { designId: st
   const enginesEnabled = {
     // model-swap also needs the brand-model pose folder
     fashn: fashnEnabled() && !!process.env.FASHN_API_KEY && !!process.env.DREVI_BRAND_MODEL_FOLDER_ID,
-    // Both fal models bill the same account, so FAL_KEY lights both chips —
-    // there is no separate Nano Banana credential to be missing on its own.
+    // All three fal models bill the same account, so FAL_KEY lights all three
+    // chips — there is no separate Nano Banana or birefnet credential to be
+    // missing on its own. matte does its compositing locally, but the cut-out
+    // it composites is still a fal call.
     seedream: !!process.env.FAL_KEY,
     nano_banana: !!process.env.FAL_KEY,
+    matte: !!process.env.FAL_KEY,
     openai_bg: !!process.env.OPENAI_API_KEY,
   };
   // Only model swap uses the brand-model folder, so while it is parked this
