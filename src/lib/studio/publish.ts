@@ -59,9 +59,19 @@ export async function publishWholesale(designId: string, staffId: string, staffE
     for (const item of publishSet) {
       // fetchImageByRef serves Drive ids AND the portal-storage sb: refs —
       // fetchDriveImage alone broke on backfilled sb: fronts.
-      const [web, thumb] = await Promise.all([fetchImageByRef(item.fileRef, 1200), fetchImageByRef(item.fileRef, 800)]);
+      // 2048 for the web image (20 Sep). At 1200 the long edge, a published
+      // front came out 674x1200 — and that exact file is what the Shopify push
+      // hands the product page, where a customer pinch-zooms the embroidery a
+      // garment is sold on. 2048 is the e-commerce norm and every engine now
+      // produces at least that. The 800 thumb is unchanged: it is a grid tile.
+      const [web, thumb] = await Promise.all([fetchImageByRef(item.fileRef, 2048), fetchImageByRef(item.fileRef, 800)]);
       if (!web || !thumb) throw new Error(`Could not fetch the ${item.angle} image`);
-      const webUp = await uploadPublishedImage(board.baseSku, board.color, item.angle, 1200, Buffer.from(web.body), web.contentType);
+      // The width is part of the storage PATH (angle-1200.jpg), so this writes
+      // angle-2048.jpg alongside whatever is already there rather than over
+      // it. product_images.storage_path moves to the new file on this publish;
+      // the old one is orphaned, not broken, so a design nobody re-publishes
+      // keeps serving exactly what it serves today.
+      const webUp = await uploadPublishedImage(board.baseSku, board.color, item.angle, 2048, Buffer.from(web.body), web.contentType);
       await uploadPublishedImage(board.baseSku, board.color, item.angle, 800, Buffer.from(thumb.body), thumb.contentType);
       webUrls.push(webUp.url);
       const { error } = await admin.from("product_images").upsert(
