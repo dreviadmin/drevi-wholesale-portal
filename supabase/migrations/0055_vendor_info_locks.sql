@@ -1,0 +1,48 @@
+-- 0055 — product_vendor_info gets the lock column wholesale_products has had
+-- since 0010, so a cost typed by hand survives the 10-minute sheet sync.
+--
+-- WHY (Ansh, 20 Sep): "At time of entering the delivery, Ayushi at times does
+-- not know the prices." The Product Master's last cost was read-only, so a
+-- delivery logged without a price left BOTH autos dead — autoMrpFrom and
+-- autoWholesaleFrom return null on a zero cost — and the only way to price the
+-- design was to override each number by hand. The cost is editable there now.
+--
+-- WHY A LOCK AND NOT JUST A WRITE: src/lib/sync.ts upserts
+-- product_vendor_info.last_cost from the Google Sheet on every run, with no
+-- lock of its own (0011 says so in as many words: "sheet is the source of
+-- truth (no locked_fields)"). The §3.7 app-owned guard does not cover this —
+-- it only skips app-created designs. So without this column a hand-typed cost
+-- on a sheet-born design would be silently reverted within ten minutes, which
+-- is the whole feature failing quietly.
+--
+-- LIVE DATA CHECKED (20 Sep, service-role reads on both projects):
+--   · SHEET_SYNC_ENABLED is unset on the prod Vercel project — the sync IS
+--     running, this is not a hypothetical.
+--   · PROD (cofarxgywnrdjbizxbxw): 301 product_vendor_info rows, 46 of them at
+--     last_cost = 0 (40 belong to sheet-born design groups — Ayushi's case);
+--     281 designs, 213 origin_source='sheet' vs 68 'app'.
+--   · DEV (qvnvxcdyvcsgxulbcmzm): 248 vendor rows, 46 at last_cost = 0 (41
+--     sheet-born); 221 designs, 215 'sheet' vs 6 'app'.
+--   · product_vendor_info.locked_fields was ABSENT on BOTH databases before
+--     this file; wholesale_products.locked_fields is present on both.
+--
+-- SEMANTICS, deliberately identical to 0010: a field named in locked_fields
+-- keeps its DB value on a sync run; every other column on the row still
+-- follows the sheet (vendor_name, vendor_id, vendor_sku, last_receipt_date,
+-- retail_price). Only 'last_cost' is ever written here today.
+--
+-- NOT LOCKED AGAINST RECEIPTS, on purpose: the goods-receipt path
+-- (delivery-actions.ts) upserts last_cost without touching locked_fields, so a
+-- real receipt still sets the cost — a counted invoice beats a typed guess —
+-- and the lock survives that write, so the sheet stays out of it afterwards.
+--
+-- No backfill: every existing row starts unlocked, i.e. exactly today's
+-- behaviour. The column only starts mattering when a human saves a cost.
+--
+-- Reversal:
+--   alter table public.product_vendor_info drop column if exists locked_fields;
+--
+-- Idempotent: safe to re-run, and safe on either database.
+
+alter table public.product_vendor_info
+  add column if not exists locked_fields text[] not null default '{}';

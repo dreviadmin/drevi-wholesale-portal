@@ -33,11 +33,12 @@ interface DesignFields {
 }
 interface VariantRow { sku: string; current_qty: number; wholesale_price: number; wholesale_visible: boolean; hsn?: string | null; location?: string | null }
 
-export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn, hsnOptions }: {
+export function MasterEditor({ board, design, variants, lastCost, lastCostLocked, sheetMrp, hsn, hsnOptions }: {
   board: BoardRow;
   design: DesignFields;
   variants: VariantRow[];
   lastCost: number;
+  lastCostLocked: boolean;
   sheetMrp: number;
   hsn: string;
   hsnOptions: string[];
@@ -63,17 +64,26 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
   // touched the MRP never collapses a deliberate per-size spread.
   const wsPrices = variants.map((v) => Number(v.wholesale_price) || 0);
   const wsUniform = wsPrices.length > 0 && wsPrices.every((p) => p === wsPrices[0]);
+  // The cost is prefilled, not a blank override box: it is the number itself,
+  // and this cell used to just display it. Saving sends it only when it
+  // DIFFERS from what was loaded, so the ordinary "Save pricing" click on a
+  // design nobody re-costed writes nothing to product_vendor_info and leaves
+  // the sheet in charge of that row.
+  const costSeed = lastCost > 0 ? String(lastCost) : "";
   const pricingSeed = {
     markupMultiplier: design.markupMultiplier,
     mrpOverride: design.mrpOverride?.toString() ?? "",
     wholesaleMultiplier: design.wholesaleMultiplier,
     wholesaleOverride: design.wholesaleOverride?.toString() ?? "",
+    lastCost: costSeed,
   };
   const specsSig = JSON.stringify(specsSeed);
   const pricingSig = JSON.stringify(pricingSeed);
   const [specs, setSpecs, specsMeta] = useDraft(`${draftKey}:specs`, specsSeed, { base: design.updatedAt ?? specsSig, hasContent: (s) => JSON.stringify(s) !== specsSig, onRestore: (d) => ({ ...specsSeed, ...d }) });
   // version 2: the wholesale half moved from a free price box onto the design
-  // row (0050), so a v1 draft holds a key this form no longer submits.
+  // row (0050), so a v1 draft holds a key this form no longer submits. The
+  // 20 Sep cost box needs no bump — it only ADDS a key, and onRestore spreads
+  // the seed under the draft, so a v2 draft comes back with today's cost.
   const [pricing, setPricing, pricingMeta] = useDraft(`${draftKey}:pricing`, pricingSeed, { version: 2, base: design.updatedAt ?? pricingSig, hasContent: (p) => JSON.stringify(p) !== pricingSig, onRestore: (d) => ({ ...pricingSeed, ...d }) });
   const setSupply = (fn: (s: SupplyBlock) => SupplyBlock) => setSpecs((s) => ({ ...s, supply: fn(s.supply ?? {}) }));
   const [hsnValue, setHsnValue, hsnMeta] = useDraft(`${draftKey}:hsn`, hsn, { base: hsn, hasContent: (h) => h !== hsn });
@@ -109,12 +119,22 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
     });
   }
 
+  // The cost the autos below stand on: what is being typed, or — blank, or a
+  // stray 0 the server would refuse — the cost already stored. Same rule
+  // savePricing applies, so the preview cannot promise a price the save
+  // won't produce.
+  const costTyped = pricing.lastCost.trim();
+  const costEntered = costTyped !== "" && costTyped !== costSeed ? Number(pricing.lastCost) : null;
+  const costZeroed = costEntered != null && !(costEntered > 0);
+  const previewCost = costEntered && costEntered > 0 ? costEntered : lastCost;
+
   // Previews come from the same helpers savePricing uses, so what the screen
-  // promises is exactly what lands. The cost under them is sheet-synced with
-  // no lock, though — it can move between visits (see src/lib/pricing.ts).
-  const previewAutoMrp = autoMrpFrom(lastCost, clampMultiplier(Number(pricing.markupMultiplier), DEFAULT_MARKUP_MULTIPLIER));
+  // promises is exactly what lands. A cost nobody has pinned is still
+  // sheet-synced and can move between visits (see src/lib/pricing.ts) — until
+  // it is typed here, which locks it against that sync.
+  const previewAutoMrp = autoMrpFrom(previewCost, clampMultiplier(Number(pricing.markupMultiplier), DEFAULT_MARKUP_MULTIPLIER));
   const effectiveMrp = pricing.mrpOverride ? Number(pricing.mrpOverride) : previewAutoMrp ?? design.autoMrp;
-  const previewAutoWholesale = autoWholesaleFrom(lastCost, clampMultiplier(Number(pricing.wholesaleMultiplier), DEFAULT_WHOLESALE_MULTIPLIER));
+  const previewAutoWholesale = autoWholesaleFrom(previewCost, clampMultiplier(Number(pricing.wholesaleMultiplier), DEFAULT_WHOLESALE_MULTIPLIER));
   const effectiveWholesale = pricing.wholesaleOverride ? Number(pricing.wholesaleOverride) : previewAutoWholesale ?? design.autoWholesale;
   // Mirrors the server rule in savePricing: an auto price is only pushed onto
   // every size when the sizes already agree.
@@ -183,10 +203,36 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
       {section("Pricing")}
       <div className="mt-2 p-3.5" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
         <div className="grid grid-cols-2 gap-3">
-          <div className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
-            <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Last cost (receipts/sheet)</span>
-            <div className="font-display mt-1" style={{ fontSize: 16, fontWeight: 600, color: palette.black }}>{lastCost > 0 ? formatINR(lastCost) : "—"}</div>
-          </div>
+          {/* Ansh (20 Sep): "Ayushi at times does not know the prices" when the
+              delivery is logged, and a zero cost leaves both autos dead — so
+              the figure both prices stand on is typed here too. Saved by the
+              same button; left as loaded it is not written at all. */}
+          <label className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+            <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Last cost ₹</span>
+            <input
+              type="number" inputMode="decimal" min="0" step="any"
+              value={pricing.lastCost}
+              disabled={variants.length === 0}
+              placeholder={variants.length === 0 ? "—" : "not known yet"}
+              onChange={(e) => setPricing((s) => ({ ...s, lastCost: e.target.value }))}
+              className="w-full mt-1 font-body disabled:opacity-50"
+              style={inputStyle}
+            />
+            {/* Where the number came from — the label used to claim
+                "receipts/sheet", which stops being true the moment someone
+                types one here. */}
+            <div className="mt-1" style={{ fontSize: 9.5, lineHeight: 1.5 }}>
+              {costEntered && costEntered > 0
+                ? <span style={{ color: palette.goldDeep }}>Saving pins this on all {variants.length} size{variants.length === 1 ? "" : "s"} — the sheet sync stops touching it.</span>
+                : costZeroed
+                  ? <span style={{ color: palette.goldDeep }}>That is not a cost — saving ignores it and {lastCost > 0 ? `keeps ${formatINR(lastCost)}` : "leaves it unset"}.</span>
+                  : lastCostLocked
+                    ? <span>Set by hand here. A new receipt still updates it; the sheet does not.</span>
+                    : lastCost > 0
+                      ? <span>From receipts/the sheet — the 10-min sync can still move it.</span>
+                      : <span>No cost recorded yet — type it and both prices below follow.</span>}
+            </div>
+          </label>
           <label className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
             <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Tier multiplier ({design.tier})</span>
             <input type="number" step="0.1" min="1" max="10" value={pricing.markupMultiplier} onChange={(e) => setPricing((s) => ({ ...s, markupMultiplier: Number(e.target.value) }))} className="w-full mt-1 font-body" style={inputStyle} />
@@ -243,6 +289,10 @@ export function MasterEditor({ board, design, variants, lastCost, sheetMrp, hsn,
             mrpOverride: pricing.mrpOverride ? Number(pricing.mrpOverride) : null,
             wholesaleMultiplier: Number(pricing.wholesaleMultiplier),
             wholesaleOverride: pricing.wholesaleOverride ? Number(pricing.wholesaleOverride) : null,
+            // null = leave the stored cost alone. Only a box that was actually
+            // changed sends a number, so re-saving a multiplier never locks a
+            // cost the user never looked at.
+            lastCost: costEntered,
           }), willFlatten ? `Pricing saved on ${variants.length} size${variants.length === 1 ? "" : "s"}` : "Pricing saved", pricingMeta.clear)}
           className="mt-3 font-body uppercase disabled:opacity-40"
           style={{ fontSize: 9, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "8px 12px" }}

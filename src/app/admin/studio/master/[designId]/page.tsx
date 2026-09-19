@@ -32,11 +32,28 @@ export default async function MasterPage({ params }: { params: { designId: strin
     .order("sku");
   const variants = (allVariants ?? []).filter((v) => v.sku.toUpperCase().endsWith(`-${detail.board.color}`));
   const skus = variants.map((v) => v.sku);
-  const { data: pvi } = skus.length
-    ? await admin.from("product_vendor_info").select("sku, last_cost, retail_price").in("sku", skus)
-    : { data: [] };
+  // locked_fields may not exist yet (0055): a deploy can precede the
+  // migration, and losing the whole row read would render every design as
+  // "no cost recorded" with both autos dead. Fall back to the columns that
+  // have always been there.
+  const pviFull = skus.length
+    ? await admin.from("product_vendor_info").select("sku, last_cost, retail_price, locked_fields").in("sku", skus)
+    : { data: [], error: null };
+  const { data: pvi } =
+    pviFull.error?.code === "42703"
+      ? await admin.from("product_vendor_info").select("sku, last_cost, retail_price").in("sku", skus)
+      : pviFull;
   const lastCost = Math.max(0, ...(pvi ?? []).map((p) => Number(p.last_cost) || 0));
   const sheetMrp = Math.max(0, ...(pvi ?? []).map((p) => Number(p.retail_price) || 0));
+  // Where the cost came from, so the editor can say so: a lock (0055) is only
+  // ever written by a human saving it here. Unlocked, it is still whatever the
+  // last receipt or the sheet put there — and the sheet can move it again.
+  // The narrowed fallback shape has no locked_fields, which is the honest
+  // answer pre-0055: nothing can be locked, so nothing is.
+  const lastCostLocked = (pvi ?? []).some((p) => {
+    const locks = (p as { locked_fields?: unknown }).locked_fields;
+    return Array.isArray(locks) && locks.includes("last_cost");
+  });
 
   return (
     <>
@@ -71,6 +88,7 @@ export default async function MasterPage({ params }: { params: { designId: strin
       hsn={variants.find((v) => v.hsn)?.hsn ?? ""}
       hsnOptions={await listKnownHsnCodes()}
       lastCost={lastCost}
+      lastCostLocked={lastCostLocked}
       sheetMrp={sheetMrp}
     />
     <div className="px-4 md:px-8 pb-10 max-w-2xl">

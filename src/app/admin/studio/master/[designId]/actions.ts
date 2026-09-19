@@ -19,6 +19,7 @@ const fail = (error: string): Res => ({ ok: false, error });
 
 type Admin = ReturnType<typeof createAdminClient>;
 interface GroupRow { sku: string; wholesale_price: number | null; locked_fields: unknown }
+interface VendorRow { sku: string; last_cost: number | null; locked_fields: unknown }
 
 /**
  * The design's own size rows. `like` also matches sibling colours of the same
@@ -58,6 +59,36 @@ async function writeGroupWholesale(admin: Admin, rows: GroupRow[], value: number
     if (error) return fail(`${v.sku}: ${error.message}`);
   }
   return { ok: true };
+}
+
+/**
+ * The cost, typed by hand, onto every size of the design (Ansh, 20 Sep: "at
+ * time of entering the delivery, Ayushi at times does not know the prices",
+ * so the figure both autos stand on has to be fixable afterwards).
+ *
+ * A group writer for the same reason writeGroupWholesale is —
+ * product_vendor_info is keyed per size SKU — and it LOCKS last_cost (0055),
+ * because sync.ts rewrites that column from the sheet every ten minutes and
+ * 213 of the 281 live designs are sheet-born. Unlocked, the number would be
+ * gone before anyone looked at it again.
+ *
+ * Upsert, not update: a size that has never been received and never appeared
+ * in the sheet has no vendor row at all. Existing locks are read first and
+ * merged — a blind upsert would erase whatever else the row had locked.
+ */
+async function writeGroupCost(admin: Admin, skus: string[], existing: VendorRow[], value: number): Promise<Res> {
+  const bySku = new Map(existing.map((r) => [r.sku, r]));
+  const nowIso = new Date().toISOString();
+  const payload = skus.map((sku) => {
+    const locks = new Set<string>(Array.isArray(bySku.get(sku)?.locked_fields) ? (bySku.get(sku)!.locked_fields as string[]) : []);
+    locks.add("last_cost");
+    return { sku, last_cost: value, locked_fields: [...locks], updated_at: nowIso };
+  });
+  // Every row carries both columns, so the bulk upsert has nothing to unify —
+  // and the columns it omits (vendor_name, last_receipt_date…) are left alone
+  // on an existing row rather than nulled.
+  const { error } = await admin.from("product_vendor_info").upsert(payload, { onConflict: "sku" });
+  return error ? fail(error.message) : { ok: true };
 }
 
 export async function saveSpecs(
@@ -123,14 +154,15 @@ export async function saveSpecs(
  * against the 10-minute sheet sync.
  *
  * Both autos recompute from the freshest cost (receipts beat the sheet), and
- * that base — product_vendor_info.last_cost — is itself sheet-synced with NO
- * lock, so it can move under a user between visits and the preview they
- * approved yesterday is not what saves today. Pre-existing for the MRP since
- * 0020 and not solved here; the override is the way to pin a number.
+ * that base — product_vendor_info.last_cost — is the third thing this form
+ * saves since 20 Sep. A delivery is often logged before anyone knows the
+ * price, and a zero cost makes BOTH autos null, so the cost is typed here and
+ * LOCKED (0055) against the ten-minute sheet sync. Left blank or unchanged it
+ * is not written at all, and a real goods receipt can still move it later.
  */
 export async function savePricing(
   designId: string,
-  patch: { markupMultiplier: number; mrpOverride: number | null; wholesaleMultiplier: number; wholesaleOverride: number | null },
+  patch: { markupMultiplier: number; mrpOverride: number | null; wholesaleMultiplier: number; wholesaleOverride: number | null; lastCost?: number | null },
 ): Promise<Res & { autoMrp?: number; autoWholesale?: number; count?: number }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
@@ -142,11 +174,43 @@ export async function savePricing(
   if (!design) return fail("Design not found");
   const { rows, error: rowsErr } = await loadGroupRows(admin, design.base_sku, design.color);
   if (rowsErr || !rows) return fail(rowsErr ?? "Could not read the size variants");
-  let cost = 0;
+  let vendorRows: VendorRow[] = [];
+  // 42703 = locked_fields is not on this database yet (0055 unapplied). The
+  // deploy can legitimately land before the migration, and when it does the
+  // whole pricing card must keep working — a multiplier save has nothing to
+  // do with the cost column. So: retry the read without the lock column, and
+  // refuse ONLY the cost further down. sync.ts:435 takes the same escape for
+  // the same reason.
+  let locksAvailable = true;
   if (rows.length) {
-    const { data: pvi } = await admin.from("product_vendor_info").select("last_cost").in("sku", rows.map((v) => v.sku));
-    cost = Math.max(0, ...(pvi ?? []).map((p) => Number(p.last_cost) || 0));
+    const skuList = rows.map((v) => v.sku);
+    const withLocks = await admin.from("product_vendor_info").select("sku, last_cost, locked_fields").in("sku", skuList);
+    if (withLocks.error?.code === "42703") {
+      locksAvailable = false;
+      const plain = await admin.from("product_vendor_info").select("sku, last_cost").in("sku", skuList);
+      // The cost is a WRITE target now, not just a number to read: guessing 0
+      // on a failed read would republish both autos as "needs a cost".
+      if (plain.error) return fail(`Could not read the cost: ${plain.error.message}`);
+      vendorRows = (plain.data ?? []) as VendorRow[];
+    } else if (withLocks.error) {
+      return fail(`Could not read the cost: ${withLocks.error.message}`);
+    } else {
+      vendorRows = withLocks.data ?? [];
+    }
   }
+  // 0 is refused on the cost exactly as on the two overrides below — a stray
+  // "0" on a phone keypad must not blank the base both prices stand on.
+  const typedCost = patch.lastCost && patch.lastCost > 0 ? patch.lastCost : null;
+  if (typedCost != null && rows.length === 0) {
+    return fail("No size variants yet — log a delivery before setting a cost.");
+  }
+  // Writing a cost without somewhere to record the lock would leave it at the
+  // sheet's mercy — the next sync would quietly undo it. Refuse the cost, not
+  // the save: the multipliers and overrides below still go through.
+  if (typedCost != null && !locksAvailable) {
+    return fail("Cost cannot be set until migration 0055 is applied — the multipliers saved, the cost did not.");
+  }
+  const cost = typedCost ?? Math.max(0, ...vendorRows.map((p) => Number(p.last_cost) || 0));
   const autoMrp = autoMrpFrom(cost, mult);
   const autoWholesale = autoWholesaleFrom(cost, wsMult);
   // 0 is refused on both overrides: a stray "0" on a phone keypad must never
@@ -154,6 +218,13 @@ export async function savePricing(
   const mrpOverride = patch.mrpOverride && patch.mrpOverride > 0 ? patch.mrpOverride : null;
   const wsOverride = patch.wholesaleOverride && patch.wholesaleOverride > 0 ? patch.wholesaleOverride : null;
   const effectiveWholesale = wsOverride ?? autoWholesale;
+
+  // The cost lands BEFORE the design row, so a design never carries autos
+  // computed from a cost that failed to save.
+  if (typedCost != null) {
+    const res = await writeGroupCost(admin, rows.map((v) => v.sku), vendorRows, typedCost);
+    if (!res.ok) return res;
+  }
 
   const { error } = await admin
     .from("designs")
@@ -187,7 +258,10 @@ export async function savePricing(
     eventType: "catalog_edit",
     staffUserId: staff.id,
     notes:
-      `master pricing ${designId} — mrp mult=${mult} override=${mrpOverride ?? "—"} auto=${autoMrp ?? "—"}; ` +
+      // The cost is named first because it moves both autos — a later reader
+      // asking "why did this design reprice?" should see it without digging.
+      `master pricing ${designId} — cost ${typedCost != null ? `₹${typedCost} set by hand + locked on ${rows.length} size(s)` : `₹${cost || "—"} (unchanged)`}; ` +
+      `mrp mult=${mult} override=${mrpOverride ?? "—"} auto=${autoMrp ?? "—"}; ` +
       `wholesale mult=${wsMult} override=${wsOverride ?? "—"} auto=${autoWholesale ?? "—"} → ₹${effectiveWholesale ?? "—"} on ${count} variant(s)`,
   });
   revalidatePath(`/admin/studio/master/${designId}`);
