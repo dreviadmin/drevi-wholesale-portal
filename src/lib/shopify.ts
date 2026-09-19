@@ -8,6 +8,7 @@ import { writeAuditEvent } from "@/lib/audit";
 import { loadVocab } from "@/lib/sku/vocab-live";
 import { SIZES } from "@/lib/sku/vocab";
 import { originLabel } from "@/lib/studio/copy-prompt";
+import { to99 } from "@/lib/pricing";
 import { loadDesignDetail } from "./studio/load";
 import { colorNameFor, describeDesignFacts } from "./studio/facts";
 import { ALL_ANGLES } from "./studio/state";
@@ -229,8 +230,17 @@ export async function publishShopify(designId: string, staffId: string, staffEma
     // and it is the shop's call to make, not something to solve here.
     const groupQty = stocked.reduce((sum, v) => sum + v.qty, 0);
     const skuFor = (size: string) => `${board.baseSku.toUpperCase()}-${size}-${board.color.toUpperCase()}`;
-    // Floored to the rupee, the same rule the +20% Custom variant used.
-    const priced = (mult: number) => (mult === 1 ? retail : Math.floor(retail * mult));
+    // Landed on a ₹…99 price point, not a raw multiplication (Ansh, 20 Sep:
+    // "10,318 becomes 10,299, 11,178 becomes 11,199"). That is to99() — round
+    // to the NEAREST hundred, minus one — which is why his two examples go in
+    // opposite directions, and it is the same helper that already turns cost ×
+    // multiplier into the auto-MRP in the Product Master. A derived size now
+    // lands on the same kind of number as a hand-set one.
+    //
+    // The base sizes are NOT rounded: M/L/XL carry the retail price exactly as
+    // it was set, and quietly moving a number a human typed is not this code's
+    // business.
+    const priced = (mult: number) => (mult === 1 ? retail : to99(retail * mult));
 
     const ladder = origin === "drevi_original" ? ORIGINAL_SIZES : CURATED_SIZES.map((x) => ({ ...x, mult: 1 }));
     const sized: { sku: string; qty: number; size: string; label: string; price: number }[] = offersAlterationSizes
