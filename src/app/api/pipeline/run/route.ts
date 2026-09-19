@@ -95,7 +95,17 @@ export async function POST(request: Request) {
     // pipeline, which transcodes whatever the phone shot (HEIC broke fal when
     // the raw bytes were mislabelled as JPEG). Storage refs ignore the size
     // and are already JPEG/PNG from capture.
-    const source = await fetchImageByRef(sourceRef, 1600);
+    // 2048, not 1600 (20 Sep). Measured on a real prod angle: the camera file
+    // in Drive is 2091x3717 and this bound handed the engine 900x1600 — 57% of
+    // the linear resolution thrown away before any model saw it, and every
+    // downstream size inherits that ceiling.
+    //
+    // COST: Nano Banana is unaffected — it prices off its `resolution` enum,
+    // not the input. Seedream v5 Pro prices off OUTPUT AREA, $0.0675 at or
+    // under 1536x1536 and $0.135 above: a 9:16 source lands at 1152x2048,
+    // exactly 1536², so it stays in the cheap band; a 3:4 source lands at
+    // 1536x2048 and doubles. Matte is free either way, it passes through.
+    const source = await fetchImageByRef(sourceRef, 2048);
     if (!source) return await failJob("Could not fetch the source image");
     await admin.from("pipeline_jobs").update({ progress: 20 }).eq("id", jobId);
 

@@ -178,6 +178,45 @@ function dataUri(bytes: Buffer, contentType: string): string {
   return `data:${t};base64,${bytes.toString("base64")}`;
 }
 
+/** The longest edge we will hand a provider, and the byte ceiling it implies. */
+const SEND_MAX_PX = 2048;
+const SEND_MAX_BYTES = 1_200_000;
+
+/**
+ * Bound an image HERE rather than trusting where it came from.
+ *
+ * fetchImageByRef's size argument is a REQUEST, not a guarantee. Drive serves
+ * =sNNN thumbnails up to a ceiling and then fetchDriveImage falls back to
+ * `alt=media`, the untouched original — so asking for 2048 returned a 2.9MB
+ * 2091x3717 camera file where 1600 returned 358KB. fal then answered
+ * `image_load_error`, which reads as a refusal and is not one. Storage `sb:`
+ * refs ignore the size argument outright.
+ *
+ * So: measure, downscale if the long edge is over, and re-encode if the bytes
+ * are still over. Everything downstream — payload size, Seedream's output-area
+ * price band, what the model actually sees — then depends on this one number
+ * instead of on which storage backend the angle happens to use.
+ */
+async function boundForProvider(bytes: Buffer, contentType: string): Promise<{ bytes: Buffer; contentType: string }> {
+  try {
+    const sharp = (await import("sharp")).default;
+    const meta = await sharp(bytes).autoOrient().metadata();
+    const long = Math.max(meta.width ?? 0, meta.height ?? 0);
+    if (long <= SEND_MAX_PX && bytes.length <= SEND_MAX_BYTES) return { bytes, contentType };
+    // PNG is kept only when it carries transparency worth keeping; a camera
+    // JPEG re-encoded as PNG would be larger than what we are trying to shrink.
+    const keepPng = contentType.includes("png") && (meta.hasAlpha ?? false);
+    let img = sharp(bytes).autoOrient();
+    if (long > SEND_MAX_PX) img = img.resize({ width: SEND_MAX_PX, height: SEND_MAX_PX, fit: "inside", withoutEnlargement: true });
+    const out = keepPng ? await img.png().toBuffer() : await img.jpeg({ quality: 90 }).toBuffer();
+    return { bytes: out, contentType: keepPng ? "image/png" : "image/jpeg" };
+  } catch {
+    // sharp could not read it — send what we were given and let the provider
+    // say so, which is still better than failing a render locally.
+    return { bytes, contentType };
+  }
+}
+
 async function download(url: string): Promise<Buffer> {
   if (url.startsWith("data:")) return Buffer.from(url.split(",", 2)[1], "base64");
   const r = await fetch(url);
@@ -769,15 +808,20 @@ export async function runEngine(args: {
   const plate: Plate | null = args.plateUrl
     ? { url: args.plateUrl, promptFallback: args.platePrompt?.trim() || "a plain seamless studio backdrop" }
     : null;
-  if (args.engine === "openai_bg") return runOpenAi(args.source, args.contentType, args.prompt, plate);
-  if (args.engine === "seedream") return runSeedream(args.source, args.contentType, args.prompt, plate);
-  if (args.engine === "nano_banana") return runNanoBanana(args.source, args.contentType, args.prompt, plate);
+
+  // ONE place bounds the source, so no runner can be handed a 2.9MB camera
+  // original by a fetch that quietly ignored its size argument.
+  const { bytes: src, contentType: srcType } = await boundForProvider(args.source, args.contentType);
+
+  if (args.engine === "openai_bg") return runOpenAi(src, srcType, args.prompt, plate);
+  if (args.engine === "seedream") return runSeedream(src, srcType, args.prompt, plate);
+  if (args.engine === "nano_banana") return runNanoBanana(src, srcType, args.prompt, plate);
   if (args.engine === "matte") {
     // A job queued before bgMode existed still has to render. A plate only
     // ever travels in coloured mode, so its presence identifies that mode; no
     // plate means prompt-only, and minimal is the studio default (0053).
     const mode: BgMode = isBgMode(args.bgMode) ? args.bgMode : plate ? "coloured" : "minimal";
-    return runMatte(args.source, args.contentType, mode, plate);
+    return runMatte(src, srcType, mode, plate);
   }
-  return runFashn(args.source, args.contentType, args.angle, args.prompt, args.seed, args.brandModel);
+  return runFashn(src, srcType, args.angle, args.prompt, args.seed, args.brandModel);
 }

@@ -180,6 +180,74 @@ export async function fetchImageByRef(
   return { body, contentType };
 }
 
+/**
+ * The name a downloaded copy of `ref` should carry, without its extension:
+ * "DD-LEH-FLR-115-GRN-front-production". A stockroom folder of files called
+ * image.jpg is useless, and these are the four facts an operator already knows
+ * the picture by — design, colour, angle, and which image of that angle it is.
+ *
+ * Resolved HERE rather than passed in by the page on purpose: the caller knows
+ * nothing the database does not, and a client-supplied name is a string that
+ * ends up in a response header. Returns null for a ref that is not a design
+ * photo (vendor cards, note photos, tracking sheets) so the route can fall
+ * back to a generic name.
+ */
+export async function downloadNameForRef(ref: string): Promise<string | null> {
+  const admin = createAdminClient();
+  const { data: rows } = await admin
+    .from("design_images")
+    .select("id, role, engine, created_at, design_id, angle_id")
+    .eq("file_ref", ref)
+    // A ref can be registered more than once (the same file re-used across
+    // angles); oldest wins so the saved name is stable between downloads.
+    .order("created_at", { ascending: true })
+    .limit(1);
+  const img = rows?.[0];
+  if (!img) return null;
+
+  const angleId: string | null = img.angle_id ?? null;
+  const [designRes, angleRes] = await Promise.all([
+    admin.from("designs").select("base_sku, color").eq("id", img.design_id).maybeSingle(),
+    angleId ? admin.from("design_angles").select("angle, approved_image_id").eq("id", angleId).maybeSingle() : null,
+  ]);
+  const design = designRes.data;
+  if (!design?.base_sku) return null; // nothing distinctive to say — let the caller decide
+
+  // "production" is not a role: it is the one image the angle publishes, so it
+  // has to be read off the angle (17 Sep semantics — approved candidate, else
+  // the source). Everything else keeps its own role: source / candidate /
+  // import / crop / ident.
+  const isProduction = Boolean(angleRes?.data && angleRes.data.approved_image_id === img.id);
+  const kind = isProduction ? "production" : img.role;
+
+  // Production is the ONE image of its angle, so sku·colour·angle·kind already
+  // names it uniquely. Every entry in the "Previous attempts" strip is not:
+  // they share all four, so three downloads land as candidate.jpg,
+  // candidate (1).jpg, candidate (2).jpg — the "folder of image.jpg" problem
+  // one level down. The engine and the moment it ran are what the strip itself
+  // labels them by, so they are what tells them apart on disk too.
+  const attempt = isProduction || img.role !== "candidate"
+    ? null
+    : [img.engine, istStamp(img.created_at)].filter(Boolean).join("-");
+  return [design.base_sku, design.color, angleRes?.data?.angle, kind, attempt].filter(Boolean).join("-");
+}
+
+/** "20250919-143207" in IST — the showroom's clock, matching every other date the studio prints. */
+function istStamp(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const digits = d
+    .toLocaleString("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+      hourCycle: "h23",
+    })
+    .replace(/\D/g, "");
+  return digits.length === 14 ? `${digits.slice(0, 8)}-${digits.slice(8)}` : null;
+}
+
 /** Store an arbitrary photo in one of the auxiliary buckets. Returns "sb:<bucket>:<path>". */
 export async function storeAuxPhoto(args: {
   bucket: "vendor-photos" | "order-attachments" | "note-photos";
