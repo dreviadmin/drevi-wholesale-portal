@@ -527,7 +527,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
                 }
                 className="mt-2 w-full font-body uppercase disabled:opacity-40"
                 style={{ fontSize: 8.5, letterSpacing: "0.12em", background: g.ready || t?.state === "changes_pending" ? palette.black : "transparent", color: g.ready || t?.state === "changes_pending" ? palette.ivory : palette.black, border: `1px solid ${palette.black}`, padding: "7px 0" }}
-                title={portal === "shopify" ? "Creates a DRAFT product — parked until ANSH-05 flips SHOPIFY_ENABLED" : undefined}
+                title={portal === "shopify" ? "Creates or updates a DRAFT product — photos, copy, the retail price, one tracked variant per size (SKU + barcode) and the five product metafields. Going live stays a human act inside Shopify." : undefined}
               >
                 {t?.state === "changes_pending" ? "Re-push" : "Push"} {portal === "wholesale" ? "wholesale" : "Shopify"}
               </button>
