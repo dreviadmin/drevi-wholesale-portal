@@ -338,7 +338,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               !isDetail && a.engine === "fashn" && brandModels.length > 0 */}
         {isDetail && (
           <div className="font-body mt-2" style={{ fontSize: 9.5, color: palette.mutedGreige }}>
-            Macro fidelity — the edit engines only replace the background; embroidery is never re-generated. A detail shot never gets a backdrop plate.
+            Macro fidelity — the edit engines only replace the background; embroidery is never re-generated.
           </div>
         )}
 
@@ -441,7 +441,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           {/* Offered engines only. The old gate was `engine !== "raw"`, which still
               rendered Generate for an angle on the parked fashn — a button whose
               only outcome was an error naming an environment variable. */}
-          {!isDetail && ENGINE_CHIPS.includes(a.engine as (typeof ENGINE_CHIPS)[number]) && a.sourceRef && !jobFor(a.id) && (
+          {ENGINE_CHIPS.includes(a.engine as (typeof ENGINE_CHIPS)[number]) && a.sourceRef && !jobFor(a.id) && (
             <button type="button" disabled={pending} onClick={() => generate(a.id)} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: `1px solid ${palette.black}`, color: palette.black, padding: "7px 10px" }} title={ENGINE_HINT[a.engine]}>
               <RefreshCw size={11} /> {current ? "Regen" : "Generate"} · {ENGINE_ESTIMATE[a.engine] ?? ""}
             </button>

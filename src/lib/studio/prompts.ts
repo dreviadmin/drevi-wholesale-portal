@@ -1,5 +1,5 @@
 import type { Angle } from "./state";
-import { resolveBackground, type BgMode } from "./backgrounds";
+import { resolveBackground } from "./backgrounds";
 
 // Angle prompts — now MODE-AWARE (Ansh, 19 Sep).
 //
@@ -76,21 +76,6 @@ function isDetailAngle(angle: Angle | string): boolean {
 }
 
 /**
- * Which wording an EDIT engine gets for this angle.
- *
- * DETAIL ANGLES NEVER GET A PLATE, IN ANY MODE — and in coloured mode they
- * fall back to the MINIMAL wording here, because the plate is what the
- * coloured sentence points at. This is a hard-won bench result, not caution:
- * handed a full-length backdrop plate, the model threw away the macro crop and
- * re-invented a full-length photo of the outfit. The close-up was gone. The
- * plate is 1128x2000 of empty wall and floor, so it reads as "this is the shot
- * you are making" rather than "this is the wall behind the shot".
- */
-function effectiveEditMode(mode: BgMode, isDetail: boolean): BgMode {
-  return mode === "coloured" && isDetail ? "minimal" : mode;
-}
-
-/**
  * Default prompt for an angle, pre-filled from the design's specs.
  */
 export function defaultAnglePrompt(angle: Angle | string, engine: string | null, d: PromptDesign): string {
@@ -100,7 +85,7 @@ export function defaultAnglePrompt(angle: Angle | string, engine: string | null,
 
   // ── The two selectable engines (19 Sep): openai_bg and seedream ──────────
   if (isEditEngine) {
-    const mode = effectiveEditMode(bg.mode, isDetail);
+    const mode = bg.mode;
     if (mode === "minimal") return MINIMAL_LINE;
     if (mode === "coloured") return COLOURED_LINE;
 
