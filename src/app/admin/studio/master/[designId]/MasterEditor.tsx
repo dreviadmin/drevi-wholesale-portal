@@ -7,6 +7,7 @@ import { Check } from "lucide-react";
 import { palette } from "@/lib/palette";
 import { formatINR } from "@/lib/format";
 import { useDraft } from "@/lib/useDraft";
+import { withFrom } from "@/components/BackLink";
 import { supplyAge } from "@/lib/availability";
 import { autoMrpFrom, autoWholesaleFrom, clampMultiplier, DEFAULT_MARKUP_MULTIPLIER, DEFAULT_WHOLESALE_MULTIPLIER } from "@/lib/pricing";
 import { ORIGIN_OPTIONS } from "@/lib/studio/copy-prompt";
@@ -222,7 +223,16 @@ export function MasterEditor({ board, design, variants, lastCost, lastCostLocked
                 "receipts/sheet", which stops being true the moment someone
                 types one here. */}
             <div className="mt-1" style={{ fontSize: 9.5, lineHeight: 1.5 }}>
-              {costEntered && costEntered > 0
+              {/* With no size SKUs the box is disabled, and saying "type it"
+                  next to a box nobody can type in is how this read as broken
+                  (Ansh, 20 Sep, on DD-SUT-PLZ-051 · PNK). The cost is stored
+                  per size SKU — product_vendor_info is keyed by sku — so a
+                  colour whose delivery was never saved has nowhere to put one.
+                  Same wording as the wholesale price below, which already
+                  said this. */}
+              {variants.length === 0
+                ? <span style={{ color: palette.goldDeep }}>No size variants yet — the cost is stored against each size SKU, so there is nowhere to put it. <Link href={withFrom("/admin/receipts/new", `/admin/studio/master/${board.id}`)} style={{ textDecoration: "underline", color: palette.goldDeep }}>Log the delivery</Link> for this colour and its sizes are minted.</span>
+                : costEntered && costEntered > 0
                 ? <span style={{ color: palette.goldDeep }}>Saving pins this on all {variants.length} size{variants.length === 1 ? "" : "s"} — the sheet sync stops touching it.</span>
                 : costZeroed
                   ? <span style={{ color: palette.goldDeep }}>That is not a cost — saving ignores it and {lastCost > 0 ? `keeps ${formatINR(lastCost)}` : "leaves it unset"}.</span>
