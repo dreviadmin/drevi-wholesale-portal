@@ -42,6 +42,11 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
   // flag), and Rakesh needs the ones he has not reached yet — neither list is
   // a badge. ANDs with the chip and the search box.
   const [specsFilter, setSpecsFilter] = useState<"any" | "confirmed" | "awaiting">("any");
+  // Photo count is MULTI-select, unlike the badge chips (Ansh, 20 Sep: "can
+  // select 1/6 and 3/6 at the same time"). The question it answers is "what is
+  // half-shot" — and the sparse counts are not adjacent, so a single pick or a
+  // range would both be the wrong shape. Empty set = no filter.
+  const [photoCounts, setPhotoCounts] = useState<Set<number>>(new Set());
   const [query, setQuery] = useState("");
   const [scanOpen, setScanOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -61,6 +66,11 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
     if (s && (CHIP_ORDER as string[]).includes(s)) setChip(s as DesignBadge);
     const sp = params.get("specs");
     if (sp === "confirmed" || sp === "awaiting") setSpecsFilter(sp);
+    const ph = params.get("photos");
+    if (ph) {
+      const picked = ph.split(",").map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
+      if (picked.length) setPhotoCounts(new Set(picked));
+    }
   }, []);
 
   const counts = useMemo(() => {
@@ -74,16 +84,23 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
     return { confirmed, awaiting: rows.length - confirmed };
   }, [rows]);
 
+  const photoCountTotals = useMemo(() => {
+    const c = new Array(7).fill(0) as number[];
+    for (const r of rows) if (r.filledCount >= 0 && r.filledCount <= 6) c[r.filledCount] += 1;
+    return c;
+  }, [rows]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toUpperCase();
     return rows.filter((r) => {
       if (chip !== "all" && r.badge !== chip) return false;
       if (specsFilter === "confirmed" && !r.specsVerified) return false;
       if (specsFilter === "awaiting" && r.specsVerified) return false;
+      if (photoCounts.size > 0 && !photoCounts.has(r.filledCount)) return false;
       if (!q) return true;
       return [r.baseSku, r.color, r.title ?? "", r.category ?? ""].some((v) => v.toUpperCase().includes(q));
     });
-  }, [rows, chip, specsFilter, query]);
+  }, [rows, chip, specsFilter, photoCounts, query]);
 
   const { sorted, sort, toggle } = useSort(filtered, {
     sku: (r) => `${r.baseSku}-${r.color}`,
@@ -129,6 +146,7 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
     const p = new URLSearchParams();
     if (chip !== "all") p.set("state", chip);
     if (specsFilter !== "any") p.set("specs", specsFilter);
+    if (photoCounts.size > 0) p.set("photos", [...photoCounts].sort((a, b) => a - b).join(","));
     const q = p.toString();
     return q ? `/admin/studio?${q}` : "/admin/studio";
   })();
@@ -265,6 +283,44 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
             </button>
           );
         })}
+      </div>
+
+      {/* Photo count — MULTI-select, so "1/6 and 3/6 at once" works. Every
+          count keeps its slot even at zero: a row that reshuffles under the
+          thumb is worse than a chip that reads 0. */}
+      <div className="flex items-center gap-1.5 mt-2 overflow-x-auto no-scrollbar">
+        <span className="font-body uppercase whitespace-nowrap" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.mutedGreige }}>Photos</span>
+        {photoCountTotals.map((n, i) => {
+          const active = photoCounts.has(i);
+          return (
+            <button
+              key={i}
+              type="button"
+              aria-pressed={active}
+              onClick={() =>
+                setPhotoCounts((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(i)) next.delete(i); else next.add(i);
+                  return next;
+                })
+              }
+              className="font-body uppercase whitespace-nowrap"
+              style={{
+                fontSize: 9.5, letterSpacing: "0.1em", padding: "7px 10px",
+                background: active ? palette.black : palette.ivory,
+                color: active ? palette.ivory : n === 0 ? palette.mutedGreige : palette.softBlack,
+                border: "1px solid rgba(26,26,26,0.12)",
+              }}
+            >
+              {i}/6 · {n}
+            </button>
+          );
+        })}
+        {photoCounts.size > 0 && (
+          <button type="button" onClick={() => setPhotoCounts(new Set())} aria-label="Clear photo filter" className="font-body uppercase whitespace-nowrap" style={{ fontSize: 9, letterSpacing: "0.1em", padding: "7px 8px", color: palette.mutedGreige, background: "transparent", border: "none" }}>
+            Clear
+          </button>
+        )}
       </div>
 
       {/* Mobile cards */}
