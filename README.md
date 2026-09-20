@@ -18,9 +18,19 @@ Living operational docs are in [`docs/`](./docs) — see
 
 > **Status: LIVE**, taking real orders since the CMAI exhibition (July 2026).
 > The productionization wave (Studio, GST receipts, LoVs, Drive consolidation,
-> importers) is built and tested on the **dev** environment; promotion to prod
-> follows `docs/CUTOVER-RUNBOOK.md`. The Google-Sheet sync stays on for about a
-> month after cutover as a safety net, then retires (decision, 2 Aug).
+> importers) **completed its prod cutover on 31 Aug** and runs in production;
+> `docs/CUTOVER-RUNBOOK.md` remains the dev → prod promotion procedure. The
+> Google-Sheet sync stays on as a safety net until it retires (decision,
+> 2 Aug); designs the app owns (`origin_source = 'app'`) are already skipped
+> by it, and `locked_fields` protects portal-owned columns on the rest.
+>
+> **Last documented: 20 Sep 2026.** Since the 12 Sep docs pass: the Shopify
+> push went live with price, tracked stock, SKU/barcode and metafields, then
+> gained the origin-driven size ladder; the imagery engines were replaced
+> (Seedream v5 Pro, Nano Banana 2, Matte in, FASHN and raw out); backgrounds
+> became three modes with real plates; Log delivery can mint a new colour of
+> an existing design; and stuck pipeline jobs are now auto-killed. Database
+> is at migration **0057**, applied to both environments.
 
 ---
 
@@ -146,31 +156,74 @@ default".
   from here through the same generator as the workbench. Default order is
   **newest first** (11 Sep: `created_at desc`, visible "Added" column, all
   other sorts still selectable); the "Wholesale price not set" blocker links
-  straight to the Specs page ("Set price").
+  straight to the Specs page ("Set price"). Two filter axes sit under the
+  stage chips (20 Sep) and AND with them and with search: **Specs** —
+  *Confirmed by Rakesh* / *Awaiting Rakesh*, which a stage chip cannot
+  express because a live design reports "Live" before anything looks at its
+  specs; and **Photos** — a **multi-select** 0/6 … 6/6, so "everything that
+  is 1/6 or 3/6" is one question. Both deep-link
+  (`?specs=confirmed&photos=1,3`) and the workbench back link carries them,
+  so you can work down a filtered list without losing your place.
 - **Workbench** (`/admin/studio/[designId]`) — per-angle review across
   **front / back / side / lifestyle / detail_1 / detail_2**:
   - **Four input modes per angle** — *Shoot* (camera/upload → a `source`
     image), *Use directly* (an existing image becomes source AND approved,
     engine `raw`, no cost), *Import* (an externally finished image,
-    immediately approvable), *Generate* (queue a pipeline job). Detail angles
-    are macro shots — never AI-generated, enforced server-side.
-  - **Backgrounds** (3 Sep) — one background style per design, applied to
-    every AI-processed angle: **Auto** (a deterministic pick from the design's
-    own identity, so all angles and regenerations of one outfit match) or an
-    explicit preset (Studio Grey · Warm Ivory · Champagne · Taupe ·
-    Charcoal), all with catalogue-style floor gradients and a realistic soft
-    contact shadow. Changing the style affects new generations only.
-  - **Detail angles** (3 Sep) — the edit engines (Seedream/OpenAI) may now
-    clean detail-shot backgrounds with a macro-safe prompt (embroidery kept
-    pixel-exact); model swap remains banned on macros.
-  - **Engines** (chips light up when their key is configured):
-    **FASHN** model-swap (garment + pose kept, swapped onto a Drevi brand
-    model; split **submit → poll** so Vercel's function limits never kill a
-    run — `/api/pipeline/run` submits, the workbench polls
-    `/api/pipeline/poll` every 4 s), **Seedream v4** edit via fal.ai
-    (grey-studio background), **OpenAI** image edit (background
-    normalisation; sources are transcoded to PNG at the door since the edits
-    endpoint rejects JPEG). Cost estimates are shown on the buttons.
+    immediately approvable), *Generate* (queue a pipeline job). All six
+    angles behave alike since 19 Sep, close-ups included — the old macro
+    carve-out is gone (see **Detail angles** below).
+  - **Backgrounds** (19 Sep) — one look per design, in **three modes**. The
+    3-Sep model was five *prose* presets; a 26-render bench killed it — the
+    same sentence painted a different wall every run, and "premium ecom"
+    prose talked the model into re-lighting the garment. What holds is
+    either saying almost nothing, or **showing** the backdrop:
+    - **Minimal — white** (recommended, and the default): prompt only, the
+      shortest prompt won the bench outright.
+    - **Studio grey**: prompt only, the 3-Sep wording kept verbatim so
+      anything approved under it can still be reproduced.
+    - **Coloured**: the backdrop travels to the model as a **second image**,
+      not as words. Five Kalki-derived plates — ivory · sand · stone ·
+      blush · midnight — plus **Auto**, a deterministic pick from the
+      design's own identity so every angle and every regeneration of one
+      outfit land on the same wall. Each chip carries a colour dot
+      **sampled from the plate file itself** (20 Sep), so what the operator
+      picks by eye cannot drift from what the model is handed.
+
+    Changing the style affects new generations only; images already in
+    production stay as they are.
+  - **Detail angles** (19 Sep) — treated exactly like the other four:
+    same engine chips, same Generate button, same plate. The earlier
+    carve-out existed because one bench render handed a macro crop a
+    full-length cyclorama and got back a re-invented full-length photo —
+    but that run also went through a fixed 2K output size, since replaced by
+    the source's own dimensions, so the framing pressure that caused it is
+    gone. Model swap remains banned on macros.
+  - **Engines** (chips light up when their key is configured), with a live
+    per-image cost estimate on the Generate button:
+
+    | Engine | What it is | ~ per image |
+    |---|---|---|
+    | **Seedream v5 Pro** | fal.ai edit, `bytedance/seedream/v5/pro/edit` | $0.0675 ≤1536², $0.135 above |
+    | **Nano Banana 2** | fal.ai edit, `fal-ai/nano-banana-2/edit` | $0.08 @1K, $0.12 @2K |
+    | **OpenAI** | image edit; sources transcoded to PNG at the door, since the edits endpoint rejects JPEG | ~$0.22 |
+    | **Matte** | not generative — BiRefNet cuts the garment out, then the portal composites it onto a drawn ground with a real contact shadow. Cannot invent handwork, because no model ever sees a garment pixel | ~$0.002 |
+
+    **FASHN** (model swap) and **raw** are retired (19 Sep) and no longer
+    offered; angles still carrying them render a struck-through chip and no
+    Generate button. Retired-engine history is preserved, not rewritten.
+    A lesson worth keeping: five rounds of prompt engineering never stopped
+    one model inventing handwork that was not on the garment — swapping the
+    engine fixed it first try, on every candidate.
+  - **Job control** (20 Sep) — a job that goes in flight and stays there hides
+    the angle's Generate button, so nothing else can touch that image. Jobs
+    are now **auto-killed** past a per-type budget (5 min for the in-process
+    engines, whose Vercel request is capped at 60 s; 15 for fashn, which is
+    submitted and polled; 30 for a Drive scan), measured from
+    `started_at ?? created_at` so a job that never *started* is caught too.
+    The sweep runs when the studio is read, not only when Generate is
+    pressed — that was the trap, since the stuck angle hid the very button
+    that would have cleared it. **Reject** kills one by hand immediately,
+    and rejecting a candidate frees its angle at the same time.
   - **Brand models** — the `DREVI_BRAND_MODEL_FOLDER_ID` Drive folder holds
     one subfolder per model (Model-a, Model-b, …); a per-design **Model**
     selector stores `designs.brand_model`, defaulting to the env's pick.
@@ -182,7 +235,18 @@ default".
     production image (moved to the folder's `_archive/`, row marked).
   - **Crop / Rotate** — an in-workbench crop sheet (drag-crop + 90° rotate)
     that saves a derived image (`role: crop`, `derived_from` set) ready for
-    review — no round-trip through a photo editor.
+    review — no round-trip through a photo editor. Presets **4:5 · model**,
+    **9:16 · storefront** (20 Sep — the storefront's own ratio, since Drevi
+    product photos are 675×1200, so a crop drops into the theme's media
+    boxes without letterboxing), **1:1 · shopping** and Free. Output is
+    1200 px wide by construction, so a 9:16 crop saves at 1200×2133. The
+    frame is white because the saved file's padding is white.
+  - **Downloads** (20 Sep) — every image in the Studio saves locally: the
+    source, the production image, every candidate in the history strip, both
+    compare panes and the picker pool. The filename is resolved server-side
+    from the database — `DD-LEH-FLR-115-GRN-front-production.heic` — never
+    from a caller-supplied string, and candidates carry their engine and an
+    IST timestamp so three attempts on one angle do not collide.
   - **Sync Drive** — registers photos dropped **directly into the design's
     wholesale_photos folder** (they don't pass through the portal, so the
     database doesn't know them) as picker options. The picker pool = every
@@ -197,13 +261,54 @@ default".
     editable inline; edits after approval revert status to draft and flip
     live portals to `changes_pending`.
   - **Destination strip** — the same gate functions the pushes use, showing
-    per-portal (wholesale / Shopify) blockers truthfully. Pushes create
-    DRAFT products while `SHOPIFY_ENABLED` is off.
+    per-portal (wholesale / Shopify) blockers truthfully.
+
+    **Shopify push** (19–20 Sep, live). One `productSet` call — a FULL sync
+    of what it sends — carrying the retail MRP (never the trade price),
+    inventory tracked and synced at the single location, **SKU and barcode
+    both holding the complete Drevi SKU** (size and colour included, so a
+    shop scanner reads it), and five metafields in full words rather than
+    codes: Handwork · Fabric · Sub-Category · Category · Origin.
+    `status` is sent **on create only**, so a product moved to Active — or
+    hidden after a sale — is never dragged back by a later price sync.
+    Media rides `productSet.files` and is skipped entirely when a
+    fingerprint metafield shows the image set is unchanged.
+
+    **Offered sizes follow `origin`** (20 Sep). What the portal *stocks* and
+    what the shop *sells* are not the same list: every garment carries enough
+    margin that the piece hanging as an L is alterable, and a Drevi Original
+    can be made to any size, so leaving sizes off only costs the customer
+    options once they filter.
+
+    | Origin | Sizes offered | Price |
+    |---|---|---|
+    | Curated Collection | M · L · XL | retail, flat |
+    | Drevi Originals | XXS · XS · S · M · L · XL · XXL · 3XL · Other | M/L/XL at retail; XXS–S +10%; XXL/3XL +20%; Other +30% |
+    | *(unset)* | exactly the sizes the portal holds | retail, flat |
+
+    Derived sizes land on a ₹…99 point (`to99` — nearest hundred minus one,
+    the same helper as the auto-MRP); the base sizes are **not** rounded,
+    because quietly moving a number a human typed is not this code's
+    business. One physical garment backs every offered size, so they share
+    its stock — Shopify will let several people buy it, which is the
+    accepted trade for listing an alterable piece in every size (owner,
+    20 Sep: "if any sale is made, I'll just hide the outfit").
+
+    **Tags** come from the copy's tag object. An `occasion` written either
+    "Reception, Sangeet, Cocktail" *or* "Sangeet and Reception" is split into
+    real tags (20 Sep) — 26 of 180 copy rows used the second form, which
+    became one tag matching no collection rule, and because the push is a
+    full sync it would have deleted the tags added by hand to compensate.
+    `silhouette` and `fabric` are never split: their "and" is descriptive
+    ("Net with Sequin and Cutdana Embroidery"), not a list.
 - **Product Master** (`/admin/studio/master/[designId]`) — **the** product
   page in the Studio (12 Sep: one page, not two). Specs (fabric, handwork,
   origin, **Colour** — the name a customer would say, which feeds the AI copy
   and photo prompts) with the **"Confirmed by Rakesh"** flag that unlocks copy;
-  **both prices together** — last ex-GST cost from receipts → tier multiplier →
+  **both prices together** — last ex-GST cost from receipts (**editable here**
+  since 20 Sep: Ayushi often does not know the price when the delivery is
+  logged, so the figure both autos stand on can be typed in afterwards, and it
+  is locked against the sheet sync once it is) → tier multiplier →
   auto-MRP ₹…99 with override (retail), and the buyer-facing **Wholesale price
   (all sizes)** beside it, written to every size SKU with the sheet-sync lock
   (₹0 is refused; sizes priced differently are listed rather than silently
@@ -288,7 +393,11 @@ default".
     18%**, **included in prices or added on top** — then per garment:
     (re-sequenced 11 Sep, in dependency order) identify — scan an existing
     tag, search, **or** describe a new design (category → sub-category →
-    **searchable colour dropdown**) → pick the **sizes received** and a name
+    **searchable colour dropdown**), **or add a new colour of a design that
+    already exists** (19 Sep — the SKU generator could always do this, but
+    once minting moved here that capability was lost; the new colour inherits
+    the base design's category, sub-category and name *verbatim*, and joins
+    the same design group) → pick the **sizes received** and a name
     → **Mint SKU** (or "Prepare N tags" / "Mint N more" for a reorder) →
     ident photo (two equal **Open camera / Choose from gallery** tiles,
     disabled until the SKU exists because the file is named after it; stored
@@ -368,6 +477,15 @@ default".
   upload/replace photos, hide/show, rename SKUs. Any manually edited field is
   **locked** against the sheet sync until unlocked; renamed SKUs join an
   ignore list so the old sheet row can't resurrect.
+
+  **Catalog visibility.** A SKU minted by Log delivery starts
+  `wholesale_visible = false`, and locked that way on purpose, so a
+  half-finished garment never reaches a buyer. **Push wholesale** now sets and
+  locks that flag (20 Sep) — before, it wrote images, description and
+  `state = 'live'` but never the flag `/catalog` actually filters on, so a
+  fully priced, fully photographed design could be "live" in the Studio and
+  invisible to every buyer. The fix does not backfill: a design pushed before
+  20 Sep needs one re-push, or the toggle here.
 
 ### Stock ledger
 
@@ -558,7 +676,7 @@ required vars. Highlights:
 | `FAL_KEY` / `DREVI_SEEDREAM_SIZE` / `DREVI_SEEDREAM_SAFETY` | Seedream via fal.ai |
 | `OPENAI_API_KEY` / `OPENAI_IMAGE_MODEL` / `OPENAI_IMAGE_QUALITY` | OpenAI image edit |
 | `RECEIPT_INTAKE_V2` | Enables the delivery-intake capture flow |
-| `SHOPIFY_ENABLED` / `SHOPIFY_STORE_DOMAIN` | Shopify push (drafts while off) |
+| `SHOPIFY_ENABLED` / `SHOPIFY_STORE_DOMAIN` | Shopify push. **Both portal environments point at the same single store**, so a push from dev creates a real product — there is no sandbox to hide behind |
 | `CRON_SECRET` | Bearer token for `/api/cron/*` |
 | `INTERAKT_API_KEY` | WhatsApp sends (degrades gracefully without it) |
 | `SUPABASE_ACCESS_TOKEN` | Management API token — only for `npm run db:migrate` |
