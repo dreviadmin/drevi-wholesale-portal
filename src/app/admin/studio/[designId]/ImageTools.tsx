@@ -226,7 +226,17 @@ export function CropSheet({
             maxWidth: preset.ratio ? `calc(62vh * ${preset.ratio})` : undefined,
             margin: "0 auto",
             aspectRatio: preset.ratio ? String(preset.ratio) : "4/5",
-            background: "#111", position: "relative", cursor: "grab",
+            // White, not #111 — apply() fills the canvas white before it draws,
+            // so a dark frame showed BLACK bars for padding that saves out
+            // WHITE. Barely visible at 4:5; at 9:16 a 4:5 source letterboxes
+            // hard, and a correct crop looked broken. The border is what keeps
+            // a white frame legible against the ivory sheet.
+            // The outline is a box-shadow, NOT a border: apply() measures this
+            // element with getBoundingClientRect, which counts a border, while
+            // the <img> sizes to the content box. A 1px border would put a
+            // ~0.6% scale error between what the frame shows and what is drawn.
+            background: "#ffffff", boxShadow: "0 0 0 1px rgba(26,26,26,0.18)",
+            position: "relative", cursor: "grab",
           }}
           onPointerDown={onDown}
           onPointerMove={onMove}
