@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 
 // Retrofit R3 — "Log delivery" behind RECEIPT_INTAKE_V2. The previous receipt
 // form stays reachable and unchanged until the flag flips (§0.4, §5.1).
-export default async function NewReceiptPage({ searchParams }: { searchParams: { sku?: string } }) {
+export default async function NewReceiptPage({ searchParams }: { searchParams: { sku?: string; design?: string } }) {
   await requireAdminOrRedirect();
   const admin = createAdminClient();
   warnIfUnconfigured();
@@ -98,6 +98,7 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: {
           hsnOptions={await listKnownHsnCodes()}
           vocab={await loadVocab()}
           staleDays={supplyStaleDays()}
+          prefillDesignId={searchParams.design?.trim() || undefined}
         />
       </div>
     </div>

@@ -81,9 +81,12 @@ export function DeliveryIntake({
   staleDays,
   hsnOptions,
   vocab,
+  prefillDesignId,
 }: {
   vendors: Vendor[];
   knownDesigns: KnownDesign[];
+  /** ?design=<id> — open the garment sheet already identified as this design. */
+  prefillDesignId?: string;
   uploadsOk: boolean;
   uploadsMessage: string;
   staleDays: number;
@@ -116,6 +119,28 @@ export function DeliveryIntake({
   const [sheet, setSheet, sheetMeta] = useDraft<Garment | null>(SHEET_DRAFT_KEY, null, {
     hasContent: (g) => !!g && (!!g.designId || !!g.baseSku || !!g.cat || !!g.variantBase || !!g.newColor || g.sizes.length > 0 || !!g.description || !!g.unitCost || !!g.vendorSku),
   });
+  // Arriving from a design that has no sizes yet (Product Master → "Log the
+  // delivery"). The garment sheet opens already identified, so the operator
+  // does not have to search for the design they just came from. Only when no
+  // sheet is already open — a restored half-captured garment always wins, and
+  // this must never fire twice.
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (prefilled.current || !prefillDesignId || sheet) return;
+    const d = knownDesigns.find((k) => k.id === prefillDesignId);
+    if (!d) return;
+    prefilled.current = true;
+    const stale = !d.supplyUpdatedAt || Date.now() - new Date(d.supplyUpdatedAt).getTime() > staleDays * 24 * 60 * 60 * 1000;
+    setSheet({
+      ...emptyGarment(),
+      designId: d.id, baseSku: d.baseSku, color: d.color, title: d.title ?? "",
+      description: d.title ?? "", vendorSku: d.vendorSku ?? "",
+      unitCost: d.lastCost ? String(d.lastCost) : "",
+      identRef: d.identRef, supply: { ...d.supply }, isReorder: true, supplyStale: stale,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillDesignId, knownDesigns]);
+
   const [toast, setToast] = useState<string | null>(null);
   // Save-only success step (§6.1): the form is replaced by a panel that points
   // at the master editor / specs for each design on the receipt.

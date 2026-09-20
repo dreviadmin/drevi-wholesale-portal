@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 import { formatINR } from "@/lib/format";
 import { reconcile } from "@/lib/stock-ledger";
 
@@ -149,6 +150,38 @@ export async function computeAttention(): Promise<AttentionItem[]> {
         href: "/admin/studio?state=awaiting_specs",
       });
     }
+    // A design with NO size SKU at all (20 Sep). Log delivery writes the
+    // designs row the moment a garment is identified, but the sizes are only
+    // minted when the delivery is SAVED — abandon it halfway and the garment
+    // exists in the Studio, cannot be priced (cost and wholesale price are
+    // stored per size SKU) and cannot be published. Nothing surfaced them
+    // before: they were found only by opening one and noticing the cost box
+    // was dead. Naming them here is the point — the fix is to log that
+    // garment's delivery, and the operator needs to know WHICH.
+    try {
+      const [designRows, productRows] = await Promise.all([
+        fetchAll<{ base_sku: string; color: string }>(admin, "designs", "base_sku, color"),
+        fetchAll<{ sku: string }>(admin, "wholesale_products", "sku"),
+      ]);
+      const skus = productRows.map((r) => String(r.sku).toUpperCase());
+      const sizeless = designRows.filter((d) => {
+        const prefix = `${String(d.base_sku).toUpperCase()}-`;
+        const suffix = `-${String(d.color).toUpperCase()}`;
+        return !skus.some((sku) => sku.startsWith(prefix) && sku.endsWith(suffix));
+      });
+      if (sizeless.length > 0) {
+        const named = sizeless.slice(0, 4).map((d) => `${d.base_sku}·${d.color}`).join(", ");
+        items.push({
+          key: "designs_without_sizes",
+          title: `${sizeless.length} design${sizeless.length === 1 ? "" : "s"} have no sizes yet`,
+          sub: `${named}${sizeless.length > 4 ? `, +${sizeless.length - 4} more` : ""} — log the delivery to mint them`,
+          count: sizeless.length,
+          severity: "medium",
+          href: "/admin/studio",
+        });
+      }
+    } catch { /* a read failure here must not cost the whole inbox */ }
+
     if ((noIdent ?? 0) > 0) {
       items.push({
         key: "designs_no_ident",

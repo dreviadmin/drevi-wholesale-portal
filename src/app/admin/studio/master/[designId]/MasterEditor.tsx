@@ -231,7 +231,7 @@ export function MasterEditor({ board, design, variants, lastCost, lastCostLocked
                   Same wording as the wholesale price below, which already
                   said this. */}
               {variants.length === 0
-                ? <span style={{ color: palette.goldDeep }}>No size variants yet — the cost is stored against each size SKU, so there is nowhere to put it. <Link href={withFrom("/admin/receipts/new", `/admin/studio/master/${board.id}`)} style={{ textDecoration: "underline", color: palette.goldDeep }}>Log the delivery</Link> for this colour and its sizes are minted.</span>
+                ? <span style={{ color: palette.goldDeep }}>No size variants yet — the cost is stored against each size SKU, so there is nowhere to put it. <Link href={withFrom(`/admin/receipts/new?design=${board.id}`, `/admin/studio/master/${board.id}`)} style={{ textDecoration: "underline", color: palette.goldDeep }}>Log the delivery</Link> for this colour and its sizes are minted.</span>
                 : costEntered && costEntered > 0
                 ? <span style={{ color: palette.goldDeep }}>Saving pins this on all {variants.length} size{variants.length === 1 ? "" : "s"} — the sheet sync stops touching it.</span>
                 : costZeroed
