@@ -35,6 +35,13 @@ const fmtAdded = (iso: string) => (iso ? new Date(iso).toLocaleDateString("en-IN
 export function StudioBoard({ rows }: { rows: BoardRow[] }) {
   const router = useRouter();
   const [chip, setChip] = useState<DesignBadge | "all">("all");
+  // Rakesh's confirmation is a SEPARATE axis from the badge, not another chip:
+  // deriveBadge reports "Live" before it looks at specs, so a live design whose
+  // specs were never ticked carries no awaiting_specs badge. Grishma needs the
+  // designs Rakesh has signed off (copy generation is gated on exactly this
+  // flag), and Rakesh needs the ones he has not reached yet — neither list is
+  // a badge. ANDs with the chip and the search box.
+  const [specsFilter, setSpecsFilter] = useState<"any" | "confirmed" | "awaiting">("any");
   const [query, setQuery] = useState("");
   const [scanOpen, setScanOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -49,8 +56,11 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
 
   // Cockpit deep-links land pre-filtered: /admin/studio?state=needs_photos
   useEffect(() => {
-    const s = new URLSearchParams(window.location.search).get("state");
+    const params = new URLSearchParams(window.location.search);
+    const s = params.get("state");
     if (s && (CHIP_ORDER as string[]).includes(s)) setChip(s as DesignBadge);
+    const sp = params.get("specs");
+    if (sp === "confirmed" || sp === "awaiting") setSpecsFilter(sp);
   }, []);
 
   const counts = useMemo(() => {
@@ -59,14 +69,21 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
     return c;
   }, [rows]);
 
+  const specsCounts = useMemo(() => {
+    const confirmed = rows.filter((r) => r.specsVerified).length;
+    return { confirmed, awaiting: rows.length - confirmed };
+  }, [rows]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toUpperCase();
     return rows.filter((r) => {
       if (chip !== "all" && r.badge !== chip) return false;
+      if (specsFilter === "confirmed" && !r.specsVerified) return false;
+      if (specsFilter === "awaiting" && r.specsVerified) return false;
       if (!q) return true;
       return [r.baseSku, r.color, r.title ?? "", r.category ?? ""].some((v) => v.toUpperCase().includes(q));
     });
-  }, [rows, chip, query]);
+  }, [rows, chip, specsFilter, query]);
 
   const { sorted, sort, toggle } = useSort(filtered, {
     sku: (r) => `${r.baseSku}-${r.color}`,
@@ -106,8 +123,16 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
 
   const ids = [...selected];
   const dot = (on: boolean) => (on ? "✓" : "○");
-  // Carry the active chip so the workbench's back link lands on the same filter.
-  const openRow = (id: string) => router.push(withFrom(`/admin/studio/${id}`, chip === "all" ? "/admin/studio" : `/admin/studio?state=${chip}`));
+  // Carry the active filters so the workbench's back link lands on the same
+  // list — Grishma works down her filtered set one design at a time.
+  const boardHref = (() => {
+    const p = new URLSearchParams();
+    if (chip !== "all") p.set("state", chip);
+    if (specsFilter !== "any") p.set("specs", specsFilter);
+    const q = p.toString();
+    return q ? `/admin/studio?${q}` : "/admin/studio";
+  })();
+  const openRow = (id: string) => router.push(withFrom(`/admin/studio/${id}`, boardHref));
 
   const rowCard = (r: BoardRow) => (
     <div key={r.id} className="flex items-center gap-3 p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
@@ -206,6 +231,37 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               }}
             >
               {c === "all" ? "All" : BADGE_LABEL[c]} · {n}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Rakesh's sign-off — a second axis, so it is labelled rather than
+          dropped into the chip row as if it were another badge. Each button
+          toggles off, and the two are mutually exclusive. */}
+      <div className="flex items-center gap-1.5 mt-2 overflow-x-auto no-scrollbar">
+        <span className="font-body uppercase whitespace-nowrap" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.mutedGreige }}>Specs</span>
+        {([
+          { key: "confirmed", label: "Confirmed by Rakesh", n: specsCounts.confirmed },
+          { key: "awaiting", label: "Awaiting Rakesh", n: specsCounts.awaiting },
+        ] as const).map((f) => {
+          const active = specsFilter === f.key;
+          return (
+            <button
+              key={f.key}
+              type="button"
+              aria-pressed={active}
+              onClick={() => setSpecsFilter(active ? "any" : f.key)}
+              className="flex items-center gap-1 font-body uppercase whitespace-nowrap"
+              style={{
+                fontSize: 9.5, letterSpacing: "0.1em", padding: "7px 11px",
+                background: active ? palette.goldDeep : palette.ivory,
+                color: active ? palette.ivory : palette.softBlack,
+                border: `1px solid ${active ? palette.goldDeep : "rgba(26,26,26,0.12)"}`,
+              }}
+            >
+              {f.key === "confirmed" && <Check size={11} />}
+              {f.label} · {f.n}
             </button>
           );
         })}
