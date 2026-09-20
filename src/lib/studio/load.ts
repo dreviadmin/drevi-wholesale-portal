@@ -5,6 +5,7 @@ import { defaultCopyPrompt } from "./copy-prompt";
 import { defaultCopyModel } from "./copy-models";
 import { promptDesignFrom } from "./facts";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sweepStaleJobs } from "@/lib/pipeline/sweep";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { loadVocab } from "@/lib/sku/vocab-live";
 import {
@@ -37,6 +38,11 @@ export interface BoardRow {
 }
 
 export async function loadBoard(): Promise<BoardRow[]> {
+  // Auto-kill, on the read path (Ansh, 20 Sep). The old sweep lived inside
+  // regenAngle, which the Workbench hides while a job is in flight — the only
+  // thing that could free a stuck angle was the button that angle had taken
+  // away. Opening the studio now clears anything that has outlived its budget.
+  await sweepStaleJobs(createAdminClient());
   const admin = createAdminClient();
   const [designs, angles, activeImages, copies, targets, products, notifies] = await Promise.all([
     fetchAll<{ id: string; base_sku: string; color: string; title: string | null; category: string | null; tier: "standard" | "hero"; specs_verified: boolean; created_at: string | null }>(

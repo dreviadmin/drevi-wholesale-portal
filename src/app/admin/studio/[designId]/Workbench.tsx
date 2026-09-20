@@ -16,7 +16,7 @@ import { AI_ANGLES } from "@/lib/studio/state";
 import { JobsTicker } from "../JobsTicker";
 // setBrandModel is deliberately absent: the picker it drove is not rendered
 // while fashn is parked (see the angle card). The action itself still exists.
-import { setBgStyle, setCopyPrompt as setCopyPromptAction, setCopyModel, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, pushWholesale, pushShopify } from "./actions";
+import { setBgStyle, setCopyPrompt as setCopyPromptAction, setCopyModel, setAnglePrompt, setAngleEngine, regenAngle, cancelAngleJob, generateCopy, saveCopyEdit, pushWholesale, pushShopify } from "./actions";
 import { BG_COLOURS, BG_MODE_DEFAULT, BG_MODE_LABEL, BG_MODE_SWATCH, resolveBackground, type BgMode, type BgSwatch } from "@/lib/studio/backgrounds";
 import { uploadSource, importFinished, applyImageDirectly, approveImage, rejectImage, saveCrop, setAngleSource, syncDrivePhotos } from "./image-actions";
 import { ImagePicker, CropSheet, CompareSheet, drivePhotoDownload } from "./ImageTools";
@@ -493,7 +493,22 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               <RefreshCw size={11} /> {current ? "Regen" : "Generate"} · {ENGINE_ESTIMATE[a.engine] ?? ""}
             </button>
           )}
-          {jobFor(a.id) && <span className="flex items-center gap-1 font-body" style={{ fontSize: 9.5, color: palette.goldDeep }}><Loader2 size={11} className="animate-spin" /> job in flight</span>}
+          {jobFor(a.id) && (
+            <>
+              <span className="flex items-center gap-1 font-body" style={{ fontSize: 9.5, color: palette.goldDeep }}><Loader2 size={11} className="animate-spin" /> job in flight</span>
+              {/* The manual kill — but ONLY when the candidate Reject above is
+                  absent, so a card never shows two buttons both saying Reject.
+                  With a candidate present that one already does this: since
+                  20 Sep rejectImage cancels its angle's in-flight jobs too. So
+                  there is always exactly one Reject, and it always frees the
+                  angle. A job that is plainly dead should not cost the operator
+                  a five-minute wait for the sweep, and while it sits here
+                  Generate is hidden — without this the angle has no way out. */}
+              {!current && <button type="button" disabled={pending} onClick={() => run(() => cancelAngleJob(a.id), "Job cancelled")} className="flex items-center gap-1 font-body uppercase disabled:opacity-40" style={{ fontSize: 8.5, letterSpacing: "0.1em", border: "1px solid #9C3A31", color: "#9C3A31", padding: "7px 10px" }} title="Stop this job and free the angle">
+                <XIcon size={11} /> Reject
+              </button>}
+            </>
+          )}
         </div>
 
         {/* D1 history */}

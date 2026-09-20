@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { cancelJobsForAngle } from "@/lib/pipeline/sweep";
 import { writeAuditEvent } from "@/lib/audit";
 import { DETAIL_ANGLES } from "@/lib/studio/state";
 import { storeDesignImage, archiveImageFile, isStorageRef } from "@/lib/design-image-store";
@@ -199,6 +200,11 @@ export async function rejectImage(imageId: string): Promise<Res> {
     : { data: null };
 
   await admin.from("design_images").update({ status: "rejected" }).eq("id", imageId);
+  // Reject frees the angle as well as the image (Ansh, 20 Sep). If a job is
+  // still in flight here it is one the operator has just decided against — and
+  // while it sits there the Workbench hides Generate, so rejecting without
+  // this would leave the angle unable to try anything else.
+  if (img.angle_id) await cancelJobsForAngle(admin, img.angle_id, staff.email);
   if (angle?.approved_image_id === imageId) {
     await admin.from("design_angles").update({ approved_image_id: null }).eq("id", angle.id);
     await flipLive(angle.design_id);
