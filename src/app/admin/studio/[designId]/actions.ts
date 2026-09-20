@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sweepStaleJobs, cancelJobsForAngle } from "@/lib/pipeline/sweep";
 import { writeAuditEvent } from "@/lib/audit";
 import { defaultAnglePrompt } from "@/lib/studio/prompts";
 import { promptDesignFrom } from "@/lib/studio/facts";
@@ -184,6 +185,31 @@ export async function setAngleEngine(angleId: string, engine: EngineKind | "raw"
 
 // Regen = one pipeline job for this angle's engine. Prompt respect (§8.2):
 // a human-edited prompt is never regenerated over unless params.force.
+/**
+ * Manual kill (Ansh, 20 Sep: "enable manual kill when 'Reject' is pressed").
+ *
+ * The auto-sweep frees an angle after its budget, but an operator watching a
+ * job that is plainly dead should not have to wait out a five-minute timer.
+ * Marked 'cancelled', not 'error', so the ticker can say a person stopped it.
+ */
+export async function cancelAngleJob(angleId: string): Promise<Res> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
+  const admin = createAdminClient();
+  const { data: angle } = await admin.from("design_angles").select("id, design_id").eq("id", angleId).maybeSingle();
+  if (!angle) return fail("Angle not found");
+  // No writeAuditEvent: audit_event_type is a Postgres ENUM (0001), so a new
+  // value would need a migration applied to both databases BEFORE this deploys
+  // — real coupling for an operational tidy-up. The job row is the better
+  // record anyway: cancelJobsForAngle stamps it "Cancelled by <email>" with a
+  // finished_at, which is who and when, on the thing that was cancelled.
+  const { cancelled } = await cancelJobsForAngle(admin, angleId, staff.email);
+  if (!cancelled) return fail("Nothing in flight on this angle");
+  revalidatePath(`/admin/studio/${angle.design_id}`);
+  revalidatePath("/admin/studio");
+  return { ok: true };
+}
+
 export async function regenAngle(angleId: string): Promise<Res & { jobId?: string }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
@@ -256,13 +282,13 @@ export async function regenAngle(angleId: string): Promise<Res & { jobId?: strin
   // changed mid-flight must not change what the running job renders.
   const bgMode = bg.mode;
 
-  // A server death mid-generation would strand the job in running forever
-  // and permanently hide the Generate button — sweep anything older than 15m.
-  await admin
-    .from("pipeline_jobs")
-    .update({ status: "error", log: "Timed out — the in-process run never finished (server restarted?)", finished_at: new Date().toISOString() })
-    .in("status", ["claimed", "running"])
-    .lt("started_at", new Date(Date.now() - 15 * 60_000).toISOString());
+  // A server death mid-generation strands the job and hides Generate. The
+  // sweep now lives in sweepStaleJobs and also runs on the studio's read paths
+  // — this call used to be the ONLY one, which was the bug: the Workbench hides
+  // Generate while a job is in flight, so the stuck angle withheld the very
+  // button that would have cleared it. Kept here too because clearing the
+  // decks immediately before queueing is still the right moment.
+  await sweepStaleJobs(admin);
 
   const dispatchConfigured = !!(process.env.GITHUB_PAT && process.env.GITHUB_RUNNER_REPO);
   const { data: job, error } = await admin
