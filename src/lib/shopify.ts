@@ -9,6 +9,7 @@ import { loadVocab } from "@/lib/sku/vocab-live";
 import { SIZES } from "@/lib/sku/vocab";
 import { originLabel } from "@/lib/studio/copy-prompt";
 import { to99 } from "@/lib/pricing";
+import { shopifyTagsFrom } from "@/lib/shopify-tags";
 import { loadDesignDetail } from "./studio/load";
 import { colorNameFor, describeDesignFacts } from "./studio/facts";
 import { ALL_ANGLES } from "./studio/state";
@@ -272,7 +273,7 @@ export async function publishShopify(designId: string, staffId: string, staffEma
     // Fallback title names the colour (Gold, not GLD).
     const title = copy?.title || board.title || `${board.baseSku} ${colorNameFor(board.color, vocab) ?? board.color}`;
     const descriptionHtml = copy?.description ? `<p>${copy.description}</p>` : "";
-    const tags = copy?.tags ? Object.values(copy.tags).filter(Boolean) : [];
+    const tags = shopifyTagsFrom(copy?.tags);
 
     const { data: existing } = await admin
       .from("publish_targets")
