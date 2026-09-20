@@ -183,3 +183,70 @@ terminal orders are history and stay untouched.
   only) beats the fallback, and multi-parent links pass `withFrom()`. No
   `history.back()` / referrer / nav-history module — `from` alone fixes every
   known entry point deterministically.
+
+### 19–20 Sep — imagery engines, backgrounds, Shopify sizes, job control
+
+- **19 Sep · FASHN and `raw` retired.** Neither earned its cost: the model
+  swap was parked and `raw` only ever meant "use this image as-is", which
+  *Use directly* already does without pretending an engine ran. Angles still
+  carrying a retired engine render a struck-through chip and no Generate
+  button — history is preserved, not rewritten. Migration 0054 swept the 42
+  rows that had drifted back to `raw` after 0053.
+- **20 Sep · Seedream v5 Pro, Nano Banana 2 and Matte replace Seedream v4.**
+  Matte is the notable one: it is *not* generative. BiRefNet returns an alpha
+  cutout and the portal composites the ORIGINAL pixels onto a drawn ground
+  with a real contact shadow, so it cannot invent handwork — at ~$0.002 an
+  image against $0.07–$0.22. The lesson recorded alongside it: five rounds of
+  prompt engineering never stopped one model inventing embroidery; changing
+  the engine fixed it first try, on every candidate. Prompt-engineer second,
+  change the engine first.
+- **19 Sep · Backgrounds are shown, not described.** The 3-Sep five-prose-
+  preset model lost a 26-render bench — the same sentence painted a different
+  wall every run, and "premium ecom" prose talked the model into re-lighting
+  the garment. Replaced by three modes: minimal (white, prompt only, the
+  recommended default), studio grey (prompt only, wording kept verbatim so
+  earlier approvals reproduce), and coloured, which sends the backdrop as a
+  SECOND IMAGE — five Kalki-derived plates plus a deterministic Auto. Deriving
+  plate colour from photographs failed (the engine neutralises it); the plates
+  are one clean luminance map recoloured to five sampled values.
+- **19 Sep · Detail close-ups are ordinary angles.** The macro carve-out was
+  compensating for a fixed 2K output size, not for the crop: after output
+  moved to the source's own dimensions, the same test held its framing. All
+  six angles now share chips, Generate and plate. Model swap stays banned on
+  macros (D5).
+- **20 Sep · Shopify offered sizes follow `origin`.** What the portal stocks
+  and what the shop sells are different lists — every garment is alterable and
+  a Drevi Original can be made to measure, so withholding sizes only costs the
+  customer options after filtering. Curated: M/L/XL flat. Originals: XXS→3XL
+  plus Other, at +10% / +20% / +30% over the retail price, each landing on a
+  ₹…99 point via the existing `to99`. Base sizes are never rounded — quietly
+  moving a number a human typed is not the code's business. One garment backs
+  all nine variants, so Shopify can oversell; accepted at this scale, with
+  "hide the outfit" as the remedy, which works only because `status` is sent
+  on create and never on update.
+- **20 Sep · An occasion tag is a list however it was punctuated.** 26 of 180
+  copy rows wrote "Sangeet and Reception" where 45 wrote "Reception, Sangeet".
+  Shopify splits the comma, so the first form became one tag matching no
+  collection rule — and since `productSet` is a full sync, pushing one would
+  delete the tags added by hand to compensate. Both separators now split.
+  `silhouette` and `fabric` are deliberately NOT split: their "and" is
+  descriptive ("Net with Sequin and Cutdana Embroidery"), and splitting would
+  invent tags for garment parts nobody filters on.
+- **20 Sep · Push wholesale actually publishes.** It wrote images, description
+  and `state='live'` but never `wholesale_visible`, the column `/catalog`
+  filters on — so a fully priced, fully photographed design was live in the
+  Studio and invisible to buyers. The flag is now set and locked on push. It
+  does not backfill.
+- **20 Sep · Stuck jobs are killed on a budget, and by hand.** Two faults made
+  a stuck job permanent: the sweep required `started_at`, so a job that never
+  started was immortal (prod and dev held four, the oldest 49 days); and it
+  ran only inside `regenAngle`, whose button the stuck angle had already
+  hidden. Age is now `started_at ?? created_at`, budgets are per type (5 min
+  in-process — their Vercel request dies at 60 s; 15 fashn; 30 Drive scan),
+  and the sweep runs on the studio's READ paths. Reject kills one outright.
+  No audit event: `audit_event_type` is a Postgres enum and a new value would
+  have to reach both databases before the deploy — the job row's
+  "Cancelled by <email>" plus `finished_at` is the better record anyway.
+- **20 Sep · Overselling and the 62 untagged SKUs** (owner): both accepted at
+  current scale — a sale means hiding the outfit, and Ayushi is checking
+  garment tags physically rather than the portal guessing.
