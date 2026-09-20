@@ -99,8 +99,13 @@ export function ImagePicker({
   );
 }
 
+// 9:16 is the storefront's own ratio — Drevi product photos are 675x1200 —
+// so a crop taken here drops into the theme's media boxes without the
+// letterboxing a 4:5 leaves behind. Listed after 4:5 rather than first so the
+// default the sheet opens on is unchanged (Ansh, 20 Sep).
 const PRESETS = [
   { key: "4:5", label: "4:5 · model", ratio: 4 / 5 },
+  { key: "9:16", label: "9:16 · storefront", ratio: 9 / 16 },
   { key: "1:1", label: "1:1 · shopping", ratio: 1 },
   { key: "free", label: "Free", ratio: null as number | null },
 ];
@@ -179,7 +184,11 @@ export function CropSheet({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(20,20,20,0.75)" }}>
-      <div className="w-full md:w-[460px] p-4" style={{ background: palette.ivory }}>
+      {/* max-h-modal + scroll, matching every other sheet in the app. This one
+          went without because 4:5 always fit; a 9:16 frame is 1.8x as tall as
+          it is wide and would have pushed Save off a laptop screen with no way
+          to reach it. */}
+      <div className="w-full md:w-[460px] max-h-modal overflow-y-auto p-4" style={{ background: palette.ivory }}>
         <div className="flex items-center justify-between">
           <span className="font-body uppercase flex items-center gap-1.5" style={{ fontSize: 10, letterSpacing: "0.2em", color: palette.softBlack }}>
             <CropIcon size={13} /> Crop &amp; rotate
@@ -205,7 +214,20 @@ export function CropSheet({
         <div
           ref={boxRef}
           className="mt-3 overflow-hidden touch-none select-none"
-          style={{ width: "100%", aspectRatio: preset.ratio ? String(preset.ratio) : "4/5", background: "#111", position: "relative", cursor: "grab" }}
+          style={{
+            width: "100%",
+            // Budget the frame by HEIGHT and let the ratio set the width. The
+            // obvious maxHeight would fight `width: 100%` and the browser drops
+            // aspect-ratio when both axes are pinned — the frame would stop
+            // being 9:16 and apply() reads the frame, so the saved crop would
+            // be the wrong shape. On a normal desktop this changes nothing:
+            // 4:5 only starts shrinking below a ~1000px viewport, where it
+            // would have overflowed anyway.
+            maxWidth: preset.ratio ? `calc(62vh * ${preset.ratio})` : undefined,
+            margin: "0 auto",
+            aspectRatio: preset.ratio ? String(preset.ratio) : "4/5",
+            background: "#111", position: "relative", cursor: "grab",
+          }}
           onPointerDown={onDown}
           onPointerMove={onMove}
           onPointerUp={onUp}
