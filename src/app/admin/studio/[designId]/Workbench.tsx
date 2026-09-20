@@ -17,7 +17,7 @@ import { JobsTicker } from "../JobsTicker";
 // setBrandModel is deliberately absent: the picker it drove is not rendered
 // while fashn is parked (see the angle card). The action itself still exists.
 import { setBgStyle, setCopyPrompt as setCopyPromptAction, setCopyModel, setAnglePrompt, setAngleEngine, regenAngle, generateCopy, saveCopyEdit, pushWholesale, pushShopify } from "./actions";
-import { BG_COLOURS, BG_MODE_DEFAULT, BG_MODE_LABEL, resolveBackground, type BgMode } from "@/lib/studio/backgrounds";
+import { BG_COLOURS, BG_MODE_DEFAULT, BG_MODE_LABEL, BG_MODE_SWATCH, resolveBackground, type BgMode, type BgSwatch } from "@/lib/studio/backgrounds";
 import { uploadSource, importFinished, applyImageDirectly, approveImage, rejectImage, saveCrop, setAngleSource, syncDrivePhotos } from "./image-actions";
 import { ImagePicker, CropSheet, CompareSheet, drivePhotoDownload } from "./ImageTools";
 
@@ -270,6 +270,20 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
   // The design's background, with 'auto' already resolved — drives which mode
   // button reads as active and whether the plate row is shown at all.
   const bg = resolveBackground(bgStyle, bgSeed);
+
+  // Wall over floor with a hard stop, not a blur: the dot reads as a backdrop
+  // with a horizon rather than a paint chip. The ring is what keeps the white
+  // one visible, and it flips light on a lit chip so it survives both grounds.
+  const swatchDot = (sw: BgSwatch, active: boolean) => (
+    <span
+      aria-hidden
+      style={{
+        width: 11, height: 11, borderRadius: "50%", flexShrink: 0, display: "inline-block",
+        background: `linear-gradient(to bottom, ${sw.wall} 62%, ${sw.floor} 62%)`,
+        border: `1px solid ${active ? "rgba(250,246,240,0.65)" : "rgba(26,26,26,0.25)"}`,
+      }}
+    />
+  );
 
   const chipStyle = (active: boolean, disabled = false) => ({
     fontSize: 8.5, letterSpacing: "0.1em", padding: "5px 8px",
@@ -625,10 +639,13 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               // and re-roll the backdrop. The pick lives one row down.
               disabled={pending || bg.mode === m}
               onClick={() => run(() => setBgStyle(board.id, BG_MODE_DEFAULT[m]), `Background → ${BG_MODE_LABEL[m]}`)}
-              className="font-body uppercase"
+              className="flex items-center gap-1.5 font-body uppercase"
               title={BG_CAPTION[m]}
               style={chipStyle(bg.mode === m)}
             >
+              {/* Coloured has no colour of its own until one is resolved, so
+                  its dot shows the plate this design would actually get. */}
+              {swatchDot(BG_MODE_SWATCH[m] ?? resolveBackground(bgStyle === "minimal" || bgStyle === "grey" ? "auto" : bgStyle, bgSeed).swatch, bg.mode === m)}
               {/* "rec" rather than "recommended": the chip row already wraps
                   at this size, and the tooltip and caption both spell it out. */}
               {BG_MODE_LABEL[m]}{m === "minimal" ? " · rec" : ""}
@@ -639,11 +656,13 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
         {/* Coloured only: Auto (deterministic) + the five plates. */}
         {bg.mode === "coloured" && (
           <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
-            <button type="button" disabled={pending} onClick={() => run(() => setBgStyle(board.id, "auto"), "Background → auto")} className="font-body uppercase" style={chipStyle(bgStyle === "auto")}>
+            <button type="button" disabled={pending} onClick={() => run(() => setBgStyle(board.id, "auto"), "Background → auto")} className="flex items-center gap-1.5 font-body uppercase" style={chipStyle(bgStyle === "auto")}>
+              {swatchDot(resolveBackground("auto", bgSeed).swatch, bgStyle === "auto")}
               Auto · {resolveBackground("auto", bgSeed).label}
             </button>
             {BG_COLOURS.map((c) => (
-              <button key={c.key} type="button" disabled={pending} onClick={() => run(() => setBgStyle(board.id, c.key), `Background → ${c.label}`)} className="font-body uppercase" style={chipStyle(bgStyle === c.key)}>
+              <button key={c.key} type="button" disabled={pending} onClick={() => run(() => setBgStyle(board.id, c.key), `Background → ${c.label}`)} className="flex items-center gap-1.5 font-body uppercase" style={chipStyle(bgStyle === c.key)}>
+                {swatchDot(c.swatch, bgStyle === c.key)}
                 {c.label}
               </button>
             ))}
@@ -652,7 +671,12 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
 
         <div className="font-body mt-1.5" style={{ fontSize: 9.5, color: palette.mutedGreige, lineHeight: 1.5 }}>
           {BG_CAPTION[bg.mode]}
-          {bg.mode === "coloured" && " Detail close-ups fall back to the white treatment and never get the backdrop image — handed a full-length plate, the model re-invents the shot instead of keeping the macro crop."}
+          {/* The sentence that used to sit here said detail close-ups fall back
+              to white and never receive the plate. That carve-out went on 19 Sep
+              ("They shall be treated exactly like the other 4") and regenAngle
+              has sent them the plate ever since — leaving the claim up would
+              have told Grishma a coloured backdrop cannot reach a close-up. */}
+          {bg.mode === "coloured" && " All six angles get the same plate, close-ups included."}
           {" "}Changing this affects NEW generations; images already in production stay as they are.
         </div>
       </div>

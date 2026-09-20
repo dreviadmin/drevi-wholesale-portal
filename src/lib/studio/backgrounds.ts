@@ -41,10 +41,28 @@ export const AUTO_KEY = "auto";
 /** What a design gets when nobody has chosen — "recommended" in the UI. */
 export const DEFAULT_BG_STYLE: BgStyle = "minimal";
 
+/**
+ * The two colours a backdrop actually shows: the wall behind the model and the
+ * floor she stands on. Rendered as a small dot beside the chip so Grishma can
+ * see which backdrop suits an outfit instead of decoding five nouns
+ * (Ansh, 20 Sep).
+ */
+export interface BgSwatch {
+  wall: string;
+  floor: string;
+}
+
 export interface BgColour {
   key: BgColourKey;
   /** UI chip text. */
   label: string;
+  /**
+   * SAMPLED FROM THE PLATE ITSELF (assets/backgrounds/<key>.jpg), not picked
+   * by eye: wall = mean of the 12–38% band, floor = mean of the 88–98% band.
+   * So the dot cannot drift from what the model is actually handed — if a
+   * plate is ever re-cut, re-sample rather than nudging these by hand.
+   */
+  swatch: BgSwatch;
   /**
    * Prose description of this plate. NOT used for the coloured-mode prompt —
    * that one just says "use the attached background" — but needed by the two
@@ -64,26 +82,31 @@ export const BG_COLOURS: readonly BgColour[] = [
   {
     key: "ivory",
     label: "Ivory",
+    swatch: { wall: "#f0e5cb", floor: "#ece1c7" },
     prompt: `seamless warm ivory studio wall meeting a pale stone floor, soft diffused lighting, no props, ${SHADOW}`,
   },
   {
     key: "sand",
     label: "Sand",
+    swatch: { wall: "#d0ab93", floor: "#cca891" },
     prompt: `seamless warm sand-terracotta studio wall meeting a matching sand floor, soft directional lighting, no props, ${SHADOW}`,
   },
   {
     key: "stone",
     label: "Stone",
+    swatch: { wall: "#b2b1b7", floor: "#aeadb3" },
     prompt: `seamless cool grey-blue stone studio wall meeting a polished grey floor, soft even lighting, no props, ${SHADOW}`,
   },
   {
     key: "blush",
     label: "Blush",
+    swatch: { wall: "#d4b1b5", floor: "#d0aeb2" },
     prompt: `seamless soft blush-pink studio wall meeting a pale pink floor, soft diffused lighting, no props, ${SHADOW}`,
   },
   {
     key: "midnight",
     label: "Midnight",
+    swatch: { wall: "#3c3754", floor: "#3b3752" },
     prompt: `seamless deep midnight-indigo studio wall meeting a dark reflective floor, soft rim lighting, no props, ${SHADOW}`,
   },
 ] as const;
@@ -93,6 +116,19 @@ const GREY_PROMPT = `seamless neutral grey studio backdrop, soft even lighting, 
 
 /** Minimal has no plate; this clause exists only for the prose-only paths. */
 const MINIMAL_PROMPT = `seamless pure white studio backdrop, soft even lighting, no props, ${SHADOW}`;
+
+/**
+ * Minimal and grey have NO plate to sample — they are described to the model in
+ * words — so these two are representative rather than measured: white, and the
+ * neutral grey with the slightly darker floor that GREY_PROMPT asks for.
+ */
+export const BG_MODE_SWATCH: Record<BgMode, BgSwatch | null> = {
+  minimal: { wall: "#ffffff", floor: "#f4f2ee" },
+  grey: { wall: "#c9c9c9", floor: "#bcbcbc" },
+  // Coloured has no single colour of its own — the chip row below it shows the
+  // five, and the resolved one is what the UI dots against Auto.
+  coloured: null,
+};
 
 export const BG_MODE_LABEL: Record<BgMode, string> = {
   minimal: "Minimal · white",
@@ -141,6 +177,8 @@ export interface ResolvedBackground {
   platePath: string | null;
   /** Prose clause — see BgColour.prompt for why a plate still carries words. */
   prompt: string;
+  /** Wall/floor colours for the UI dot — the plate's own in coloured mode. */
+  swatch: BgSwatch;
 }
 
 /** Small stable string hash (djb2) — no Math.random, same input same output. */
@@ -166,10 +204,10 @@ export function resolveBackground(
   const stored: BgStyle = isBgStyle(raw) ? raw : DEFAULT_BG_STYLE;
 
   if (stored === "minimal") {
-    return { stored, mode: "minimal", colourKey: null, label: "Minimal — white", platePath: null, prompt: MINIMAL_PROMPT };
+    return { stored, mode: "minimal", colourKey: null, label: "Minimal — white", platePath: null, prompt: MINIMAL_PROMPT, swatch: BG_MODE_SWATCH.minimal! };
   }
   if (stored === "grey") {
-    return { stored, mode: "grey", colourKey: null, label: BG_MODE_LABEL.grey, platePath: null, prompt: GREY_PROMPT };
+    return { stored, mode: "grey", colourKey: null, label: BG_MODE_LABEL.grey, platePath: null, prompt: GREY_PROMPT, swatch: BG_MODE_SWATCH.grey! };
   }
 
   const colourKey: BgColourKey =
@@ -182,5 +220,6 @@ export function resolveBackground(
     label: colour.label,
     platePath: platePathFor(colourKey),
     prompt: colour.prompt,
+    swatch: colour.swatch,
   };
 }
