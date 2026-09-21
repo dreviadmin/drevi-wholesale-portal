@@ -138,7 +138,13 @@ export async function loadBoard(): Promise<BoardRow[]> {
       id: d.id,
       baseSku: d.base_sku,
       color: d.color,
-      title: d.title,
+      // The GENERATED name wins once it exists (Ansh, 21 Sep: "the name shown
+      // here in studio is not getting updated even after copy is generated").
+      // designs.title is whatever was typed at Log delivery — "beeds zari and
+      // sequin work" — and the board kept showing that after Opus had written
+      // the real product name. The copy row was already loaded here for
+      // copyPresent; only the board never read it.
+      title: copyRow?.title?.trim() || d.title,
       category: d.category,
       tier: d.tier,
       specsVerified: d.specs_verified,

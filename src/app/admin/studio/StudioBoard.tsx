@@ -285,6 +285,39 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
         })}
       </div>
 
+      {/* Select-all over the FILTERED set, not the whole board (Ansh, 21 Sep:
+          "add a select all option as well so that I don't have to select each
+          manually"). Filtered is the only sane meaning: the point of filtering
+          to Ready is to act on exactly those, and a control that quietly
+          selected all 283 designs behind a filter showing 101 would be a trap
+          in front of buttons that spend money and publish. */}
+      {sorted.length > 0 && (
+        <div className="flex items-center gap-2 mt-2">
+          <button
+            type="button"
+            onClick={() => {
+              const shown = sorted.map((r) => r.id);
+              const allOn = shown.every((id) => selected.has(id));
+              setSelected((prev) => {
+                const next = new Set(prev);
+                for (const id of shown) { if (allOn) next.delete(id); else next.add(id); }
+                return next;
+              });
+            }}
+            className="font-body uppercase"
+            style={{ fontSize: 9, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", padding: "6px 10px" }}
+          >
+            {sorted.every((r) => selected.has(r.id)) ? `Clear these ${sorted.length}` : `Select all ${sorted.length}`}
+          </button>
+          {selected.size > 0 && (
+            <button type="button" onClick={() => setSelected(new Set())} className="font-body uppercase"
+              style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.mutedGreige, background: "transparent", border: "none", padding: "6px 2px" }}>
+              Clear selection ({selected.size})
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Photo count — MULTI-select, so "1/6 and 3/6 at once" works. Every
           count keeps its slot even at zero: a row that reshuffles under the
           thumb is worse than a chip that reads 0. */}

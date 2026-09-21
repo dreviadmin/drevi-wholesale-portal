@@ -212,6 +212,10 @@ export interface OrderBill extends DocumentBuyerSnapshot {
   id: string;
   order_id: string;
   bill_number: string;
+  /** Set when the invoice is cancelled (0060) — the row is kept, never deleted. */
+  cancelled_at?: string | null;
+  cancelled_by?: string | null;
+  cancel_reason?: string | null;
   seq: number;
   items: OrderItem[];
   subtotal: number;
