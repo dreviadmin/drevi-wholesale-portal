@@ -9,6 +9,7 @@ import { useSort, SortTh } from "@/components/sortable";
 import { withFrom } from "@/components/BackLink";
 import { palette } from "@/lib/palette";
 import { useToast } from "@/lib/use-toast";
+import { MISSING_FIELDS, isMissingKey, type MissingKey } from "@/lib/studio/missing";
 import { BatchProgress, type BatchProgressState } from "@/components/admin/BatchProgress";
 import { BADGE_LABEL, type DesignBadge } from "@/lib/studio/state";
 import type { BoardRow } from "@/lib/studio/load";
@@ -55,6 +56,9 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
   // half-shot" — and the sparse counts are not adjacent, so a single pick or a
   // range would both be the wrong shape. Empty set = no filter.
   const [photoCounts, setPhotoCounts] = useState<Set<number>>(new Set());
+  // OR, not AND: the job these serve is a sweep — "show me everything with a
+  // gap in any of these" — not "everything missing all of them at once".
+  const [missingFilter, setMissingFilter] = useState<Set<MissingKey>>(new Set());
   const [query, setQuery] = useState("");
   const [scanOpen, setScanOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -79,6 +83,11 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
     if (s && (CHIP_ORDER as string[]).includes(s)) setChip(s as DesignBadge);
     const sp = params.get("specs");
     if (sp === "confirmed" || sp === "awaiting") setSpecsFilter(sp);
+    const ms = params.get("missing");
+    if (ms) {
+      const picked = ms.split(",").filter(isMissingKey);
+      if (picked.length) setMissingFilter(new Set(picked));
+    }
     const ph = params.get("photos");
     if (ph) {
       const picked = ph.split(",").map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
@@ -97,6 +106,15 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
     return { confirmed, awaiting: rows.length - confirmed };
   }, [rows]);
 
+  // Over every row, not the filtered set — the same rule the state, specs and
+  // photo chips already follow, so the number on a chip is an inventory rather
+  // than a reflection of whatever else is switched on.
+  const missingTotals = useMemo(() => {
+    const c = new Map<MissingKey, number>();
+    for (const r of rows) for (const k of r.missing ?? []) c.set(k, (c.get(k) ?? 0) + 1);
+    return c;
+  }, [rows]);
+
   const photoCountTotals = useMemo(() => {
     const c = new Array(7).fill(0) as number[];
     for (const r of rows) if (r.filledCount >= 0 && r.filledCount <= 6) c[r.filledCount] += 1;
@@ -110,10 +128,11 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
       if (specsFilter === "confirmed" && !r.specsVerified) return false;
       if (specsFilter === "awaiting" && r.specsVerified) return false;
       if (photoCounts.size > 0 && !photoCounts.has(r.filledCount)) return false;
+      if (missingFilter.size > 0 && !(r.missing ?? []).some((k) => missingFilter.has(k))) return false;
       if (!q) return true;
       return [r.baseSku, r.color, r.title ?? "", r.category ?? ""].some((v) => v.toUpperCase().includes(q));
     });
-  }, [rows, chip, specsFilter, photoCounts, query]);
+  }, [rows, chip, specsFilter, photoCounts, missingFilter, query]);
 
   const { sorted, sort, toggle } = useSort(filtered, {
     sku: (r) => `${r.baseSku}-${r.color}`,
@@ -177,6 +196,7 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
     if (chip !== "all") p.set("state", chip);
     if (specsFilter !== "any") p.set("specs", specsFilter);
     if (photoCounts.size > 0) p.set("photos", [...photoCounts].sort((a, b) => a - b).join(","));
+    if (missingFilter.size > 0) p.set("missing", MISSING_FIELDS.filter((f) => missingFilter.has(f.key)).map((f) => f.key).join(","));
     const q = p.toString();
     return q ? `/admin/studio?${q}` : "/admin/studio";
   })();
@@ -385,6 +405,51 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
           </button>
         )}
       </div>
+
+      {/* Missing specs — MULTI-select and OR'd, because the job is a sweep.
+          Origin leads the row: it picks the Shopify size ladder, and without
+          it a design is listed in only the sizes physically in stock — which
+          is how 21 of 103 products reached the store in one size on 21 Sep.
+          A chip at zero is dropped rather than shown greyed: unlike the photo
+          counts, which are a fixed 0..6 scale, this row has no natural order
+          to preserve and a wall of zeroes would bury the gaps that exist. */}
+      {missingTotals.size > 0 && (
+        <div className="flex items-center gap-1.5 mt-2 overflow-x-auto no-scrollbar">
+          <span className="font-body uppercase whitespace-nowrap" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.mutedGreige }}>Missing</span>
+          {MISSING_FIELDS.filter((f) => (missingTotals.get(f.key) ?? 0) > 0).map((f) => {
+            const n = missingTotals.get(f.key) ?? 0;
+            const active = missingFilter.has(f.key);
+            return (
+              <button
+                key={f.key}
+                type="button"
+                aria-pressed={active}
+                onClick={() =>
+                  setMissingFilter((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(f.key)) next.delete(f.key); else next.add(f.key);
+                    return next;
+                  })
+                }
+                className="font-body uppercase whitespace-nowrap"
+                style={{
+                  fontSize: 9.5, letterSpacing: "0.1em", padding: "7px 10px",
+                  background: active ? palette.black : palette.ivory,
+                  color: active ? palette.ivory : palette.softBlack,
+                  border: "1px solid rgba(26,26,26,0.12)",
+                }}
+              >
+                {f.label} · {n}
+              </button>
+            );
+          })}
+          {missingFilter.size > 0 && (
+            <button type="button" onClick={() => setMissingFilter(new Set())} aria-label="Clear missing filter" className="font-body uppercase whitespace-nowrap" style={{ fontSize: 9, letterSpacing: "0.1em", padding: "7px 8px", color: palette.mutedGreige, background: "transparent", border: "none" }}>
+              Clear
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Mobile cards */}
       <div className="md:hidden mt-3 flex flex-col gap-1.5 pb-24">
