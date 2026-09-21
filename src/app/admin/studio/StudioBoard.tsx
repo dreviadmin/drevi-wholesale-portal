@@ -433,10 +433,30 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
         {sorted.length === 0 && <div className="font-body py-8 text-center" style={{ fontSize: 12, color: palette.mutedGreige }}>No designs match.</div>}
       </div>
 
-      {/* Batch bar */}
-      {selected.size > 0 && (
-        <div className="fixed bottom-16 md:bottom-4 inset-x-0 z-40 mx-auto max-w-2xl px-3">
-          <div className="flex items-center gap-2 flex-wrap p-3" style={{ background: palette.black, boxShadow: "0 6px 24px rgba(0,0,0,0.35)" }}>
+      {/* Toast, meter and batch bar are ONE bottom stack. They were three fixed
+          elements with hand-picked offsets, and the offsets were wrong the
+          moment the bar wrapped onto a second row of buttons — the meter
+          covered them. A flex column cannot overlap itself. */}
+      {(selected.size > 0 || progress || toast) && (
+        <div className="fixed bottom-16 md:bottom-4 inset-x-0 z-40 mx-auto max-w-2xl px-3 flex flex-col gap-2 pointer-events-none">
+          {toast && (
+            <button
+              type="button"
+              onClick={dismissToast}
+              className="self-center font-body px-4 py-2 flex items-center gap-2 text-left pointer-events-auto"
+              style={{ background: palette.black, color: palette.ivory, fontSize: 12, maxWidth: "100%" }}
+              aria-live="polite"
+            >
+              <Check size={13} color={palette.gold} /> {toast}
+            </button>
+          )}
+
+          <div className="pointer-events-auto">
+            <BatchProgress state={progress} onDismiss={() => setProgress(null)} onStop={requestStop} />
+          </div>
+
+          {selected.size > 0 && (
+          <div className="flex items-center gap-2 flex-wrap p-3 pointer-events-auto" style={{ background: palette.black, boxShadow: "0 6px 24px rgba(0,0,0,0.35)" }}>
             <span className="font-body" style={{ fontSize: 11, color: palette.champagne }}>{selected.size} selected</span>
             <span className="flex-1" />
             <button type="button" disabled={pending} onClick={() => runBatch(() => setTierBatch(ids, "hero"), "Tier set to hero")} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.black, background: palette.gold, padding: "8px 10px" }}>Set hero</button>
@@ -607,6 +627,7 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               Push SH
             </button>
           </div>
+          )}
         </div>
       )}
 
@@ -673,21 +694,6 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
         </div>
       )}
 
-      {/* Stacked bottom-up: batch bar, meter, toast — so a message never lands
-          on top of the progress it is describing. */}
-      <BatchProgress state={progress} onDismiss={() => setProgress(null)} onStop={requestStop} />
-
-      {toast && (
-        <button
-          type="button"
-          onClick={dismissToast}
-          className={`fixed ${progress ? "bottom-56 md:bottom-44" : "bottom-24"} left-1/2 -translate-x-1/2 z-50 font-body px-4 py-2 flex items-center gap-2 text-left`}
-          style={{ background: palette.black, color: palette.ivory, fontSize: 12, maxWidth: "min(92vw, 34rem)" }}
-          aria-live="polite"
-        >
-          <Check size={13} color={palette.gold} /> {toast}
-        </button>
-      )}
     </div>
   );
 }
