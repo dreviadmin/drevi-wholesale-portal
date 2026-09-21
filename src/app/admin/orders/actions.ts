@@ -12,6 +12,7 @@ import { billableLines, pendingLines, computeBillTotals, validateBillDate, billD
 import { renderOrderPdf } from "@/lib/order-pdf";
 import { uploadOrderPdf } from "@/lib/storage";
 import { writeAuditEvent } from "@/lib/audit";
+import { formatINR } from "@/lib/format";
 import { captureBuyerSnapshot, resolveDocumentParty, snapshotSourceForDate, type BuyerParty } from "@/lib/buyer-snapshot";
 import type { AuditEventType, DiscountType, Order, OrderBill, OrderItem, OrderStatus, TaxMode, WholesaleProduct } from "@/lib/types";
 
@@ -1057,4 +1058,91 @@ export async function setOrderDate(
   revalidatePath("/admin/dashboard");
   revalidatePath(`/admin/buyers/${o.buyer_id}`);
   return { ok: true, orderDate };
+}
+
+/**
+ * Record a payment received against an order (Ansh, 21 Sep: "after an order is
+ * fulfilled there shall be an option to record payment ... VALLABHAM had
+ * payment due which they have paid, but there's no option to mark payment").
+ *
+ * WHY THIS IS NOT PART OF THE ORDER EDITOR. orders.advance_amount had exactly
+ * one writer — updateOrderItems, through the editor — and OrderEditor returns
+ * null past 'confirmed'. So the moment an order was delivered or fulfilled,
+ * the money it was still owed became unrecordable. DX-20260717-017 sat
+ * 'fulfilled' with ₹33,501.51 outstanding and nowhere to enter it.
+ *
+ * It is the same mistake the order page already calls out for billing:
+ * "billing does not belong to the logistics lifecycle at all". Neither does
+ * payment. A balance is normally settled AFTER delivery — that is what a
+ * balance is — so this refuses only 'cancelled', exactly as
+ * generateOrderBill does, and is indifferent to every other status.
+ *
+ * ADDITIVE, not a setter: advance_amount is the cumulative total received, so
+ * a part payment adds to it rather than replacing it. There is no payments
+ * table to hold a history, so each receipt appends a dated, attributed line to
+ * payment_notes — which is the visible record on the order — and the audit
+ * event carries the same facts centrally.
+ */
+export async function recordPayment(
+  orderId: string,
+  input: { amount: number; method: string; note?: string },
+): Promise<{ ok: boolean; error?: string; advance?: number; balance?: number }> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
+
+  const admin = createAdminClient();
+  const { data: orderRow } = await admin.from("orders").select("*").eq("id", orderId).maybeSingle();
+  if (!orderRow) return { ok: false, error: "Order not found." };
+  const o = orderRow as Order;
+  if (o.status === "cancelled") return { ok: false, error: "This order is cancelled — nothing is owed on it." };
+
+  const method = (input.method ?? "").trim().slice(0, 40);
+  if (!method) return { ok: false, error: "How was it paid? Cash, bank transfer, UPI, cheque…" };
+
+  const advance = Number(o.advance_amount) || 0;
+  const credit = Number((orderRow as Record<string, unknown>).credit_applied ?? 0) || 0;
+  const balance = Math.round(Math.max(0, (Number(o.total_amount) || 0) - advance - credit) * 100) / 100;
+  if (balance <= 0) return { ok: false, error: "This order is already settled in full." };
+
+  const amount = Math.round((Number(input.amount) || 0) * 100) / 100;
+  if (!(amount > 0)) return { ok: false, error: "Enter the amount received." };
+  // Refused, not clamped: more than the balance is a typo far more often than
+  // it is a gift, and silently keeping the difference would hide it.
+  if (amount > balance) {
+    return { ok: false, error: `That is more than the ${formatINR(balance)} outstanding — enter ${formatINR(balance)} or less.` };
+  }
+
+  const today = new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" });
+  const clean = (input.note ?? "").trim().slice(0, 200);
+  const line = `${today} · ${formatINR(amount)} by ${method}${clean ? ` · ${clean}` : ""} · recorded by ${staff.email}`;
+  const notes = [o.payment_notes?.trim(), line].filter(Boolean).join("\n").slice(0, 2000);
+
+  const nextAdvance = Math.round((advance + amount) * 100) / 100;
+  const { error } = await admin
+    .from("orders")
+    .update({
+      advance_amount: nextAdvance,
+      // Singular column, so it holds the LATEST method; the appended note is
+      // what keeps a mixed-tender history readable.
+      payment_method: method,
+      payment_notes: notes,
+    })
+    .eq("id", orderId)
+    // Guard the read-modify-write: two people recording a payment at once must
+    // not each add to the same starting figure.
+    .eq("advance_amount", advance);
+  if (error) return { ok: false, error: error.message };
+
+  await writeAuditEvent({
+    eventType: "order_payment_recorded",
+    buyerId: o.buyer_id,
+    staffUserId: staff.id,
+    notes: `payment recorded — ${o.order_number}: ${formatINR(amount)} by ${method}${clean ? ` (${clean})` : ""}; advance ${formatINR(advance)} → ${formatINR(nextAdvance)}, balance now ${formatINR(Math.max(0, balance - amount))}`,
+  });
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/dashboard");
+  revalidatePath(`/admin/buyers/${o.buyer_id}`);
+  return { ok: true, advance: nextAdvance, balance: Math.round(Math.max(0, balance - amount) * 100) / 100 };
 }

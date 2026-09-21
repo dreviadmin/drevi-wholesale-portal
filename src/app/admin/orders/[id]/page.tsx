@@ -9,6 +9,7 @@ import { palette } from "@/lib/palette";
 import { NotesPanel } from "@/components/admin/NotesPanel";
 import { listEntityNotes } from "@/lib/entity-notes";
 import { OrderActions } from "./OrderActions";
+import { RecordPayment } from "./RecordPayment";
 import { EditBuyerButton } from "./EditBuyerButton";
 import { RecaptureParty } from "./RecaptureParty";
 import { DateCorrection } from "./DateCorrection";
@@ -388,7 +389,11 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
       {/* Credit settles an order exactly as an advance does, so the block has
           to mount for credit alone — an order with no advance was showing no
           balance due at all. */}
-      {((o.advance_amount ?? 0) > 0 || creditApplied > 0) && (
+      {/* ...and whenever anything is still owed (21 Sep). An order with no
+          advance and a full balance rendered no payment block at all, so there
+          was nowhere to put the Record payment control — the same shape of
+          omission the credit note above describes. */}
+      {((o.advance_amount ?? 0) > 0 || creditApplied > 0 || balanceDue > 0) && (
         <div className="mt-3 p-3" style={{ background: palette.ivoryDeep }}>
           {(o.advance_amount ?? 0) > 0 && (
             <div className="flex justify-between font-body" style={{ fontSize: 12, color: palette.softBlack }}>
@@ -403,7 +408,14 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
           <div className="flex justify-between font-body mt-1" style={{ fontSize: 13, color: palette.goldDeep, fontWeight: 600 }}>
             <span>Balance due</span><span>{formatINR(balanceDue)}</span>
           </div>
-          {o.payment_notes && <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige }}>{o.payment_notes}</div>}
+          {/* Pre-wrap: each recorded payment is its own line. */}
+          {o.payment_notes && <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige, whiteSpace: "pre-wrap" }}>{o.payment_notes}</div>}
+          {/* Money is not logistics: a balance is normally settled AFTER
+              delivery, so this follows generateOrderBill's rule (refuse only
+              cancelled) rather than the line-edit lock. */}
+          {balanceDue > 0 && o.status !== "cancelled" && (
+            <RecordPayment orderId={o.id} balance={balanceDue} />
+          )}
         </div>
       )}
 
