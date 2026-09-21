@@ -17,6 +17,7 @@ import { LineHsnEditor } from "./LineHsnEditor";
 import { listKnownHsnCodes } from "@/lib/hsn";
 import { OrderEditor, type PickerProduct } from "./OrderEditor";
 import { LineStateControls, GenerateBillBar } from "./LineBilling";
+import { SettleReturn, type SettleTarget } from "./SettleReturn";
 import { ReturnPanel, ApplyCreditBar, type ReturnPanelLine } from "./ReturnPanel";
 import { effectiveLineState, billableLines, computeBillTotals } from "@/lib/order-lines-core";
 import { loadOrderCredit, loadBuyerWallet } from "@/lib/credit-load";
@@ -63,6 +64,11 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   // follows generateOrderBill's own rule, which refuses cancelled and nothing
   // else.
   const lineEditLocked = ["cancelled", "delivered", "fulfilled"].includes(o.status);
+  // Modify Order is a DIFFERENT question from the per-line state controls
+  // (21 Sep). The owner asked for an order to be editable at any stage;
+  // OrderEditor now gates itself on cancelled alone and updateOrderItems
+  // enforces the real limits per line. lineEditLocked below still governs
+  // LineStateControls and the bill bar, which are genuinely about logistics.
   const billingLocked = o.status === "cancelled";
   // Maintained by the apply/unapply RPCs (0046) as a read cache of the
   // consumption rows, so every balance-due surface can subtract it without a join.
@@ -89,6 +95,33 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
     });
   }
   const returnedOf = (billId: string, billIndex: number) => credit.returnedByBillLine.get(`${billId}:${billIndex}`) ?? 0;
+  // The order's own lines, for an order-anchored return. Index IS the order
+  // line index, so the panel, the note snapshot and the reservation all agree.
+  // Credit may be set against ANY open order of this buyer, not only the one
+  // returned (owner's call, 21 Sep) — a buyer who returns against one order
+  // and owes on another is the ordinary case in wholesale.
+  const { data: openOrderRows } = o.buyer_id
+    ? await admin
+        .from("orders")
+        .select("id, order_number, total_amount, advance_amount, credit_applied")
+        .eq("buyer_id", o.buyer_id)
+        .neq("status", "cancelled")
+    : { data: [] };
+  const settleTargets: SettleTarget[] = (openOrderRows ?? [])
+    .map((r) => ({
+      id: r.id as string,
+      orderNumber: r.order_number as string,
+      due: Math.round(Math.max(0, (Number(r.total_amount) || 0) - (Number(r.advance_amount) || 0) - (Number(r.credit_applied) || 0)) * 100) / 100,
+    }))
+    .filter((t) => t.due > 0)
+    .sort((a, b) => (a.id === o.id ? -1 : b.id === o.id ? 1 : b.due - a.due));
+
+  const orderReturnLines: ReturnPanelLine[] = (o.items ?? []).map((item, index) => ({
+    item,
+    index,
+    returned: credit.returnedByOrderLine.get(index) ?? 0,
+    orderLineIndex: index,
+  }));
   const returnLinesFor = (b: OrderBill): ReturnPanelLine[] =>
     (b.items ?? []).map((item, index) => ({
       item,
@@ -127,7 +160,9 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
 
   // Catalog for the "add item" picker in the order editor (admins only).
   let pickerProducts: PickerProduct[] = [];
-  if (isAdminRole(staff.role) && (o.status === "submitted" || o.status === "confirmed")) {
+  // The add-item picker exists on any order still open to edits — without this
+  // the editor renders on a delivered order with an empty catalog.
+  if (isAdminRole(staff.role) && o.status !== "cancelled") {
     const { data: prods } = await admin
       .from("wholesale_products")
       .select("sku, title, wholesale_price, image_urls")
@@ -471,6 +506,33 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
           point belongs with the bills — a return is raised against one — and
           each row routes into the SAME ReturnPanel the line control opens, so
           there is one return flow, not two. */}
+      {/* No bill? Return against the ORDER (21 Sep). This block used to render
+          only when a bill existed, which on 23 of 24 delivered prod orders
+          meant there was no return control anywhere on the page — the feature
+          was built and unreachable. */}
+      {isAdminRole(staff.role) && returnableBills.length === 0 && o.status !== "cancelled" && orderReturnLines.some((l) => l.item.qty > l.returned) && (
+        <div id="returns" className="mt-5 p-3" style={{ background: palette.ivory, border: `1px solid ${palette.crimsonBorder}` }}>
+          <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.crimsonText }}>Create a return</div>
+          <p className="font-body mt-1" style={{ fontSize: 11, lineHeight: 1.6, color: palette.softBlack }}>
+            Goods come back against <b>{o.order_number}</b>, the invoice they went out on. The credit note prices them the way this
+            order priced the sale, puts the pieces back into stock, and credits the party — as a credit note, a refund, money off a
+            balance, or any split of the three.
+          </p>
+          <ReturnPanel
+            orderId={o.id}
+            billId={null}
+            billNumber={o.order_number}
+            bill={{
+              subtotal: (o.items ?? []).reduce((sum, it) => sum + (Number(it.qty) || 0) * (Number(it.unit_price) || 0), 0),
+              discount_amount: o.discount_amount ?? 0,
+              tax_mode: o.tax_mode ?? null,
+              tax_rate: o.tax_rate == null ? null : Number(o.tax_rate),
+            }}
+            lines={orderReturnLines}
+          />
+        </div>
+      )}
+
       {isAdminRole(staff.role) && returnableBills.length > 0 && (
         <div id="returns" className="mt-5 p-3" style={{ background: palette.ivory, border: `1px solid ${palette.crimsonBorder}` }}>
           <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.crimsonText }}>Create a return</div>
@@ -526,6 +588,26 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
                     PDF
                   </a>
                 </div>
+              </div>
+            );
+          })}
+
+          {/* How each live return was settled, and the way to settle what is
+              left. A credit note is not automatically what the customer wants
+              (Ansh, 21 Sep) — it may be refunded, set against a balance, or
+              any split of the three. */}
+          {isAdminRole(staff.role) && credit.notes.filter((n) => n.status === "issued").map((n) => {
+            const st = credit.settlementByNote.get(n.id) ?? { refunded: 0, adjusted: 0, held: Number(n.total) || 0 };
+            return (
+              <div key={`settle-${n.id}`} className="mt-2 pt-2" style={{ borderTop: "1px dashed rgba(26,26,26,0.12)" }}>
+                <div className="font-body" style={{ fontSize: 10.5, color: palette.mutedGreige }}>
+                  {n.note_number}: {formatINR(st.held)} on account
+                  {st.refunded > 0 ? ` · ${formatINR(st.refunded)} refunded` : ""}
+                  {st.adjusted > 0 ? ` · ${formatINR(st.adjusted)} against a balance` : ""}
+                </div>
+                {st.held > 0 && (
+                  <SettleReturn noteId={n.id} noteNumber={n.note_number} unsettled={st.held} targets={settleTargets} />
+                )}
               </div>
             );
           })}

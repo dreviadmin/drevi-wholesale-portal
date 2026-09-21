@@ -220,9 +220,20 @@ export async function updateOrderItems(
   const { data: orderRow } = await admin.from("orders").select("*").eq("id", orderId).maybeSingle();
   if (!orderRow) return { ok: false, error: "Order not found." };
   const order = orderRow as Order;
-  if (order.status !== "submitted" && order.status !== "confirmed") {
-    return { ok: false, error: `A ${String(order.status).replace(/_/g, " ")} order can no longer be modified.` };
+  // "An order, at any stage first of all shall be editable" (Ansh, 21 Sep).
+  // Only a cancelled order is closed to edits — that one is history, and its
+  // stock has already been returned. 'packed' and 'out_for_delivery' were
+  // refused here with no justification at all; 'delivered' and 'fulfilled'
+  // were refused because the PDF had shipped, which is an argument for
+  // RE-ISSUING the document, not for freezing the record. The real protections
+  // are per-line and live below: a billed line, a returned line, and a
+  // reduction on goods that already left.
+  if (order.status === "cancelled") {
+    return { ok: false, error: "A cancelled order can no longer be modified." };
   }
+  const shipped = ["out_for_delivery", "delivered", "fulfilled"].includes(order.status);
+  const returnedOf = (it: OrderItem | undefined) =>
+    Math.max(0, Math.trunc(Number((it as { returned_qty?: number } | undefined)?.returned_qty) || 0));
   if (lines.length === 0) return { ok: false, error: "An order needs at least one item — use Cancel instead." };
 
   // Catalog lookup for added lines + refreshing the original-price marker.
@@ -323,6 +334,25 @@ export async function updateOrderItems(
   // Recompute money server-side — same math as order submission; never trust
   // client totals. Terms the editor sends replace the stored ones; anything
   // omitted keeps the order's existing value.
+  // The money TERMS freeze once anything prices off them. computeBillTotals
+  // treats an absolute discount as a pot consumed across bills, and a credit
+  // note's discountShareFor prorates against the figure that stood when it was
+  // raised — move either afterwards and both documents start lying.
+  const termKeys = ["discountType", "discountValue", "taxMode", "taxRate"] as const;
+  const termsTouched = !!terms && termKeys.some((k) => k in terms);
+  if (termsTouched) {
+    const [{ count: billCount }, { count: noteCount }] = await Promise.all([
+      admin.from("order_bills").select("id", { count: "exact", head: true }).eq("order_id", orderId).is("cancelled_at", null),
+      admin.from("credit_notes").select("id", { count: "exact", head: true }).eq("order_id", orderId).eq("status", "issued"),
+    ]);
+    if ((billCount ?? 0) > 0) {
+      return { ok: false, error: "This order has a bill — its discount and tax are fixed by the invoice. Cancel the bill to change them." };
+    }
+    if ((noteCount ?? 0) > 0) {
+      return { ok: false, error: "A credit note was priced off this order's discount and tax — void it before changing them." };
+    }
+  }
+
   const discountType: DiscountType | null =
     terms && "discountType" in terms
       ? terms.discountType === "percent" || terms.discountType === "absolute" ? terms.discountType : null
@@ -380,6 +410,13 @@ export async function updateOrderItems(
     const prev = order.items[i];
     if (!keptIdx.has(i)) {
       if (prev.billed_in) return { ok: false, error: `${prev.title || prev.sku} is on a bill — billed lines can't be removed. Cancel that bill first.` };
+      const back = returnedOf(prev);
+      if (back > 0) {
+        return { ok: false, error: `${prev.title || prev.sku} has ${back} returned against it on a credit note — void that note before removing the line.` };
+      }
+      if (shipped && prev.sku && !prev.custom) {
+        return { ok: false, error: `${prev.title || prev.sku} has already gone out — take it back with a Return, not an edit. The credit note is what records the money and puts the stock back.` };
+      }
       if (prev.stock_moved && prev.sku && !prev.custom) {
         stockAdjust.push({ sku: prev.sku, delta: Math.trunc(Number(prev.qty) || 0), why: "line removed in edit — stock returned" });
       }
@@ -393,6 +430,19 @@ export async function updateOrderItems(
     const newPrice = Math.max(0, Math.round((Number(line.unitPrice) || 0) * 100) / 100);
     if (prev.billed_in && (newQty !== prev.qty || newPrice !== prev.unit_price)) {
       return { ok: false, error: `${prev.title || prev.sku} is on a bill — change the pending lines instead.` };
+    }
+    const back = returnedOf(prev);
+    if (back > 0 && newQty < back) {
+      return { ok: false, error: `${prev.title || prev.sku} has ${back} returned against it — it cannot go below that.` };
+    }
+    if (back > 0 && newPrice !== prev.unit_price) {
+      return { ok: false, error: `${prev.title || prev.sku} has a credit note against it at ${formatINR(prev.unit_price)} — repricing it would contradict that note. Void it first.` };
+    }
+    // Goods that already left come back through a Return, which credits the
+    // money and restocks the piece. An edit does neither, so a quiet reduction
+    // here would lose both. Increasing is fine — more genuinely went out.
+    if (shipped && newQty < prev.qty && prev.sku && !prev.custom) {
+      return { ok: false, error: `${prev.title || prev.sku} has already gone out — reduce it with a Return, not an edit.` };
     }
     if (prev.stock_moved && prev.sku && !prev.custom && newQty !== prev.qty) {
       stockAdjust.push({ sku: prev.sku, delta: prev.qty - newQty, why: `qty ${prev.qty}→${newQty} in edit` });
@@ -1118,7 +1168,7 @@ export async function recordPayment(
   const notes = [o.payment_notes?.trim(), line].filter(Boolean).join("\n").slice(0, 2000);
 
   const nextAdvance = Math.round((advance + amount) * 100) / 100;
-  const { error } = await admin
+  const { data: won, error } = await admin
     .from("orders")
     .update({
       advance_amount: nextAdvance,
@@ -1129,9 +1179,25 @@ export async function recordPayment(
     })
     .eq("id", orderId)
     // Guard the read-modify-write: two people recording a payment at once must
-    // not each add to the same starting figure.
-    .eq("advance_amount", advance);
+    // not each add to the same starting figure. credit_applied is in the
+    // predicate too, because settling a return against this order moves the
+    // balance this function just read.
+    .eq("advance_amount", advance)
+    .eq("credit_applied", credit)
+    // .select().maybeSingle() is the whole point (21 Sep): a PostgREST update
+    // that matches ZERO rows returns no error, so the original
+    // `const { error } = ...` reported ok:true on a LOST compare-and-set and
+    // went on to write an audit event saying the money had landed. The guard
+    // was decorative — this is what makes it a guard.
+    .select("id")
+    .maybeSingle();
   if (error) return { ok: false, error: error.message };
+  if (!won) {
+    return {
+      ok: false,
+      error: "This order's payment or credit changed in another session — reload and check the balance before entering this again.",
+    };
+  }
 
   await writeAuditEvent({
     eventType: "order_payment_recorded",

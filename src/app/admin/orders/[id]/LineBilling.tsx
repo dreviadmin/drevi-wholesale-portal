@@ -177,8 +177,8 @@ export function GenerateBillBar({
       </div>
       {orderClosed && (
         <div className="font-body mt-1" style={{ fontSize: 10, lineHeight: 1.5, color: palette.goldDeep }}>
-          This order has already closed, and its lines can no longer change. Billing it is still correct — an invoice can be raised after
-          delivery, and a return can only be raised against a bill.
+          This order has already closed. Billing it is still correct — an invoice can be raised after delivery. Its lines can still be
+          edited, and goods that come back are handled by a Return, which credits the money and puts the stock back.
         </div>
       )}
       {toast && <div className="font-body mt-1.5" style={{ fontSize: 11, color: palette.goldDeep, fontWeight: 600 }}>{toast}</div>}

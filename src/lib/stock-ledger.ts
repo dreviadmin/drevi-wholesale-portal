@@ -244,3 +244,52 @@ export async function recomputeCache(sku: string): Promise<{ ok: boolean; stock:
   await admin.from("wholesale_products").update({ current_qty: stock }).eq("sku", sku.trim().toUpperCase());
   return { ok: true, stock };
 }
+
+/**
+ * How many pieces of each SKU this order actually took off the shelf and has
+ * not already had back.
+ *
+ * Reads the LEDGER, never the stock_moved flag (21 Sep). 0042_stock_moved_
+ * backfill stamps that flag onto legacy lines from the order's STATUS and
+ * writes no movement rows at all — so the flag's presence is not evidence that
+ * stock left, and its absence on an old fulfilled order is not evidence that
+ * it did not. Restocking off the flag would credit stock the ledger never saw
+ * leave. voidCreditNote already compensates by reading what ACTUALLY posted;
+ * this is the same rule applied on the way in.
+ *
+ * Nets the round trip: a line confirmed, un-confirmed and re-confirmed reads
+ * -1, +1, -1 and must come back as 1, not 2. Returns already credited against
+ * this order's own credit notes are netted off for the same reason.
+ */
+export async function restockableFor(
+  orderId: string,
+  skus: string[],
+  noteIds: string[] = [],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const wanted = [...new Set(skus.map((s) => (s || "").trim().toUpperCase()).filter(Boolean))];
+  if (wanted.length === 0) return out;
+
+  const admin = createAdminClient();
+  const refIds = [orderId, ...noteIds];
+  const { data, error } = await admin
+    .from("stock_movements")
+    .select("sku, delta, ref_type, ref_id")
+    .in("sku", wanted)
+    .in("ref_id", refIds);
+  // Unreadable is NOT "everything is restockable": a failure here must not
+  // hand the operator a tick-box that silently invents stock.
+  if (error) return out;
+
+  for (const row of data ?? []) {
+    const type = String(row.ref_type ?? "");
+    if (type !== "order" && type !== "credit_note") continue;
+    const sku = String(row.sku ?? "").toUpperCase();
+    out.set(sku, (out.get(sku) ?? 0) + (Number(row.delta) || 0));
+  }
+  // delta is negative when stock left, so the restockable count is its
+  // negation, floored at zero.
+  for (const [sku, net] of out) out.set(sku, Math.max(0, -net));
+  for (const sku of wanted) if (!out.has(sku)) out.set(sku, 0);
+  return out;
+}

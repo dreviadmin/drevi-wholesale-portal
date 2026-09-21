@@ -13,6 +13,7 @@ import { shopifyTagsFrom } from "@/lib/shopify-tags";
 import { loadDesignDetail } from "./studio/load";
 import { colorNameFor, describeDesignFacts } from "./studio/facts";
 import { ALL_ANGLES } from "./studio/state";
+import { publishImageSet, publishedSetIsStale } from "@/lib/studio/publish";
 
 // Stage 7b — Shopify push (build guide §11.3). Creates/updates a DRAFT
 // product; going live from DRAFT stays a human act inside Shopify admin.
@@ -135,13 +136,30 @@ export async function publishShopify(designId: string, staffId: string, staffEma
 
   await admin.from("publish_targets").update({ state: "pushing", error: null }).eq("design_id", designId).eq("portal", "shopify");
   try {
-    // Published wholesale set is the media source; sizes/prices from the group.
+    // The published web set is the media source; sizes/prices from the group.
+    //
+    // DECOUPLED FROM THE WHOLESALE PUSH (20 Sep, Ansh: "there will be garments
+    // specific to Shopify, not wholesale"). This used to refuse with "Push
+    // wholesale first", because product_images was only ever written by
+    // publishWholesale — so a retail-only garment could not reach the store
+    // without first being put in the trade catalog, which is a different
+    // commercial decision. product_images is keyed (sku_base, color, angle)
+    // and is not a wholesale table; it is the published web set, and either
+    // portal may now create it.
+    //
+    // Stale as well as missing: a Shopify-only garment never gets a wholesale
+    // re-push to refresh its media, so without the staleness check its
+    // pictures would freeze at whatever was published the first time.
+    if (await publishedSetIsStale(designId)) {
+      const set = await publishImageSet(designId);
+      if (!set.ok) throw new Error(set.error ?? "Could not publish the image set");
+    }
     const { data: images } = await admin
       .from("product_images")
       .select("angle, storage_path, published_at")
       .eq("sku_base", board.baseSku)
       .eq("color", board.color);
-    if (!images?.length) throw new Error("Push wholesale first — Shopify media uses the published set");
+    if (!images?.length) throw new Error("No images to publish — the design has no approved or source photo yet");
     const rank = new Map<string, number>(ALL_ANGLES.map((a, i) => [a as string, i]));
     const ordered = [...images].sort((a, b) => (rank.get(a.angle) ?? 99) - (rank.get(b.angle) ?? 99));
     const { data: pub } = admin.storage.from("product-images").getPublicUrl("x");

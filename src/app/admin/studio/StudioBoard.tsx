@@ -10,7 +10,7 @@ import { withFrom } from "@/components/BackLink";
 import { palette } from "@/lib/palette";
 import { BADGE_LABEL, type DesignBadge } from "@/lib/studio/state";
 import type { BoardRow } from "@/lib/studio/load";
-import { setTierBatch, togglePortalBatch, runFashnBatch, approveAllPreflight, approveAllBatch, generateCopyBatch, pushWholesaleBatch } from "./actions";
+import { setTierBatch, togglePortalBatch, runFashnBatch, approveAllPreflight, approveAllBatch, generateCopyBatch, pushWholesaleBatch, pushShopifyBatch } from "./actions";
 import { JobsTicker } from "./JobsTicker";
 
 // Studio board (§7.4): derived-state chips with live counts, rows with
@@ -441,6 +441,30 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.black, background: palette.gold, padding: "8px 10px" }}
             >
               Push WS
+            </button>
+            {/* The one bulk route that did not exist (21 Sep). Same cap and the
+                same honest reporting as its wholesale twin — and it names the
+                first real failure, because "3 failed" on its own sends the
+                operator hunting through twenty designs. */}
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                if (!window.confirm(`Push up to ${Math.min(ids.length, 20)} design(s) to Shopify? New products are created as DRAFT; gate-blocked designs are skipped and reported.`)) return;
+                startTransition(async () => {
+                  const r = await pushShopifyBatch(ids);
+                  flash(
+                    r.ok
+                      ? `Shopify: ${r.pushed} pushed · ${r.blocked} gate-blocked · ${r.failed} failed${r.firstError ? ` — ${r.firstError}` : ""}`
+                      : r.error ?? "Failed",
+                  );
+                  router.refresh();
+                });
+              }}
+              className="font-body uppercase disabled:opacity-50"
+              style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.black, background: palette.gold, padding: "8px 10px" }}
+            >
+              Push SH
             </button>
           </div>
         </div>

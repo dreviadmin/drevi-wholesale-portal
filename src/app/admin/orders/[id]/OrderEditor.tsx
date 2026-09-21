@@ -172,7 +172,11 @@ export function OrderEditor({
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [isPending, start] = useTransition();
-  const editable = status === "submitted" || status === "confirmed";
+  // Editable at every stage but cancelled (Ansh, 21 Sep). The protections that
+  // matter are per-line and enforced server-side in updateOrderItems: a billed
+  // line, a line with a credit note against it, and a reduction on goods that
+  // already went out — that last one is a Return, not an edit.
+  const editable = status !== "cancelled";
 
   // Monotonic id source for added/custom draft lines — a length-based key can
   // collide with a surviving line after a removal and edit both at once.
@@ -432,7 +436,7 @@ export function OrderEditor({
     />
   );
 
-  if (status !== "submitted" && status !== "confirmed") return null;
+  if (status === "cancelled") return null;
 
   return (
     <>

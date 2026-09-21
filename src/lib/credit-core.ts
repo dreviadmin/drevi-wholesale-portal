@@ -124,7 +124,7 @@ export interface CreditNoteLike {
   id: string;
   status: string;
   order_bill_id: string | null;
-  items: { bill_line_index?: number | null; qty?: number | null; sku?: string | null }[] | null;
+  items: { bill_line_index?: number | null; order_line_index?: number | null; qty?: number | null; sku?: string | null }[] | null;
 }
 
 /**
@@ -149,6 +149,80 @@ export function remainingReturnable(billedQty: number, alreadyReturned: number):
   return Math.max(0, (Number(billedQty) || 0) - (Number(alreadyReturned) || 0));
 }
 
+/**
+ * The mirror of returnedByBillLine for ORDER-anchored notes (21 Sep), keyed by
+ * the order line index. returnedByBillLine skips a note with no bill and must
+ * keep doing so — the two never see each other's notes, so an order that has
+ * both kinds counts each against the right document.
+ */
+export function returnedByOrderLine(notes: CreditNoteLike[]): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const n of notes) {
+    if (n.status !== "issued" || n.order_bill_id) continue;
+    for (const it of n.items ?? []) {
+      const idx = it?.order_line_index;
+      if (idx == null) continue;
+      out.set(idx, r2((out.get(idx) ?? 0) + (Number(it.qty) || 0)));
+    }
+  }
+  return out;
+}
+
+/** One consumption row against a note, for noteSettlement. */
+export interface SettlementEntry {
+  reason: string;
+  delta: number;
+  source_note_id?: string | null;
+}
+
+/**
+ * How ONE return was settled: refunded in cash, set against an order, or left
+ * on account. 'applied' and 'refund' carry delta < 0, 'unapplied' carries
+ * delta > 0 — so summing -delta nets a reversal automatically and `held` is
+ * always the residual, never a typed figure.
+ */
+export function noteSettlement(
+  noteTotal: number,
+  entries: SettlementEntry[],
+): { refunded: number; adjusted: number; held: number } {
+  let refunded = 0;
+  let adjusted = 0;
+  for (const e of entries) {
+    const d = -(Number(e.delta) || 0);
+    if (e.reason === "refund") refunded += d;
+    else if (e.reason === "applied") adjusted += d;
+    else if (e.reason === "unapplied") {
+      // A reversal frees whichever leg it reverses. Its own row does not say
+      // which, so it is netted off the larger side first — the settle panel
+      // only ever shows the residual, and `held` below stays exact either way.
+      if (refunded >= adjusted) refunded += d; else adjusted += d;
+    }
+  }
+  refunded = r2(Math.max(0, refunded));
+  adjusted = r2(Math.max(0, adjusted));
+  return { refunded, adjusted, held: r2(Math.max(0, (Number(noteTotal) || 0) - refunded - adjusted)) };
+}
+
+/**
+ * Validate a split of one return across refund / adjust, with the wallet leg
+ * as the residual. The residual is COMPUTED, never typed, so the three legs
+ * cannot fail to add up to the note.
+ */
+export function splitLegs(
+  total: number,
+  refund: number,
+  adjust: number,
+): { held: number; ok: boolean; error?: string } {
+  const t = r2(Number(total) || 0);
+  const r = r2(Number(refund) || 0);
+  const a = r2(Number(adjust) || 0);
+  if (r < 0 || a < 0) return { held: t, ok: false, error: "A settlement amount cannot be negative." };
+  if (r2(r + a) > t) {
+    return { held: 0, ok: false, error: `That is more than the ${t} on this credit note.` };
+  }
+  return { held: r2(t - r - a), ok: true };
+}
+
 /** A grant (an issued credit note) for wallet arithmetic. */
 export interface WalletGrant {
   id: string;
@@ -165,6 +239,10 @@ export interface WalletEntry {
   reason: string;
   effective_date: string;
   created_at: string;
+  /** cash / bank transfer / UPI / cheque — set on a 'refund' row (0060). */
+  method?: string | null;
+  /** WHICH note this row consumed (0060). Null on rows written before it. */
+  source_note_id?: string | null;
 }
 
 /**

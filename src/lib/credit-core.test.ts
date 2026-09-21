@@ -1,9 +1,13 @@
 import { describe, it, expect } from "vitest";
 
+import type { CreditNoteLike } from "./credit-core";
 import {
   computeCreditTotals,
   discountShareFor,
   returnedByBillLine,
+  returnedByOrderLine,
+  noteSettlement,
+  splitLegs,
   remainingReturnable,
   walletBalance,
   allocateConsumption,
@@ -165,5 +169,80 @@ describe("validateCreditAmount", () => {
   });
   it("rounds to paise", () => {
     expect(validateCreditAmount(100.456)).toEqual({ ok: true, value: 100.46 });
+  });
+});
+
+// ── Order-anchored returns and the splittable settlement (21 Sep) ──────────
+describe("returnedByOrderLine", () => {
+  const note = (over: Partial<CreditNoteLike>): CreditNoteLike => ({
+    id: "n1", status: "issued", order_bill_id: null, items: [], ...over,
+  });
+
+  it("counts order-anchored notes by their order line index", () => {
+    const m = returnedByOrderLine([
+      note({ items: [{ order_line_index: 0, qty: 2 }, { order_line_index: 3, qty: 1 }] }),
+      note({ items: [{ order_line_index: 0, qty: 1 }] }),
+    ]);
+    expect(m.get(0)).toBe(3);
+    expect(m.get(3)).toBe(1);
+  });
+
+  it("ignores bill-anchored notes — those belong to returnedByBillLine", () => {
+    const m = returnedByOrderLine([note({ order_bill_id: "b1", items: [{ order_line_index: 0, qty: 5 }] })]);
+    expect(m.size).toBe(0);
+  });
+
+  it("ignores a voided note", () => {
+    const m = returnedByOrderLine([note({ status: "void", items: [{ order_line_index: 0, qty: 5 }] })]);
+    expect(m.size).toBe(0);
+  });
+});
+
+describe("noteSettlement", () => {
+  it("splits the owner's own example: 10,000 = 5,000 held + 3,000 refunded + 2,000 adjusted", () => {
+    const s = noteSettlement(10000, [
+      { reason: "refund", delta: -3000 },
+      { reason: "applied", delta: -2000 },
+    ]);
+    expect(s).toEqual({ refunded: 3000, adjusted: 2000, held: 5000 });
+    expect(s.refunded + s.adjusted + s.held).toBe(10000);
+  });
+
+  it("leaves the whole note on account when nothing was consumed", () => {
+    expect(noteSettlement(26495, [])).toEqual({ refunded: 0, adjusted: 0, held: 26495 });
+  });
+
+  it("nets a reversal back into held", () => {
+    const s = noteSettlement(10000, [
+      { reason: "refund", delta: -3000 },
+      { reason: "unapplied", delta: 3000 },
+    ]);
+    expect(s.refunded).toBe(0);
+    expect(s.held).toBe(10000);
+  });
+
+  it("never reports a negative leg or a negative residual", () => {
+    const s = noteSettlement(1000, [{ reason: "applied", delta: -5000 }]);
+    expect(s.held).toBe(0);
+    expect(s.refunded).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("splitLegs", () => {
+  it("computes the residual rather than trusting a typed one", () => {
+    expect(splitLegs(26495, 6495, 10000)).toEqual({ held: 10000, ok: true });
+  });
+  it("accepts the whole note as one leg", () => {
+    expect(splitLegs(10000, 10000, 0)).toEqual({ held: 0, ok: true });
+    expect(splitLegs(10000, 0, 10000)).toEqual({ held: 0, ok: true });
+  });
+  it("refuses legs that exceed the note", () => {
+    expect(splitLegs(10000, 6000, 5000).ok).toBe(false);
+  });
+  it("refuses a negative leg", () => {
+    expect(splitLegs(10000, -1, 0).ok).toBe(false);
+  });
+  it("survives paise", () => {
+    expect(splitLegs(26495.5, 6495.25, 10000.25)).toEqual({ held: 10000, ok: true });
   });
 });
