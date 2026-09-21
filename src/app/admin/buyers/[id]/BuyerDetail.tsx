@@ -51,6 +51,13 @@ interface BuyerDTO {
   approvedByName: string | null;
   hasPassword: boolean;
   cardUrl?: string | null;
+  extraCardUrls?: string[];
+  category?: string | null;
+  website?: string | null;
+  instagram?: string | null;
+  facebook?: string | null;
+  email_alt?: string | null;
+  contacts?: { id: string; name: string | null; designation: string | null; phone: string | null; isPrimary: boolean }[];
 }
 type BuyerEditForm = BuyerEditFields & { other_details: string };
 interface OrderDTO { id: string; order_number: string; total_amount: number; status: OrderStatus; submitted_at: string; }
@@ -643,6 +650,54 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet, changeRe
             <img src={buyer.cardUrl} alt="Visiting card" style={{ maxWidth: 260, maxHeight: 170, objectFit: "cover", border: "1px solid rgba(26,26,26,0.15)" }} />
           </button>
           {cardZoom && <Lightbox src={buyer.cardUrl} alt="Visiting card" onClose={() => setCardZoom(false)} />}
+          {/* A brand often hands over two cards — front and back, or one per
+              person. The primary keeps the zoom; the rest open in a tab. */}
+          {(buyer.extraCardUrls ?? []).length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              {(buyer.extraCardUrls ?? []).map((u, i) => (
+                <a key={u} href={u} target="_blank" rel="noreferrer">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={u} alt={`Visiting card ${i + 2}`} style={{ maxWidth: 150, maxHeight: 100, objectFit: "cover", border: "1px solid rgba(26,26,26,0.15)" }} />
+                </a>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* People. A business is rarely one person, and the card usually names
+          two or three — the number that actually gets picked up is often the
+          second one. */}
+      {(buyer.contacts ?? []).length > 0 && (
+        <section className="mt-8">
+          <h2 className="font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.2em", color: palette.gold }}>People</h2>
+          <div className="mt-2 flex flex-col gap-2">
+            {(buyer.contacts ?? []).map((c) => (
+              <div key={c.id} className="flex items-baseline gap-2 flex-wrap">
+                <span className="font-body" style={{ fontSize: 13, color: palette.black, fontWeight: c.isPrimary ? 600 : 400 }}>
+                  {c.name || "—"}
+                </span>
+                {c.designation && <span className="font-body" style={{ fontSize: 11, color: palette.mutedGreige }}>{c.designation}</span>}
+                {c.phone && (
+                  <a href={`tel:${c.phone}`} className="font-mono" style={{ fontSize: 12, color: palette.goldDeep }}>{c.phone}</a>
+                )}
+                {c.isPrimary && <span className="font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.1em", color: palette.mutedGreige }}>primary</span>}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {(buyer.category || buyer.website || buyer.instagram || buyer.facebook || buyer.email_alt) && (
+        <section className="mt-8">
+          <h2 className="font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.2em", color: palette.gold }}>Directory</h2>
+          <dl className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+            {buyer.category && (<div><dt className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>Products / category</dt><dd className="font-body" style={{ fontSize: 12.5, color: palette.black }}>{buyer.category}</dd></div>)}
+            {buyer.website && (<div><dt className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>Website</dt><dd className="font-body" style={{ fontSize: 12.5 }}><a href={buyer.website.startsWith("http") ? buyer.website : `https://${buyer.website}`} target="_blank" rel="noreferrer" style={{ color: palette.goldDeep }}>{buyer.website}</a></dd></div>)}
+            {buyer.instagram && (<div><dt className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>Instagram</dt><dd className="font-body" style={{ fontSize: 12.5 }}><a href={`https://instagram.com/${buyer.instagram.replace(/^@/, "")}`} target="_blank" rel="noreferrer" style={{ color: palette.goldDeep }}>@{buyer.instagram.replace(/^@/, "")}</a></dd></div>)}
+            {buyer.facebook && (<div><dt className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>Facebook</dt><dd className="font-body" style={{ fontSize: 12.5, color: palette.black }}>{buyer.facebook}</dd></div>)}
+            {buyer.email_alt && (<div><dt className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>Alternate email</dt><dd className="font-body" style={{ fontSize: 12.5, color: palette.black }}>{buyer.email_alt}</dd></div>)}
+          </dl>
         </section>
       )}
 

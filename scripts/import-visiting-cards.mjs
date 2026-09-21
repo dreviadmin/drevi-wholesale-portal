@@ -39,6 +39,7 @@ import zlib from "node:zlib";
 import readline from "node:readline/promises";
 import { createClient } from "@supabase/supabase-js";
 import sharp from "sharp";
+import { execFileSync } from "node:child_process";
 import dotenv from "dotenv";
 
 const PROD = process.argv.includes("--prod");
@@ -49,6 +50,7 @@ const SLOTS = ["Slot1", "Slot2", "slot3"];
 const BUYER_LOGIN_DOMAIN = "buyers.drevifashion.com";
 const BATCH = "visiting_cards_2026_09";
 const MAX_USERNAME = 20;
+let viaSips = 0;
 
 dotenv.config({ path: PROD ? ".env.local" : ".env.development.local", override: true });
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -184,10 +186,40 @@ function indexImages() {
   return have;
 }
 
+async function toJpeg(srcFile) {
+  try {
+    return await sharp(srcFile).rotate().resize({ width: 2000, withoutEnlargement: true }).jpeg({ quality: 86 }).toBuffer();
+  } catch (e) {
+    // libheif refuses an image whose iref box holds more than 16 references,
+    // and a fair number of these cards have 48 — it is a security limit, not a
+    // corrupt file. macOS decodes them fine, so hand those to sips and put the
+    // result back through sharp for the resize.
+    if (!/Security limit|corrupt header/i.test(String(e.message))) throw e;
+    const tmp = path.join("/tmp", `vc-${crypto.randomBytes(6).toString("hex")}.jpg`);
+    execFileSync("sips", ["-s", "format", "jpeg", srcFile, "--out", tmp], { stdio: "ignore" });
+    const out = await sharp(tmp).rotate().resize({ width: 2000, withoutEnlargement: true }).jpeg({ quality: 86 }).toBuffer();
+    fs.unlinkSync(tmp);
+    viaSips++;
+    return out;
+  }
+}
+
+// The app's uploadBuyerCardImage calls ensureBucket first; a script that skips
+// it fails with a bare "Bucket not found" on a fresh environment. Same private
+// bucket, same 5MB limit as src/lib/storage.ts.
+let bucketReady = false;
+async function ensureCardBucket() {
+  if (bucketReady) return;
+  const { data } = await admin.storage.getBucket("buyer-cards");
+  if (!data) await admin.storage.createBucket("buyer-cards", { public: false, fileSizeLimit: "5MB" });
+  bucketReady = true;
+}
+
 async function uploadCard(buyerId, srcFile, index) {
+  await ensureCardBucket();
   // HEIC straight from an iPhone does not render in any browser, and these are
   // shown through a signed URL in an <img>. Convert once, here.
-  const jpeg = await sharp(srcFile).rotate().resize({ width: 2000, withoutEnlargement: true }).jpeg({ quality: 86 }).toBuffer();
+  const jpeg = await toJpeg(srcFile);
   const p = index === 0 ? `${buyerId}/card.jpg` : `${buyerId}/card-${index + 1}.jpg`;
   const { error } = await admin.storage.from("buyer-cards").upload(p, jpeg, { contentType: "image/jpeg", upsert: true });
   if (error) throw new Error(`card upload ${p}: ${error.message}`);
@@ -253,7 +285,24 @@ for (const c of cards) {
 const { data: existing } = await admin.from("buyers").select("id, business_name, owner_name, phone, email, city, gstin, address, notes, status, created_at, card_image_path");
 const { data: existingContacts } = await admin.from("buyer_contacts").select("buyer_id, phone");
 const phoneToBuyer = new Map();
-for (const b of existing ?? []) for (const p of normPhone(b.phone)) phoneToBuyer.set(p, b);
+// A phone can already point at TWO buyer rows — the portal carries duplicate
+// pairs (THE ROYAL VIVA, RAJWADA, Radhkrishna NX). Whichever the map happened
+// to keep last would get the card and the twin would silently diverge, so the
+// OLDEST row wins deterministically and the clash is reported for a human to
+// merge. This import does not merge buyers; that is a decision with orders and
+// credentials hanging off it.
+const portalDupes = [];
+for (const b of existing ?? []) {
+  for (const p of normPhone(b.phone)) {
+    const prev = phoneToBuyer.get(p);
+    if (prev && prev.id !== b.id) {
+      portalDupes.push({ phone: p, keep: prev, other: b });
+      if (String(b.created_at) < String(prev.created_at)) phoneToBuyer.set(p, b);
+      continue;
+    }
+    phoneToBuyer.set(p, b);
+  }
+}
 for (const c of existingContacts ?? []) if (c.phone) phoneToBuyer.set(c.phone, (existing ?? []).find((b) => b.id === c.buyer_id));
 const nameToBuyer = new Map((existing ?? []).map((b) => [nameKey(b.business_name), b]));
 
@@ -303,6 +352,16 @@ for (const u of plan.update) {
   const diff = u.buyer.business_name !== u.card.business_name ? `  name: "${u.buyer.business_name}" -> "${u.card.business_name}"` : "  (name same)";
   console.log(`  ${u.how.padEnd(5)} ${u.card.business_name}${diff}`);
 }
+if (portalDupes.length) {
+  console.log("");
+  console.log("PRE-EXISTING DUPLICATE BUYERS (not merged — yours to decide):");
+  for (const d of portalDupes) {
+    const keep = `${d.keep.business_name} (${String(d.keep.created_at).slice(0, 10)})`;
+    const other = `${d.other.business_name} (${String(d.other.created_at).slice(0, 10)})`;
+    console.log(`  ${d.phone}  card goes to the older: ${keep}   twin left alone: ${other}`);
+  }
+}
+
 const dupes = merged.filter((c) => c.mergedFrom);
 if (dupes.length) {
   console.log("");
@@ -331,15 +390,22 @@ if (PROD) {
 let inserted = 0, updated = 0, contactRows = 0, uploaded = 0, credentialed = 0;
 
 async function writeContacts(buyerId, contacts) {
+  // bc_buyer_phone_idx is a PARTIAL unique index (where phone is not null).
+  // Postgres will not accept a partial index as an ON CONFLICT target unless
+  // the predicate is restated, which PostgREST cannot express — so the
+  // idempotency is done here, by reading what the buyer already has.
+  const { data: already } = await admin.from("buyer_contacts").select("phone").eq("buyer_id", buyerId);
+  const seen = new Set((already ?? []).map((r) => r.phone).filter(Boolean));
   for (const [i, c] of contacts.entries()) {
     if (!c.phone && !c.first_name && !c.last_name) continue;
-    const { error } = await admin.from("buyer_contacts").upsert({
+    if (c.phone && seen.has(c.phone)) continue;
+    const { error } = await admin.from("buyer_contacts").insert({
       buyer_id: buyerId, first_name: c.first_name, last_name: c.last_name,
       designation: c.designation, phone: c.phone, is_primary: i === 0,
       position: c.position ?? i + 1, source: "visiting_card", created_by: "import",
-    }, { onConflict: "buyer_id,phone", ignoreDuplicates: false });
+    });
     if (error) console.error(`  ! contact ${c.phone ?? c.first_name}: ${error.message}`);
-    else contactRows++;
+    else { contactRows++; if (c.phone) seen.add(c.phone); }
   }
 }
 
@@ -423,4 +489,4 @@ for (const id of identities) {
 }
 
 console.log("");
-console.log(`DONE — inserted ${inserted}, updated ${updated}, contacts ${contactRows}, cards ${uploaded}, logins ${credentialed}`);
+console.log(`DONE — inserted ${inserted}, updated ${updated}, contacts ${contactRows}, cards ${uploaded} (${viaSips} via sips), logins ${credentialed}`);

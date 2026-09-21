@@ -15,7 +15,14 @@ import { downscalePhoto } from "@/lib/downscale-photo";
 const EMPTY = {
   business_name: "", owner_name: "", email: "", phone: "", city: "", gstin: "",
   address: "", transport_details: "", broker_details: "", other_details: "", notes: "",
+  category: "", website: "", instagram: "", facebook: "", email_alt: "",
 };
+
+// What a person capturing a buyer at a counter actually types. Everything else
+// is real but rarely known in the moment, so it sits behind one disclosure
+// rather than making the common case scroll (Ansh, 21 Sep: "while manual entry
+// show only the required fields (minimal like right now), make other fields in
+// a collapsible window").
 
 // Case B — manual add. Most fields are optional; the credential modal opens
 // immediately so Rakesh can activate on the spot when ready.
@@ -86,11 +93,24 @@ export default function AddBuyerPage() {
         <PhoneInput value={f.phone} onChange={(v) => setF({ ...f, phone: v })} required />
         {field("City", "city")}
         {field("GSTIN", "gstin")}
-        {area("Address", "address")}
-        {area("Transport details", "transport_details")}
-        {area("Broker details", "broker_details")}
-        {area("Other details", "other_details")}
-        {area("Notes", "notes")}
+
+        <details style={{ borderTop: "1px solid rgba(26,26,26,0.12)", paddingTop: 14 }}>
+          <summary className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.16em", color: palette.mutedGreige, cursor: "pointer", listStyle: "revert" }}>
+            More details — address, trade, socials
+          </summary>
+          <div className="mt-3 flex flex-col gap-4">
+            {field("Products / category", "category")}
+            {area("Address", "address")}
+            {field("Website", "website")}
+            {field("Instagram", "instagram")}
+            {field("Facebook", "facebook")}
+            {field("Alternate email", "email_alt", false, "email")}
+            {area("Transport details", "transport_details")}
+            {area("Broker details", "broker_details")}
+            {area("Other details", "other_details")}
+            {area("Notes", "notes")}
+          </div>
+        </details>
         <div className="flex flex-col gap-1.5">
           <span className={labelCls} style={labelStyle}>Visiting card / photo</span>
           <input ref={cardCameraRef} type="file" accept="image/*" capture="environment" className="hidden"

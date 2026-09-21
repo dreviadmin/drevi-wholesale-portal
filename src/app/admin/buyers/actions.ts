@@ -257,6 +257,13 @@ export async function addBuyer(form: {
   broker_details?: string;
   other_details?: string;
   notes?: string;
+  // Directory fields (0061) — what a visiting card carries beyond a name and
+  // a number. Optional like everything else here.
+  category?: string;
+  website?: string;
+  instagram?: string;
+  facebook?: string;
+  email_alt?: string;
   // Idempotency: flaky-wifi retries of the same Add Buyer resolve to one row
   // (same pattern as the exhibition capture — audit fix).
   clientRef?: string;
@@ -293,6 +300,11 @@ export async function addBuyer(form: {
       broker_details: form.broker_details?.trim() || null,
       other_details: form.other_details?.trim() || null,
       notes: form.notes?.trim() || null,
+      category: form.category?.trim() || null,
+      website: form.website?.trim() || null,
+      instagram: form.instagram?.trim().replace(/^@/, "") || null,
+      facebook: form.facebook?.trim() || null,
+      email_alt: form.email_alt?.trim().toLowerCase() || null,
       status: "pending",
       source: "manual_admin",
       captured_by: staff.id,
