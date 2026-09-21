@@ -7,9 +7,9 @@ import { getShopifyAccessToken, SHOPIFY_API_VERSION } from "@/lib/shopify-auth";
 import { writeAuditEvent } from "@/lib/audit";
 import { loadVocab } from "@/lib/sku/vocab-live";
 import { SIZES } from "@/lib/sku/vocab";
-import { originLabel } from "@/lib/studio/copy-prompt";
+import { ORIGIN_OPTIONS, originLabel } from "@/lib/studio/copy-prompt";
 import { to99 } from "@/lib/pricing";
-import { shopifyTagsFrom } from "@/lib/shopify-tags";
+import { shopifyTagsFrom, splitOccasions } from "@/lib/shopify-tags";
 import { loadDesignDetail } from "./studio/load";
 import { colorNameFor, describeDesignFacts } from "./studio/facts";
 import { ALL_ANGLES } from "./studio/state";
@@ -32,15 +32,36 @@ import { publishImageSet, publishedSetIsStale } from "@/lib/studio/publish";
 
 const SIZE_OPTION_NAME = "Size";
 const VENDOR = "Drevi Fashion";
-/** The namespace Ansh's five product metafield definitions live in. */
+/** The namespace Ansh's product metafield definitions live in. */
 const CUSTOM_NS = "custom";
 /** Ours, undefined in Shopify admin on purpose: bookkeeping, not merchandising. */
 const DREVI_NS = "drevi";
 const MEDIA_FINGERPRINT_KEY = "media_fingerprint";
 
-/** The five metafields, in the order the Shopify admin lists them. */
-const META_KEYS = ["handwork", "fabric", "sub_category", "category", "origin"] as const;
-type MetaKey = (typeof META_KEYS)[number];
+// The eight definitions in the custom namespace, with the type each one is
+// declared as in Shopify admin. The type travels WITH the key because occasion
+// is not a string: sending single_line_text_field for it is rejected outright.
+//
+// sub_category and silhouette look redundant and are not. sub_category is the
+// CONTROLLED form the theme's smart collections match on ("Flared / Kali",
+// "Mermaid", "Palazzo Suit"); silhouette is the free-text descriptive version
+// the vision pass writes ("Flared Kali Lehenga"). Dropping sub_category empties
+// those collections silently, so both are written.
+const META_TYPES = {
+  handwork: "single_line_text_field",
+  fabric: "single_line_text_field",
+  sub_category: "single_line_text_field",
+  category: "single_line_text_field",
+  origin: "single_line_text_field",
+  color: "single_line_text_field",
+  silhouette: "single_line_text_field",
+  occasion: "list.single_line_text_field",
+} as const;
+type MetaKey = keyof typeof META_TYPES;
+const META_KEYS = Object.keys(META_TYPES) as MetaKey[];
+
+/** The only two words custom.origin may ever hold. */
+const ORIGIN_LABELS: readonly string[] = ORIGIN_OPTIONS.map((o) => o.label);
 
 const ANGLE_LABEL: Record<string, string> = {
   front: "front", back: "back", side: "side",
@@ -278,20 +299,55 @@ export async function publishShopify(designId: string, staffId: string, staffEma
       { category: designRow.category, subCategory: designRow.sub_category, color: designRow.color, colorName: designRow.color_name },
       vocab,
     );
+    // The four descriptive attributes the storefront filters on come from the
+    // VISION pass (Ansh, 21 Sep) — it is the thing that has actually looked at
+    // the garment. The verified spec stays underneath as the floor, never the
+    // other way round: 96 of the 194 designs on prod carry a verified fabric
+    // and no copy row yet, so taking the vision value ALONE would strip
+    // custom.fabric off every one of them on the next push.
+    //
+    // silhouette has no verified counterpart, so it is vision or nothing.
+    const visionTags = copy?.tags ?? {};
+    const fromVision = (key: string): string | null => {
+      const v = visionTags[key];
+      return typeof v === "string" && v.trim() ? v.trim() : null;
+    };
+    const occasions = splitOccasions(fromVision("occasion"));
+
+    // The product page keys size behaviour, pricing tiers, payment terms and
+    // inventory policy off origin, so a third value is worse than none —
+    // originLabel passes pre-0051 free text through untouched, and that must
+    // not reach the store. No row on either database holds anything but the
+    // two tokens today, so this can only fire on genuinely broken data.
+    const originText = originLabel(designRow.origin)?.trim() || null;
+    if (originText && !ORIGIN_LABELS.includes(originText)) {
+      throw new Error(
+        `custom.origin must be ${ORIGIN_LABELS.map((l) => `"${l}"`).join(" or ")} — this design holds "${originText}"`,
+      );
+    }
+
     // Codes never leave the portal: the metafields carry the words a customer
     // reads ("Pre-Draped", not "PRD"; "Drevi Originals", not "drevi_original").
     const metaValues: Record<MetaKey, string | null> = {
       handwork: designRow.handwork?.trim() || null,
-      fabric: designRow.fabric?.trim() || null,
+      fabric: fromVision("fabric") ?? (designRow.fabric?.trim() || null),
       sub_category: facts.subCategoryName?.trim() || null,
       category: facts.categoryName?.trim() || null,
-      origin: originLabel(designRow.origin)?.trim() || null,
+      origin: originText,
+      // facts.colorName is the design's own colour name, else the vocabulary's
+      // name for its code — never the code itself, so "GLD" cannot leak.
+      color: fromVision("color") ?? (facts.colorName?.trim() || null),
+      silhouette: fromVision("silhouette"),
+      // A LIST metafield takes a JSON array. Atomic values only: "Sangeet and
+      // Mehendi" as one string fails validation, and would sit in the
+      // storefront filter as a value distinct from "Sangeet".
+      occasion: occasions.length ? JSON.stringify(occasions) : null,
     };
 
     // Fallback title names the colour (Gold, not GLD).
     const title = copy?.title || board.title || `${board.baseSku} ${colorNameFor(board.color, vocab) ?? board.color}`;
     const descriptionHtml = copy?.description ? `<p>${copy.description}</p>` : "";
-    const tags = shopifyTagsFrom(copy?.tags);
+    const shopifyTags = shopifyTagsFrom(visionTags);
 
     const { data: existing } = await admin
       .from("publish_targets")
@@ -344,7 +400,7 @@ export async function publishShopify(designId: string, staffId: string, staffEma
         namespace: CUSTOM_NS,
         key: k,
         value: metaValues[k] as string,
-        type: "single_line_text_field",
+        type: META_TYPES[k],
       })),
       { namespace: DREVI_NS, key: MEDIA_FINGERPRINT_KEY, value: mediaFingerprint, type: "single_line_text_field" },
     ];
@@ -353,7 +409,7 @@ export async function publishShopify(designId: string, staffId: string, staffEma
       ...(remoteId ? { id: remoteId } : { status: "DRAFT", vendor: VENDOR }),
       title,
       descriptionHtml,
-      tags,
+      tags: shopifyTags,
       productOptions: [{ name: SIZE_OPTION_NAME, values: sized.map((v) => ({ name: v.label })) }],
       variants: sized.map((v) => ({
         optionValues: [{ optionName: SIZE_OPTION_NAME, name: v.label }],

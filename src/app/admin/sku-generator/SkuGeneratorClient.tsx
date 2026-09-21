@@ -11,6 +11,7 @@ import { ColorCombobox } from "@/components/admin/ColorCombobox";
 import { palette } from "@/lib/palette";
 import { DraftNotice } from "@/components/DraftNotice";
 import { useDraft, isDraftOlderThan, DRAFT_NOTICE_AFTER_MS } from "@/lib/useDraft";
+import { useToast } from "@/lib/use-toast";
 
 interface HistoryRow {
   variant_sku: string; base_sku: string; category: string; sub_category: string;
@@ -40,8 +41,7 @@ export function SkuGeneratorClient({ isAdmin, vocab, initialTab }: { isAdmin: bo
   const [totalSkus, setTotalSkus] = useState(0);
   const [bases, setBases] = useState<BaseEntry[] | null>(null);
   const [tray, setTray] = useState<TrayItem[]>([]);
-  const [toast, setToast] = useState<string | null>(null);
-  const flash = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(null), 2200); }, []);
+  const [toast, flash] = useToast();
 
   // ---- generate form ----
   const [picks, setPicks, picksMeta] = useDraft<Picks>("drevi:draft:sku-gen", EMPTY_PICKS, {

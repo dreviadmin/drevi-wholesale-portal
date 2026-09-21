@@ -21,6 +21,7 @@ import { palette } from "@/lib/palette";
 import { downscalePhoto } from "@/lib/downscale-photo";
 import { useDraft } from "@/lib/useDraft";
 import type { WholesaleProduct, SessionType, TaxMode, DiscountType } from "@/lib/types";
+import { useToast } from "@/lib/use-toast";
 
 type Buyer = { id: string; business_name: string | null; owner_name: string | null; phone: string | null; city: string | null; status?: string };
 type Step = "buyer" | "catalog" | "cart" | "confirm";
@@ -53,7 +54,7 @@ export function ExhibitionWizard({
   const [query, setQuery] = useState("");
   const [catalogQuery, setCatalogQuery] = useState("");
   const [scanning, setScanning] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
   const [detailProduct, setDetailProduct] = useState<WholesaleProduct | null>(null);
   // Scanner callbacks outlive renders — read the live cart via a ref.
   const cartScanRef = useRef(cart);
@@ -367,11 +368,6 @@ export function ExhibitionWizard({
     });
   }
   function changeCartQty(p: WholesaleProduct, qty: number) { setQty(p.sku, qty); }
-
-  function flash(msg: string) {
-    setToast(msg);
-    setTimeout(() => setToast(null), 2200);
-  }
 
   async function addCustomItem() {
     const name = customForm.name.trim();

@@ -10,6 +10,7 @@ import { BuyerNavDrawer } from "@/components/BuyerNavDrawer";
 import { palette } from "@/lib/palette";
 import { formatINR } from "@/lib/format";
 import type { BuyerHomeData } from "@/lib/buyer-home";
+import { useToast } from "@/lib/use-toast";
 import { BuyerWalletCard, type BuyerWallet } from "@/components/BuyerWalletCard";
 import { addToCart } from "@/app/cart/actions";
 
@@ -41,9 +42,8 @@ export function BuyerHome({ businessName, city, cartCount, data, wallet }: {
   const [menuOpen, setMenuOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [scanned, setScanned] = useState<{ sku: string; known: boolean; title?: string | null; thumb?: string | null; message?: string; actions: { key: string; label: string; href?: string }[] } | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
 
-  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2400); }
 
   function handleScan(text: string): ScanFeedback {
     const sku = text.trim().toUpperCase();

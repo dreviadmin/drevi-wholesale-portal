@@ -15,6 +15,7 @@ import { tooLargeMessage } from "@/lib/downscale-photo";
 import { useDraft } from "@/lib/useDraft";
 import { HsnInput } from "@/components/admin/HsnInput";
 import type { WholesaleProduct } from "@/lib/types";
+import { useToast } from "@/lib/use-toast";
 
 const FIELDS: { key: string; label: string; type?: "number" | "textarea" | "bool" | "hsn" }[] = [
   { key: "title", label: "Title" },
@@ -178,10 +179,9 @@ function EditModal({ product, hsnOptions, onClose, onSaved }: { product: Wholesa
   const [newSku, setNewSku] = useState(product.sku);
   const [photoUrl, setPhotoUrl] = useState(product.image_urls?.[0] ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
   const [isPending, start] = useTransition();
 
-  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2500); }
 
   // X / backdrop / Close: an explicit close drops the draft.
   const close = () => { if (isPending) return; draft.clear(); onClose(); };

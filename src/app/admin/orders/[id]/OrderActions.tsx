@@ -8,6 +8,7 @@ import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { downscalePhoto } from "@/lib/downscale-photo";
 import type { OrderStatus } from "@/lib/types";
+import { useToast } from "@/lib/use-toast";
 
 export function OrderActions({
   orderId,
@@ -30,14 +31,13 @@ export function OrderActions({
 }) {
   const router = useRouter();
   const [isPending, start] = useTransition();
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
   const [dispatchOpen, setDispatchOpen] = useState(false);
   const [form, setForm] = useState<StageDetails>({ courier: courier ?? "", trackingNumber: trackingNumber ?? "", trackingNote: "" });
   const [sheet, setSheet] = useState<File | null>(null);
   const sheetCameraRef = useRef<HTMLInputElement>(null);
   const sheetGalleryRef = useRef<HTMLInputElement>(null);
 
-  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 3500); }
 
   function act(next: OrderStatus, opts?: { sendInvoice?: boolean; confirmMsg?: string; details?: StageDetails }) {
     if (opts?.confirmMsg && !window.confirm(opts.confirmMsg)) return;

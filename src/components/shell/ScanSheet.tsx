@@ -7,6 +7,7 @@ import { X, QrCode, Printer, Tag, PackageCheck, SlidersHorizontal, PlusCircle, S
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { palette } from "@/lib/palette";
 import { t } from "@/lib/strings";
+import { useToast } from "@/lib/use-toast";
 import { queueTray } from "@/app/admin/sku-generator/labels";
 
 // Global scan action sheet (build guide §6.5). The FAB opens the existing
@@ -57,7 +58,7 @@ export function ScanSheet({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const [resolved, setResolved] = useState<Resolved | null>(null);
   const [scanning, setScanning] = useState(true);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
 
   function handleScan(text: string): ScanFeedback {
     const sku = text.trim().toUpperCase();
@@ -71,9 +72,8 @@ export function ScanSheet({ onClose }: { onClose: () => void }) {
   }
 
   function addToPrintTray(sku: string) {
-    if (!queueTray([sku], "merge")) { setToast("Could not write the print tray"); setTimeout(() => setToast(null), 1800); return; }
-    setToast(t("scan.added_to_print"));
-    setTimeout(() => setToast(null), 1800);
+    if (!queueTray([sku], "merge")) { flash("Could not write the print tray"); return; }
+    flash(t("scan.added_to_print"));
   }
 
   const draft = resolved && resolved.known ? findWizardDraft() : null;

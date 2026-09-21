@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { CalendarClock } from "lucide-react";
 import { setBillDate, setOrderDate } from "@/app/admin/orders/actions";
 import { palette } from "@/lib/palette";
+import { useToast } from "@/lib/use-toast";
 
 // Ansh (14 Sep) — the companion to back-dated entry (18 Aug). Entry records the
 // day a sale actually happened; this is the way back when that day was recorded
@@ -54,9 +55,8 @@ export function DateCorrection({
   const [reason, setReason] = useState("");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
 
-  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 3500); }
 
   function close() { setOpen(false); setDate(currentDate); setReason(""); setError(null); }
 

@@ -11,6 +11,7 @@ import { createVendor, updateVendor, uploadVendorPhoto, type VendorForm } from "
 import { palette } from "@/lib/palette";
 import { downscalePhoto } from "@/lib/downscale-photo";
 import { useDraft, isDraftOlderThan, DRAFT_NOTICE_AFTER_MS } from "@/lib/useDraft";
+import { useToast } from "@/lib/use-toast";
 
 export interface VendorRow {
   id: string;
@@ -62,8 +63,7 @@ export function VendorsView({ rows, sheetVendorBySku }: { rows: VendorRow[]; she
   useEffect(() => {
     if (editingId && editingId !== "new" && !rows.some((r) => r.id === editingId)) editingDraft.discard();
   }, [editingId, rows, editingDraft]);
-  const [toast, setToast] = useState<string | null>(null);
-  const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2400); };
+  const [toast, flash] = useToast();
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

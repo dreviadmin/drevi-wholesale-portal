@@ -12,6 +12,7 @@ import { supplyAge } from "@/lib/availability";
 import { autoMrpFrom, autoWholesaleFrom, clampMultiplier, DEFAULT_MARKUP_MULTIPLIER, DEFAULT_WHOLESALE_MULTIPLIER } from "@/lib/pricing";
 import { ORIGIN_OPTIONS } from "@/lib/studio/copy-prompt";
 import type { BoardRow } from "@/lib/studio/load";
+import { useToast } from "@/lib/use-toast";
 import type { SupplyBlock } from "@/app/admin/receipts/new/delivery-actions";
 import { saveSpecs, savePricing, saveVariant, setStockForSku, saveDesignHsn, togglePortal } from "./actions";
 import { HsnInput } from "@/components/admin/HsnInput";
@@ -49,7 +50,7 @@ export function MasterEditor({ board, design, variants, lastCost, lastCostLocked
   const [resetFor, setResetFor] = useState<string | null>(null);
   const [resetQty, setResetQty] = useState("");
   const [resetNote, setResetNote] = useState("");
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
   // One draft per Save button so a save clears only its own key. Specs and
   // pricing live on the design row (updated_at bumps on save); HSN and the
   // size rows come from wholesale_products, so their seed is their base.
@@ -111,7 +112,6 @@ export function MasterEditor({ board, design, variants, lastCost, lastCostLocked
     setRowEdits((e) => ({ ...e, [v.sku]: { ...(e[v.sku] ?? { qty: v.qty, ws: v.ws, loc: v.loc, stockNote: v.stockNote }), ...patch } }));
   const rowsRestored = rowsMeta.restored && Object.keys(rowEdits).length > 0;
 
-  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2400); }
   function run(fn: () => Promise<{ ok: boolean; error?: string }>, done: string, onOk?: () => void) {
     startTransition(async () => {
       const r = await fn();

@@ -7,6 +7,7 @@ import { addStaffUser, setStaffActive } from "./actions";
 import { useSort, SortTh, type SortAccessor } from "@/components/sortable";
 import { palette } from "@/lib/palette";
 import type { StaffRole } from "@/lib/types";
+import { useToast } from "@/lib/use-toast";
 
 interface RowDTO { id: string; email: string; name: string | null; role: StaffRole; active: boolean; }
 
@@ -28,7 +29,7 @@ export function StaffManager({ actor, rows }: { actor: { id: string; role: Staff
   const [role, setRole] = useState<StaffRole>("staff");
   const [error, setError] = useState<string | null>(null);
   const [createdPw, setCreatedPw] = useState<{ email: string; password: string } | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
 
   const { sorted, sort, toggle: toggleSort } = useSort(rows, ACCESSORS);
   const canCreateAdmin = actor.role === "super_admin";
@@ -38,7 +39,6 @@ export function StaffManager({ actor, rows }: { actor: { id: string; role: Staff
     return actor.role === "admin" && target.role === "staff";
   }
 
-  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2500); }
 
   function save() {
     setError(null);

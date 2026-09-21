@@ -11,6 +11,7 @@ import { formatINR } from "@/lib/format";
 import { useDraft, isDraftOlderThan, DRAFT_NOTICE_AFTER_MS } from "@/lib/useDraft";
 import { createRetailBill, updateRetailBill } from "./actions";
 import type { DiscountType, RetailBill, TaxMode } from "@/lib/types";
+import { useToast } from "@/lib/use-toast";
 
 // Retail billing form (31 Aug). Scan or search → line with the retail price
 // prefilled (editable when negotiated) → optional customer, discount, GST,
@@ -83,7 +84,7 @@ const chip = (active: boolean) => ({
 export function RetailBillForm({ catalog, editBill }: { catalog: CatalogRow[]; editBill?: RetailBill | null }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
   const [scanning, setScanning] = useState(false);
   const [query, setQuery] = useState("");
   const todayIst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
@@ -117,7 +118,6 @@ export function RetailBillForm({ catalog, editBill }: { catalog: CatalogRow[]; e
 
   const bySku = useMemo(() => new Map(catalog.map((c) => [c.sku.toUpperCase(), c])), [catalog]);
 
-  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 3000); }
 
   function addSku(raw: string): boolean {
     const sku = raw.trim().toUpperCase();

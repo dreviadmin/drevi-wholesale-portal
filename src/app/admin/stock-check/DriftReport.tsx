@@ -6,6 +6,7 @@ import { RefreshCw, Check, ChevronDown } from "lucide-react";
 import { palette } from "@/lib/palette";
 import { recomputeSku, setStockFromDrift } from "./actions";
 import type { Movement } from "@/lib/stock-ledger-core";
+import { useToast } from "@/lib/use-toast";
 
 // Retrofit R8 §10.3 — every row offers exactly two answers:
 //   Recompute cache  (the cache was stale)
@@ -33,10 +34,9 @@ export function DriftReport({ checked, rows }: { checked: number; rows: DriftRow
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [count, setCount] = useState<Record<string, string>>({});
   const [note, setNote] = useState<Record<string, string>>({});
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
   const [pending, startTransition] = useTransition();
 
-  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2600); }
 
   function run(fn: () => Promise<{ ok: boolean; error?: string }>, ok: string) {
     startTransition(async () => {

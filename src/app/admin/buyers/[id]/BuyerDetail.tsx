@@ -30,6 +30,7 @@ import { downscalePhoto } from "@/lib/downscale-photo";
 import { useDraft } from "@/lib/useDraft";
 import { ORDER_STATUS_LABEL } from "@/lib/order-status";
 import type { BuyerStatus, BuyerSource, OrderStatus, AuditEventType } from "@/lib/types";
+import { useToast } from "@/lib/use-toast";
 
 interface BuyerDTO {
   id: string;
@@ -110,7 +111,7 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet, changeRe
   const [revealed, setRevealed] = useState<string | null>(null);
   const [changing, setChanging] = useState(false);
   const [newPw, setNewPw] = useState("");
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
   const [cardZoom, setCardZoom] = useState(false);
   // Full profile edit — every stored detail plus the photo/visiting card.
   // The draft (open flag + fields) is shared with the order page's Edit button.
@@ -191,7 +192,6 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet, changeRe
   // A restored draft reopens the composer so it is never mistaken for the saved notes.
   useEffect(() => { if (notesMeta.restored) setEditingNotes(true); }, [notesMeta.restored]);
 
-  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2500); }
 
   function changeStatus(next: BuyerStatus) {
     if (next === buyer.status) return;
