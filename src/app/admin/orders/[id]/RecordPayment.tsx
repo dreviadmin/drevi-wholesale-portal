@@ -13,7 +13,12 @@ import { recordPayment } from "../actions";
 
 const METHODS = ["Cash", "Bank transfer", "UPI", "Cheque"];
 
-export function RecordPayment({ orderId, balance }: { orderId: string; balance: number }) {
+export function RecordPayment({ orderId, balance: rawBalance }: { orderId: string; balance: number }) {
+  // The page computes the balance as total - advance - credit, which in binary
+  // floating point lands on 30977.379999999997. Unrounded, "Paid in full" typed
+  // exactly that into the box. Rounded here so the figure the operator sees and
+  // submits is the figure they are owed; the server rounds again regardless.
+  const balance = Math.round(rawBalance * 100) / 100;
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
