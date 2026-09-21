@@ -29,6 +29,8 @@ export interface DesignStateInput {
   /** from wholesale_products for the group */
   wholesalePriceSet: boolean;
   tier: "standard" | "hero" | null;
+  /** designs.origin — 'drevi_original' | 'curated' | null. Shopify only. */
+  origin?: string | null;
 }
 
 export type DesignBadge =
@@ -63,15 +65,29 @@ export function wholesaleGate(s: DesignStateInput): GateResult {
   return { ready: blockers.length === 0, blockers };
 }
 
-// Shopify gate: front + back filled AND copy present AND tier set. Copy no
-// longer needs the approved stamp — a real draft (title AND description)
-// publishes; whoever pushes reads it on the way.
+// Shopify gate: front + back filled AND copy present AND tier set AND origin
+// set. Copy no longer needs the approved stamp — a real draft (title AND
+// description) publishes; whoever pushes reads it on the way.
+//
+// ORIGIN (Ansh, 22 Sep: "why did you allow products to show as 'Ready' when
+// the origin was not set ... Now that this feeds into shopify directly: It
+// must be set"). He is right, and the gate simply predates the dependency:
+// origin started picking the Shopify size ladder on 19-20 Sep and nothing came
+// back to close the gate behind it. Without origin a product is pushed in only
+// the sizes physically in stock — which is how 21 of 103 products reached the
+// store listed in a single size — and custom.origin is omitted, which the
+// product page keys size behaviour, pricing tiers and payment terms off.
+//
+// Wholesale is deliberately NOT gated on it: nothing in the wholesale push
+// reads origin, and blocking that would stop a garment going on sale over a
+// field it does not use.
 export function shopifyGate(s: DesignStateInput): GateResult {
   const blockers: string[] = [];
   if (!s.filledAngles.front) blockers.push("Front image missing");
   if (!s.filledAngles.back) blockers.push("Back image missing");
   if (!s.copyPresent) blockers.push("Copy not written");
   if (!s.tier) blockers.push("Tier not set");
+  if (!(s.origin ?? "").trim()) blockers.push("Origin not set");
   return { ready: blockers.length === 0, blockers };
 }
 

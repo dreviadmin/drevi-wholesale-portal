@@ -6,9 +6,7 @@ import { Search, X, Lock, Unlock, Eye, EyeOff, Pencil, ImageOff, ScanLine } from
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { ZoomImage } from "@/components/Lightbox";
 import { DraftNotice } from "@/components/DraftNotice";
-import {
-  updateProductFields, unlockProductField, uploadProductPhotoAction, renameProductSku, setProductVisibility,
-} from "./actions";
+import { updateProductFields, unlockProductField, uploadProductPhotoAction, renameProductSku, setProductVisibility, setProductSellable } from "./actions";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { tooLargeMessage } from "@/lib/downscale-photo";
@@ -253,6 +251,14 @@ function EditModal({ product, hsnOptions, onClose, onSaved }: { product: Wholesa
     });
   }
 
+  function toggleSellable() {
+    start(async () => {
+      const res = await setProductSellable(product.sku, !product.wholesale_visible);
+      if (!res.ok) { setError(res.error ?? "Failed"); return; }
+      onSaved();
+    });
+  }
+
   const lockBadge = (field: string) =>
     locked.has(field) ? (
       <button type="button" onClick={() => unlock(field)} className="flex items-center gap-1 font-body" style={{ fontSize: 8.5, color: palette.goldDeep, letterSpacing: "0.08em" }}>
@@ -289,8 +295,15 @@ function EditModal({ product, hsnOptions, onClose, onSaved }: { product: Wholesa
               Replace photo
               <input type="file" accept="image/*" className="hidden" onChange={(e) => onPhoto(e.target.files?.[0] ?? null)} />
             </label>
+            {/* Two independent switches since 0062, because they answer two
+                different questions: what buyers browse, and what staff can
+                ring up at the counter. A garment pulled from the storefront
+                is usually still hanging in the showroom. */}
             <button type="button" onClick={toggleVisible} disabled={isPending} className="mt-2 flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", color: product.buyer_visible ? palette.crimsonText : palette.goldDeep }}>
               {product.buyer_visible ? <><EyeOff size={12} /> Hide from buyer catalog</> : <><Eye size={12} /> Show in buyer catalog</>}
+            </button>
+            <button type="button" onClick={toggleSellable} disabled={isPending} className="mt-1.5 flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", color: product.wholesale_visible ? palette.crimsonText : palette.goldDeep }}>
+              {product.wholesale_visible ? <><EyeOff size={12} /> Withdraw from billing</> : <><Eye size={12} /> Make sellable at the counter</>}
             </button>
           </div>
         </div>

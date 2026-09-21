@@ -278,3 +278,27 @@ export async function pushShopifyBatch(
   revalidatePath("/admin/studio");
   return { ok: true, pushed, blocked, failed, ...(firstError ? { firstError } : {}) };
 }
+
+/**
+ * Take a live design back off a portal (Ansh, 22 Sep).
+ *
+ * Deliberately one design at a time and not part of the batch bar. The batch
+ * buttons put things OUT; a control that silently withdrew twenty products
+ * from sale on one click belongs nowhere near them.
+ */
+export async function unpublishDesign(
+  designId: string,
+  portal: "wholesale" | "shopify",
+): Promise<{ ok: boolean; error?: string }> {
+  let staff;
+  try {
+    staff = await requireAdmin();
+  } catch {
+    return { ok: false, error: "Not authorized" };
+  }
+  const { unpublish } = await import("@/lib/studio/publish");
+  const res = await unpublish(designId, portal, staff.id, staff.email);
+  revalidatePath("/admin/studio");
+  revalidatePath(`/admin/studio/${designId}`);
+  return { ok: res.ok, ...(res.error ? { error: res.error } : {}) };
+}

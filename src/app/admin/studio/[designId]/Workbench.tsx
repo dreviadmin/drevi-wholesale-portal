@@ -17,6 +17,7 @@ import { JobsTicker } from "../JobsTicker";
 // setBrandModel is deliberately absent: the picker it drove is not rendered
 // while fashn is parked (see the angle card). The action itself still exists.
 import { setBgStyle, setCopyPrompt as setCopyPromptAction, setCopyModel, setAnglePrompt, setAngleEngine, regenAngle, cancelAngleJob, generateCopy, saveCopyEdit, pushWholesale, pushShopify } from "./actions";
+import { unpublishDesign } from "../actions";
 import { BG_COLOURS, BG_MODE_DEFAULT, BG_MODE_LABEL, BG_MODE_SWATCH, resolveBackground, type BgMode, type BgSwatch } from "@/lib/studio/backgrounds";
 import { useToast } from "@/lib/use-toast";
 import { uploadSource, importFinished, applyImageDirectly, approveImage, rejectImage, saveCrop, setAngleSource, syncDrivePhotos } from "./image-actions";
@@ -630,6 +631,31 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               >
                 {t?.state === "changes_pending" ? "Re-push" : "Push"} {portal === "wholesale" ? "wholesale" : "Shopify"}
               </button>
+
+              {/* Unpublish — only once it is actually out there (Ansh, 22 Sep).
+                  Wholesale takes it out of the buyer catalog; Shopify sets the
+                  product to DRAFT, because a published product cannot be
+                  un-created and deleting it would throw away the handle, the
+                  URL and anything a customer has bookmarked. Either way the
+                  work survives and a later push reconciles the same product. */}
+              {(t?.state === "live" || t?.state === "changes_pending") && (
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => {
+                    if (!window.confirm(
+                      portal === "wholesale"
+                        ? "Take this out of the buyer catalog? Staff can still bill it at the counter, and its photos and description stay — pushing again puts it straight back."
+                        : "Set this Shopify product back to DRAFT? It disappears from the storefront but keeps its URL, variants and metafields, and pushing again updates the same product.",
+                    )) return;
+                    run(() => unpublishDesign(board.id, portal), portal === "wholesale" ? "Taken out of the catalog" : "Set to draft in Shopify");
+                  }}
+                  className="mt-1.5 w-full font-body uppercase disabled:opacity-40"
+                  style={{ fontSize: 8.5, letterSpacing: "0.12em", background: "transparent", color: "#9C3A31", border: "1px solid #9C3A31", padding: "7px 0" }}
+                >
+                  {portal === "wholesale" ? "Unpublish from catalog" : "Unpublish (set to draft)"}
+                </button>
+              )}
             </details>
           );
         })}

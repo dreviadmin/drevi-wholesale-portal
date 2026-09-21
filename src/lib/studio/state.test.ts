@@ -18,6 +18,9 @@ const base: DesignStateInput = {
   ],
   wholesalePriceSet: false,
   tier: "standard",
+  // Set on the fixture so the tests below keep testing what they were written
+  // to test. The origin blocker gets its own case.
+  origin: "curated",
 };
 
 describe("wholesaleGate", () => {
@@ -33,6 +36,17 @@ describe("wholesaleGate", () => {
 });
 
 describe("shopifyGate", () => {
+  it("requires an origin — it picks the size ladder and the product page's pricing tier", () => {
+    const shot = { ...base, filledAngles: { front: true, back: true }, copyStatus: "draft" as const, copyPresent: true };
+    expect(shopifyGate({ ...shot, origin: null }).blockers).toEqual(["Origin not set"]);
+    expect(shopifyGate({ ...shot, origin: "   " }).blockers).toEqual(["Origin not set"]);
+    expect(shopifyGate({ ...shot, origin: undefined }).blockers).toEqual(["Origin not set"]);
+    expect(shopifyGate({ ...shot, origin: "drevi_original" }).ready).toBe(true);
+    // Wholesale does not read origin, so it must not be blocked on one — a
+    // garment would otherwise be held off sale over a field its push ignores.
+    expect(wholesaleGate({ ...base, filledAngles: { front: true }, wholesalePriceSet: true, origin: null }).ready).toBe(true);
+  });
+
   it("requires front AND back filled, copy present, and a tier", () => {
     expect(shopifyGate({ ...base, filledAngles: { front: true } }).blockers).toContain("Back image missing");
     expect(shopifyGate({ ...base, filledAngles: { front: true, back: true } }).blockers).toContain("Copy not written");
