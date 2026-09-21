@@ -5,6 +5,7 @@ import { fetchAll } from "@/lib/supabase/fetch-all";
 import {
   allocateConsumption,
   returnedByBillLine,
+  returnedByOrderLine,
   walletBalance,
   type CreditLineSnapshot,
   type CreditNoteLike,
@@ -148,6 +149,8 @@ const asEntry = (e: WalletEntryRow): WalletEntry => ({
 export async function loadOrderCredit(orderId: string): Promise<{
   notes: CreditNoteRow[];
   returnedByBillLine: Map<string, number>;
+  /** Order-anchored notes, keyed by order line index (21 Sep). */
+  returnedByOrderLine: Map<number, number>;
   creditTotal: number;
 }> {
   const admin = createAdminClient();
@@ -162,6 +165,7 @@ export async function loadOrderCredit(orderId: string): Promise<{
   return {
     notes,
     returnedByBillLine: returnedByBillLine(notes as CreditNoteLike[]),
+    returnedByOrderLine: returnedByOrderLine(notes as CreditNoteLike[]),
     creditTotal,
   };
 }

@@ -3,14 +3,17 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/staff";
-import { applyMovement } from "@/lib/stock-ledger";
+import { applyMovement, restockableFor } from "@/lib/stock-ledger";
 import { validateBillDate } from "@/lib/order-lines-core";
 import { captureBuyerSnapshot, snapshotSourceForDate } from "@/lib/buyer-snapshot";
 import { formatINR } from "@/lib/format";
+import { writeAuditEvent } from "@/lib/audit";
 import {
   computeCreditTotals,
   remainingReturnable,
   returnedByBillLine,
+  returnedByOrderLine,
+  noteSettlement,
   validateCreditAmount,
   walletBalance,
   type BillLine,
@@ -28,9 +31,14 @@ import type { OrderItem } from "@/lib/types";
 // BOTH racers abort and burnt a number out of the CN series each time, and a
 // gap in a GST series is an audit liability.
 
-/** A line of a bill snapshot coming back, as the picker sends it. */
+/**
+ * A line coming back, as the picker sends it. `lineIndex` indexes the BILL's
+ * items when the return is bill-anchored and the ORDER's items when it is
+ * order-anchored (21 Sep) — the two are never mixed in one note, because a
+ * return names exactly one document.
+ */
 export interface ReturnLineInput {
-  billLineIndex: number;
+  lineIndex: number;
   qty: number;
   restock: boolean;
 }
@@ -41,6 +49,14 @@ const MAX_RETURN_LINES = 50;
 
 type LinePatch = Partial<OrderItem> & { returned_qty?: number };
 type FreshLine = OrderItem & { returned_qty?: number };
+
+/** The IST calendar day an ISO timestamp falls on — the order's invoice date. */
+function istDay(iso: string | null | undefined): string {
+  if (!iso) return todayIst();
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return todayIst();
+  return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
 
 function todayIst(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
@@ -115,7 +131,8 @@ function resolveOrderLines(orderItems: OrderItem[], billId: string, billItems: O
  */
 export async function createReturnCreditNote(input: {
   orderId: string;
-  orderBillId: string;
+  /** Omitted for an ORDER-anchored return — the order's own invoice (21 Sep). */
+  orderBillId?: string | null;
   lines: ReturnLineInput[];
   reason: string;
   noteDate: string;
@@ -142,7 +159,7 @@ export async function createReturnCreditNote(input: {
 
   const requested = (input.lines ?? [])
     .map((l) => ({
-      billLineIndex: Math.trunc(Number(l?.billLineIndex)),
+      lineIndex: Math.trunc(Number(l?.lineIndex)),
       qty: Math.trunc(Number(l?.qty)) || 0,
       restock: !!l?.restock,
     }))
@@ -151,47 +168,150 @@ export async function createReturnCreditNote(input: {
   if (requested.length > MAX_RETURN_LINES) {
     return { ok: false, error: `One credit note covers at most ${MAX_RETURN_LINES} lines — split the return.` };
   }
-  if (new Set(requested.map((l) => l.billLineIndex)).size !== requested.length) {
+  if (new Set(requested.map((l) => l.lineIndex)).size !== requested.length) {
     return { ok: false, error: "The same line was picked twice — reload and retry." };
   }
 
   // FRESH reads: the order is the arbiter, the bill is the price.
   const { data: order } = await admin
-    .from("orders").select("id, order_number, buyer_id, status, items").eq("id", input.orderId).maybeSingle();
+    .from("orders")
+    .select("id, order_number, buyer_id, status, source, items, submitted_at, discount_amount, tax_mode, tax_rate, buyer_business_name, buyer_owner_name, buyer_phone, buyer_city, buyer_gstin, buyer_address, buyer_snapshot_at, buyer_snapshot_source")
+    .eq("id", input.orderId)
+    .maybeSingle();
   if (!order) return { ok: false, error: "Order not found." };
   if (order.status === "cancelled") return { ok: false, error: "This order is cancelled — nothing can be returned against it." };
 
-  const { data: bill } = await admin
-    .from("order_bills")
-    .select("id, order_id, bill_number, bill_date, items, subtotal, discount_amount, tax_mode, tax_rate, buyer_business_name, buyer_owner_name, buyer_phone, buyer_city, buyer_gstin, buyer_address, buyer_snapshot_at, buyer_snapshot_source")
-    .eq("id", input.orderBillId)
-    .maybeSingle();
-  if (!bill || bill.order_id !== order.id) return { ok: false, error: "That bill is not on this order — reload and retry." };
-
   const orderItems = (order.items ?? []) as FreshLine[];
-  const billItems = (bill.items ?? []) as OrderItem[];
-  const orderLineFor = resolveOrderLines(orderItems, bill.id, billItems);
-  if (!orderLineFor) {
-    return { ok: false, error: "This order's lines no longer match the bill — it was edited since billing, so the return can't be placed." };
-  }
 
-  const { data: priorNotes } = await admin
-    .from("credit_notes").select("id, status, order_bill_id, items").eq("order_bill_id", bill.id);
-  const alreadyReturned = returnedByBillLine((priorNotes ?? []) as CreditNoteLike[]);
+  // ONE document is being reversed. Either a bill snapshot, or — since 21 Sep —
+  // the order itself, whose own PDF is the tax invoice for every source but
+  // portal_self_service. `doc` is what the rest of this function reads, so the
+  // two paths diverge here and nowhere else.
+  interface ReturnDoc {
+    billId: string | null;
+    number: string;
+    date: string;
+    /** The lines being returned against, in the index space the picker used. */
+    lines: OrderItem[];
+    /** lineIndex -> index into orders.items */
+    orderLineFor: number[];
+    source: SourceBill;
+    party: Record<string, unknown>;
+    alreadyReturned: (lineIndex: number) => number;
+  }
+  let doc: ReturnDoc;
+  // Notes already raised on this document — their restock movements net off the
+  // ledger cap so a second return cannot credit the same piece twice.
+  let priorNoteIds: string[] = [];
+
+  if (input.orderBillId) {
+    const { data: bill } = await admin
+      .from("order_bills")
+      .select("id, order_id, bill_number, bill_date, items, subtotal, discount_amount, tax_mode, tax_rate, cancelled_at, buyer_business_name, buyer_owner_name, buyer_phone, buyer_city, buyer_gstin, buyer_address, buyer_snapshot_at, buyer_snapshot_source")
+      .eq("id", input.orderBillId)
+      .maybeSingle();
+    if (!bill || bill.order_id !== order.id) return { ok: false, error: "That bill is not on this order — reload and retry." };
+    if (bill.cancelled_at) return { ok: false, error: `${bill.bill_number} was cancelled — return against the order instead.` };
+
+    const billItems = (bill.items ?? []) as OrderItem[];
+    const map = resolveOrderLines(orderItems, bill.id, billItems);
+    if (!map) {
+      return { ok: false, error: "This order's lines no longer match the bill — it was edited since billing, so the return can't be placed." };
+    }
+    const { data: priorNotes } = await admin
+      .from("credit_notes").select("id, status, order_bill_id, items").eq("order_bill_id", bill.id);
+    const prior = returnedByBillLine((priorNotes ?? []) as CreditNoteLike[]);
+    priorNoteIds = (priorNotes ?? []).map((n) => String(n.id));
+    doc = {
+      billId: bill.id,
+      number: bill.bill_number,
+      date: bill.bill_date,
+      lines: billItems,
+      orderLineFor: map,
+      source: {
+        subtotal: Number(bill.subtotal) || 0,
+        discount_amount: Number(bill.discount_amount) || 0,
+        tax_mode: bill.tax_mode ?? null,
+        tax_rate: bill.tax_rate == null ? null : Number(bill.tax_rate),
+      },
+      // The party is INHERITED from the bill being reversed, not read live: a
+      // note against a six-month-old bill must be addressed to whoever THAT
+      // bill was addressed to, or the credit note contradicts the invoice it
+      // reverses. The source rides along too.
+      party: {
+        buyer_business_name: bill.buyer_business_name,
+        buyer_owner_name: bill.buyer_owner_name,
+        buyer_phone: bill.buyer_phone,
+        buyer_city: bill.buyer_city,
+        buyer_gstin: bill.buyer_gstin,
+        buyer_address: bill.buyer_address,
+        buyer_snapshot_at: bill.buyer_snapshot_at,
+        buyer_snapshot_source: bill.buyer_snapshot_source,
+      },
+      alreadyReturned: (i) => prior.get(`${bill.id}:${i}`) ?? 0,
+    };
+  } else {
+    // A self-service order's PDF prints as an ORDER REQUEST, not an invoice
+    // (order-pdf.tsx isInvoice), so there is no document to reverse. Zero prod
+    // orders are in this state; the bill path is the way out if one ever is.
+    if (order.source === "portal_self_service") {
+      return { ok: false, error: "This is a portal order request, not an invoice. Raise a bill for it first, then return against that bill." };
+    }
+    const { data: priorNotes } = await admin
+      .from("credit_notes").select("id, status, order_bill_id, items").eq("order_id", order.id);
+    const prior = returnedByOrderLine((priorNotes ?? []) as CreditNoteLike[]);
+    priorNoteIds = (priorNotes ?? []).map((n) => String(n.id));
+    doc = {
+      billId: null,
+      number: order.order_number,
+      date: istDay(order.submitted_at as string),
+      lines: orderItems,
+      orderLineFor: orderItems.map((_, i) => i),
+      source: {
+        // Σ(qty × unit_price) — the same figure order-pdf prints as the
+        // subtotal, and the base discountShareFor prorates against. NOT
+        // total_amount, which is already discounted and taxed.
+        subtotal: r2(orderItems.reduce((sum, it) => sum + (Number(it.qty) || 0) * (Number(it.unit_price) || 0), 0)),
+        discount_amount: Number(order.discount_amount) || 0,
+        tax_mode: (order.tax_mode as string | null) ?? null,
+        tax_rate: order.tax_rate == null ? null : Number(order.tax_rate),
+      },
+      party: {
+        buyer_business_name: order.buyer_business_name,
+        buyer_owner_name: order.buyer_owner_name,
+        buyer_phone: order.buyer_phone,
+        buyer_city: order.buyer_city,
+        buyer_gstin: order.buyer_gstin,
+        buyer_address: order.buyer_address,
+        buyer_snapshot_at: order.buyer_snapshot_at,
+        buyer_snapshot_source: order.buyer_snapshot_source,
+      },
+      alreadyReturned: (i) => prior.get(i) ?? 0,
+    };
+  }
 
   const resolved: { line: BillLine; qty: number; restock: boolean; orderLineIndex: number; seenReturned: number }[] = [];
   for (const req of requested) {
-    const idx = req.billLineIndex;
-    if (!Number.isInteger(idx) || idx < 0 || idx >= billItems.length) {
-      return { ok: false, error: "A picked line is not on this bill — reload and retry." };
+    const idx = req.lineIndex;
+    if (!Number.isInteger(idx) || idx < 0 || idx >= doc.lines.length) {
+      return { ok: false, error: "A picked line is not on this document — reload and retry." };
     }
-    const billItem = billItems[idx];
-    const orderIndex = orderLineFor[idx];
+    const billItem = doc.lines[idx];
+    const orderIndex = doc.orderLineFor[idx];
     const fresh = orderItems[orderIndex];
-    if (!fresh || fresh.billed_in !== bill.id || fresh.sku !== billItem.sku) {
+    if (!fresh || fresh.sku !== billItem.sku) {
+      return { ok: false, error: `${billItem.sku} no longer sits on this ${doc.billId ? "bill" : "order"} — it was edited. Reload and retry.` };
+    }
+    // Bill-anchored only: the line must still BE on that bill. An
+    // order-anchored return instead refuses a line that IS billed — that
+    // return belongs to the bill, because a note names one document.
+    if (doc.billId && fresh.billed_in !== doc.billId) {
       return { ok: false, error: `${billItem.sku} no longer sits on this bill — the order was edited. Reload and retry.` };
     }
-    const remaining = remainingReturnable(Math.trunc(Number(billItem.qty) || 0), alreadyReturned.get(`${bill.id}:${idx}`) ?? 0);
+    if (!doc.billId && fresh.billed_in) {
+      return { ok: false, error: `${billItem.sku} was invoiced on a bill — raise that return against the bill.` };
+    }
+    const remaining = remainingReturnable(Math.trunc(Number(billItem.qty) || 0), doc.alreadyReturned(idx));
     if (req.qty > remaining) {
       return { ok: false, error: `Only ${remaining} of ${billItem.sku} can still be returned.` };
     }
@@ -226,8 +346,12 @@ export async function createReturnCreditNote(input: {
       (fresh) => {
         const prev = returnedQty(fresh);
         const lineQty = Math.trunc(Number(fresh.qty) || 0);
-        return fresh.billed_in !== bill.id ? `${rl.line.item.sku} is no longer billed on ${bill.bill_number}.`
+        return doc.billId && fresh.billed_in !== doc.billId ? `${rl.line.item.sku} is no longer billed on ${doc.number}.`
+          : !doc.billId && fresh.billed_in ? `${rl.line.item.sku} was invoiced on a bill while this return was being raised.`
           : fresh.sku !== rl.line.item.sku ? "The order's lines changed while the return was being raised."
+          // lines_rev is a whole-array counter, so two lines of the same SKU at
+          // different prices are otherwise indistinguishable.
+          : Number(fresh.unit_price) !== Number(rl.line.item.unit_price) ? `${rl.line.item.sku} was repriced while this return was being raised.`
           : prev !== rl.seenReturned ? `Another return went through for ${rl.line.item.sku}.`
           : prev + rl.qty > lineQty ? `Only ${Math.max(0, lineQty - prev)} of ${rl.line.item.sku} can still be returned.`
           : null;
@@ -241,12 +365,7 @@ export async function createReturnCreditNote(input: {
   }
 
   // Only now take a number: a racer that lost above never consumes one.
-  const source: SourceBill = {
-    subtotal: Number(bill.subtotal) || 0,
-    discount_amount: Number(bill.discount_amount) || 0,
-    tax_mode: bill.tax_mode ?? null,
-    tax_rate: bill.tax_rate == null ? null : Number(bill.tax_rate),
-  };
+  const source: SourceBill = doc.source;
   const totals = computeCreditTotals(
     resolved.map((r) => ({ line: r.line, qty: r.qty, restock: r.restock, orderLineIndex: r.orderLineIndex })),
     source,
@@ -267,22 +386,13 @@ export async function createReturnCreditNote(input: {
         kind: "return",
         buyer_id: order.buyer_id,
         order_id: order.id,
-        order_bill_id: bill.id,
-        source_bill_number: bill.bill_number,
-        source_bill_date: bill.bill_date,
-        // The party is INHERITED from the bill being reversed, not read live: a
-        // note against a six-month-old bill must be addressed to whoever THAT
-        // bill was addressed to, or the credit note contradicts the invoice it
-        // reverses. The source rides along too — this capture happened at the
-        // bill's issue, not at this note's.
-        buyer_business_name: bill.buyer_business_name,
-        buyer_owner_name: bill.buyer_owner_name,
-        buyer_phone: bill.buyer_phone,
-        buyer_city: bill.buyer_city,
-        buyer_gstin: bill.buyer_gstin,
-        buyer_address: bill.buyer_address,
-        buyer_snapshot_at: bill.buyer_snapshot_at,
-        buyer_snapshot_source: bill.buyer_snapshot_source,
+        order_bill_id: doc.billId,
+        // The document this note reverses: the bill, or the order's own
+        // invoice. The PDF's "against invoice X dated Y" line reads these two
+        // columns and needs no change either way.
+        source_bill_number: doc.number,
+        source_bill_date: doc.date,
+        ...doc.party,
         items: totals.items,
         source_subtotal: totals.sourceSubtotal,
         discount_share: totals.discountShare,
@@ -321,19 +431,50 @@ export async function createReturnCreditNote(input: {
   // Goods back on the shelf. A failure NEVER rolls the note back (the pieces
   // physically came back) and never hides — staff are told which SKUs to fix.
   const moveFailed: string[] = [];
+  // What this order actually took off the shelf and has not had back, read
+  // from the LEDGER — stock_moved is stamped from order status by 0042 and
+  // backs no movement row, so it cannot authorise a credit.
+  const restockCap = await restockableFor(
+    input.orderId,
+    totals.items.filter((it) => it.restock && it.sku).map((it) => it.sku as string),
+    priorNoteIds,
+  );
   for (const it of totals.items) {
-    if (!it.restock || !it.sku) continue;
-    const res = await applyMovement({
-      sku: it.sku,
-      delta: Math.trunc(it.qty),
-      reason: "return",
-      refType: "credit_note",
-      refId: note.id,
-      note: `${note.note_number} — returned against ${bill.bill_number}`,
-      createdBy: staff.email,
-    });
-    if (!res.ok) moveFailed.push(it.sku);
+    if (!it.restock || !it.sku || it.sku.toUpperCase() === "CUSTOM") continue;
+    const want = Math.trunc(it.qty);
+    const cap = restockCap.get(it.sku.toUpperCase()) ?? 0;
+    const within = Math.min(want, cap);
+    const beyond = Math.max(0, want - cap);
+    // A 'return' movement always nets a recorded issue, so it stays
+    // reconcilable forever. Anything the operator ticked BEYOND what the
+    // ledger saw leave is still posted — the pieces are physically back — but
+    // as a 'correction' naming the note, which is what it actually is.
+    if (within > 0) {
+      const res = await applyMovement({
+        sku: it.sku, delta: within, reason: "return",
+        refType: "credit_note", refId: note.id,
+        note: `${note.note_number} — returned against ${doc.number}`,
+        createdBy: staff.email,
+      });
+      if (!res.ok) moveFailed.push(it.sku);
+    }
+    if (beyond > 0) {
+      const res = await applyMovement({
+        sku: it.sku, delta: beyond, reason: "correction",
+        refType: "credit_note", refId: note.id,
+        note: `${note.note_number} — ${beyond} back on the shelf beyond what ${doc.number} took out`,
+        createdBy: staff.email,
+      });
+      if (!res.ok) moveFailed.push(it.sku);
+    }
   }
+
+  await writeAuditEvent({
+    eventType: "return_credit_note_raised",
+    buyerId: order.buyer_id as string | null,
+    staffUserId: staff.id,
+    notes: `${note.note_number} against ${doc.number}: ${totals.items.length} line(s), ${formatINR(totals.total)} — ${reason}`,
+  });
 
   // No credit_ledger row: the note IS the grant (migration 0046), so the
   // credit can never go missing behind a document that was already shared.
@@ -458,6 +599,34 @@ export async function voidCreditNote(noteId: string, reason: string): Promise<{ 
     return { ok: false, error: exists ? "This credit note is already void." : "Credit note not found." };
   }
 
+  // PER-NOTE FIRST (21 Sep). The wallet check below is party-level, so it
+  // passes whenever the party holds OTHER credit — leaving this note's own
+  // consumption rows alive, and orders.credit_applied with them, funded by a
+  // document that is now void. Ask the narrow question before the broad one.
+  {
+    const { data: consumed } = await admin
+      .from("credit_ledger")
+      .select("delta, reason, method, ref_id")
+      .eq("source_note_id", noteId);
+    const legs = noteSettlement(Number(won.total) || 0, (consumed ?? []).map((c) => ({
+      reason: String(c.reason), delta: Number(c.delta) || 0,
+    })));
+    if (legs.refunded > 0 || legs.adjusted > 0) {
+      await admin
+        .from("credit_notes")
+        .update({ status: "issued", voided_at: null, voided_by: null, void_reason: null })
+        .eq("id", noteId);
+      const parts = [
+        legs.refunded > 0 ? `${formatINR(legs.refunded)} was refunded` : null,
+        legs.adjusted > 0 ? `${formatINR(legs.adjusted)} was set against an order` : null,
+      ].filter(Boolean).join(" and ");
+      return {
+        ok: false,
+        error: `${won.note_number} cannot be voided — ${parts}. Reverse that on the party's wallet first, then void this note.`,
+      };
+    }
+  }
+
   // The void now stands — does the wallet survive it? (The note is already
   // excluded from the grants by its new status.)
   if (won.buyer_id) {
@@ -496,15 +665,24 @@ export async function voidCreditNote(noteId: string, reason: string): Promise<{ 
   const blocked: string[] = [];
 
   // Free the reservation so those pieces can be returned again.
-  if (won.order_id && won.order_bill_id) {
+  // NOT gated on order_bill_id (21 Sep): an order-anchored note has none, and
+  // the old gate left its returned_qty reserved forever — the line could never
+  // be returned again, and the edit policy would keep refusing to resize it.
+  if (won.order_id) {
     const [{ data: order }, { data: bill }] = await Promise.all([
       admin.from("orders").select("items").eq("id", won.order_id).maybeSingle(),
-      admin.from("order_bills").select("items").eq("id", won.order_bill_id).maybeSingle(),
+      won.order_bill_id
+        ? admin.from("order_bills").select("items").eq("id", won.order_bill_id).maybeSingle()
+        : Promise.resolve({ data: null }),
     ]);
     const orderItems = (order?.items ?? []) as FreshLine[];
     const billItems = (bill?.items ?? []) as OrderItem[];
-    const orderLineFor = resolveOrderLines(orderItems, won.order_bill_id, billItems);
+    const orderLineFor = won.order_bill_id
+      ? resolveOrderLines(orderItems, won.order_bill_id, billItems)
+      : null;
     for (const it of (won.items ?? []) as { sku: string; qty: number; bill_line_index: number; order_line_index: number | null }[]) {
+      // Order-anchored notes snapshot bill_line_index === order_line_index, so
+      // either key finds the line; order_line_index is the honest one to read.
       const index = orderLineFor ? orderLineFor[it.bill_line_index] : it.order_line_index;
       const qty = Math.trunc(Number(it.qty) || 0);
       if (index == null || qty <= 0) { blocked.push(it.sku); continue; }
@@ -631,4 +809,84 @@ export async function unapplyCredit(entryId: string): Promise<{ ok: boolean; err
   revalidatePath("/admin/credit-notes");
   revalidatePath("/admin/dashboard");
   return { ok: true };
+}
+
+/**
+ * Settle a return across the owner's three routes, splittably (Ansh, 21 Sep):
+ *   1) credit note — kept on account   2) refunded   3) adjusted against a balance
+ *
+ * Leg 1 writes NOTHING: it is whatever the other two did not consume, which is
+ * also exactly what the wallet already reports as that note's remaining. Both
+ * consumption rows land in ONE transaction inside settle_return — a refund that
+ * succeeds while the adjustment fails is a half-settled return no surface can
+ * explain.
+ *
+ * The adjusted order may be ANY open order of the same buyer, not only the one
+ * returned (owner's call, 21 Sep) — a buyer who returns against one order and
+ * owes on another is the normal case in wholesale.
+ */
+export async function settleReturn(input: {
+  noteId: string;
+  refund: number;
+  adjust: number;
+  orderId?: string | null;
+  method?: string | null;
+  reference?: string | null;
+  clientRef: string;
+}): Promise<{ ok: boolean; error?: string; balance?: number }> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
+  if (!CLIENT_REF.test(input.clientRef ?? "")) return { ok: false, error: "Missing a request id — reload and retry." };
+
+  const refund = r2(Number(input.refund) || 0);
+  const adjust = r2(Number(input.adjust) || 0);
+  if (refund < 0 || adjust < 0) return { ok: false, error: "A settlement amount cannot be negative." };
+  if (refund === 0 && adjust === 0) {
+    // "Leave it all as credit" is a real answer and writes nothing.
+    return { ok: true };
+  }
+  if (refund > 0 && !(input.method ?? "").trim()) {
+    return { ok: false, error: "Say how the money went out — cash, bank transfer, UPI or cheque." };
+  }
+  if (adjust > 0 && !input.orderId) {
+    return { ok: false, error: "Pick the order the credit is being set against." };
+  }
+
+  const admin = createAdminClient();
+  const { data: note } = await admin
+    .from("credit_notes").select("id, note_number, buyer_id, total, status").eq("id", input.noteId).maybeSingle();
+  if (!note) return { ok: false, error: "That credit note no longer exists." };
+  if (note.status !== "issued") return { ok: false, error: "A void credit note cannot be settled." };
+
+  // The per-note cap, the per-order due cap and the wallet cap all live in the
+  // RPC, under a lock — these are the friendly versions, not the guards.
+  const { data: balance, error } = await admin.rpc("settle_return", {
+    p_note: input.noteId,
+    p_refund: refund,
+    p_adjust: adjust,
+    p_order: input.orderId ?? null,
+    p_method: (input.method ?? "").trim() || null,
+    p_reference: (input.reference ?? "").trim() || null,
+    p_client_ref: input.clientRef,
+    p_created_by: staff.email,
+  });
+  if (error) return { ok: false, error: error.message };
+
+  const legs = [
+    refund > 0 ? `${formatINR(refund)} refunded by ${(input.method ?? "").trim()}` : null,
+    adjust > 0 ? `${formatINR(adjust)} set against an order` : null,
+  ].filter(Boolean).join(", ");
+  await writeAuditEvent({
+    eventType: "credit_settled",
+    buyerId: note.buyer_id,
+    staffUserId: staff.id,
+    notes: `${note.note_number} (${formatINR(Number(note.total) || 0)}): ${legs}${input.reference ? ` — ${input.reference}` : ""}`,
+  });
+
+  revalidatePath("/admin/credit-notes");
+  revalidatePath("/admin/orders");
+  if (input.orderId) revalidatePath(`/admin/orders/${input.orderId}`);
+  if (note.buyer_id) revalidatePath(`/admin/buyers/${note.buyer_id}`);
+  revalidatePath("/admin/dashboard");
+  return { ok: true, balance: balance == null ? undefined : Number(balance) };
 }

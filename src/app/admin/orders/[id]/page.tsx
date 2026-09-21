@@ -63,6 +63,11 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   // follows generateOrderBill's own rule, which refuses cancelled and nothing
   // else.
   const lineEditLocked = ["cancelled", "delivered", "fulfilled"].includes(o.status);
+  // Modify Order is a DIFFERENT question from the per-line state controls
+  // (21 Sep). The owner asked for an order to be editable at any stage;
+  // OrderEditor now gates itself on cancelled alone and updateOrderItems
+  // enforces the real limits per line. lineEditLocked below still governs
+  // LineStateControls and the bill bar, which are genuinely about logistics.
   const billingLocked = o.status === "cancelled";
   // Maintained by the apply/unapply RPCs (0046) as a read cache of the
   // consumption rows, so every balance-due surface can subtract it without a join.
@@ -89,6 +94,14 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
     });
   }
   const returnedOf = (billId: string, billIndex: number) => credit.returnedByBillLine.get(`${billId}:${billIndex}`) ?? 0;
+  // The order's own lines, for an order-anchored return. Index IS the order
+  // line index, so the panel, the note snapshot and the reservation all agree.
+  const orderReturnLines: ReturnPanelLine[] = (o.items ?? []).map((item, index) => ({
+    item,
+    index,
+    returned: credit.returnedByOrderLine.get(index) ?? 0,
+    orderLineIndex: index,
+  }));
   const returnLinesFor = (b: OrderBill): ReturnPanelLine[] =>
     (b.items ?? []).map((item, index) => ({
       item,
@@ -127,7 +140,9 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
 
   // Catalog for the "add item" picker in the order editor (admins only).
   let pickerProducts: PickerProduct[] = [];
-  if (isAdminRole(staff.role) && (o.status === "submitted" || o.status === "confirmed")) {
+  // The add-item picker exists on any order still open to edits — without this
+  // the editor renders on a delivered order with an empty catalog.
+  if (isAdminRole(staff.role) && o.status !== "cancelled") {
     const { data: prods } = await admin
       .from("wholesale_products")
       .select("sku, title, wholesale_price, image_urls")
@@ -471,6 +486,33 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
           point belongs with the bills — a return is raised against one — and
           each row routes into the SAME ReturnPanel the line control opens, so
           there is one return flow, not two. */}
+      {/* No bill? Return against the ORDER (21 Sep). This block used to render
+          only when a bill existed, which on 23 of 24 delivered prod orders
+          meant there was no return control anywhere on the page — the feature
+          was built and unreachable. */}
+      {isAdminRole(staff.role) && returnableBills.length === 0 && o.status !== "cancelled" && orderReturnLines.some((l) => l.item.qty > l.returned) && (
+        <div id="returns" className="mt-5 p-3" style={{ background: palette.ivory, border: `1px solid ${palette.crimsonBorder}` }}>
+          <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.crimsonText }}>Create a return</div>
+          <p className="font-body mt-1" style={{ fontSize: 11, lineHeight: 1.6, color: palette.softBlack }}>
+            Goods come back against <b>{o.order_number}</b>, the invoice they went out on. The credit note prices them the way this
+            order priced the sale, puts the pieces back into stock, and credits the party — as a credit note, a refund, money off a
+            balance, or any split of the three.
+          </p>
+          <ReturnPanel
+            orderId={o.id}
+            billId={null}
+            billNumber={o.order_number}
+            bill={{
+              subtotal: (o.items ?? []).reduce((sum, it) => sum + (Number(it.qty) || 0) * (Number(it.unit_price) || 0), 0),
+              discount_amount: o.discount_amount ?? 0,
+              tax_mode: o.tax_mode ?? null,
+              tax_rate: o.tax_rate == null ? null : Number(o.tax_rate),
+            }}
+            lines={orderReturnLines}
+          />
+        </div>
+      )}
+
       {isAdminRole(staff.role) && returnableBills.length > 0 && (
         <div id="returns" className="mt-5 p-3" style={{ background: palette.ivory, border: `1px solid ${palette.crimsonBorder}` }}>
           <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.crimsonText }}>Create a return</div>

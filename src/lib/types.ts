@@ -49,7 +49,11 @@ export type AuditEventType =
   | "buyer_change_rejected"
   | "document_party_recaptured"
   | "document_date_corrected"
-  | "order_payment_recorded";
+  | "order_payment_recorded"
+  | "return_credit_note_raised"
+  | "return_credit_note_voided"
+  | "credit_settled"
+  | "order_bill_cancelled";
 
 /**
  * The buyer identity frozen onto a document at its issue date (0047) — carried

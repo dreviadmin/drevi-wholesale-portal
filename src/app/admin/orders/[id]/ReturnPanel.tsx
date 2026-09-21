@@ -66,7 +66,8 @@ export function ReturnPanel({
   orderId, billId, billNumber, bill, lines, focusIndex,
 }: {
   orderId: string;
-  billId: string;
+  /** Null for an ORDER-anchored return (21 Sep) — the order's own invoice. */
+  billId?: string | null;
   billNumber: string;
   bill: SourceBill;
   lines: ReturnPanelLine[];
@@ -81,7 +82,7 @@ export function ReturnPanel({
   // Key is null while closed, so only the open dialog writes the draft (every
   // billed line of this bill mounts its own panel over the same return).
   const [draft, setDraft, draftMeta] = useDraft<ReturnDraft>(
-    open ? `drevi:draft:credit-note:${orderId}:${billId}` : null,
+    open ? `drevi:draft:credit-note:${orderId}:${billId ?? "order"}` : null,
     () => seed(lines, focusIndex),
     {
       hasContent: (d) => Object.values(d.qty).some((q) => q > 0) || d.reason.trim().length > 0,
@@ -119,8 +120,8 @@ export function ReturnPanel({
     start(async () => {
       const r = await createReturnCreditNote({
         orderId,
-        orderBillId: billId,
-        lines: picked.map((p) => ({ billLineIndex: p.line.index, qty: p.qty, restock: p.restock })),
+        orderBillId: billId ?? null,
+        lines: picked.map((p) => ({ lineIndex: p.line.index, qty: p.qty, restock: p.restock })),
         reason: reason.trim(),
         noteDate,
         clientRef,
