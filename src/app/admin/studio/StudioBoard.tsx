@@ -18,6 +18,12 @@ import { JobsTicker } from "./JobsTicker";
 // visible but disabled until their stages land (D8: no spend without an
 // estimate — and no runner yet).
 
+// Server-side caps, mirrored here so the button can feed the action in chunks
+// instead of silently truncating the selection. Keep in step with
+// generateCopyBatch / pushWholesaleBatch / pushShopifyBatch.
+const COPY_CHUNK = 10;
+const PUSH_CHUNK = 20;
+
 const CHIP_ORDER: (DesignBadge | "all")[] = ["all", "awaiting_specs", "needs_photos", "in_review", "needs_copy", "ready", "live", "changes_pending"];
 
 const BADGE_STYLE: Record<DesignBadge, { bg: string; fg: string }> = {
@@ -447,10 +453,24 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               type="button"
               disabled={pending}
               onClick={() => {
-                if (!window.confirm(`Generate copy for up to ${Math.min(ids.length, 10)} design(s)? One vision call each; unverified specs are skipped.`)) return;
+                if (!window.confirm(`Generate copy for ${ids.length} design(s)? One vision call each; unverified specs are skipped. Runs in batches of ${COPY_CHUNK} — leave this tab open.`)) return;
                 startTransition(async () => {
-                  const r = await generateCopyBatch(ids);
-                  flash(r.ok ? `Copy: ${r.generated} generated · ${r.skipped} awaiting specs · ${r.failed} failed` : r.error ?? "Failed");
+                  // The ACTION caps at 10 because each design is one Opus
+                  // vision call run sequentially inside a Vercel function with
+                  // a 60s ceiling — ten is about what fits. Selecting 101 used
+                  // to silently do ten and drop the rest. The cap stays where
+                  // it belongs, on the server; the button now feeds it in
+                  // chunks so one click means one click. (Ansh, 21 Sep.)
+                  let gen = 0, skip = 0, fail = 0, done = 0;
+                  for (let i = 0; i < ids.length; i += COPY_CHUNK) {
+                    const chunk = ids.slice(i, i + COPY_CHUNK);
+                    const r = await generateCopyBatch(chunk);
+                    if (!r.ok) { flash(r.error ?? "Failed"); break; }
+                    gen += r.generated ?? 0; skip += r.skipped ?? 0; fail += r.failed ?? 0;
+                    done += chunk.length;
+                    flash(`Copy ${done}/${ids.length} · ${gen} generated · ${skip} awaiting specs${fail ? ` · ${fail} failed` : ""}`);
+                  }
+                  flash(`Copy done: ${gen} generated · ${skip} awaiting specs · ${fail} failed`);
                   router.refresh();
                 });
               }}
@@ -463,10 +483,18 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               type="button"
               disabled={pending}
               onClick={() => {
-                if (!window.confirm(`Push up to ${Math.min(ids.length, 20)} design(s) to wholesale? Gate-blocked designs are skipped and reported.`)) return;
+                if (!window.confirm(`Push ${ids.length} design(s) to wholesale? Gate-blocked designs are skipped and reported.`)) return;
                 startTransition(async () => {
-                  const r = await pushWholesaleBatch(ids);
-                  flash(r.ok ? `Wholesale: ${r.pushed} pushed · ${r.blocked} gate-blocked · ${r.failed} failed` : r.error ?? "Failed");
+                  let pushed = 0, blocked = 0, failed = 0, done = 0;
+                  for (let i = 0; i < ids.length; i += PUSH_CHUNK) {
+                    const chunk = ids.slice(i, i + PUSH_CHUNK);
+                    const r = await pushWholesaleBatch(chunk);
+                    if (!r.ok) { flash(r.error ?? "Failed"); break; }
+                    pushed += r.pushed ?? 0; blocked += r.blocked ?? 0; failed += r.failed ?? 0;
+                    done += chunk.length;
+                    flash(`Wholesale ${done}/${ids.length} · ${pushed} pushed · ${blocked} blocked${failed ? ` · ${failed} failed` : ""}`);
+                  }
+                  flash(`Wholesale done: ${pushed} pushed · ${blocked} gate-blocked · ${failed} failed`);
                   router.refresh();
                 });
               }}
@@ -483,14 +511,19 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               type="button"
               disabled={pending}
               onClick={() => {
-                if (!window.confirm(`Push up to ${Math.min(ids.length, 20)} design(s) to Shopify? New products are created as DRAFT; gate-blocked designs are skipped and reported.`)) return;
+                if (!window.confirm(`Push ${ids.length} design(s) to Shopify? New products are created as DRAFT; gate-blocked designs are skipped and reported.`)) return;
                 startTransition(async () => {
-                  const r = await pushShopifyBatch(ids);
-                  flash(
-                    r.ok
-                      ? `Shopify: ${r.pushed} pushed · ${r.blocked} gate-blocked · ${r.failed} failed${r.firstError ? ` — ${r.firstError}` : ""}`
-                      : r.error ?? "Failed",
-                  );
+                  let pushed = 0, blocked = 0, failed = 0, done = 0, firstError = "";
+                  for (let i = 0; i < ids.length; i += PUSH_CHUNK) {
+                    const chunk = ids.slice(i, i + PUSH_CHUNK);
+                    const r = await pushShopifyBatch(chunk);
+                    if (!r.ok) { flash(r.error ?? "Failed"); break; }
+                    pushed += r.pushed ?? 0; blocked += r.blocked ?? 0; failed += r.failed ?? 0;
+                    if (!firstError && r.firstError) firstError = r.firstError;
+                    done += chunk.length;
+                    flash(`Shopify ${done}/${ids.length} · ${pushed} pushed · ${blocked} blocked${failed ? ` · ${failed} failed` : ""}`);
+                  }
+                  flash(`Shopify done: ${pushed} pushed · ${blocked} gate-blocked · ${failed} failed${firstError ? ` — ${firstError}` : ""}`);
                   router.refresh();
                 });
               }}
