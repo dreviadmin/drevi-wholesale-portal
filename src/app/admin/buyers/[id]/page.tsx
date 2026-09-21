@@ -29,6 +29,21 @@ export default async function BuyerDetailPage({ params }: { params: { id: string
 
   const staffName = new Map<string, string>((staffRows ?? []).map((s) => [s.id, s.name ?? "Staff"]));
   const cardUrl = b.card_image_path ? await signedCardUrl(b.card_image_path) : null;
+  // 60 of the imported brands handed over more than one card. card_image_path
+  // stays the primary so every existing reader is untouched; the rest come
+  // from the array and are signed the same way.
+  const extraCardUrls = (
+    await Promise.all(
+      ((b as { card_image_paths?: string[] }).card_image_paths ?? [])
+        .filter((p2) => p2 && p2 !== b.card_image_path)
+        .map((p2) => signedCardUrl(p2)),
+    )
+  ).filter(Boolean) as string[];
+  const { data: contactRows } = await admin
+    .from("buyer_contacts")
+    .select("id, first_name, last_name, designation, phone, is_primary, position")
+    .eq("buyer_id", b.id)
+    .order("position");
 
   // The allocation map is flattened onto each note — a Map does not belong in
   // a client component's props, and consumed/remaining is what the card shows.
@@ -85,6 +100,19 @@ export default async function BuyerDetailPage({ params }: { params: { id: string
         approvedByName: b.approved_by ? staffName.get(b.approved_by) ?? null : null,
         hasPassword: !!b.encrypted_password,
         cardUrl,
+        extraCardUrls,
+        category: (b as { category?: string | null }).category ?? null,
+        website: (b as { website?: string | null }).website ?? null,
+        instagram: (b as { instagram?: string | null }).instagram ?? null,
+        facebook: (b as { facebook?: string | null }).facebook ?? null,
+        email_alt: (b as { email_alt?: string | null }).email_alt ?? null,
+        contacts: (contactRows ?? []).map((c) => ({
+          id: c.id as string,
+          name: [c.first_name, c.last_name].filter(Boolean).join(" ") || null,
+          designation: c.designation as string | null,
+          phone: c.phone as string | null,
+          isPrimary: !!c.is_primary,
+        })),
       }}
       orders={((orders ?? []) as Pick<Order, "id" | "order_number" | "total_amount" | "status" | "submitted_at">[])}
       wallet={walletDTO}

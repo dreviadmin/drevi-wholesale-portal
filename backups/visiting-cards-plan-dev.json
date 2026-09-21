@@ -1,0 +1,1606 @@
+{
+ "plan": {
+  "update": [
+   {
+    "buyer": "Anjni Design Inc.",
+    "card": "Anjni Design Inc.",
+    "how": "phone"
+   },
+   {
+    "buyer": "Nine Hugs",
+    "card": "Nine Hugs",
+    "how": "phone"
+   },
+   {
+    "buyer": "Vasstram Brides",
+    "card": "Vasstram Brides",
+    "how": "phone"
+   },
+   {
+    "buyer": "House of Mewar",
+    "card": "House of Mewar",
+    "how": "phone"
+   },
+   {
+    "buyer": "House of Reet",
+    "card": "House of Reet",
+    "how": "phone"
+   },
+   {
+    "buyer": "Ettara Bridal",
+    "card": "Ettara Bridal",
+    "how": "phone"
+   },
+   {
+    "buyer": "Vallabham",
+    "card": "Vallabham",
+    "how": "phone"
+   },
+   {
+    "buyer": "Sherwani On Rent",
+    "card": "Sherwani On Rent",
+    "how": "phone"
+   },
+   {
+    "buyer": "Rivah (a brand by Gopisons)",
+    "card": "Rivah (a brand by Gopisons)",
+    "how": "phone"
+   },
+   {
+    "buyer": "Baba Family Collection",
+    "card": "Baba Family Collection",
+    "how": "phone"
+   },
+   {
+    "buyer": "Sakhi (Dinesh Kumar Madanlal)",
+    "card": "Sakhi (Dinesh Kumar Madanlal)",
+    "how": "phone"
+   },
+   {
+    "buyer": "Bhelora",
+    "card": "Bhelora",
+    "how": "phone"
+   },
+   {
+    "buyer": "Aaroham by Aarti",
+    "card": "Aaroham by Aarti",
+    "how": "phone"
+   },
+   {
+    "buyer": "Vaparimal Savaldas Wholesale Studio (Naren Pearl)",
+    "card": "Vaparimal Savaldas Wholesale Studio (Naren Pearl)",
+    "how": "phone"
+   },
+   {
+    "buyer": "Ridh - The Fabric Studio",
+    "card": "Ridh - The Fabric Studio",
+    "how": "phone"
+   },
+   {
+    "buyer": "Ajantha Bridal Collection",
+    "card": "Ajantha Bridal Collection",
+    "how": "phone"
+   },
+   {
+    "buyer": "Juhi Makhija Couture",
+    "card": "Juhi Makhija Couture",
+    "how": "phone"
+   },
+   {
+    "buyer": "Aishwarya Fashion Couture / Aishwarya Lifestyle Pvt. Ltd.",
+    "card": "Aishwarya Fashion Couture / Aishwarya Lifestyle Pvt. Ltd.",
+    "how": "phone"
+   },
+   {
+    "buyer": "The Faab Fur",
+    "card": "The Faab Fur",
+    "how": "phone"
+   },
+   {
+    "buyer": "Gramodyog Emporium",
+    "card": "Gramodyog Emporium",
+    "how": "phone"
+   },
+   {
+    "buyer": "Neeta Lahrani - Bespoke Couture",
+    "card": "Neeta Lahrani - Bespoke Couture",
+    "how": "name"
+   },
+   {
+    "buyer": "Ishu Chopra Fashion Designer",
+    "card": "Ishu Chopra Fashion Designer",
+    "how": "phone"
+   },
+   {
+    "buyer": "MAVY (Maahika Trendz Pvt. Ltd.)",
+    "card": "MAVY (Maahika Trendz Pvt. Ltd.)",
+    "how": "phone"
+   },
+   {
+    "buyer": "R | F (brand name unclear)",
+    "card": "R | F (brand name unclear)",
+    "how": "phone"
+   },
+   {
+    "buyer": "Ruchi Fashion",
+    "card": "Ruchi Fashion",
+    "how": "phone"
+   },
+   {
+    "buyer": "Angel Bay / Patterns India",
+    "card": "Angel Bay / Patterns India",
+    "how": "phone"
+   },
+   {
+    "buyer": "Popin",
+    "card": "Popin",
+    "how": "phone"
+   },
+   {
+    "buyer": "Riza Boutique",
+    "card": "Riza Boutique",
+    "how": "phone"
+   },
+   {
+    "buyer": "Change",
+    "card": "Change",
+    "how": "phone"
+   },
+   {
+    "buyer": "Vamika Fashion Studio",
+    "card": "Vamika Fashion Studio",
+    "how": "phone"
+   },
+   {
+    "buyer": "Nisha Bakliwal",
+    "card": "Nisha Bakliwal",
+    "how": "phone"
+   },
+   {
+    "buyer": "Soni_label by Neema & Divya",
+    "card": "Soni_label by Neema & Divya",
+    "how": "phone"
+   },
+   {
+    "buyer": "nanda",
+    "card": "nanda",
+    "how": "phone"
+   },
+   {
+    "buyer": "Shreiya Silks",
+    "card": "Shreiya Silks",
+    "how": "phone"
+   },
+   {
+    "buyer": "Sunbai by Rajdhani",
+    "card": "Sunbai by Rajdhani",
+    "how": "phone"
+   },
+   {
+    "buyer": "Kalakruti",
+    "card": "Kalakruti",
+    "how": "phone"
+   },
+   {
+    "buyer": "Aangan Boutique",
+    "card": "Aangan Boutique",
+    "how": "phone"
+   },
+   {
+    "buyer": "Plus Mark",
+    "card": "Plus Mark",
+    "how": "phone"
+   },
+   {
+    "buyer": "Priya Creations",
+    "card": "Priya Creations",
+    "how": "phone"
+   },
+   {
+    "buyer": "GJ4 Fashion",
+    "card": "GJ4 Fashion",
+    "how": "phone"
+   },
+   {
+    "buyer": "Sony's Ethnic",
+    "card": "Sony's Ethnic",
+    "how": "phone"
+   },
+   {
+    "buyer": "Pariwar",
+    "card": "Pariwar",
+    "how": "phone"
+   },
+   {
+    "buyer": "Yes Madam",
+    "card": "Yes Madam",
+    "how": "phone"
+   },
+   {
+    "buyer": "Antra Designer Studio",
+    "card": "Antra Designer Studio",
+    "how": "phone"
+   },
+   {
+    "buyer": "Vainmune",
+    "card": "Vainmune",
+    "how": "phone"
+   },
+   {
+    "buyer": "Anushka",
+    "card": "Anushka",
+    "how": "phone"
+   },
+   {
+    "buyer": "Padmavati (Sarees / Prints)",
+    "card": "Padmavati (Sarees / Prints)",
+    "how": "phone"
+   },
+   {
+    "buyer": "Ganpati Sarees",
+    "card": "Ganpati Sarees",
+    "how": "name"
+   },
+   {
+    "buyer": "RiBiRTH",
+    "card": "RiBiRTH",
+    "how": "phone"
+   },
+   {
+    "buyer": "Mahalaxmi Designer Dresses",
+    "card": "Mahalaxmi Designer Dresses",
+    "how": "phone"
+   },
+   {
+    "buyer": "Sindhi Group of Companies",
+    "card": "Sindhi Group of Companies",
+    "how": "phone"
+   },
+   {
+    "buyer": "Amber Shaili",
+    "card": "Amber Shaili",
+    "how": "phone"
+   },
+   {
+    "buyer": "Nakoda Designer Studio (NDS) - Sheogani Wala",
+    "card": "Nakoda Designer Studio (NDS) - Sheogani Wala",
+    "how": "phone"
+   },
+   {
+    "buyer": "Shakti",
+    "card": "Shakti",
+    "how": "phone"
+   },
+   {
+    "buyer": "Element by Shrushti Bhandari",
+    "card": "Element by Shrushti Bhandari",
+    "how": "phone"
+   },
+   {
+    "buyer": "Siddham Fabrics",
+    "card": "Siddham Fabrics",
+    "how": "phone"
+   },
+   {
+    "buyer": "Tyar Couture By Mansi Jain",
+    "card": "Tyar Couture By Mansi Jain",
+    "how": "phone"
+   },
+   {
+    "buyer": "Pruthvi Boutique",
+    "card": "Pruthvi Boutique",
+    "how": "phone"
+   },
+   {
+    "buyer": "Pehnawa by Juhi (Juhi Lasod)",
+    "card": "Pehnawa by Juhi (Juhi Lasod)",
+    "how": "phone"
+   },
+   {
+    "buyer": "Ariha Traditional",
+    "card": "Ariha Traditional",
+    "how": "phone"
+   },
+   {
+    "buyer": "New Mina Bazar",
+    "card": "New Mina Bazar",
+    "how": "phone"
+   },
+   {
+    "buyer": "Rudra Choli - The Designer Studio",
+    "card": "Rudra Choli - The Designer Studio",
+    "how": "phone"
+   },
+   {
+    "buyer": "Radhkrishna NX",
+    "card": "Radhkrishna NX",
+    "how": "phone"
+   },
+   {
+    "buyer": "Sobber Threads (Styluxe Apparel)",
+    "card": "Sobber Threads (Styluxe Apparel)",
+    "how": "phone"
+   },
+   {
+    "buyer": "Rajesh Kumar & Co. (R.K. Punjabi Suit)",
+    "card": "Rajesh Kumar & Co. (R.K. Punjabi Suit)",
+    "how": "phone"
+   },
+   {
+    "buyer": "Dulari (by Manishkumar Rahulkumar)",
+    "card": "Dulari (by Manishkumar Rahulkumar)",
+    "how": "phone"
+   },
+   {
+    "buyer": "Bombay Beauty",
+    "card": "Bombay Beauty",
+    "how": "phone"
+   },
+   {
+    "buyer": "Chhaya Ethnic Studio",
+    "card": "Chhaya Ethnic Studio",
+    "how": "phone"
+   },
+   {
+    "buyer": "Shree Fashion Hub",
+    "card": "Shree Fashion Hub",
+    "how": "phone"
+   },
+   {
+    "buyer": "Shubham'S",
+    "card": "Shubham'S",
+    "how": "phone"
+   },
+   {
+    "buyer": "Jigna Apparels",
+    "card": "Jigna Apparels",
+    "how": "phone"
+   },
+   {
+    "buyer": "Saawariya",
+    "card": "Saawariya",
+    "how": "phone"
+   },
+   {
+    "buyer": "Navkar Ethnic",
+    "card": "Navkar Ethnic",
+    "how": "phone"
+   },
+   {
+    "buyer": "Laxmi Laces and Fabrics",
+    "card": "Laxmi Laces and Fabrics",
+    "how": "phone"
+   },
+   {
+    "buyer": "Meena Saree",
+    "card": "Meena Saree",
+    "how": "phone"
+   },
+   {
+    "buyer": "FashionEra",
+    "card": "FashionEra",
+    "how": "phone"
+   },
+   {
+    "buyer": "Link Marketing",
+    "card": "Link Marketing",
+    "how": "phone"
+   },
+   {
+    "buyer": "Neo Fashions",
+    "card": "Neo Fashions",
+    "how": "phone"
+   },
+   {
+    "buyer": "Jovaa House",
+    "card": "Jovaa House",
+    "how": "phone"
+   },
+   {
+    "buyer": "Ashirwad Fashion World",
+    "card": "Ashirwad Fashion World",
+    "how": "phone"
+   },
+   {
+    "buyer": "Nishu Kurties",
+    "card": "Nishu Kurties",
+    "how": "phone"
+   },
+   {
+    "buyer": "Janaiya (Barati / Epex Family)",
+    "card": "Janaiya (Barati / Epex Family)",
+    "how": "phone"
+   },
+   {
+    "buyer": "OM TEX",
+    "card": "OM TEX",
+    "how": "phone"
+   },
+   {
+    "buyer": "FLYROBE (Surat - Bhatar Road)",
+    "card": "FLYROBE (Surat - Bhatar Road)",
+    "how": "phone"
+   },
+   {
+    "buyer": "Shree Rajeshwar Fabrics",
+    "card": "Shree Rajeshwar Fabrics",
+    "how": "phone"
+   },
+   {
+    "buyer": "Barati Designer",
+    "card": "Barati Designer",
+    "how": "phone"
+   },
+   {
+    "buyer": "Shree Madhavam",
+    "card": "Shree Madhavam",
+    "how": "phone"
+   },
+   {
+    "buyer": "Radhey Fashion",
+    "card": "Radhey Fashion",
+    "how": "phone"
+   },
+   {
+    "buyer": "Panchhi (Kayona by Panchhi)",
+    "card": "Panchhi (Kayona by Panchhi)",
+    "how": "phone"
+   },
+   {
+    "buyer": "Asopan",
+    "card": "Asopan",
+    "how": "phone"
+   },
+   {
+    "buyer": "Alisia Fabric-O-Land",
+    "card": "Alisia Fabric-O-Land",
+    "how": "phone"
+   },
+   {
+    "buyer": "Exclusive Fancy Boutique Materials (S C)",
+    "card": "Exclusive Fancy Boutique Materials (S C)",
+    "how": "phone"
+   },
+   {
+    "buyer": "Kanika Textile",
+    "card": "Kanika Textile",
+    "how": "phone"
+   },
+   {
+    "buyer": "Blue Lady",
+    "card": "Blue Lady",
+    "how": "phone"
+   },
+   {
+    "buyer": "Nawaz Selection",
+    "card": "Nawaz Selection",
+    "how": "phone"
+   },
+   {
+    "buyer": "Bansi Fab World",
+    "card": "Bansi Fab World",
+    "how": "phone"
+   },
+   {
+    "buyer": "Silk House NX",
+    "card": "Silk House NX",
+    "how": "phone"
+   },
+   {
+    "buyer": "Vidhata Impex",
+    "card": "Vidhata Impex",
+    "how": "phone"
+   },
+   {
+    "buyer": "Kailash Silk Mills",
+    "card": "Kailash Silk Mills",
+    "how": "phone"
+   },
+   {
+    "buyer": "Maruti Designer",
+    "card": "Maruti Designer",
+    "how": "phone"
+   },
+   {
+    "buyer": "Kapoor Lehenga & Saree",
+    "card": "Kapoor Lehenga & Saree",
+    "how": "phone"
+   },
+   {
+    "buyer": "The Fabrix Collections",
+    "card": "The Fabrix Collections",
+    "how": "phone"
+   },
+   {
+    "buyer": "JR Textile",
+    "card": "JR Textile",
+    "how": "phone"
+   },
+   {
+    "buyer": "Marwari Vastra (मारवाड़ी वस्त्र)",
+    "card": "Marwari Vastra (मारवाड़ी वस्त्र)",
+    "how": "name"
+   },
+   {
+    "buyer": "FLO (Jaipur)",
+    "card": "FLO (Jaipur)",
+    "how": "phone"
+   },
+   {
+    "buyer": "FLO Mumbai",
+    "card": "FLO Mumbai",
+    "how": "phone"
+   },
+   {
+    "buyer": "Bandhani by Cholis (M/s Cholis Creation)",
+    "card": "Bandhani by Cholis (M/s Cholis Creation)",
+    "how": "phone"
+   },
+   {
+    "buyer": "NOYA",
+    "card": "NOYA",
+    "how": "phone"
+   },
+   {
+    "buyer": "Nikhaar Collections (निखार)",
+    "card": "Nikhaar Collections (निखार)",
+    "how": "phone"
+   },
+   {
+    "buyer": "Fashion Queen Private Limited",
+    "card": "Fashion Queen Private Limited",
+    "how": "name"
+   },
+   {
+    "buyer": "Sayonee",
+    "card": "Sayonee",
+    "how": "phone"
+   },
+   {
+    "buyer": "Puneet Creation",
+    "card": "Puneet Creation",
+    "how": "phone"
+   },
+   {
+    "buyer": "Kaya Ethnic",
+    "card": "Kaya Ethnic",
+    "how": "phone"
+   },
+   {
+    "buyer": "Satrang - The Engagement Store",
+    "card": "Satrang - The Engagement Store",
+    "how": "phone"
+   },
+   {
+    "buyer": "Shree Radha Studio",
+    "card": "Shree Radha Studio",
+    "how": "phone"
+   },
+   {
+    "buyer": "NYAL Fashion Pvt Ltd",
+    "card": "NYAL Fashion Pvt Ltd",
+    "how": "phone"
+   },
+   {
+    "buyer": "GeonAttire (Roopam Creations Pvt Ltd / Saavre Shringar)",
+    "card": "GeonAttire (Roopam Creations Pvt Ltd / Saavre Shringar)",
+    "how": "phone"
+   },
+   {
+    "buyer": "DEVI (Devi Designs Pvt. Ltd.)",
+    "card": "DEVI (Devi Designs Pvt. Ltd.)",
+    "how": "phone"
+   },
+   {
+    "buyer": "NAKHRALI",
+    "card": "NAKHRALI",
+    "how": "phone"
+   },
+   {
+    "buyer": "Taal Designer Studio (name uncertain - stylized logo)",
+    "card": "Taal Designer Studio (name uncertain - stylized logo)",
+    "how": "phone"
+   },
+   {
+    "buyer": "Namo Designer",
+    "card": "Namo Designer",
+    "how": "name"
+   },
+   {
+    "buyer": "Nakshatra Stores (नक्षत्र STORES)",
+    "card": "Nakshatra Stores (नक्षत्र STORES)",
+    "how": "phone"
+   }
+  ],
+  "insert": []
+ },
+ "identities": [
+  {
+   "buyerId": "6d517a24-f61d-49ea-8aa9-157a226f217e",
+   "name": "Radhkrishna NX",
+   "username": "radhkrishnanx",
+   "password": "radhkrishnanxxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "db5b9bfb-cb32-4c57-8871-69553072bab9",
+   "name": "Radhkrishna NX",
+   "username": "radhkrishnanx2",
+   "password": "radhkrishnanx2xdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "8808488e-11ce-4ed4-9077-3405ded40023",
+   "name": "Anjni Design Inc.",
+   "username": "anjnidesigninc",
+   "password": "anjnidesignincxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "eec87a1e-0b15-47bb-b764-03cb30a22fb1",
+   "name": "AMARRA",
+   "username": "amarra",
+   "password": "amarraxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "39575b45-57bd-4f42-be7b-5bc4e3ee76f2",
+   "name": "AZMAIRA",
+   "username": "azmaira",
+   "password": "azmairaxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "0ce0ef57-dfa0-4dc9-8e70-9ec4c16dc2de",
+   "name": "BHABHIJI STUDIO",
+   "username": "bhabhijistudio",
+   "password": "bhabhijistudioxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "3d9c8046-633b-48f0-b23d-4e9465a30cf4",
+   "name": "RAJWADA WEDDING STORE",
+   "username": "rajwadaweddingstore",
+   "password": "rajwadaweddingstorexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "88befed7-15fb-4545-a631-c039e69cc283",
+   "name": "House of Reet",
+   "username": "houseofreet",
+   "password": "houseofreetxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "cf4a53f7-f2b4-4fab-9234-ac9a778b8c20",
+   "name": "RIVAAZ",
+   "username": "rivaaz",
+   "password": "rivaazxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "a0cbe0a8-c4b6-4a85-bb86-7e2be0c392fb",
+   "name": "SUBH SVSAR",
+   "username": "subhsvsar",
+   "password": "subhsvsarxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "6b7c5024-e675-487f-a375-3f8203a81215",
+   "name": null,
+   "username": "",
+   "password": "xdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "2b334cbf-dad7-4c30-a397-938001815105",
+   "name": "PREMIUM CLOTHING COMPANY",
+   "username": "premiumclothing",
+   "password": "premiumclothingxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "c5bb7ec0-cb67-440f-b8d5-fe57098c3844",
+   "name": "NEW LABDHI COLLECTION",
+   "username": "newlabdhicollection",
+   "password": "newlabdhicollectionxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "af90863e-d14d-4e8f-90f3-170ed62e0cd1",
+   "name": "WORLD ONE IMPORT EXPORT LLP",
+   "username": "worldoneimportexport",
+   "password": "worldoneimportexportxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "96f81dc7-2f34-46bf-ba61-bfd2bb331100",
+   "name": "ITARA",
+   "username": "itara",
+   "password": "itaraxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "8d36d80a-f107-4685-8698-e24046a2aca3",
+   "name": "MAJISHA ATTIRE",
+   "username": "majishaattire",
+   "password": "majishaattirexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "1d432ef8-010a-4b19-8253-152eea1c5a48",
+   "name": "Vallabham",
+   "username": "vallabham",
+   "password": "vallabhamxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "40069fd6-3b41-4bcc-904c-996314abba88",
+   "name": "YUVRAANI",
+   "username": "yuvraani",
+   "password": "yuvraanixdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "f5ed9623-43a9-4631-92f8-4853f948c548",
+   "name": "PAREVDI DESIGNER",
+   "username": "parevdidesigner",
+   "password": "parevdidesignerxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "0a183717-ee9e-4a11-a768-8b14c405ac76",
+   "name": "THE ROYAL VIVA",
+   "username": "royalviva",
+   "password": "royalvivaxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "d6932c5c-2fc9-420b-a580-dd56bb46d4cc",
+   "name": "SHAHI JODA",
+   "username": "shahijoda",
+   "password": "shahijodaxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "dd4045ba-5560-49e0-89fd-a75a38a0b205",
+   "name": "SHIVAM DRESS WALA",
+   "username": "shivamdresswala",
+   "password": "shivamdresswalaxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "485a704c-1a0e-4353-aaf0-820e7a1a17ff",
+   "name": "Sharma Boutique",
+   "username": "sharmaboutique",
+   "password": "sharmaboutiquexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "ccf72bf4-7b5e-42b5-8554-077ab9527a78",
+   "name": "Nine Hugs",
+   "username": "ninehugs",
+   "password": "ninehugsxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "0b7a51ee-3dbf-44a3-97f0-996ff5a00136",
+   "name": "Vasstram Brides",
+   "username": "vasstrambrides",
+   "password": "vasstrambridesxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "9e7a7da4-bdab-4c03-bd3c-b9ce405514a3",
+   "name": "House of Mewar",
+   "username": "houseofmewar",
+   "password": "houseofmewarxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "99dd82dc-555d-42e7-9b34-30ac2981d45b",
+   "name": "Ettara Bridal",
+   "username": "ettarabridal",
+   "password": "ettarabridalxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "b0f9ae53-5c74-4692-9a51-85a4648f97c4",
+   "name": "Sherwani On Rent",
+   "username": "sherwanionrent",
+   "password": "sherwanionrentxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "483e44b4-7f51-4bf8-824d-3dd737789e81",
+   "name": "Rivah (a brand by Gopisons)",
+   "username": "rivahabrandby",
+   "password": "rivahabrandbyxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "d56af37f-66ac-47b3-b7a4-26b5bd96fe18",
+   "name": "Baba Family Collection",
+   "username": "babafamilycollection",
+   "password": "babafamilycollectionxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "d7c8dc56-9ed8-449b-9a5d-c88a2aa5b5d7",
+   "name": "Sakhi (Dinesh Kumar Madanlal)",
+   "username": "sakhidineshkumar",
+   "password": "sakhidineshkumarxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "f94994ab-cb7c-4e2d-a865-5b93d7e748b3",
+   "name": "Bhelora",
+   "username": "bhelora",
+   "password": "bheloraxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "d4732a84-2ff7-4c7c-b9b1-6d4dffe3c938",
+   "name": "Aaroham by Aarti",
+   "username": "aarohambyaarti",
+   "password": "aarohambyaartixdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "6c564146-aa6d-42c1-8971-17e2e33b6fed",
+   "name": "Vaparimal Savaldas Wholesale Studio (Naren Pearl)",
+   "username": "vaparimalsavaldas",
+   "password": "vaparimalsavaldasxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "b57ce4f9-7cd0-4dff-ad5a-8f945c20e198",
+   "name": "Ridh - The Fabric Studio",
+   "username": "ridhthefabricstudio",
+   "password": "ridhthefabricstudioxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "aece8f4f-c364-40aa-892a-cb173fa21d2f",
+   "name": "Ajantha Bridal Collection",
+   "username": "ajanthabridal",
+   "password": "ajanthabridalxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "f4149dcd-4268-4f50-a2c7-b1ec26c89c64",
+   "name": "Juhi Makhija Couture",
+   "username": "juhimakhijacouture",
+   "password": "juhimakhijacouturexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "a2488269-356f-4a9d-b6c3-f97be2a18c74",
+   "name": "Aishwarya Fashion Couture / Aishwarya Lifestyle Pvt. Ltd.",
+   "username": "aishwaryafashion",
+   "password": "aishwaryafashionxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "642a6706-afb8-4d1e-9b37-da647dc97df8",
+   "name": "The Faab Fur",
+   "username": "faabfur",
+   "password": "faabfurxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "c9c17d07-8612-49e4-9027-847383daa127",
+   "name": "Gramodyog Emporium",
+   "username": "gramodyogemporium",
+   "password": "gramodyogemporiumxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "fb9f274a-e762-434d-841a-2cbae28e642e",
+   "name": "Neeta Lahrani - Bespoke Couture",
+   "username": "neetalahranibespoke",
+   "password": "neetalahranibespokexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "49e3ad79-a194-4d5d-a341-fb18342c8093",
+   "name": "Ishu Chopra Fashion Designer",
+   "username": "ishuchoprafashion",
+   "password": "ishuchoprafashionxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "e1115908-914b-45c1-a5f6-bbe823e82803",
+   "name": "MAVY (Maahika Trendz Pvt. Ltd.)",
+   "username": "mavymaahikatrendzpvt",
+   "password": "mavymaahikatrendzpvtxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "c09d8422-ab64-4644-8c0d-348b26945d38",
+   "name": "R | F (brand name unclear)",
+   "username": "rfbrandnameunclear",
+   "password": "rfbrandnameunclearxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "b063ad3f-95bc-4123-9165-84f252843d9b",
+   "name": "Ruchi Fashion",
+   "username": "ruchifashion",
+   "password": "ruchifashionxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "b2b5fff0-1447-4bf2-9d5f-204fa6704630",
+   "name": "Angel Bay / Patterns India",
+   "username": "angelbaypatterns",
+   "password": "angelbaypatternsxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "12c5bd1d-7676-461c-bc2f-06720e03d821",
+   "name": "Popin",
+   "username": "popin",
+   "password": "popinxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "02b68a83-2de7-47b2-b760-68aa542397c0",
+   "name": "Riza Boutique",
+   "username": "rizaboutique",
+   "password": "rizaboutiquexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "101d5d0a-1faf-4215-ab1a-6072719ab732",
+   "name": "Change",
+   "username": "change",
+   "password": "changexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "d3c8ae03-a500-4b02-a921-85b81d0e61e5",
+   "name": "Vamika Fashion Studio",
+   "username": "vamikafashionstudio",
+   "password": "vamikafashionstudioxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "e3fdfbb3-b990-4f8e-8710-09d19b183bd4",
+   "name": "Nisha Bakliwal",
+   "username": "nishabakliwal",
+   "password": "nishabakliwalxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "8663edd9-322a-46b4-95fd-c02b40bebc50",
+   "name": "Soni_label by Neema & Divya",
+   "username": "sonilabelbyneema",
+   "password": "sonilabelbyneemaxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "5c440fca-ab17-4919-8e44-634112044689",
+   "name": "nanda",
+   "username": "nanda",
+   "password": "nandaxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "1e088ff6-101d-48c3-a69e-1cf5f9a8d53f",
+   "name": "Shreiya Silks",
+   "username": "shreiyasilks",
+   "password": "shreiyasilksxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "590a79c0-ff2c-417b-b574-7567e1388d30",
+   "name": "Sunbai by Rajdhani",
+   "username": "sunbaibyrajdhani",
+   "password": "sunbaibyrajdhanixdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "d99488e8-299d-4861-9c80-77fe8645c4dd",
+   "name": "Kalakruti",
+   "username": "kalakruti",
+   "password": "kalakrutixdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "53eeda9e-25e6-4b76-b99a-8334e12de2b8",
+   "name": "Aangan Boutique",
+   "username": "aanganboutique",
+   "password": "aanganboutiquexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "11ecaef9-d877-49fb-9d6c-70ddcfe2c11c",
+   "name": "Plus Mark",
+   "username": "plusmark",
+   "password": "plusmarkxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "fec94e9d-2b22-4987-860b-899eac949494",
+   "name": "Priya Creations",
+   "username": "priyacreations",
+   "password": "priyacreationsxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "841a867c-f926-466f-800f-161478e94ca0",
+   "name": "GJ4 Fashion",
+   "username": "gj4fashion",
+   "password": "gj4fashionxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "6f039f85-10b0-4f74-9b2d-8b50de2793ea",
+   "name": "Sony's Ethnic",
+   "username": "sonysethnic",
+   "password": "sonysethnicxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "f8e6ad99-795d-4b1b-9170-614b6ae93205",
+   "name": "Pariwar",
+   "username": "pariwar",
+   "password": "pariwarxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "ba2b2da4-3163-4294-a115-ce491f3ac67c",
+   "name": "Yes Madam",
+   "username": "yesmadam",
+   "password": "yesmadamxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "01a9da3a-c25c-48b2-9115-4dd01c1c04ae",
+   "name": "Antra Designer Studio",
+   "username": "antradesignerstudio",
+   "password": "antradesignerstudioxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "cb30e3b4-9c12-4af6-acb4-ea3db040206b",
+   "name": "Vainmune",
+   "username": "vainmune",
+   "password": "vainmunexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "14474f3a-560f-4dbb-807c-28b4571a0c16",
+   "name": "Anushka",
+   "username": "anushka",
+   "password": "anushkaxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "d7b369c6-d1a2-49d8-9560-699e83a9610a",
+   "name": "Padmavati (Sarees / Prints)",
+   "username": "padmavatisarees",
+   "password": "padmavatisareesxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "f1dc6355-ee59-4f66-b2db-6638ae69744e",
+   "name": "Ganpati Sarees",
+   "username": "ganpatisarees",
+   "password": "ganpatisareesxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "b3ebb50e-4bed-4f48-9a63-1618655717c6",
+   "name": "RiBiRTH",
+   "username": "ribirth",
+   "password": "ribirthxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "248f94d4-944e-4680-8f3a-457d4f4ab7da",
+   "name": "Mahalaxmi Designer Dresses",
+   "username": "mahalaxmidesigner",
+   "password": "mahalaxmidesignerxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "e894d581-6e8e-4372-b5e8-bcf760a396a5",
+   "name": "Sindhi Group of Companies",
+   "username": "sindhigroupof",
+   "password": "sindhigroupofxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "db89bb6f-a1f7-45b9-b988-79ed67431b4e",
+   "name": "Amber Shaili",
+   "username": "ambershaili",
+   "password": "ambershailixdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "73a910b2-8d46-4e6d-a139-c3bcba785d66",
+   "name": "Nakoda Designer Studio (NDS) - Sheogani Wala",
+   "username": "nakodadesignerstudio",
+   "password": "nakodadesignerstudioxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "5432eab8-4b0e-4d43-bf75-9238895db367",
+   "name": "Shakti",
+   "username": "shakti",
+   "password": "shaktixdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "d0c67c56-de12-4d11-810b-86f195566f12",
+   "name": "Element by Shrushti Bhandari",
+   "username": "elementbyshrushti",
+   "password": "elementbyshrushtixdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "7ed47286-8d19-405e-be14-c943332ed396",
+   "name": "Siddham Fabrics",
+   "username": "siddhamfabrics",
+   "password": "siddhamfabricsxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "1c31e498-2f69-448b-a634-19f18192c241",
+   "name": "Tyar Couture By Mansi Jain",
+   "username": "tyarcouturebymansi",
+   "password": "tyarcouturebymansixdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "669c075f-1b3d-4a88-a0b5-8b499fe32897",
+   "name": "Pruthvi Boutique",
+   "username": "pruthviboutique",
+   "password": "pruthviboutiquexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "c5ac5b62-0ad2-4a46-b090-07464813a828",
+   "name": "Pehnawa by Juhi (Juhi Lasod)",
+   "username": "pehnawabyjuhijuhi",
+   "password": "pehnawabyjuhijuhixdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "bf69d20c-ac9c-4d38-9719-acdcf47d7b53",
+   "name": "Ariha Traditional",
+   "username": "arihatraditional",
+   "password": "arihatraditionalxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "c8affe07-3648-4f41-a313-e320df826d95",
+   "name": "New Mina Bazar",
+   "username": "newminabazar",
+   "password": "newminabazarxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "eead204a-f641-4793-abfa-ef6b063aa29c",
+   "name": "Rudra Choli - The Designer Studio",
+   "username": "rudracholithe",
+   "password": "rudracholithexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "d1b00b63-ba09-44a7-9c9d-7d74f89cd7eb",
+   "name": "Sobber Threads (Styluxe Apparel)",
+   "username": "sobberthreadsstyluxe",
+   "password": "sobberthreadsstyluxexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "461b0237-b1e9-4134-8560-c783505d433d",
+   "name": "Rajesh Kumar & Co. (R.K. Punjabi Suit)",
+   "username": "rajeshkumarcork",
+   "password": "rajeshkumarcorkxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "f0ebec44-1e96-49fd-85c4-e706ecae4182",
+   "name": "Dulari (by Manishkumar Rahulkumar)",
+   "username": "dularibymanishkumar",
+   "password": "dularibymanishkumarxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "664fd3ef-fdb5-4489-b102-91af451e8c74",
+   "name": "Bombay Beauty",
+   "username": "bombaybeauty",
+   "password": "bombaybeautyxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "286ee640-ad30-4a50-bf3e-35b4d1d2023c",
+   "name": "Chhaya Ethnic Studio",
+   "username": "chhayaethnicstudio",
+   "password": "chhayaethnicstudioxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "baf9f5ea-24a5-444a-b333-2e8f89bd7f19",
+   "name": "Shree Fashion Hub",
+   "username": "shreefashionhub",
+   "password": "shreefashionhubxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "15d27778-ad6a-4eb5-8a3d-d814c8623b93",
+   "name": "Shubham'S",
+   "username": "shubhams",
+   "password": "shubhamsxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "de5a2fcd-3cf1-43e7-980a-eb8070b30021",
+   "name": "Jigna Apparels",
+   "username": "jignaapparels",
+   "password": "jignaapparelsxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "be6261d1-73ee-470b-a180-25106459b8a6",
+   "name": "Saawariya",
+   "username": "saawariya",
+   "password": "saawariyaxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "6e0e967d-fc49-405d-82d5-7f0d6e84aa9b",
+   "name": "Navkar Ethnic",
+   "username": "navkarethnic",
+   "password": "navkarethnicxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "95796a77-c99a-43d5-bda3-62d6b13c70d4",
+   "name": "Laxmi Laces and Fabrics",
+   "username": "laxmilacesandfabrics",
+   "password": "laxmilacesandfabricsxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "232625e4-3fad-47f2-9864-c48c200bf9b5",
+   "name": "Meena Saree",
+   "username": "meenasaree",
+   "password": "meenasareexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "1515fd94-4890-4657-bf44-0a4b1ecf7a47",
+   "name": "FashionEra",
+   "username": "fashionera",
+   "password": "fashioneraxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "9bfb3774-6789-4627-a244-29697c1e7428",
+   "name": "Link Marketing",
+   "username": "linkmarketing",
+   "password": "linkmarketingxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "ab8d0d4a-7293-4f12-b5de-bbe58c184c7a",
+   "name": "Neo Fashions",
+   "username": "neofashions",
+   "password": "neofashionsxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "ded924d5-4dc7-41c9-b2af-b5aea3311555",
+   "name": "Jovaa House",
+   "username": "jovaahouse",
+   "password": "jovaahousexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "c85c807b-588b-43db-85a6-6fb4ffe60824",
+   "name": "Ashirwad Fashion World",
+   "username": "ashirwadfashionworld",
+   "password": "ashirwadfashionworldxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "c3b3b361-16a0-4319-90ef-35d70d6d1ba2",
+   "name": "Nishu Kurties",
+   "username": "nishukurties",
+   "password": "nishukurtiesxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "501470b7-e977-4f0a-952e-db32e4f4fdc2",
+   "name": "Janaiya (Barati / Epex Family)",
+   "username": "janaiyabaratiepex",
+   "password": "janaiyabaratiepexxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "0e78e3ba-6777-4ccd-9d6b-39bdcf2fb6db",
+   "name": "OM TEX",
+   "username": "omtex",
+   "password": "omtexxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "6da8623d-c9d9-433a-843c-03278250346f",
+   "name": "FLYROBE (Surat - Bhatar Road)",
+   "username": "flyrobesuratbhatar",
+   "password": "flyrobesuratbhatarxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "fa5252ba-847d-44d7-b7f9-b5a7e205646d",
+   "name": "Shree Rajeshwar Fabrics",
+   "username": "shreerajeshwar",
+   "password": "shreerajeshwarxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "79f1ca73-55c7-4756-861d-dc41a9bf9350",
+   "name": "Barati Designer",
+   "username": "baratidesigner",
+   "password": "baratidesignerxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "dc2053c8-632a-456e-8568-1922f222c884",
+   "name": "Shree Madhavam",
+   "username": "shreemadhavam",
+   "password": "shreemadhavamxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "dc9e20eb-61fb-4e24-ba2d-abe43213f7ef",
+   "name": "Radhey Fashion",
+   "username": "radheyfashion",
+   "password": "radheyfashionxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "7445d39b-062d-4fca-a9a6-68e99f788c07",
+   "name": "Panchhi (Kayona by Panchhi)",
+   "username": "panchhikayonaby",
+   "password": "panchhikayonabyxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "ac91134c-5e70-484b-ac95-3e7eddebe82f",
+   "name": "Asopan",
+   "username": "asopan",
+   "password": "asopanxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "847734ba-1ca4-495d-a5c8-c429d99cb5b6",
+   "name": "Alisia Fabric-O-Land",
+   "username": "alisiafabricoland",
+   "password": "alisiafabricolandxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "5325d08f-0730-4618-9159-ad82f08868d5",
+   "name": "Exclusive Fancy Boutique Materials (S C)",
+   "username": "exclusivefancy",
+   "password": "exclusivefancyxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "b8326256-6307-4b32-8911-b0ce46d67ff5",
+   "name": "Kanika Textile",
+   "username": "kanikatextile",
+   "password": "kanikatextilexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "dc04a7cd-ea74-4975-84be-48d4c37c8d85",
+   "name": "Blue Lady",
+   "username": "bluelady",
+   "password": "blueladyxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "29aeb6e5-48ae-4e28-abeb-ad719e438eff",
+   "name": "Nawaz Selection",
+   "username": "nawazselection",
+   "password": "nawazselectionxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "356afea2-222b-451d-9aa0-8eb7232311bb",
+   "name": "Bansi Fab World",
+   "username": "bansifabworld",
+   "password": "bansifabworldxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "2f7f35b6-cd9c-4805-ad3e-ef91761e072b",
+   "name": "Silk House NX",
+   "username": "silkhousenx",
+   "password": "silkhousenxxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "42ff76c4-a87e-4a55-afa3-eeed7d2dadd1",
+   "name": "Vidhata Impex",
+   "username": "vidhataimpex",
+   "password": "vidhataimpexxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "fea4c94d-ec50-41d6-86e2-034f581c18c7",
+   "name": "Kailash Silk Mills",
+   "username": "kailashsilkmills",
+   "password": "kailashsilkmillsxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "bc95d117-0e60-4169-8a0e-6ab0d61cbcaf",
+   "name": "Maruti Designer",
+   "username": "marutidesigner",
+   "password": "marutidesignerxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "3b1208a3-8ab7-4ad0-ab84-053bcb6b2cf9",
+   "name": "Kapoor Lehenga & Saree",
+   "username": "kapoorlehengasaree",
+   "password": "kapoorlehengasareexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "59050c2a-d522-4b4b-b217-29bea3c7871b",
+   "name": "The Fabrix Collections",
+   "username": "fabrixcollections",
+   "password": "fabrixcollectionsxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "e2ef7dac-8d0e-4b1c-a51f-36d0828c7f0b",
+   "name": "JR Textile",
+   "username": "jrtextile",
+   "password": "jrtextilexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "b9720948-c418-4f17-9e1f-d390ddcc096b",
+   "name": "Marwari Vastra (मारवाड़ी वस्त्र)",
+   "username": "marwarivastra",
+   "password": "marwarivastraxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "532356b4-74f4-46fe-96ba-309e82db0380",
+   "name": "FLO (Jaipur)",
+   "username": "flojaipur",
+   "password": "flojaipurxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "52f59543-7f75-4de0-b4a2-c4cf9636bb92",
+   "name": "FLO Mumbai",
+   "username": "flomumbai",
+   "password": "flomumbaixdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "894aec20-008b-4b10-b8d5-6fc8d7dda15f",
+   "name": "Bandhani by Cholis (M/s Cholis Creation)",
+   "username": "bandhanibycholisms",
+   "password": "bandhanibycholismsxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "ac294e84-74a3-49b1-b400-a5ff3794b833",
+   "name": "NOYA",
+   "username": "noya",
+   "password": "noyaxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "5313b220-5e95-40cc-a4ed-425949326b00",
+   "name": "Nikhaar Collections (निखार)",
+   "username": "nikhaarcollections",
+   "password": "nikhaarcollectionsxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "6dc1ed53-c5ae-464f-ad83-e566a24a40f9",
+   "name": "Fashion Queen Private Limited",
+   "username": "fashionqueenprivate",
+   "password": "fashionqueenprivatexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "eaedad80-b430-4d12-99b7-f1e1a103c1c8",
+   "name": "Sayonee",
+   "username": "sayonee",
+   "password": "sayoneexdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "9682551e-e037-44ef-8725-26778104b079",
+   "name": "Puneet Creation",
+   "username": "puneetcreation",
+   "password": "puneetcreationxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "45bc3426-133c-4626-937b-2ddcef2de404",
+   "name": "Kaya Ethnic",
+   "username": "kayaethnic",
+   "password": "kayaethnicxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "8cc1e10a-8317-43aa-a8e4-87b91046b52e",
+   "name": "Satrang - The Engagement Store",
+   "username": "satrangtheengagement",
+   "password": "satrangtheengagementxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "a64c3d67-7017-45ed-a024-d2c033d09787",
+   "name": "Shree Radha Studio",
+   "username": "shreeradhastudio",
+   "password": "shreeradhastudioxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "36d1aa75-b14d-4b1f-b508-572521caa2fb",
+   "name": "NYAL Fashion Pvt Ltd",
+   "username": "nyalfashionpvtltd",
+   "password": "nyalfashionpvtltdxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "8a1a4e0a-02c5-447c-bbd9-149a8bbc7418",
+   "name": "GeonAttire (Roopam Creations Pvt Ltd / Saavre Shringar)",
+   "username": "geonattireroopam",
+   "password": "geonattireroopamxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "6b29a3af-55fa-412d-90e0-fdc37c2857a5",
+   "name": "DEVI (Devi Designs Pvt. Ltd.)",
+   "username": "devidevidesignspvt",
+   "password": "devidevidesignspvtxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "ddadc622-2ab8-4e6a-93ae-208f9c5daf21",
+   "name": "NAKHRALI",
+   "username": "nakhrali",
+   "password": "nakhralixdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "2b64b77d-13dd-4869-8caf-6446f9b558c7",
+   "name": "Taal Designer Studio (name uncertain - stylized logo)",
+   "username": "taaldesignerstudio",
+   "password": "taaldesignerstudioxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "e7c0b4ee-a0a6-48f8-87f8-40b118a18de1",
+   "name": "Namo Designer",
+   "username": "namodesigner",
+   "password": "namodesignerxdrevi",
+   "existing": true
+  },
+  {
+   "buyerId": "5785ebc9-d75b-4205-8857-5a76a5e71764",
+   "name": "Nakshatra Stores (नक्षत्र STORES)",
+   "username": "nakshatrastores",
+   "password": "nakshatrastoresxdrevi",
+   "existing": true
+  }
+ ]
+}
