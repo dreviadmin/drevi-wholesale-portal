@@ -1118,7 +1118,7 @@ export async function recordPayment(
   const notes = [o.payment_notes?.trim(), line].filter(Boolean).join("\n").slice(0, 2000);
 
   const nextAdvance = Math.round((advance + amount) * 100) / 100;
-  const { error } = await admin
+  const { data: won, error } = await admin
     .from("orders")
     .update({
       advance_amount: nextAdvance,
@@ -1129,9 +1129,25 @@ export async function recordPayment(
     })
     .eq("id", orderId)
     // Guard the read-modify-write: two people recording a payment at once must
-    // not each add to the same starting figure.
-    .eq("advance_amount", advance);
+    // not each add to the same starting figure. credit_applied is in the
+    // predicate too, because settling a return against this order moves the
+    // balance this function just read.
+    .eq("advance_amount", advance)
+    .eq("credit_applied", credit)
+    // .select().maybeSingle() is the whole point (21 Sep): a PostgREST update
+    // that matches ZERO rows returns no error, so the original
+    // `const { error } = ...` reported ok:true on a LOST compare-and-set and
+    // went on to write an audit event saying the money had landed. The guard
+    // was decorative — this is what makes it a guard.
+    .select("id")
+    .maybeSingle();
   if (error) return { ok: false, error: error.message };
+  if (!won) {
+    return {
+      ok: false,
+      error: "This order's payment or credit changed in another session — reload and check the balance before entering this again.",
+    };
+  }
 
   await writeAuditEvent({
     eventType: "order_payment_recorded",
