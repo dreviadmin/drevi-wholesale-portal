@@ -4,6 +4,7 @@ import { defaultAnglePrompt } from "./prompts";
 import { defaultCopyPrompt } from "./copy-prompt";
 import { defaultCopyModel } from "./copy-models";
 import { promptDesignFrom } from "./facts";
+import { missingFields, type MissingKey } from "./missing";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sweepStaleJobs } from "@/lib/pipeline/sweep";
 import { fetchAll } from "@/lib/supabase/fetch-all";
@@ -34,6 +35,9 @@ export interface BoardRow {
   thumb: string | null;
   wholesalePriceSet: boolean;
   notifyCount: number; // open back-in-stock requests (Stage 9)
+  /** Spec fields this design is still short of — drives the board's Missing
+   *  chips. Empty on a complete design. */
+  missing: MissingKey[];
   createdAt: string; // ISO from designs.created_at ('' if null)
 }
 
@@ -44,9 +48,19 @@ export async function loadBoard(): Promise<BoardRow[]> {
   // away. Opening the studio now clears anything that has outlived its budget.
   await sweepStaleJobs(createAdminClient());
   const admin = createAdminClient();
-  const [designs, angles, activeImages, copies, targets, products, notifies] = await Promise.all([
-    fetchAll<{ id: string; base_sku: string; color: string; title: string | null; category: string | null; tier: "standard" | "hero"; specs_verified: boolean; created_at: string | null }>(
-      admin, "designs", "id, base_sku, color, title, category, tier, specs_verified, created_at",
+  const [designs, angles, activeImages, copies, targets, products, notifies, vocab] = await Promise.all([
+    fetchAll<{
+      id: string; base_sku: string; color: string; title: string | null; category: string | null;
+      tier: "standard" | "hero"; specs_verified: boolean; created_at: string | null;
+      // Read for the Missing chips (22 Sep). They ride along on the query
+      // the board already runs rather than costing a second pass.
+      origin: string | null; fabric: string | null; handwork: string | null;
+      color_name: string | null; sub_category: string | null;
+      mrp_override: number | null; auto_mrp: number | null;
+    }>(
+      admin, "designs",
+      "id, base_sku, color, title, category, sub_category, tier, specs_verified, created_at, " +
+      "origin, fabric, handwork, color_name, mrp_override, auto_mrp",
       // Board default: newest design first (§7.4 / Item 4). nullsFirst:false —
       // the column is nullable and Postgres floats NULLs to the top on DESC.
       // id desc is the stable tiebreak so paging never reshuffles equal stamps.
@@ -65,6 +79,10 @@ export async function loadBoard(): Promise<BoardRow[]> {
     fetchAll<{ sku: string; wholesale_price: number; image_urls: string[] | null }>(
       admin, "wholesale_products", "sku, wholesale_price, image_urls"),
     fetchAll<{ sku_base: string; color: string }>(admin, "notify_me", "sku_base, color", (q) => q.is("fulfilled_at", null)),
+    // For the colour check only: a design carrying GLD with no color_name is
+    // not missing a colour, because the vocabulary answers "Gold" — and that
+    // is the name the title and the metafield already use.
+    loadVocab(),
   ]);
   const notifyByGroup = new Map<string, number>();
   for (const n of notifies) {
@@ -164,6 +182,13 @@ export async function loadBoard(): Promise<BoardRow[]> {
       thumb: groupThumb.get(key) ?? (frontRef ? `/api/drive-photo?id=${encodeURIComponent(frontRef)}&s=200` : null),
       wholesalePriceSet: input.wholesalePriceSet,
       notifyCount: notifyByGroup.get(key.toUpperCase()) ?? 0,
+      missing: missingFields({
+        origin: d.origin, fabric: d.fabric, handwork: d.handwork,
+        color: d.color, colorName: d.color_name,
+        category: d.category, subCategory: d.sub_category,
+        mrpOverride: d.mrp_override, autoMrp: d.auto_mrp,
+        wholesalePriceSet: input.wholesalePriceSet,
+      }, vocab),
       createdAt: d.created_at ?? "",
     };
   });
