@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, PauseCircle, RotateCcw, ReceiptText } from "lucide-react";
 import { palette } from "@/lib/palette";
+import { useToast } from "@/lib/use-toast";
 import { setLineState, generateOrderBill } from "@/app/admin/orders/actions";
 
 // Line-level confirmation + split billing (Ansh, 18 Aug).
@@ -12,8 +13,8 @@ import { setLineState, generateOrderBill } from "@/app/admin/orders/actions";
 // (immutable, shows its bill number).
 
 function useFlash(): [string | null, (m: string) => void] {
-  const [toast, setToast] = useState<string | null>(null);
-  return [toast, (m: string) => { setToast(m); setTimeout(() => setToast(null), 2600); }];
+  const [toast, flash] = useToast();
+  return [toast, flash];
 }
 
 const chip = (bg: string, fg: string) => ({

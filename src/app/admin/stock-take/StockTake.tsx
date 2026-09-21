@@ -8,6 +8,7 @@ import { DraftNotice } from "@/components/DraftNotice";
 import { useDraft, isDraftOlderThan, DRAFT_NOTICE_AFTER_MS } from "@/lib/useDraft";
 import { baseSkuOf } from "@/lib/variants";
 import { palette } from "@/lib/palette";
+import { useToast } from "@/lib/use-toast";
 import { lookupSku, commitCount, type ScannedSku, type CountableProduct } from "./actions";
 
 // Retrofit R8 §10.2b — built for walking the rack:
@@ -67,7 +68,7 @@ export function StockTake({ catalog }: { catalog: CountableProduct[] }) {
   const [active, setActive] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [manual, setManual] = useState("");
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
   const [pending, startTransition] = useTransition();
   const qtyRef = useRef<HTMLInputElement | null>(null);
   // Bulk picker. `selected` holds SKUs, never designs — a half-ticked design is
@@ -82,7 +83,6 @@ export function StockTake({ catalog }: { catalog: CountableProduct[] }) {
   // at the first await, so the double-submit guard has to be its own latch.
   const committingRef = useRef(false);
 
-  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2600); }
 
   function add(item: ScannedSku): "existing" | "new" {
     let outcome: "existing" | "new" = "new";

@@ -10,6 +10,7 @@ import { useSort, SortTh, type SortAccessor } from "@/components/sortable";
 import { palette } from "@/lib/palette";
 import { formatINR } from "@/lib/format";
 import type { OrderStatus, OrderSource } from "@/lib/types";
+import { useToast } from "@/lib/use-toast";
 
 export interface OrderRowDTO {
   id: string;
@@ -65,8 +66,7 @@ export function OrdersTable({ rows }: { rows: OrderRowDTO[] }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [toast, setToast] = useState<string | null>(null);
-  const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3200); };
+  const [toast, flash] = useToast();
   const [status, setStatus] = useState<Set<OrderStatus>>(new Set());
   const [source, setSource] = useState<Set<OrderSource>>(new Set());
   const [range, setRange] = useState<"today" | "7d" | "all">("all");

@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Clock3, Lock } from "lucide-react";
 import { DraftNotice } from "@/components/DraftNotice";
 import { PhoneInput } from "@/components/PhoneInput";
 import { palette } from "@/lib/palette";
 import { useDraft } from "@/lib/useDraft";
+import { useToast } from "@/lib/use-toast";
 import { updateMyDetails, requestIdentityChange, type IdentityField } from "@/app/account/actions";
 
 // Two halves, and the split is the point. The top half a buyer owns outright.
@@ -71,7 +72,7 @@ export function DetailsForm({
 }) {
   const router = useRouter();
   const [isPending, start] = useTransition();
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
 
   const [draft, setDraft, draftMeta] = useDraft<DraftState>(
     draftKey,
@@ -86,11 +87,6 @@ export function DetailsForm({
   );
 
   const dirty = sig(draft.fields) !== sig(seed);
-
-  function flash(m: string) {
-    setToast(m);
-    setTimeout(() => setToast(null), 2600);
-  }
 
   function setField(key: keyof DetailsFields, value: string) {
     setDraft((d) => ({ ...d, fields: { ...d.fields, [key]: value } }));

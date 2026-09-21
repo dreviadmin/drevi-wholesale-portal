@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { upsertLov, setLovActive, type LovList } from "./actions";
 import { palette } from "@/lib/palette";
+import { useToast } from "@/lib/use-toast";
 
 export interface LovRow {
   id: string;
@@ -29,10 +30,9 @@ export function LovsEditor({ rows }: { rows: LovRow[] }) {
   const [tab, setTab] = useState<LovList>("category");
   const [code, setCode] = useState("");
   const [label, setLabel] = useState("");
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
   const [pending, start] = useTransition();
 
-  const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2400); };
   const visible = useMemo(() => rows.filter((r) => r.list === tab), [rows, tab]);
 
   function add() {

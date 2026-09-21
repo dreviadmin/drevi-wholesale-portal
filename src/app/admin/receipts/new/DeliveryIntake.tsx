@@ -19,6 +19,7 @@ import type { LiveVocab } from "@/lib/sku/vocab-live";
 import { queueTray } from "@/app/admin/sku-generator/labels";
 import { resolveGarmentDesign, uploadIdentPhoto, saveDelivery, quickAddVendor, type SupplyBlock, type SavedDesign } from "./delivery-actions";
 import { downscalePhoto } from "@/lib/downscale-photo";
+import { useToast } from "@/lib/use-toast";
 
 // Retrofit R3 (§5) — "Log delivery". One screen: vendor block that collapses,
 // a list of garment cards (one per DESIGN, not per size), and a full-screen
@@ -141,13 +142,12 @@ export function DeliveryIntake({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillDesignId, knownDesigns]);
 
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
   // Save-only success step (§6.1): the form is replaced by a panel that points
   // at the master editor / specs for each design on the receipt.
   const [saved, setSaved] = useState<{ receiptId: string; receiptNumber: string; skus: string[]; designs: SavedDesign[]; pieces: number; value: number } | null>(null);
   const entryDate = useMemo(() => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }), []);
 
-  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2600); }
 
   // Restored garments mean the vendor block is already filled — collapse it.
   useEffect(() => {

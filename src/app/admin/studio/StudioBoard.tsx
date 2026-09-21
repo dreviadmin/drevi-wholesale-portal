@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Search, X, ScanLine, ImageOff, Check, Crown } from "lucide-react";
@@ -8,6 +8,8 @@ import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { useSort, SortTh } from "@/components/sortable";
 import { withFrom } from "@/components/BackLink";
 import { palette } from "@/lib/palette";
+import { useToast } from "@/lib/use-toast";
+import { BatchProgress, type BatchProgressState } from "@/components/admin/BatchProgress";
 import { BADGE_LABEL, type DesignBadge } from "@/lib/studio/state";
 import type { BoardRow } from "@/lib/studio/load";
 import { setTierBatch, togglePortalBatch, runFashnBatch, approveAllPreflight, approveAllBatch, generateCopyBatch, pushWholesaleBatch, pushShopifyBatch } from "./actions";
@@ -56,7 +58,12 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
   const [query, setQuery] = useState("");
   const [scanOpen, setScanOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash, dismissToast] = useToast();
+  const [progress, setProgress] = useState<BatchProgressState | null>(null);
+  // A ref, not state: the bulk loops run inside a transition and read this
+  // BETWEEN chunks, where a state value captured at the start would be stale
+  // forever. Setting it is what "Stop" does.
+  const stopRef = useRef(false);
   const [pending, startTransition] = useTransition();
   // D8 confirm sheets: FASHN spend (count + credits) and use-candidates (thumbnails).
   const [confirm, setConfirm] = useState<
@@ -119,7 +126,24 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
     added: (r) => (r.createdAt ? Date.parse(r.createdAt) : null),
   }, { key: "added", dir: "desc" });
 
-  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2200); }
+  // Progress lives beside the toast, not inside it: a toast answers "what just
+  // happened", the meter answers "how much longer". A 17-minute copy run needs
+  // both (Ansh, 22 Sep).
+  function runProgress(label: string, done: number, total: number, detail?: string) {
+    setProgress({ label, done, total, detail, stopping: stopRef.current });
+  }
+  function endProgress(label: string, total: number, detail: string, done?: number) {
+    setProgress({ label, done: done ?? total, total, detail, finished: true });
+  }
+  // Stop takes effect at the next chunk boundary. The chunk already in flight
+  // is a server action on its way to Anthropic or Shopify — it finishes and is
+  // counted, because pretending otherwise would misreport what was spent.
+  function requestStop() {
+    stopRef.current = true;
+    setProgress((p) => (p && !p.finished ? { ...p, stopping: true } : p));
+    flash("Stopping after the designs already sent — no new ones will start.");
+  }
+  function startRun() { stopRef.current = false; }
 
   function handleScan(text: string): ScanFeedback {
     const sku = text.trim().toUpperCase();
@@ -462,15 +486,31 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
                   // it belongs, on the server; the button now feeds it in
                   // chunks so one click means one click. (Ansh, 21 Sep.)
                   let gen = 0, skip = 0, fail = 0, done = 0;
+                  startRun();
+                  runProgress("Generating copy", 0, ids.length, "one vision call per design");
                   for (let i = 0; i < ids.length; i += COPY_CHUNK) {
+                    if (stopRef.current) {
+                      endProgress("Generating copy", ids.length, `stopped at ${done} of ${ids.length} · ${gen} generated · ${skip} awaiting specs`, done);
+                      flash(`Stopped. ${gen} generated · ${skip} awaiting specs · ${ids.length - done} not started`);
+                      return;
+                    }
                     const chunk = ids.slice(i, i + COPY_CHUNK);
                     const r = await generateCopyBatch(chunk);
-                    if (!r.ok) { flash(r.error ?? "Failed"); break; }
+                    if (!r.ok) {
+                      flash(r.error ?? "Failed");
+                      endProgress("Generating copy", ids.length, `stopped at ${done} of ${ids.length} — ${r.error ?? "failed"}`);
+                      break;
+                    }
                     gen += r.generated ?? 0; skip += r.skipped ?? 0; fail += r.failed ?? 0;
                     done += chunk.length;
-                    flash(`Copy ${done}/${ids.length} · ${gen} generated · ${skip} awaiting specs${fail ? ` · ${fail} failed` : ""}`);
+                    const tally = `${gen} generated · ${skip} awaiting specs${fail ? ` · ${fail} failed` : ""}`;
+                    runProgress("Generating copy", done, ids.length, tally);
+                    flash(`Copy ${done}/${ids.length} · ${tally}`);
                   }
-                  flash(`Copy done: ${gen} generated · ${skip} awaiting specs · ${fail} failed`);
+                  if (done === ids.length) {
+                    endProgress("Generating copy", ids.length, `${gen} generated · ${skip} awaiting specs · ${fail} failed`);
+                    flash(`Copy done: ${gen} generated · ${skip} awaiting specs · ${fail} failed`);
+                  }
                   router.refresh();
                 });
               }}
@@ -486,15 +526,32 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
                 if (!window.confirm(`Push ${ids.length} design(s) to wholesale? Gate-blocked designs are skipped and reported.`)) return;
                 startTransition(async () => {
                   let pushed = 0, blocked = 0, failed = 0, done = 0;
+                  startRun();
+                  runProgress("Pushing to wholesale", 0, ids.length);
                   for (let i = 0; i < ids.length; i += PUSH_CHUNK) {
+                    if (stopRef.current) {
+                      endProgress("Pushing to wholesale", ids.length, `stopped at ${done} of ${ids.length} · ${pushed} pushed`, done);
+                      flash(`Stopped. ${pushed} pushed · ${ids.length - done} not started`);
+                      router.refresh();
+                      return;
+                    }
                     const chunk = ids.slice(i, i + PUSH_CHUNK);
                     const r = await pushWholesaleBatch(chunk);
-                    if (!r.ok) { flash(r.error ?? "Failed"); break; }
+                    if (!r.ok) {
+                      flash(r.error ?? "Failed");
+                      endProgress("Pushing to wholesale", ids.length, `stopped at ${done} of ${ids.length} — ${r.error ?? "failed"}`);
+                      break;
+                    }
                     pushed += r.pushed ?? 0; blocked += r.blocked ?? 0; failed += r.failed ?? 0;
                     done += chunk.length;
-                    flash(`Wholesale ${done}/${ids.length} · ${pushed} pushed · ${blocked} blocked${failed ? ` · ${failed} failed` : ""}`);
+                    const tally = `${pushed} pushed · ${blocked} blocked${failed ? ` · ${failed} failed` : ""}`;
+                    runProgress("Pushing to wholesale", done, ids.length, tally);
+                    flash(`Wholesale ${done}/${ids.length} · ${tally}`);
                   }
-                  flash(`Wholesale done: ${pushed} pushed · ${blocked} gate-blocked · ${failed} failed`);
+                  if (done === ids.length) {
+                    endProgress("Pushing to wholesale", ids.length, `${pushed} pushed · ${blocked} gate-blocked · ${failed} failed`);
+                    flash(`Wholesale done: ${pushed} pushed · ${blocked} gate-blocked · ${failed} failed`);
+                  }
                   router.refresh();
                 });
               }}
@@ -514,16 +571,33 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
                 if (!window.confirm(`Push ${ids.length} design(s) to Shopify? New products are created as DRAFT; gate-blocked designs are skipped and reported.`)) return;
                 startTransition(async () => {
                   let pushed = 0, blocked = 0, failed = 0, done = 0, firstError = "";
+                  startRun();
+                  runProgress("Pushing to Shopify", 0, ids.length, "new products are created as DRAFT");
                   for (let i = 0; i < ids.length; i += PUSH_CHUNK) {
+                    if (stopRef.current) {
+                      endProgress("Pushing to Shopify", ids.length, `stopped at ${done} of ${ids.length} · ${pushed} pushed`, done);
+                      flash(`Stopped. ${pushed} pushed · ${ids.length - done} not started`);
+                      router.refresh();
+                      return;
+                    }
                     const chunk = ids.slice(i, i + PUSH_CHUNK);
                     const r = await pushShopifyBatch(chunk);
-                    if (!r.ok) { flash(r.error ?? "Failed"); break; }
+                    if (!r.ok) {
+                      flash(r.error ?? "Failed");
+                      endProgress("Pushing to Shopify", ids.length, `stopped at ${done} of ${ids.length} — ${r.error ?? "failed"}`);
+                      break;
+                    }
                     pushed += r.pushed ?? 0; blocked += r.blocked ?? 0; failed += r.failed ?? 0;
                     if (!firstError && r.firstError) firstError = r.firstError;
                     done += chunk.length;
-                    flash(`Shopify ${done}/${ids.length} · ${pushed} pushed · ${blocked} blocked${failed ? ` · ${failed} failed` : ""}`);
+                    const tally = `${pushed} pushed · ${blocked} blocked${failed ? ` · ${failed} failed` : ""}`;
+                    runProgress("Pushing to Shopify", done, ids.length, tally);
+                    flash(`Shopify ${done}/${ids.length} · ${tally}`);
                   }
-                  flash(`Shopify done: ${pushed} pushed · ${blocked} gate-blocked · ${failed} failed${firstError ? ` — ${firstError}` : ""}`);
+                  if (done === ids.length) {
+                    endProgress("Pushing to Shopify", ids.length, `${pushed} pushed · ${blocked} gate-blocked · ${failed} failed${firstError ? ` — ${firstError}` : ""}`);
+                    flash(`Shopify done: ${pushed} pushed · ${blocked} gate-blocked · ${failed} failed${firstError ? ` — ${firstError}` : ""}`);
+                  }
                   router.refresh();
                 });
               }}
@@ -599,10 +673,20 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
         </div>
       )}
 
+      {/* Stacked bottom-up: batch bar, meter, toast — so a message never lands
+          on top of the progress it is describing. */}
+      <BatchProgress state={progress} onDismiss={() => setProgress(null)} onStop={requestStop} />
+
       {toast && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 font-body px-4 py-2 flex items-center gap-2" style={{ background: palette.black, color: palette.ivory, fontSize: 12 }}>
+        <button
+          type="button"
+          onClick={dismissToast}
+          className={`fixed ${progress ? "bottom-56 md:bottom-44" : "bottom-24"} left-1/2 -translate-x-1/2 z-50 font-body px-4 py-2 flex items-center gap-2 text-left`}
+          style={{ background: palette.black, color: palette.ivory, fontSize: 12, maxWidth: "min(92vw, 34rem)" }}
+          aria-live="polite"
+        >
           <Check size={13} color={palette.gold} /> {toast}
-        </div>
+        </button>
       )}
     </div>
   );

@@ -7,6 +7,7 @@ import { StatusPill, SourcePill } from "@/components/admin/Pills";
 import { useSort, SortTh, type SortAccessor } from "@/components/sortable";
 import { palette } from "@/lib/palette";
 import type { BuyerStatus, BuyerSource } from "@/lib/types";
+import { useToast } from "@/lib/use-toast";
 import { sendCredentialsBatch } from "./actions";
 
 export interface BuyerRowDTO {
@@ -86,7 +87,7 @@ export function BuyersTable({
   const [requestsOnly, setRequestsOnly] = useState(initialRequestsOnly);
   const [sourceFilter, setSourceFilter] = useState<Set<BuyerSource>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
   const [pending, start] = useTransition();
 
   const pendingCount = useMemo(() => rows.filter((r) => r.status === "pending").length, [rows]);
@@ -120,7 +121,6 @@ export function BuyersTable({
     });
   }
 
-  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 3200); }
 
   const chosen = useMemo(() => rows.filter((r) => selected.has(r.id)), [rows, selected]);
   // What will actually go out, as against what is ticked. Shown before the

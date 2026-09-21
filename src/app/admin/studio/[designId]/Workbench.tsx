@@ -18,6 +18,7 @@ import { JobsTicker } from "../JobsTicker";
 // while fashn is parked (see the angle card). The action itself still exists.
 import { setBgStyle, setCopyPrompt as setCopyPromptAction, setCopyModel, setAnglePrompt, setAngleEngine, regenAngle, cancelAngleJob, generateCopy, saveCopyEdit, pushWholesale, pushShopify } from "./actions";
 import { BG_COLOURS, BG_MODE_DEFAULT, BG_MODE_LABEL, BG_MODE_SWATCH, resolveBackground, type BgMode, type BgSwatch } from "@/lib/studio/backgrounds";
+import { useToast } from "@/lib/use-toast";
 import { uploadSource, importFinished, applyImageDirectly, approveImage, rejectImage, saveCrop, setAngleSource, syncDrivePhotos } from "./image-actions";
 import { ImagePicker, CropSheet, CompareSheet, drivePhotoDownload } from "./ImageTools";
 
@@ -111,7 +112,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
   const [promptOpen, setPromptOpen] = useState<Record<string, boolean>>({});
   const [historyOpen, setHistoryOpen] = useState<Record<string, boolean>>({});
   // Per-angle prompt edits keyed by angle id. An entry equal to its server
@@ -237,7 +238,6 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [copy.prompt]);
 
-  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 2400); }
   function run(fn: () => Promise<{ ok: boolean; error?: string }>, done: string, onOk?: () => void) {
     startTransition(async () => {
       const r = await fn();

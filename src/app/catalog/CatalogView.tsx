@@ -11,6 +11,7 @@ import { setQty as setCartQty } from "@/app/cart/actions";
 import { groupByBase } from "@/lib/variants";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
+import { toastDuration } from "@/lib/use-toast";
 
 // Preferred chip order (prototype); unknown categories are appended.
 const PREFERRED = ["Sarees", "Lehengas", "Indo-Western", "Co-ords", "Drape Skirts", "Jackets"];
@@ -65,7 +66,7 @@ export function CatalogView({
   function showToast(msg: string) {
     setToast(msg);
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2200);
+    toastTimer.current = setTimeout(() => setToast(null), toastDuration(msg));
   }
 
   // QR decode → add to cart (continuous: scanner stays open, returns feedback).

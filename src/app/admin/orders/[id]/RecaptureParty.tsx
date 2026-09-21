@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { FileWarning } from "lucide-react";
 import { recaptureDocumentParty } from "@/app/admin/orders/actions";
 import { palette } from "@/lib/palette";
+import { useToast } from "@/lib/use-toast";
 
 // Ansh (13 Sep) — the way back from a party recorded wrong. 0047 froze the
 // recipient onto the order and its bills at issue, so Edit Details no longer
@@ -57,9 +58,8 @@ export function RecaptureParty({
   const [reason, setReason] = useState("");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, flash] = useToast();
 
-  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 3500); }
 
   // The buyers row is what would be stamped, so this diff is the whole
   // preview: these lines are what the documents will say afterwards.
