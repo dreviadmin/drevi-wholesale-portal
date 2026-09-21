@@ -190,6 +190,12 @@ export async function publishWholesale(designId: string, staffId: string, staffE
         image_urls: webUrls,
         images_fetched_at: nowIso,
         wholesale_visible: true,
+        // THE buyer catalog gate (0062). This push is the only thing that ever
+        // turns it on, which is what makes "the catalog is what Studio pushed"
+        // true rather than aspirational — the 10-minute sheet cron cannot
+        // reach this column, and wholesale_visible above it is hardcoded true
+        // for every sheet row.
+        buyer_visible: true,
         locked_fields: [...locks],
       };
       // Copy presence (not the approved stamp) writes the description — the

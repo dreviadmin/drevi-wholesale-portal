@@ -124,7 +124,7 @@ export function ManageCatalogView({ products, hsnOptions }: { products: Wholesal
                 if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setEditingSku(p.sku); }
               }}
               className="flex items-center gap-3 py-2.5 text-left cursor-pointer"
-              style={{ borderBottom: "1px solid rgba(26,26,26,0.07)", opacity: p.wholesale_visible ? 1 : 0.5 }}
+              style={{ borderBottom: "1px solid rgba(26,26,26,0.07)", opacity: p.buyer_visible ? 1 : 0.5 }}
             >
               {p.image_urls?.[0] ? (
                 <ZoomImage src={p.image_urls[0]} alt={p.title ?? p.sku} width={40} height={50} />
@@ -136,7 +136,7 @@ export function ManageCatalogView({ products, hsnOptions }: { products: Wholesal
               <div className="min-w-0 flex-1">
                 <div className="font-display truncate" style={{ fontSize: 13, fontWeight: 500, color: palette.black }}>{p.title ?? p.sku}</div>
                 <div className="font-body" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.06em" }}>
-                  {p.sku}{!p.wholesale_visible ? " · HIDDEN" : ""}{locked.length ? ` · ${locked.length} locked` : ""}
+                  {p.sku}{!p.buyer_visible ? " · NOT IN CATALOG" : ""}{locked.length ? ` · ${locked.length} locked` : ""}
                 </div>
               </div>
               <div className="flex-shrink-0 text-right">
@@ -247,7 +247,7 @@ function EditModal({ product, hsnOptions, onClose, onSaved }: { product: Wholesa
 
   function toggleVisible() {
     start(async () => {
-      const res = await setProductVisibility(product.sku, !product.wholesale_visible);
+      const res = await setProductVisibility(product.sku, !product.buyer_visible);
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
       onSaved();
     });
@@ -289,8 +289,8 @@ function EditModal({ product, hsnOptions, onClose, onSaved }: { product: Wholesa
               Replace photo
               <input type="file" accept="image/*" className="hidden" onChange={(e) => onPhoto(e.target.files?.[0] ?? null)} />
             </label>
-            <button type="button" onClick={toggleVisible} disabled={isPending} className="mt-2 flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", color: product.wholesale_visible ? palette.crimsonText : palette.goldDeep }}>
-              {product.wholesale_visible ? <><EyeOff size={12} /> Hide from catalog</> : <><Eye size={12} /> Show in catalog</>}
+            <button type="button" onClick={toggleVisible} disabled={isPending} className="mt-2 flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", color: product.buyer_visible ? palette.crimsonText : palette.goldDeep }}>
+              {product.buyer_visible ? <><EyeOff size={12} /> Hide from buyer catalog</> : <><Eye size={12} /> Show in buyer catalog</>}
             </button>
           </div>
         </div>

@@ -17,7 +17,7 @@ export default async function ProductPage({ params }: { params: { sku: string } 
   if (!user) redirect("/login");
 
   const [{ data: product }, { data: buyer }] = await Promise.all([
-    supabase.from("wholesale_products").select(BUYER_PRODUCT_COLUMNS).eq("sku", sku).eq("wholesale_visible", true).maybeSingle(),
+    supabase.from("wholesale_products").select(BUYER_PRODUCT_COLUMNS).eq("sku", sku).eq("buyer_visible", true).maybeSingle(),
     supabase.from("buyers").select("id").eq("email", user.email ?? "").maybeSingle(),
   ]);
 

@@ -14,7 +14,7 @@ export default async function ManageCatalogPage() {
   const { data: products } = await admin
     .from("wholesale_products")
     .select("*")
-    .order("wholesale_visible", { ascending: false })
+    .order("buyer_visible", { ascending: false })
     .order("category", { nullsFirst: false })
     .order("title", { nullsFirst: false });
 

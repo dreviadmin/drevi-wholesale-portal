@@ -130,16 +130,21 @@ export async function renameProductSku(oldSku: string, newSkuRaw: string): Promi
   return { ok: true };
 }
 
-// Show/hide a product (locks wholesale_visible).
+// Show/hide a product in the BUYER catalog.
+//
+// This writes buyer_visible, not wholesale_visible (0062). The button has
+// always said "Hide from catalog", and the catalog it means is the one buyers
+// log in to see — wholesale_visible is the sheet/ops flag that keeps a garment
+// billable at the counter, and pulling something from the storefront must not
+// take it out of the booth's scanner. No lock is needed either: the sheet sync
+// never names buyer_visible, so there is nothing to protect it from.
 export async function setProductVisibility(sku: string, visible: boolean): Promise<{ ok: boolean; error?: string }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
   const admin = createAdminClient();
-  const { data: row } = await admin.from("wholesale_products").select("locked_fields").eq("sku", sku).maybeSingle();
+  const { data: row } = await admin.from("wholesale_products").select("sku").eq("sku", sku).maybeSingle();
   if (!row) return { ok: false, error: "Product not found." };
-  const locked = new Set<string>(Array.isArray(row.locked_fields) ? row.locked_fields : []);
-  locked.add("wholesale_visible");
-  const { error } = await admin.from("wholesale_products").update({ wholesale_visible: visible, locked_fields: Array.from(locked) }).eq("sku", sku);
+  const { error } = await admin.from("wholesale_products").update({ buyer_visible: visible }).eq("sku", sku);
   if (error) return { ok: false, error: error.message };
   await writeAuditEvent({ eventType: "catalog_edit", staffUserId: staff.id, notes: `${sku}: ${visible ? "shown" : "hidden"}` });
   revalidatePath("/admin/manage-catalog");

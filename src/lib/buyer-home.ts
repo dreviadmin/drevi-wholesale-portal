@@ -45,7 +45,7 @@ export async function loadBuyerHome(buyerId: string): Promise<BuyerHomeData> {
       // payload. Same leak that put "Rack B2" in the product page RSC stream
       // on 2 Aug, which is why BUYER_PRODUCT_COLUMNS exists.
       .select(BUYER_PRODUCT_COLUMNS)
-      .eq("wholesale_visible", true),
+      .eq("buyer_visible", true),
     admin.from("notify_me").select("sku_base, color").eq("buyer_id", buyerId).is("fulfilled_at", null),
   ]);
 

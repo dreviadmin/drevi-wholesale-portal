@@ -22,7 +22,11 @@ export default async function CatalogPage() {
     supabase
       .from("wholesale_products")
       .select(BUYER_PRODUCT_COLUMNS)
-      .eq("wholesale_visible", true)
+      // buyer_visible, NOT wholesale_visible (0062). The old flag is the
+      // sheet/ops one that every billing screen reads; this one is set only
+      // by a wholesale push from Studio, which is what the owner asked the
+      // catalog to mean.
+      .eq("buyer_visible", true)
       .order("category", { nullsFirst: false })
       .order("title", { nullsFirst: false }),
   ]);

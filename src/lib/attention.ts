@@ -39,7 +39,7 @@ export async function computeAttention(): Promise<AttentionItem[]> {
     admin.from("buyer_change_requests").select("id", { count: "exact", head: true }).eq("status", "pending"),
     // 5. Sold-out BEST-SELLERS: sold out AND actually ordered at least once —
     //    the whole catalog being qty-0 must not flood the inbox.
-    admin.from("wholesale_products").select("sku").lte("current_qty", 0).eq("wholesale_visible", true),
+    admin.from("wholesale_products").select("sku").lte("current_qty", 0).eq("buyer_visible", true),
     admin.from("orders").select("items").neq("status", "cancelled"),
   ]);
   const orderedSkus = new Set<string>();
