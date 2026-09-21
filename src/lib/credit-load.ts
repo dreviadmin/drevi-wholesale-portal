@@ -6,6 +6,7 @@ import {
   allocateConsumption,
   returnedByBillLine,
   returnedByOrderLine,
+  noteSettlement,
   walletBalance,
   type CreditLineSnapshot,
   type CreditNoteLike,
@@ -151,6 +152,8 @@ export async function loadOrderCredit(orderId: string): Promise<{
   returnedByBillLine: Map<string, number>;
   /** Order-anchored notes, keyed by order line index (21 Sep). */
   returnedByOrderLine: Map<number, number>;
+  /** How each note was settled: refunded / adjusted / still held (21 Sep). */
+  settlementByNote: Map<string, { refunded: number; adjusted: number; held: number }>;
   creditTotal: number;
 }> {
   const admin = createAdminClient();
@@ -162,8 +165,27 @@ export async function loadOrderCredit(orderId: string): Promise<{
 
   const notes = (data ?? []).map(toNote);
   const creditTotal = r2(notes.reduce((s, n) => (n.status === "issued" ? s + n.total : s), 0));
+
+  // The consumption rows of these notes, so each can say how it was settled.
+  // source_note_id is null on anything written before 0060 — those fall back
+  // to "all still held", which is what allocateConsumption already implies.
+  const settlementByNote = new Map<string, { refunded: number; adjusted: number; held: number }>();
+  const noteIds = notes.map((n) => n.id);
+  if (noteIds.length > 0) {
+    const { data: rows } = await admin
+      .from("credit_ledger")
+      .select("delta, reason, source_note_id")
+      .in("source_note_id", noteIds);
+    for (const n of notes) {
+      const mine = (rows ?? []).filter((r) => r.source_note_id === n.id)
+        .map((r) => ({ reason: String(r.reason), delta: Number(r.delta) || 0 }));
+      settlementByNote.set(n.id, noteSettlement(n.total, mine));
+    }
+  }
+
   return {
     notes,
+    settlementByNote,
     returnedByBillLine: returnedByBillLine(notes as CreditNoteLike[]),
     returnedByOrderLine: returnedByOrderLine(notes as CreditNoteLike[]),
     creditTotal,

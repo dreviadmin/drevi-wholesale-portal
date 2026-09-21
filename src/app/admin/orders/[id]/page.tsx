@@ -17,6 +17,7 @@ import { LineHsnEditor } from "./LineHsnEditor";
 import { listKnownHsnCodes } from "@/lib/hsn";
 import { OrderEditor, type PickerProduct } from "./OrderEditor";
 import { LineStateControls, GenerateBillBar } from "./LineBilling";
+import { SettleReturn, type SettleTarget } from "./SettleReturn";
 import { ReturnPanel, ApplyCreditBar, type ReturnPanelLine } from "./ReturnPanel";
 import { effectiveLineState, billableLines, computeBillTotals } from "@/lib/order-lines-core";
 import { loadOrderCredit, loadBuyerWallet } from "@/lib/credit-load";
@@ -96,6 +97,25 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   const returnedOf = (billId: string, billIndex: number) => credit.returnedByBillLine.get(`${billId}:${billIndex}`) ?? 0;
   // The order's own lines, for an order-anchored return. Index IS the order
   // line index, so the panel, the note snapshot and the reservation all agree.
+  // Credit may be set against ANY open order of this buyer, not only the one
+  // returned (owner's call, 21 Sep) — a buyer who returns against one order
+  // and owes on another is the ordinary case in wholesale.
+  const { data: openOrderRows } = o.buyer_id
+    ? await admin
+        .from("orders")
+        .select("id, order_number, total_amount, advance_amount, credit_applied")
+        .eq("buyer_id", o.buyer_id)
+        .neq("status", "cancelled")
+    : { data: [] };
+  const settleTargets: SettleTarget[] = (openOrderRows ?? [])
+    .map((r) => ({
+      id: r.id as string,
+      orderNumber: r.order_number as string,
+      due: Math.round(Math.max(0, (Number(r.total_amount) || 0) - (Number(r.advance_amount) || 0) - (Number(r.credit_applied) || 0)) * 100) / 100,
+    }))
+    .filter((t) => t.due > 0)
+    .sort((a, b) => (a.id === o.id ? -1 : b.id === o.id ? 1 : b.due - a.due));
+
   const orderReturnLines: ReturnPanelLine[] = (o.items ?? []).map((item, index) => ({
     item,
     index,
@@ -568,6 +588,26 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
                     PDF
                   </a>
                 </div>
+              </div>
+            );
+          })}
+
+          {/* How each live return was settled, and the way to settle what is
+              left. A credit note is not automatically what the customer wants
+              (Ansh, 21 Sep) — it may be refunded, set against a balance, or
+              any split of the three. */}
+          {isAdminRole(staff.role) && credit.notes.filter((n) => n.status === "issued").map((n) => {
+            const st = credit.settlementByNote.get(n.id) ?? { refunded: 0, adjusted: 0, held: Number(n.total) || 0 };
+            return (
+              <div key={`settle-${n.id}`} className="mt-2 pt-2" style={{ borderTop: "1px dashed rgba(26,26,26,0.12)" }}>
+                <div className="font-body" style={{ fontSize: 10.5, color: palette.mutedGreige }}>
+                  {n.note_number}: {formatINR(st.held)} on account
+                  {st.refunded > 0 ? ` · ${formatINR(st.refunded)} refunded` : ""}
+                  {st.adjusted > 0 ? ` · ${formatINR(st.adjusted)} against a balance` : ""}
+                </div>
+                {st.held > 0 && (
+                  <SettleReturn noteId={n.id} noteNumber={n.note_number} unsettled={st.held} targets={settleTargets} />
+                )}
               </div>
             );
           })}

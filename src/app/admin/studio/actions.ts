@@ -236,3 +236,45 @@ export async function pushWholesaleBatch(
   revalidatePath("/admin/studio");
   return { ok: true, pushed, blocked, failed };
 }
+
+/**
+ * Bulk push to Shopify (Ansh, 21 Sep: "filter the ready orders from top, bulk
+ * generate their copies, bulk push to wholesale portal and Shopify").
+ *
+ * The board already had multiselect, bulk copy and bulk wholesale — Shopify
+ * was the one route that had to be done a design at a time.
+ *
+ * Capped at 20 like its wholesale twin, and SEQUENTIAL on purpose: each push
+ * is a productSet round trip against one store, and Shopify rate-limits by
+ * cost. A design that is not ready is reported as blocked, never skipped
+ * silently — the count is what tells the operator to go look.
+ */
+export async function pushShopifyBatch(
+  designIds: string[],
+): Promise<{ ok: boolean; error?: string; pushed?: number; blocked?: number; failed?: number; firstError?: string }> {
+  let staff;
+  try {
+    staff = await requireAdmin();
+  } catch {
+    return { ok: false, error: "Not authorized" };
+  }
+  if (designIds.length === 0) return { ok: false, error: "Nothing selected" };
+  const { publishShopify, shopifyEnabled } = await import("@/lib/shopify");
+  if (!shopifyEnabled()) return { ok: false, error: "Shopify is not connected — set SHOPIFY_ENABLED." };
+
+  let pushed = 0, blocked = 0, failed = 0;
+  let firstError: string | undefined;
+  for (const id of designIds.slice(0, 20)) {
+    const res = await publishShopify(id, staff.id, staff.email);
+    if (res.ok) pushed++;
+    else if (res.blockers) blocked++;
+    else {
+      failed++;
+      // Surface ONE reason. A bare "3 failed" sends the operator hunting
+      // through twenty designs for a cause the server already knew.
+      if (!firstError) firstError = res.error;
+    }
+  }
+  revalidatePath("/admin/studio");
+  return { ok: true, pushed, blocked, failed, ...(firstError ? { firstError } : {}) };
+}
