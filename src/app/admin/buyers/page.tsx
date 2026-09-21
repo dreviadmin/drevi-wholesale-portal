@@ -45,6 +45,9 @@ export default async function BuyersPage({
     created_at: b.created_at,
     ordersCount: stats.get(b.id)?.count ?? 0,
     lastOrder: stats.get(b.id)?.last ?? null,
+    // Drives the "n of m can be sent" count on the bulk bar. Only the boolean
+    // crosses to the client — the encrypted password never leaves the server.
+    canSend: b.status === "active" && !!b.phone && !!b.encrypted_password,
     pendingIdentity: pendingIdentity.has(b.id),
   }));
 

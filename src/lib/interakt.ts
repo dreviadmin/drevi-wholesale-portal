@@ -76,3 +76,24 @@ export function sendOrderConfirmation(phone: string, orderNumber: string, total:
   // PDF rides in the template header (document media).
   return sendTemplate(phone, "wholesale_order_confirmation", [orderNumber, total], [pdfUrl]);
 }
+
+/**
+ * The buyer's portal login, over WhatsApp (Ansh, 21 Sep).
+ *
+ * SIXTH template — must be approved in Interakt/Meta before this sends
+ * anything; until then sendTemplate logs and skips, which is why the bulk
+ * action reports "skipped" rather than claiming success.
+ *
+ * Body values are POSITIONAL: the approved template's {{1}}..{{4}} must be
+ * business, link, login id, password IN THAT ORDER. If the template is
+ * approved with a different order, change this array, not the template.
+ */
+export async function sendBuyerCredentials(
+  phone: string,
+  business: string,
+  portalUrl: string,
+  loginId: string,
+  password: string,
+): Promise<SendResult> {
+  return sendTemplate(phone, "wholesale_credentials", [business, portalUrl, loginId, password]);
+}

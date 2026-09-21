@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { Search, Plus, MessageCircle } from "lucide-react";
 import { StatusPill, SourcePill } from "@/components/admin/Pills";
 import { useSort, SortTh, type SortAccessor } from "@/components/sortable";
 import { palette } from "@/lib/palette";
 import type { BuyerStatus, BuyerSource } from "@/lib/types";
+import { sendCredentialsBatch } from "./actions";
 
 export interface BuyerRowDTO {
   id: string;
@@ -22,7 +23,16 @@ export interface BuyerRowDTO {
   /** Has an undecided business_name / gstin change request. */
   pendingIdentity?: boolean;
   lastOrder: string | null;
+  /** Active, has a phone, and has a stored password — i.e. the WhatsApp send
+   *  will actually reach somebody. Computed server-side; the password itself
+   *  never crosses. */
+  canSend?: boolean;
 }
+
+// Each send is one Interakt call with an 8s timeout, inside a 60s function —
+// six per round trip leaves headroom. The server caps at the same number, so
+// a selection is chunked here rather than truncated there.
+const CRED_CHUNK = 6;
 
 const STATUSES: BuyerStatus[] = ["pending", "active", "suspended", "rejected"];
 const SOURCES: BuyerSource[] = ["inquiry_form", "exhibition", "manual_admin"];
@@ -75,6 +85,9 @@ export function BuyersTable({
   );
   const [requestsOnly, setRequestsOnly] = useState(initialRequestsOnly);
   const [sourceFilter, setSourceFilter] = useState<Set<BuyerSource>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [toast, setToast] = useState<string | null>(null);
+  const [pending, start] = useTransition();
 
   const pendingCount = useMemo(() => rows.filter((r) => r.status === "pending").length, [rows]);
   const identityWaiting = useMemo(() => rows.filter((r) => r.pendingIdentity).length, [rows]);
@@ -98,6 +111,54 @@ export function BuyersTable({
   }
 
   const { sorted, sort, toggle: toggleSort } = useSort(filtered, ACCESSORS, { key: "created", dir: "desc" });
+
+  function toggleRow(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function flash(m: string) { setToast(m); setTimeout(() => setToast(null), 3200); }
+
+  const chosen = useMemo(() => rows.filter((r) => selected.has(r.id)), [rows, selected]);
+  // What will actually go out, as against what is ticked. Shown before the
+  // send, not reported after it, so nobody hits the button expecting 40
+  // messages and gets 12.
+  const sendable = useMemo(() => chosen.filter((r) => r.canSend), [chosen]);
+
+  function sendCredentials() {
+    const ids = sendable.map((r) => r.id);
+    if (!ids.length) return;
+    const held = chosen.length - ids.length;
+    if (!window.confirm(
+      `Send login details over WhatsApp to ${ids.length} buyer${ids.length > 1 ? "s" : ""}?` +
+      (held ? ` ${held} of the ${chosen.length} selected will be left out — not active, or no phone/password on file.` : "") +
+      ` Sent in batches of ${CRED_CHUNK} — leave this tab open.`,
+    )) return;
+    start(async () => {
+      let sent = 0, skipped = 0, failed = 0, done = 0;
+      let firstError: string | undefined;
+      for (let i = 0; i < ids.length; i += CRED_CHUNK) {
+        const chunk = ids.slice(i, i + CRED_CHUNK);
+        const res = await sendCredentialsBatch(chunk);
+        if (!res.ok) { flash(res.error ?? "Failed"); return; }
+        sent += res.sent ?? 0; skipped += res.skipped ?? 0; failed += res.failed ?? 0;
+        done += chunk.length;
+        if (!firstError && res.firstError) firstError = res.firstError;
+        flash(`WhatsApp ${done}/${ids.length} · ${sent} sent${skipped ? ` · ${skipped} not configured` : ""}${failed ? ` · ${failed} failed` : ""}`);
+      }
+      // `skipped` means INTERAKT_API_KEY is absent — the send is a logged
+      // no-op. Saying so plainly beats a silent "0 sent".
+      flash(
+        skipped === done
+          ? `Nothing went out — WhatsApp (Interakt) is not configured yet on this deployment.`
+          : `Done: ${sent} sent${skipped ? ` · ${skipped} not configured` : ""}${failed ? ` · ${failed} failed` : ""}${firstError ? ` — ${firstError}` : ""}`,
+      );
+      if (sent > 0) setSelected(new Set());
+    });
+  }
 
   const chip = (active: boolean) => ({
     fontSize: 9,
@@ -166,11 +227,43 @@ export function BuyersTable({
         </div>
       </div>
 
+      {/* Select-all covers the FILTERED rows, never the whole book — the point
+          of narrowing to, say, Exhibition is to act on exactly those, and a
+          control that quietly ticked all 173 buyers behind a list showing 24
+          would be a trap in front of a button that messages people. */}
+      {sorted.length > 0 && (
+        <div className="flex items-center gap-2 mt-3">
+          <button
+            type="button"
+            onClick={() => {
+              const shown = sorted.map((r) => r.id);
+              const allOn = shown.every((id) => selected.has(id));
+              setSelected((prev) => {
+                const next = new Set(prev);
+                for (const id of shown) { if (allOn) next.delete(id); else next.add(id); }
+                return next;
+              });
+            }}
+            className="font-body uppercase"
+            style={{ fontSize: 9, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", padding: "6px 10px" }}
+          >
+            {sorted.every((r) => selected.has(r.id)) ? `Clear these ${sorted.length}` : `Select all ${sorted.length}`}
+          </button>
+          {selected.size > 0 && (
+            <button type="button" onClick={() => setSelected(new Set())} className="font-body uppercase"
+              style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.mutedGreige, background: "transparent", border: "none", padding: "6px 2px" }}>
+              Clear selection ({selected.size})
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Table */}
       <div className="mt-5 overflow-x-auto">
         <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 760 }}>
           <thead>
             <tr style={{ borderBottom: "1px solid rgba(26,26,26,0.15)" }}>
+              <th style={{ width: 30, padding: "8px 0 8px 6px" }}><span className="sr-only">Select</span></th>
               <SortTh label="Business" k="business" sort={sort} onToggle={toggleSort} />
               <SortTh label="Owner" k="owner" sort={sort} onToggle={toggleSort} />
               <SortTh label="Phone" k="phone" sort={sort} onToggle={toggleSort} />
@@ -186,7 +279,16 @@ export function BuyersTable({
             {sorted.map((r) => {
               const wa = waLink(r.phone);
               return (
-                <tr key={r.id} style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
+                <tr key={r.id} style={{ borderBottom: "1px solid rgba(26,26,26,0.06)", background: selected.has(r.id) ? "rgba(201,169,110,0.10)" : undefined }}>
+                  <td style={{ padding: "10px 0 10px 6px" }}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(r.id)}
+                      onChange={() => toggleRow(r.id)}
+                      aria-label={`Select ${r.business_name ?? "buyer"}`}
+                      style={{ accentColor: palette.goldDeep }}
+                    />
+                  </td>
                   <td style={{ padding: "10px" }}>
                     <Link href={`/admin/buyers/${r.id}`} className="font-display" style={{ fontSize: 13, fontWeight: 600, color: palette.black }}>{r.business_name ?? "—"}</Link>
                   </td>
@@ -223,6 +325,43 @@ export function BuyersTable({
           <div className="text-center py-12 font-body" style={{ fontSize: 12, color: palette.mutedGreige, letterSpacing: "0.08em" }}>No buyers match.</div>
         )}
       </div>
+
+      {/* Batch bar — mirrors the studio board's, so the gesture is the same
+          wherever staff are selecting rows. */}
+      {selected.size > 0 && (
+        <div className="fixed bottom-16 md:bottom-4 inset-x-0 z-40 mx-auto max-w-2xl px-3">
+          <div className="flex items-center gap-2 flex-wrap p-3" style={{ background: palette.black, boxShadow: "0 6px 24px rgba(0,0,0,0.35)" }}>
+            <span className="font-body" style={{ fontSize: 11, color: palette.champagne }}>
+              {selected.size} selected
+              {sendable.length !== selected.size && (
+                <span style={{ color: palette.mutedGreige }}> · {sendable.length} can be messaged</span>
+              )}
+            </span>
+            <span className="flex-1" />
+            <button
+              type="button"
+              disabled={pending || sendable.length === 0}
+              onClick={sendCredentials}
+              className="flex items-center gap-1.5 font-body uppercase disabled:opacity-40"
+              style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.black, background: palette.gold, padding: "8px 11px" }}
+              title={sendable.length === 0 ? "None of these are active with a phone and a password on file" : undefined}
+            >
+              <MessageCircle size={12} strokeWidth={2} />
+              {pending ? "Sending…" : `Send credentials (${sendable.length})`}
+            </button>
+            <button type="button" onClick={() => setSelected(new Set())} className="font-body uppercase"
+              style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.champagne, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}>
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed bottom-32 md:bottom-20 inset-x-0 z-50 flex justify-center px-3 pointer-events-none">
+          <div className="font-body" style={{ background: palette.black, color: palette.ivory, fontSize: 11, padding: "9px 14px", letterSpacing: "0.04em" }}>{toast}</div>
+        </div>
+      )}
     </div>
   );
 }
