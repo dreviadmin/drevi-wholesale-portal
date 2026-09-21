@@ -40,8 +40,12 @@ export function BatchProgress({
   const total = Math.max(1, state.total);
   const pct = Math.min(100, Math.round((state.done / total) * 100));
 
+  // Deliberately NOT positioned here. The batch bar it sits above wraps onto a
+  // second row of buttons at narrow widths, so any fixed offset guessed from
+  // its height is wrong half the time — it overlapped the buttons on the first
+  // run. The caller stacks this and the bar in one flex column instead.
   return (
-    <div className="fixed bottom-32 md:bottom-20 inset-x-0 z-40 mx-auto max-w-2xl px-3">
+    <div className="w-full">
       <div style={{ background: palette.black, boxShadow: "0 6px 24px rgba(0,0,0,0.35)", padding: "10px 12px" }}>
         <div className="flex items-baseline justify-between gap-3">
           <span className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.16em", color: palette.champagne }}>
