@@ -88,6 +88,16 @@ export function sendOrderConfirmation(phone: string, orderNumber: string, total:
  * business, link, login id, password IN THAT ORDER. If the template is
  * approved with a different order, change this array, not the template.
  */
+// Bulk credential share from /admin/buyers (Ansh, 21 Sep).
+//
+// TEMPLATE CONTRACT — bodyValues are POSITIONAL, so the approved template's
+// placeholders must be in exactly this order:
+//   {{1}} business name   {{2}} portal link   {{3}} login id   {{4}} password
+// Word {{3}}'s line as "Login ID: {{3}}", not "Username:" — a buyer
+// credentialed on their own email address gets that address here, and
+// loginDisplay only strips the synthetic @buyers.drevifashion.com domain.
+// Mirror the wording of buildWhatsAppMessage in lib/share.ts so the bulk send
+// and the manual wa.me share say the same thing.
 export async function sendBuyerCredentials(
   phone: string,
   business: string,
