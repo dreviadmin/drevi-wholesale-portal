@@ -18,6 +18,7 @@ import { listKnownHsnCodes } from "@/lib/hsn";
 import { OrderEditor, type PickerProduct } from "./OrderEditor";
 import { LineStateControls, GenerateBillBar } from "./LineBilling";
 import { SettleReturn, type SettleTarget } from "./SettleReturn";
+import { CancelBillButton } from "./CancelBillButton";
 import { ReturnPanel, ApplyCreditBar, type ReturnPanelLine } from "./ReturnPanel";
 import { effectiveLineState, billableLines, computeBillTotals } from "@/lib/order-lines-core";
 import { loadOrderCredit, loadBuyerWallet } from "@/lib/credit-load";
@@ -489,7 +490,15 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <span className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>{formatINR(b.total)}</span>
+                {b.cancelled_at && (
+                  <span className="font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.1em", padding: "3px 7px", background: palette.crimsonSoft, color: palette.crimsonText, fontWeight: 600 }}>Cancelled</span>
+                )}
+                {/* "Cancel that bill first" has been the advice since August
+                    while naming an action nobody could perform. */}
+                {isAdminRole(staff.role) && !b.cancelled_at && (
+                  <CancelBillButton billId={b.id} billNumber={b.bill_number} />
+                )}
+                <span className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black, textDecoration: b.cancelled_at ? "line-through" : "none" }}>{formatINR(b.total)}</span>
                 {b.pdf_url && (
                   <a href={b.pdf_url} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.goldDeep, textDecoration: "underline" }}>
                     PDF

@@ -1212,3 +1212,97 @@ export async function recordPayment(
   revalidatePath(`/admin/buyers/${o.buyer_id}`);
   return { ok: true, advance: nextAdvance, balance: Math.round(Math.max(0, balance - amount) * 100) / 100 };
 }
+
+/**
+ * Cancel a bill without touching the order (Ansh, 21 Sep — asked for exactly
+ * this: "cancel the bill, not the order").
+ *
+ * A tax invoice is not deleted, it is cancelled and KEPT, the same way a credit
+ * note is voided rather than edited. The row survives with who cancelled it and
+ * why; the order's lines are released back to the order path so they can be
+ * billed again or returned against the order itself.
+ *
+ * No stock is touched: generateOrderBill posts no movements, so there is
+ * nothing to reverse. It refuses while a live credit note still cites the
+ * bill — that note's "against invoice X" line would be naming a cancelled
+ * document.
+ *
+ * This also finally makes true the error message at the top of
+ * updateOrderItems, which has told staff to "Cancel that bill first" since
+ * August while naming an action nobody could perform.
+ */
+export async function cancelBill(
+  billId: string,
+  reason: string,
+): Promise<{ ok: boolean; error?: string; billNumber?: string; linesFreed?: number }> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
+
+  const clean = (reason ?? "").trim().slice(0, 300);
+  if (!clean) return { ok: false, error: "Say why this bill is being cancelled." };
+
+  const admin = createAdminClient();
+  const { data: bill } = await admin
+    .from("order_bills")
+    .select("id, order_id, bill_number, cancelled_at")
+    .eq("id", billId)
+    .maybeSingle();
+  if (!bill) return { ok: false, error: "Bill not found." };
+  if (bill.cancelled_at) return { ok: false, error: `${bill.bill_number} is already cancelled.` };
+
+  const { count: liveNotes } = await admin
+    .from("credit_notes")
+    .select("id", { count: "exact", head: true })
+    .eq("order_bill_id", billId)
+    .eq("status", "issued");
+  if ((liveNotes ?? 0) > 0) {
+    return { ok: false, error: `A credit note was raised against ${bill.bill_number} — void it before cancelling the bill it reverses.` };
+  }
+
+  const { data: won, error } = await admin
+    .from("order_bills")
+    .update({ cancelled_at: new Date().toISOString(), cancelled_by: staff.email, cancel_reason: clean })
+    .eq("id", billId)
+    .is("cancelled_at", null)
+    .select("id, bill_number")
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!won) return { ok: false, error: "That bill was cancelled in another session." };
+
+  // Release the lines. CAS on lines_rev, like every other writer of items.
+  let linesFreed = 0;
+  const { data: orderRow } = await admin
+    .from("orders").select("items, lines_rev").eq("id", bill.order_id).maybeSingle();
+  if (orderRow) {
+    const items = ((orderRow.items ?? []) as OrderItem[]).map((it) => {
+      if (it.billed_in !== billId) return it;
+      linesFreed++;
+      const next = { ...it };
+      delete (next as { billed_in?: string | null }).billed_in;
+      return next;
+    });
+    if (linesFreed > 0) {
+      const rev = Number((orderRow as { lines_rev?: number }).lines_rev) || 0;
+      const { data: patched } = await admin
+        .from("orders")
+        .update({ items, lines_rev: rev + 1 })
+        .eq("id", bill.order_id)
+        .eq("lines_rev", rev)
+        .select("id")
+        .maybeSingle();
+      if (!patched) {
+        return { ok: false, error: "The order changed while the bill was being cancelled — the bill IS cancelled, but its lines were not released. Reload and check them." };
+      }
+    }
+  }
+
+  await writeAuditEvent({
+    eventType: "order_bill_cancelled",
+    staffUserId: staff.id,
+    notes: `${won.bill_number} cancelled by ${staff.email} — ${clean}; ${linesFreed} line(s) released back to the order`,
+  });
+
+  revalidatePath(`/admin/orders/${bill.order_id}`);
+  revalidatePath("/admin/orders");
+  return { ok: true, billNumber: won.bill_number, linesFreed };
+}
