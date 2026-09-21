@@ -452,7 +452,12 @@ for (const p of plan.insert) {
   const owner = c.contacts[0] ? [c.contacts[0].first_name, c.contacts[0].last_name].filter(Boolean).join(" ") : null;
   const { data, error } = await admin.from("buyers").insert({
     business_name: c.business_name, owner_name: owner || null,
-    phone: c.contacts[0]?.phone ?? null,
+    // The FIRST AVAILABLE mobile, not contact 1's. Asopan's card names Vijay
+    // Pajwani with a truncated landline and Jay Pajwani with a working mobile;
+    // keying on contacts[0] left the buyer row with no phone at all while the
+    // number sat on the second contact, which made the business unreachable
+    // from the buyers list and unmessageable by the bulk credential send.
+    phone: c.allPhones[0] ?? null,
     email: `${p.username}@${BUYER_LOGIN_DOMAIN}`,
     gstin: c.gstin, address: c.address, notes: c.notes,
     category: c.category, website: c.website, instagram: c.instagram, facebook: c.facebook,
