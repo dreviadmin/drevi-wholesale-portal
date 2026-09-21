@@ -296,8 +296,13 @@ for (const b of existing ?? []) {
   for (const p of normPhone(b.phone)) {
     const prev = phoneToBuyer.get(p);
     if (prev && prev.id !== b.id) {
-      portalDupes.push({ phone: p, keep: prev, other: b });
-      if (String(b.created_at) < String(prev.created_at)) phoneToBuyer.set(p, b);
+      // Decide FIRST, then report what was actually decided — reporting `prev`
+      // as the keeper before the comparison printed the newer row as "older".
+      const bIsOlder = String(b.created_at) < String(prev.created_at);
+      const keep = bIsOlder ? b : prev;
+      const other = bIsOlder ? prev : b;
+      if (bIsOlder) phoneToBuyer.set(p, b);
+      portalDupes.push({ phone: p, keep, other });
       continue;
     }
     phoneToBuyer.set(p, b);
