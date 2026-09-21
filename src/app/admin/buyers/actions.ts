@@ -535,3 +535,78 @@ export async function decideChangeRequest(
   revalidatePath("/admin/home");
   return { ok: true };
 }
+
+/**
+ * Send portal credentials to several buyers over WhatsApp (Ansh, 21 Sep).
+ *
+ * Deliberately honest about the three ways a buyer is NOT sent to:
+ *   · no phone            — 7 of the imported brands have none
+ *   · no credentials yet  — nothing to send
+ *   · Interakt not wired  — sendTemplate logs and skips without an API key,
+ *                           so this reports "skipped", never a false success.
+ *
+ * Capped low and run sequentially: each Interakt call has an 8s timeout, and
+ * this runs inside a Vercel function that dies at 60. The buyers page feeds it
+ * in chunks, the same shape the studio batches use.
+ */
+// Kept in step with CRED_CHUNK in BuyersTable, which chunks the selection
+// client-side. Six sends x an 8s Interakt timeout still clears a 60s function.
+const CREDENTIAL_BATCH_CAP = 6;
+
+export interface CredentialBatchResult {
+  ok: boolean;
+  error?: string;
+  sent?: number;
+  /** Interakt is not configured yet — the send was a logged no-op. */
+  skipped?: number;
+  failed?: number;
+  noPhone?: number;
+  noCreds?: number;
+  notActive?: number;
+  firstError?: string;
+}
+
+export async function sendCredentialsBatch(buyerIds: string[]): Promise<CredentialBatchResult> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
+  if (!buyerIds.length) return { ok: false, error: "Nothing selected" };
+
+  const { sendBuyerCredentials } = await import("@/lib/interakt");
+  const { loginDisplay } = await import("@/lib/share");
+  const admin = createAdminClient();
+  const { data: rows } = await admin
+    .from("buyers")
+    .select("id, business_name, phone, email, status, encrypted_password")
+    .in("id", buyerIds.slice(0, CREDENTIAL_BATCH_CAP));
+
+  let sent = 0, skipped = 0, failed = 0, noPhone = 0, noCreds = 0, notActive = 0;
+  let firstError: string | undefined;
+  for (const b of rows ?? []) {
+    // A login that has not been granted yet, or has been taken away, must not
+    // be messaged out — the password on a pending or suspended row is either
+    // not theirs to use or deliberately dead.
+    if (b.status !== "active") { notActive++; continue; }
+    if (!b.phone) { noPhone++; continue; }
+    if (!b.encrypted_password) { noCreds++; continue; }
+    let password: string;
+    try { password = decryptPassword(b.encrypted_password); }
+    catch { failed++; if (!firstError) firstError = `${b.business_name}: stored password could not be read`; continue; }
+    // Buyers sign in with a bare username; loginDisplay is what the manual
+    // share already prints, so the template says the same thing the card does.
+    const loginId = loginDisplay(b.email ?? "").value;
+    const res = await sendBuyerCredentials(b.phone, b.business_name ?? "there", "wholesale.drevifashion.com", loginId, password);
+    if (res.sent) {
+      sent++;
+      await writeAuditEvent({
+        eventType: "credential_shared",
+        buyerId: b.id,
+        staffUserId: staff.id,
+        notes: `credentials sent over WhatsApp to ${b.phone} by ${staff.email}`,
+      });
+    } else if (res.skipped) skipped++;
+    else { failed++; if (!firstError) firstError = `${b.business_name}: ${res.error ?? "send failed"}`; }
+  }
+
+  revalidatePath("/admin/buyers");
+  return { ok: true, sent, skipped, failed, noPhone, noCreds, notActive, ...(firstError ? { firstError } : {}) };
+}

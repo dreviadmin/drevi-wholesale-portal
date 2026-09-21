@@ -76,3 +76,34 @@ export function sendOrderConfirmation(phone: string, orderNumber: string, total:
   // PDF rides in the template header (document media).
   return sendTemplate(phone, "wholesale_order_confirmation", [orderNumber, total], [pdfUrl]);
 }
+
+/**
+ * The buyer's portal login, over WhatsApp (Ansh, 21 Sep).
+ *
+ * SIXTH template — must be approved in Interakt/Meta before this sends
+ * anything; until then sendTemplate logs and skips, which is why the bulk
+ * action reports "skipped" rather than claiming success.
+ *
+ * Body values are POSITIONAL: the approved template's {{1}}..{{4}} must be
+ * business, link, login id, password IN THAT ORDER. If the template is
+ * approved with a different order, change this array, not the template.
+ */
+// Bulk credential share from /admin/buyers (Ansh, 21 Sep).
+//
+// TEMPLATE CONTRACT — bodyValues are POSITIONAL, so the approved template's
+// placeholders must be in exactly this order:
+//   {{1}} business name   {{2}} portal link   {{3}} login id   {{4}} password
+// Word {{3}}'s line as "Login ID: {{3}}", not "Username:" — a buyer
+// credentialed on their own email address gets that address here, and
+// loginDisplay only strips the synthetic @buyers.drevifashion.com domain.
+// Mirror the wording of buildWhatsAppMessage in lib/share.ts so the bulk send
+// and the manual wa.me share say the same thing.
+export async function sendBuyerCredentials(
+  phone: string,
+  business: string,
+  portalUrl: string,
+  loginId: string,
+  password: string,
+): Promise<SendResult> {
+  return sendTemplate(phone, "wholesale_credentials", [business, portalUrl, loginId, password]);
+}
