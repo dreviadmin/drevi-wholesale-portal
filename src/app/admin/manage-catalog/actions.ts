@@ -130,8 +130,41 @@ export async function renameProductSku(oldSku: string, newSkuRaw: string): Promi
   return { ok: true };
 }
 
-// Show/hide a product (locks wholesale_visible).
+// Show/hide a product in the BUYER catalog.
+//
+// This writes buyer_visible, not wholesale_visible (0062). The button has
+// always said "Hide from catalog", and the catalog it means is the one buyers
+// log in to see — wholesale_visible is the sheet/ops flag that keeps a garment
+// billable at the counter, and pulling something from the storefront must not
+// take it out of the booth's scanner. No lock is needed either: the sheet sync
+// never names buyer_visible, so there is nothing to protect it from.
 export async function setProductVisibility(sku: string, visible: boolean): Promise<{ ok: boolean; error?: string }> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
+  const admin = createAdminClient();
+  const { data: row } = await admin.from("wholesale_products").select("sku").eq("sku", sku).maybeSingle();
+  if (!row) return { ok: false, error: "Product not found." };
+  const { error } = await admin.from("wholesale_products").update({ buyer_visible: visible }).eq("sku", sku);
+  if (error) return { ok: false, error: error.message };
+  await writeAuditEvent({ eventType: "catalog_edit", staffUserId: staff.id, notes: `${sku}: ${visible ? "shown to buyers" : "hidden from buyers"}` });
+  revalidatePath("/admin/manage-catalog");
+  revalidatePath("/admin/catalog");
+  return { ok: true };
+}
+
+// Sellable at the counter — the OTHER half of the flag that 0062 split.
+//
+// Moving the catalog toggle onto buyer_visible left wholesale_visible with no
+// control anywhere in the app, and it is the flag every billing screen reads.
+// That matters on real rows: 14 SKUs sit at false today, one of them
+// (DD-LEH-FLR-084-L-BRN) on two live orders it can no longer be re-added to.
+// The sheet can set it, but only by someone editing a spreadsheet column that
+// is read as a negative — so the capability belongs here too.
+//
+// It locks, unlike its buyer twin: the sheet sync hardcodes this column true
+// for every row it carries, so an app decision to hold one back survives the
+// next cron only if it is locked.
+export async function setProductSellable(sku: string, sellable: boolean): Promise<{ ok: boolean; error?: string }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
   const admin = createAdminClient();
@@ -139,10 +172,12 @@ export async function setProductVisibility(sku: string, visible: boolean): Promi
   if (!row) return { ok: false, error: "Product not found." };
   const locked = new Set<string>(Array.isArray(row.locked_fields) ? row.locked_fields : []);
   locked.add("wholesale_visible");
-  const { error } = await admin.from("wholesale_products").update({ wholesale_visible: visible, locked_fields: Array.from(locked) }).eq("sku", sku);
+  const { error } = await admin
+    .from("wholesale_products")
+    .update({ wholesale_visible: sellable, locked_fields: Array.from(locked) })
+    .eq("sku", sku);
   if (error) return { ok: false, error: error.message };
-  await writeAuditEvent({ eventType: "catalog_edit", staffUserId: staff.id, notes: `${sku}: ${visible ? "shown" : "hidden"}` });
+  await writeAuditEvent({ eventType: "catalog_edit", staffUserId: staff.id, notes: `${sku}: ${sellable ? "sellable at the counter" : "withdrawn from billing"}` });
   revalidatePath("/admin/manage-catalog");
-  revalidatePath("/admin/catalog");
   return { ok: true };
 }

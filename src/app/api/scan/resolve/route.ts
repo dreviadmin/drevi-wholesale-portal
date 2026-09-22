@@ -36,10 +36,10 @@ export async function GET(request: Request) {
     if (buyerRows?.[0]?.status !== "active") return NextResponse.json({ error: "Not authorized" }, { status: 401 });
     const { data: prod } = await adminB
       .from("wholesale_products")
-      .select("sku, title, image_urls, wholesale_visible")
+      .select("sku, title, image_urls, buyer_visible")
       .eq("sku", sku)
       .maybeSingle();
-    if (!prod || !prod.wholesale_visible) {
+    if (!prod || !prod.buyer_visible) {
       return NextResponse.json({ sku, known: false, message: "Not available on the wholesale portal.", actions: [] });
     }
     return NextResponse.json({

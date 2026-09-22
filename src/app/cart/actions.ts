@@ -46,7 +46,7 @@ async function saveCart(buyerId: string, items: RawCartItem[]): Promise<void> {
 // Clamp a requested qty against the product's stock rules. Returns null if the
 // product can't be ordered at all (missing/hidden/sold out).
 function clampQty(product: WholesaleProduct | undefined, qty: number): number | null {
-  if (!product || !product.wholesale_visible) return null;
+  if (!product || !product.buyer_visible) return null;
   if (getStockState(product) === "sold_out") return null;
   const cap = qtyCap(product);
   const q = Math.max(1, Math.floor(qty));
@@ -108,7 +108,7 @@ export async function setSpecialQty(sku: string, qty: number): Promise<{ qty: nu
   const buyer = await resolveActiveBuyer();
   const items = await getRawCart(buyer.id);
   const product = await loadProduct(sku);
-  if (!product || !product.wholesale_visible || getStockState(product) === "sold_out") {
+  if (!product || !product.buyer_visible || getStockState(product) === "sold_out") {
     return { qty: 0 };
   }
   const wanted = Math.max(1, Math.floor(qty));

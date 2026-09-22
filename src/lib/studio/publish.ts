@@ -190,6 +190,12 @@ export async function publishWholesale(designId: string, staffId: string, staffE
         image_urls: webUrls,
         images_fetched_at: nowIso,
         wholesale_visible: true,
+        // THE buyer catalog gate (0062). This push is the only thing that ever
+        // turns it on, which is what makes "the catalog is what Studio pushed"
+        // true rather than aspirational — the 10-minute sheet cron cannot
+        // reach this column, and wholesale_visible above it is hardcoded true
+        // for every sheet row.
+        buyer_visible: true,
         locked_fields: [...locks],
       };
       // Copy presence (not the approved stamp) writes the description — the
@@ -222,6 +228,96 @@ export async function publishWholesale(designId: string, staffId: string, staffE
       .update({ state: "error", error: message })
       .eq("design_id", designId)
       .eq("portal", "wholesale");
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Take a design back off a portal (Ansh, 22 Sep: "add a option to unpublish
+ * for Live designs : for both Wholesale and Shopify - even though you may not
+ * be able to delete draft on shopify").
+ *
+ * He is right that Shopify cannot be undone by deletion, and deleting would be
+ * the wrong move anyway — the product carries its handle, its URL and whatever
+ * a customer has bookmarked. So unpublishing means DRAFT there, which is the
+ * same state a fresh push creates and the same one Shopify's own Unpublish
+ * button produces. The product, its variants and its metafields survive, and a
+ * later push reconciles them rather than minting a duplicate: publish_targets
+ * keeps remote_id for exactly that reason.
+ *
+ * Wholesale has a real off switch now — buyer_visible (0062) — and turning it
+ * off is the whole of the job: the images and description the push wrote stay
+ * on the row, so a re-push is a no-op rather than a rebuild.
+ *
+ * Both leave the target at 'ready', not 'not_ready': the design still satisfies
+ * its gate, it is simply not out there. 'not_ready' would claim work is
+ * missing and send someone hunting for it.
+ */
+export async function unpublish(
+  designId: string,
+  portal: "wholesale" | "shopify",
+  staffId: string,
+  staffEmail: string,
+): Promise<PublishResult> {
+  const admin = createAdminClient();
+  const detail = await loadDesignDetail(designId);
+  if (!detail) return { ok: false, error: "Design not found" };
+  const { board } = detail;
+
+  const { data: target } = await admin
+    .from("publish_targets")
+    .select("state, remote_id")
+    .eq("design_id", designId)
+    .eq("portal", portal)
+    .maybeSingle();
+  if (!target) return { ok: false, error: `No ${portal} target for this design` };
+  if (target.state !== "live" && target.state !== "changes_pending") {
+    return { ok: false, error: `Not live on ${portal} — nothing to take down` };
+  }
+
+  try {
+    let detailNote: string;
+
+    if (portal === "wholesale") {
+      // Every size variant of the (base, colour) group, matched the way the
+      // push matched them.
+      const { data: variants, error: vErr } = await admin
+        .from("wholesale_products")
+        .select("sku")
+        .like("sku", `${board.baseSku}-%`);
+      if (vErr) throw new Error(vErr.message);
+      const skus = (variants ?? [])
+        .map((v) => v.sku)
+        .filter((s) => s.toUpperCase().endsWith(`-${board.color.toUpperCase()}`));
+      if (skus.length) {
+        const { error } = await admin.from("wholesale_products").update({ buyer_visible: false }).in("sku", skus);
+        if (error) throw new Error(error.message);
+      }
+      detailNote = `${skus.length} variant(s) hidden from the buyer catalog`;
+    } else {
+      if (!target.remote_id) throw new Error("No Shopify product recorded for this design");
+      // Dynamic import: shopify.ts imports publishImageSet from this file, so
+      // a static import here would close the cycle.
+      const { setShopifyStatus } = await import("@/lib/shopify");
+      await setShopifyStatus(target.remote_id, "DRAFT");
+      detailNote = `${target.remote_id} set to DRAFT`;
+    }
+
+    await admin
+      .from("publish_targets")
+      .update({ state: "ready", error: null })
+      .eq("design_id", designId)
+      .eq("portal", portal);
+
+    await writeAuditEvent({
+      eventType: "studio_published",
+      staffUserId: staffId,
+      notes: `${portal} UNPUBLISH ${board.baseSku}·${board.color}: ${detailNote} by ${staffEmail}`,
+    });
+    return { ok: true };
+  } catch (err) {
+    const message = (err as Error).message;
+    await admin.from("publish_targets").update({ error: message }).eq("design_id", designId).eq("portal", portal);
     return { ok: false, error: message };
   }
 }

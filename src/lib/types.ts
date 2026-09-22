@@ -81,7 +81,7 @@ export interface DocumentBuyerSnapshot {
 // internal fields (location, cost provenance) into the page payload — caught
 // live on 2 Aug when "Rack B2" appeared in the product page's RSC stream.
 export const BUYER_PRODUCT_COLUMNS =
-  "sku, title, description, category, sub_category, color, primary_fabric, wholesale_price, wholesale_visible, min_order_qty, current_qty, restockable, restock_days, image_urls, hsn";
+  "sku, title, description, category, sub_category, color, primary_fabric, wholesale_price, wholesale_visible, buyer_visible, min_order_qty, current_qty, restockable, restock_days, image_urls, hsn";
 
 export interface WholesaleProduct {
   hsn?: string | null;
@@ -93,7 +93,11 @@ export interface WholesaleProduct {
   color: string | null;
   primary_fabric: string | null;
   wholesale_price: number;
+  /** The sheet/ops flag: staff may sell this. Every billing screen reads it. */
   wholesale_visible: boolean;
+  /** Buyers may SEE this in /catalog. Written only by a Studio wholesale push
+   *  or by staff in Manage Catalog — never by the sheet sync (0062). */
+  buyer_visible: boolean;
   min_order_qty: number | null;
   restockable: boolean;
   restock_days: number | null;

@@ -150,6 +150,7 @@ export async function loadBoard(): Promise<BoardRow[]> {
       targets: targetsByDesign.get(d.id) ?? [],
       wholesalePriceSet: priceSet.has(key),
       tier: d.tier,
+      origin: d.origin,
     };
     const { badge, portals } = deriveBadge(input);
     return {

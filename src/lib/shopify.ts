@@ -483,3 +483,25 @@ export async function publishShopify(designId: string, staffId: string, staffEma
     return { ok: false, error: message };
   }
 }
+
+/**
+ * Set a product's status. Used by the studio's Unpublish (Ansh, 22 Sep).
+ *
+ * DRAFT rather than delete, deliberately: the product owns its handle, its URL
+ * and anything a customer has bookmarked, and publish_targets keeps remote_id
+ * so a later push reconciles the same product instead of minting a second one.
+ * It is also the only lever Shopify gives — a published product cannot be
+ * un-created, which is what the owner meant by "even though you may not be
+ * able to delete draft on shopify".
+ */
+export async function setShopifyStatus(productId: string, status: "ACTIVE" | "DRAFT"): Promise<void> {
+  if (!shopifyEnabled()) throw new Error("Shopify is not enabled on this deployment");
+  const res = await gql<{ productUpdate: { product: { id: string; status: string } | null; userErrors: UserError[] } }>(
+    `mutation($input: ProductInput!) {
+      productUpdate(input: $input) { product { id status } userErrors { field message } }
+    }`,
+    { input: { id: productId, status } },
+  );
+  throwUserErrors("productUpdate", res.productUpdate.userErrors);
+  if (!res.productUpdate.product) throw new Error("productUpdate returned no product");
+}

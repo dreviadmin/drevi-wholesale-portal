@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/staff";
+import { requireAdmin, requireStaff } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import { DETAIL_ANGLES } from "@/lib/studio/state";
@@ -277,4 +277,91 @@ export async function pushShopifyBatch(
   }
   revalidatePath("/admin/studio");
   return { ok: true, pushed, blocked, failed, ...(firstError ? { firstError } : {}) };
+}
+
+/**
+ * Take a live design back off a portal (Ansh, 22 Sep).
+ *
+ * Deliberately one design at a time and not part of the batch bar. The batch
+ * buttons put things OUT; a control that silently withdrew twenty products
+ * from sale on one click belongs nowhere near them.
+ */
+export async function unpublishDesign(
+  designId: string,
+  portal: "wholesale" | "shopify",
+): Promise<{ ok: boolean; error?: string }> {
+  let staff;
+  try {
+    staff = await requireAdmin();
+  } catch {
+    return { ok: false, error: "Not authorized" };
+  }
+  const { unpublish } = await import("@/lib/studio/publish");
+  const res = await unpublish(designId, portal, staff.id, staff.email);
+  revalidatePath("/admin/studio");
+  revalidatePath(`/admin/studio/${designId}`);
+  return { ok: res.ok, ...(res.error ? { error: res.error } : {}) };
+}
+
+/**
+ * The variant SKUs behind a selection of board rows, for bulk tag printing
+ * (Ansh, 22 Sep: "an option to select multiple designs and print tags in the
+ * studio").
+ *
+ * A board row is a (base, colour) GROUP; a tag is printed per size SKU, so the
+ * one thing the board cannot answer for itself is which sizes exist. Resolved
+ * from sku_registry rather than wholesale_products: the registry is what a
+ * minted SKU is recorded in, and a garment can have a tag printed before its
+ * catalog row carries a price or has been pushed anywhere.
+ */
+export async function traySkusForDesigns(
+  designIds: string[],
+): Promise<{ ok: boolean; error?: string; skus?: string[]; groups?: number; missing?: string[] }> {
+  try {
+    await requireStaff();
+  } catch {
+    return { ok: false, error: "Not authorized" };
+  }
+  if (designIds.length === 0) return { ok: false, error: "Nothing selected" };
+  const admin = createAdminClient();
+
+  const { data: designs, error } = await admin
+    .from("designs")
+    .select("id, base_sku, color")
+    .in("id", designIds.slice(0, 200));
+  if (error) return { ok: false, error: error.message };
+  if (!designs?.length) return { ok: false, error: "No designs found" };
+
+  // One query for every base in the selection, then filtered on the colour
+  // suffix in memory. Chained .like() on the same column is unreliable through
+  // PostgREST, and a per-design round trip would be 100+ queries.
+  const bases = [...new Set(designs.map((d) => d.base_sku.toUpperCase()))];
+  const rows: { variant_sku: string }[] = [];
+  const CHUNK = 25;
+  for (let i = 0; i < bases.length; i += CHUNK) {
+    const ors = bases.slice(i, i + CHUNK).map((b) => `variant_sku.ilike.${b}-%`).join(",");
+    const { data, error: rErr } = await admin.from("sku_registry").select("variant_sku").or(ors).range(0, 9999);
+    if (rErr) return { ok: false, error: rErr.message };
+    rows.push(...(data ?? []));
+  }
+
+  const wanted = new Set(designs.map((d) => `${d.base_sku.toUpperCase()}|${d.color.toUpperCase()}`));
+  const skus: string[] = [];
+  const seenGroups = new Set<string>();
+  for (const r of rows) {
+    const parts = r.variant_sku.toUpperCase().split("-");
+    if (parts.length < 5) continue;
+    const key = `${parts.slice(0, 4).join("-")}|${parts[parts.length - 1]}`;
+    if (!wanted.has(key)) continue;
+    skus.push(r.variant_sku.toUpperCase());
+    seenGroups.add(key);
+  }
+
+  // Named, not just counted: "3 designs have no SKUs" sends someone hunting
+  // through the selection.
+  const missing = designs
+    .filter((d) => !seenGroups.has(`${d.base_sku.toUpperCase()}|${d.color.toUpperCase()}`))
+    .map((d) => `${d.base_sku}·${d.color}`);
+
+  return { ok: true, skus: [...new Set(skus)].sort(), groups: seenGroups.size, missing };
 }

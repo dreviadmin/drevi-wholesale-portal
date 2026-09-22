@@ -58,7 +58,7 @@ export async function getDetailedCart(buyerId: string): Promise<DetailedCart> {
   const lines: CartLine[] = [];
   for (const it of items) {
     const product = bySku.get(it.sku);
-    if (!product || !product.wholesale_visible) continue; // drop hidden/stale
+    if (!product || !product.buyer_visible) continue; // drop hidden/stale
     const stockState = getStockState(product);
     if (stockState === "sold_out") continue; // sold out can't be ordered
     const cap = qtyCap(product);

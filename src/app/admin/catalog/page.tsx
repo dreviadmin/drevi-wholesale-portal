@@ -15,7 +15,9 @@ export default async function StaffCatalogPage() {
   const { data: products } = await admin
     .from("wholesale_products")
     .select("*")
-    .eq("wholesale_visible", true)
+    // What the BUYER sees, so staff browsing this page are looking at the same
+    // catalog their customers are (0062).
+    .eq("buyer_visible", true)
     .order("category", { nullsFirst: false })
     .order("title", { nullsFirst: false });
 
@@ -24,7 +26,7 @@ export default async function StaffCatalogPage() {
   const { data: hidden } = await admin
     .from("wholesale_products")
     .select("sku")
-    .eq("wholesale_visible", false);
+    .eq("buyer_visible", false);
 
   const lastSynced = (products ?? []).reduce<string | null>(
     (max, p) => (p.synced_at && (!max || p.synced_at > max) ? p.synced_at : max),

@@ -11,6 +11,7 @@ import { applyMovement } from "@/lib/stock-ledger";
 import { storeDesignImage } from "@/lib/design-image-store";
 import { ensureDesignImagery } from "@/lib/design-imagery";
 import { exGstCost } from "@/lib/gst";
+import { isOriginValue } from "@/lib/studio/copy-prompt";
 
 // Retrofit R3 (§5) — "Log delivery": one screen, one motion per garment.
 //
@@ -48,6 +49,32 @@ export interface GarmentInput {
   supply?: SupplyBlock;
   /** ident photo, already uploaded via uploadIdentPhoto → design_images id */
   identImageId?: string;
+  /**
+   * Specs filled AT GOODS-IN (Ansh, 22 Sep: "add option to add specs -
+   * price(WH and retail), fabric, color, etc while logging delivery as well").
+   *
+   * Every field is optional and a blank one writes NOTHING — the §5.9 rule the
+   * master editor already follows. Someone logging six garments off a bill has
+   * the fabric in front of them and the price on the invoice; making them walk
+   * into six master editors afterwards is how designs end up at "Awaiting
+   * specs" for weeks.
+   */
+  specs?: GarmentSpecsInput;
+}
+
+export interface GarmentSpecsInput {
+  fabric?: string;
+  handwork?: string;
+  /** The human colour name beside the code — "Champagne Gold", not GLD. */
+  colorName?: string;
+  /** 'drevi_original' | 'curated'. Anything else is ignored, as 0051 requires. */
+  origin?: string;
+  /** Per-size wholesale price, applied to every size of the group. */
+  wholesalePrice?: number;
+  /** Retail MRP — designs.mrp_override. */
+  retailPrice?: number;
+  /** Tick only when the person filling this is the one who signs specs off. */
+  specsVerified?: boolean;
 }
 
 export interface GstInput {
@@ -536,6 +563,41 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
         // Reorder path: fill the code if the product has none; a differing
         // existing value is Manage Catalog's to change.
         await admin.from("wholesale_products").update({ hsn: hsnValue }).eq("sku", sku).is("hsn", null);
+      }
+
+      // Specs captured on the intake form (22 Sep). Applied per SKU because
+      // the wholesale price lives per size row; the design-level fields are
+      // idempotent, so writing them once per size costs a duplicate update and
+      // buys not having to special-case the first size.
+      //
+      // BLANK MEANS LEAVE ALONE, never overwrite — the §5.9 rule. A reorder of
+      // a garment whose specs Rakesh has already signed off must not be wiped
+      // by someone tabbing through the form.
+      if (g.specs) {
+        const sp = g.specs;
+        const designPatch: Record<string, unknown> = {};
+        if (sp.fabric?.trim()) designPatch.fabric = sp.fabric.trim();
+        if (sp.handwork?.trim()) designPatch.handwork = sp.handwork.trim();
+        if (sp.colorName?.trim()) designPatch.color_name = sp.colorName.trim();
+        if (isOriginValue(sp.origin)) designPatch.origin = sp.origin;
+        if (Number(sp.retailPrice) > 0) designPatch.mrp_override = Number(sp.retailPrice);
+        // Only ever set TRUE here. Clearing a sign-off is the master editor's
+        // job, with the whole spec sheet in view.
+        if (sp.specsVerified) designPatch.specs_verified = true;
+        if (Object.keys(designPatch).length) {
+          designPatch.updated_at = new Date().toISOString();
+          await admin.from("designs").update(designPatch).eq("id", g.designId);
+        }
+        if (Number(sp.wholesalePrice) > 0) {
+          // Locked, like every other app-set price: the sheet sync would
+          // otherwise put the sheet's number back on the next run.
+          const { data: pr } = await admin.from("wholesale_products").select("locked_fields").eq("sku", sku).maybeSingle();
+          const locks = new Set<string>(Array.isArray(pr?.locked_fields) ? pr.locked_fields : []);
+          locks.add("wholesale_price");
+          await admin.from("wholesale_products")
+            .update({ wholesale_price: Number(sp.wholesalePrice), locked_fields: [...locks] })
+            .eq("sku", sku);
+        }
       }
 
       // §5.7 — receipts now set last_cost and INCREMENT stock, through the

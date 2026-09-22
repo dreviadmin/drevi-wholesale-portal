@@ -6,9 +6,7 @@ import { Search, X, Lock, Unlock, Eye, EyeOff, Pencil, ImageOff, ScanLine } from
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { ZoomImage } from "@/components/Lightbox";
 import { DraftNotice } from "@/components/DraftNotice";
-import {
-  updateProductFields, unlockProductField, uploadProductPhotoAction, renameProductSku, setProductVisibility,
-} from "./actions";
+import { updateProductFields, unlockProductField, uploadProductPhotoAction, renameProductSku, setProductVisibility, setProductSellable } from "./actions";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { tooLargeMessage } from "@/lib/downscale-photo";
@@ -124,7 +122,7 @@ export function ManageCatalogView({ products, hsnOptions }: { products: Wholesal
                 if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setEditingSku(p.sku); }
               }}
               className="flex items-center gap-3 py-2.5 text-left cursor-pointer"
-              style={{ borderBottom: "1px solid rgba(26,26,26,0.07)", opacity: p.wholesale_visible ? 1 : 0.5 }}
+              style={{ borderBottom: "1px solid rgba(26,26,26,0.07)", opacity: p.buyer_visible ? 1 : 0.5 }}
             >
               {p.image_urls?.[0] ? (
                 <ZoomImage src={p.image_urls[0]} alt={p.title ?? p.sku} width={40} height={50} />
@@ -136,7 +134,7 @@ export function ManageCatalogView({ products, hsnOptions }: { products: Wholesal
               <div className="min-w-0 flex-1">
                 <div className="font-display truncate" style={{ fontSize: 13, fontWeight: 500, color: palette.black }}>{p.title ?? p.sku}</div>
                 <div className="font-body" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.06em" }}>
-                  {p.sku}{!p.wholesale_visible ? " · HIDDEN" : ""}{locked.length ? ` · ${locked.length} locked` : ""}
+                  {p.sku}{!p.buyer_visible ? " · NOT IN CATALOG" : ""}{locked.length ? ` · ${locked.length} locked` : ""}
                 </div>
               </div>
               <div className="flex-shrink-0 text-right">
@@ -247,7 +245,15 @@ function EditModal({ product, hsnOptions, onClose, onSaved }: { product: Wholesa
 
   function toggleVisible() {
     start(async () => {
-      const res = await setProductVisibility(product.sku, !product.wholesale_visible);
+      const res = await setProductVisibility(product.sku, !product.buyer_visible);
+      if (!res.ok) { setError(res.error ?? "Failed"); return; }
+      onSaved();
+    });
+  }
+
+  function toggleSellable() {
+    start(async () => {
+      const res = await setProductSellable(product.sku, !product.wholesale_visible);
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
       onSaved();
     });
@@ -289,8 +295,15 @@ function EditModal({ product, hsnOptions, onClose, onSaved }: { product: Wholesa
               Replace photo
               <input type="file" accept="image/*" className="hidden" onChange={(e) => onPhoto(e.target.files?.[0] ?? null)} />
             </label>
-            <button type="button" onClick={toggleVisible} disabled={isPending} className="mt-2 flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", color: product.wholesale_visible ? palette.crimsonText : palette.goldDeep }}>
-              {product.wholesale_visible ? <><EyeOff size={12} /> Hide from catalog</> : <><Eye size={12} /> Show in catalog</>}
+            {/* Two independent switches since 0062, because they answer two
+                different questions: what buyers browse, and what staff can
+                ring up at the counter. A garment pulled from the storefront
+                is usually still hanging in the showroom. */}
+            <button type="button" onClick={toggleVisible} disabled={isPending} className="mt-2 flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", color: product.buyer_visible ? palette.crimsonText : palette.goldDeep }}>
+              {product.buyer_visible ? <><EyeOff size={12} /> Hide from buyer catalog</> : <><Eye size={12} /> Show in buyer catalog</>}
+            </button>
+            <button type="button" onClick={toggleSellable} disabled={isPending} className="mt-1.5 flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", color: product.wholesale_visible ? palette.crimsonText : palette.goldDeep }}>
+              {product.wholesale_visible ? <><EyeOff size={12} /> Withdraw from billing</> : <><Eye size={12} /> Make sellable at the counter</>}
             </button>
           </div>
         </div>
