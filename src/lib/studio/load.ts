@@ -38,10 +38,24 @@ export interface BoardRow {
   /** Spec fields this design is still short of — drives the board's Missing
    *  chips. Empty on a complete design. */
   missing: MissingKey[];
+  /** Retired (0063). The board hides these unless "Discontinued" is on. */
+  discontinuedAt: string | null;
+  discontinuedBy: string | null;
+  discontinuedNote: string | null;
   createdAt: string; // ISO from designs.created_at ('' if null)
 }
 
-export async function loadBoard(): Promise<BoardRow[]> {
+/**
+ * opts.includeDiscontinued — retired designs are EXCLUDED by default (0063).
+ *
+ * Correct-by-default on purpose. This loader feeds the board, the staff
+ * attention inbox and the scan sheet, and the inbox counted retired designs
+ * while the board hid them: "9 designs awaiting photos" linking to a list of
+ * 7. Anything that wants them must now say so, and only two callers do — the
+ * board, which has a switch for them, and loadDesignDetail, which must still
+ * be able to open one to restore it.
+ */
+export async function loadBoard(opts?: { includeDiscontinued?: boolean }): Promise<BoardRow[]> {
   // Auto-kill, on the read path (Ansh, 20 Sep). The old sweep lived inside
   // regenAngle, which the Workbench hides while a job is in flight — the only
   // thing that could free a stuck angle was the button that angle had taken
@@ -57,10 +71,12 @@ export async function loadBoard(): Promise<BoardRow[]> {
       origin: string | null; fabric: string | null; handwork: string | null;
       color_name: string | null; sub_category: string | null;
       mrp_override: number | null; auto_mrp: number | null;
+      discontinued_at: string | null; discontinued_by: string | null; discontinued_note: string | null;
     }>(
       admin, "designs",
       "id, base_sku, color, title, category, sub_category, tier, specs_verified, created_at, " +
-      "origin, fabric, handwork, color_name, mrp_override, auto_mrp",
+      "origin, fabric, handwork, color_name, mrp_override, auto_mrp, " +
+      "discontinued_at, discontinued_by, discontinued_note",
       // Board default: newest design first (§7.4 / Item 4). nullsFirst:false —
       // the column is nullable and Postgres floats NULLs to the top on DESC.
       // id desc is the stable tiebreak so paging never reshuffles equal stamps.
@@ -126,7 +142,11 @@ export async function loadBoard(): Promise<BoardRow[]> {
     if (img && !groupThumb.has(key)) groupThumb.set(key, img);
   }
 
-  return designs.map((d) => {
+  const keep = opts?.includeDiscontinued
+    ? designs
+    : designs.filter((d) => !d.discontinued_at);
+
+  return keep.map((d) => {
     const key = `${d.base_sku}|${d.color}`;
     const dAngles = anglesByDesign.get(d.id) ?? [];
     const filledAngles: Partial<Record<Angle, boolean>> = {};
@@ -151,6 +171,7 @@ export async function loadBoard(): Promise<BoardRow[]> {
       wholesalePriceSet: priceSet.has(key),
       tier: d.tier,
       origin: d.origin,
+      discontinued: !!d.discontinued_at,
     };
     const { badge, portals } = deriveBadge(input);
     return {
@@ -190,6 +211,9 @@ export async function loadBoard(): Promise<BoardRow[]> {
         mrpOverride: d.mrp_override, autoMrp: d.auto_mrp,
         wholesalePriceSet: input.wholesalePriceSet,
       }, vocab),
+      discontinuedAt: d.discontinued_at,
+      discontinuedBy: d.discontinued_by,
+      discontinuedNote: d.discontinued_note,
       createdAt: d.created_at ?? "",
     };
   });
@@ -235,7 +259,9 @@ export async function loadDesignDetail(designId: string): Promise<{
   driveFolderId: string | null;
   activeJobs: { angleId: string | null; type: string; status: string; progress: number }[];
 } | null> {
-  const rows = await loadBoard();
+  // Retired designs included: the workbench is where the restore button is,
+  // so refusing to open one would strand it.
+  const rows = await loadBoard({ includeDiscontinued: true });
   const board = rows.find((r) => r.id === designId);
   if (!board) return null;
   const admin = createAdminClient();

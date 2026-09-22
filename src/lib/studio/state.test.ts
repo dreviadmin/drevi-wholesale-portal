@@ -36,6 +36,25 @@ describe("wholesaleGate", () => {
 });
 
 describe("shopifyGate", () => {
+  it("refuses BOTH portals for a discontinued design — publishing would undo the retirement", () => {
+    // publishWholesale writes buyer_visible: true for every size, which is the
+    // exact flag setDiscontinued clears. Before this blocker, Push WS on a
+    // selection that included a retired design put it back in the buyer
+    // catalog with discontinued_at still set and the board still hiding it.
+    const readyShopify = { ...base, filledAngles: { front: true, back: true }, copyStatus: "draft" as const, copyPresent: true };
+    expect(shopifyGate({ ...readyShopify, discontinued: true }).blockers).toContain("Discontinued — restore it first");
+    expect(shopifyGate({ ...readyShopify, discontinued: true }).ready).toBe(false);
+
+    const readyWholesale = { ...base, filledAngles: { front: true }, wholesalePriceSet: true };
+    expect(wholesaleGate({ ...readyWholesale, discontinued: true }).blockers).toContain("Discontinued — restore it first");
+    expect(wholesaleGate({ ...readyWholesale, discontinued: true }).ready).toBe(false);
+
+    // Absent or false is the ordinary case and must not block.
+    expect(wholesaleGate({ ...readyWholesale, discontinued: false }).ready).toBe(true);
+    expect(wholesaleGate(readyWholesale).ready).toBe(true);
+    expect(shopifyGate(readyShopify).ready).toBe(true);
+  });
+
   it("requires an origin — it picks the size ladder and the product page's pricing tier", () => {
     const shot = { ...base, filledAngles: { front: true, back: true }, copyStatus: "draft" as const, copyPresent: true };
     expect(shopifyGate({ ...shot, origin: null }).blockers).toEqual(["Origin not set"]);

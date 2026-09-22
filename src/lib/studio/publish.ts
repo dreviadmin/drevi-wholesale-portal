@@ -258,6 +258,7 @@ export async function unpublish(
   portal: "wholesale" | "shopify",
   staffId: string,
   staffEmail: string,
+  opts?: { force?: boolean },
 ): Promise<PublishResult> {
   const admin = createAdminClient();
   const detail = await loadDesignDetail(designId);
@@ -271,7 +272,15 @@ export async function unpublish(
     .eq("portal", portal)
     .maybeSingle();
   if (!target) return { ok: false, error: `No ${portal} target for this design` };
-  if (target.state !== "live" && target.state !== "changes_pending") {
+  // The manual control refuses unless the mirror says the design is out there;
+  // force skips that, because the mirror DRIFTS. Going live from DRAFT is a
+  // human act inside Shopify admin that never writes publish_targets, so a
+  // target can read 'ready' while the product is on sale — on prod today all
+  // 115 shopify targets say 'live' and 12 of those products are DRAFT, so the
+  // disagreement is routine. A retirement must not skip the take-down because
+  // of a stale local row; productUpdate(status: DRAFT) is idempotent, so the
+  // cost of being wrong is one round trip.
+  if (!opts?.force && target.state !== "live" && target.state !== "changes_pending") {
     return { ok: false, error: `Not live on ${portal} — nothing to take down` };
   }
 

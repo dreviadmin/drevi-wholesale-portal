@@ -365,3 +365,172 @@ export async function traySkusForDesigns(
 
   return { ok: true, skus: [...new Set(skus)].sort(), groups: seenGroups.size, missing };
 }
+
+/**
+ * Retire a product, or bring it back (Ansh, 22 Sep).
+ *
+ * `discontinued_at` is a stamp rather than a boolean, so the row still answers
+ * who retired it and when — the questions anyone actually asks six months
+ * later. Clearing the stamp is the restore.
+ *
+ * It ALSO takes the product out of the buyer catalog, because a product
+ * announced as discontinued that buyers can still order is a promise nobody
+ * meant to make. It does NOT touch wholesale_visible: a retired garment still
+ * hanging in the showroom stays sellable at the counter, the same separation
+ * 0062 drew. Restoring does not put it back in the catalog either — that is a
+ * Studio push, and it should be a decision rather than a side effect.
+ *
+ * SHOPIFY IS TAKEN DOWN TOO (Ansh, 23 Sep, answering exactly that question).
+ * It reuses unpublish() rather than duplicating the mutation, so the target
+ * state, the audit line and the error path stay in one place.
+ *
+ * Order matters. The Shopify call goes FIRST, because it is the step that can
+ * fail and it is idempotent — setting a product to DRAFT twice is the same as
+ * once, so a retry after a dropped response is safe. The local writes follow
+ * and effectively cannot fail.
+ *
+ * A Shopify failure does NOT block the retirement. Being unable to retire a
+ * garment because Shopify is having a bad afternoon is the worse outcome, and
+ * the half-state is made loud rather than hidden: the result carries
+ * shopifyError, the caller says so, and publish_targets keeps its own error so
+ * the Shopify panel shows it with Unpublish sitting right there.
+ */
+export async function setDiscontinued(
+  designId: string,
+  discontinued: boolean,
+  note?: string,
+): Promise<{ ok: boolean; error?: string; hiddenSkus?: number; shopifyDrafted?: boolean; shopifyError?: string }> {
+  let staff;
+  try {
+    staff = await requireAdmin();
+  } catch {
+    return { ok: false, error: "Not authorized" };
+  }
+  const admin = createAdminClient();
+
+  const { data: design } = await admin
+    .from("designs")
+    .select("id, base_sku, color, discontinued_at")
+    .eq("id", designId)
+    .maybeSingle();
+  if (!design) return { ok: false, error: "Design not found" };
+  if (discontinued && design.discontinued_at) return { ok: false, error: "Already discontinued" };
+  if (!discontinued && !design.discontinued_at) return { ok: false, error: "This product is not discontinued" };
+
+  // Shopify first — see the note above on ordering.
+  let shopifyDrafted = false;
+  let shopifyError: string | undefined;
+  if (discontinued) {
+    // Gated on a product EXISTING, not on the mirrored state. publish_targets
+    // drifts — going live from DRAFT is a human act in Shopify admin that never
+    // writes back here — so trusting the state would silently skip the
+    // take-down on a product that is genuinely on sale.
+    const { data: sh } = await admin
+      .from("publish_targets")
+      .select("state, remote_id")
+      .eq("design_id", designId)
+      .eq("portal", "shopify")
+      .maybeSingle();
+    if (sh?.remote_id) {
+      const { unpublish } = await import("@/lib/studio/publish");
+      const res = await unpublish(designId, "shopify", staff.id, staff.email, { force: true });
+      if (res.ok) shopifyDrafted = true;
+      else shopifyError = res.error ?? "Shopify unpublish failed";
+    }
+  }
+
+  const { error } = await admin
+    .from("designs")
+    .update(
+      discontinued
+        ? { discontinued_at: new Date().toISOString(), discontinued_by: staff.email, discontinued_note: note?.trim() || null }
+        : { discontinued_at: null, discontinued_by: null, discontinued_note: null },
+    )
+    .eq("id", designId);
+  if (error) return { ok: false, error: error.message };
+
+  let hiddenSkus = 0;
+  if (discontinued) {
+    const { data: variants } = await admin
+      .from("wholesale_products")
+      .select("sku")
+      .like("sku", `${design.base_sku}-%`);
+    const skus = (variants ?? [])
+      .map((v) => v.sku)
+      .filter((s) => s.toUpperCase().endsWith(`-${design.color.toUpperCase()}`));
+    if (skus.length) {
+      await admin.from("wholesale_products").update({ buyer_visible: false }).in("sku", skus);
+      hiddenSkus = skus.length;
+    }
+  }
+
+  await writeAuditEvent({
+    eventType: "catalog_edit",
+    staffUserId: staff.id,
+    notes: discontinued
+      ? `DISCONTINUED ${design.base_sku}·${design.color} by ${staff.email}${note?.trim() ? ` — ${note.trim()}` : ""}` +
+        `${hiddenSkus ? ` (${hiddenSkus} variant(s) out of the catalog)` : ""}` +
+        `${shopifyDrafted ? ", Shopify set to DRAFT" : ""}${shopifyError ? `, SHOPIFY STILL ACTIVE: ${shopifyError}` : ""}`
+      : `RESTORED ${design.base_sku}·${design.color} by ${staff.email}`,
+  });
+
+  revalidatePath("/admin/studio");
+  revalidatePath(`/admin/studio/${designId}`);
+  revalidatePath(`/admin/studio/master/${designId}`);
+  return { ok: true, hiddenSkus, shopifyDrafted, ...(shopifyError ? { shopifyError } : {}) };
+}
+
+/**
+ * Bulk discontinue / restore (Ansh, 23 Sep).
+ *
+ * Capped at 12, well under the per-design cap the other bulk routes use,
+ * because discontinuing now makes a Shopify call for every design that is
+ * live there — the board chunks a larger selection the same way it chunks
+ * copy generation.
+ *
+ * Failures are counted and the FIRST is named. "3 failed" on its own sends the
+ * operator hunting through twelve designs, and the failure that matters here
+ * is specifically "Shopify is still active", which needs a name to act on.
+ */
+export async function setDiscontinuedBatch(
+  designIds: string[],
+  discontinued: boolean,
+): Promise<{
+  ok: boolean; error?: string;
+  done?: number; skipped?: number; failed?: number;
+  shopifyDrafted?: number; shopifyStuck?: number; firstError?: string;
+}> {
+  try {
+    await requireAdmin();
+  } catch {
+    return { ok: false, error: "Not authorized" };
+  }
+  if (designIds.length === 0) return { ok: false, error: "Nothing selected" };
+
+  let done = 0, skipped = 0, failed = 0, shopifyDrafted = 0, shopifyStuck = 0;
+  let firstError: string | undefined;
+  for (const id of designIds.slice(0, 12)) {
+    const res = await setDiscontinued(id, discontinued);
+    if (res.ok) {
+      done++;
+      if (res.shopifyDrafted) shopifyDrafted++;
+      if (res.shopifyError) {
+        shopifyStuck++;
+        if (!firstError) firstError = res.shopifyError;
+      }
+      continue;
+    }
+    // "Already discontinued" / "not discontinued" is a no-op, not a failure —
+    // a selection spanning both states is ordinary when the board is showing
+    // retired products alongside live ones.
+    if (res.error === "Already discontinued" || res.error === "This product is not discontinued") {
+      skipped++;
+      continue;
+    }
+    failed++;
+    if (!firstError) firstError = res.error;
+  }
+
+  revalidatePath("/admin/studio");
+  return { ok: true, done, skipped, failed, shopifyDrafted, shopifyStuck, ...(firstError ? { firstError } : {}) };
+}

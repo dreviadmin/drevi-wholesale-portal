@@ -14,7 +14,7 @@ import { MISSING_FIELDS, isMissingKey, type MissingKey } from "@/lib/studio/miss
 import { BatchProgress, type BatchProgressState } from "@/components/admin/BatchProgress";
 import { BADGE_LABEL, type DesignBadge } from "@/lib/studio/state";
 import type { BoardRow } from "@/lib/studio/load";
-import { setTierBatch, togglePortalBatch, runFashnBatch, approveAllPreflight, approveAllBatch, generateCopyBatch, pushWholesaleBatch, pushShopifyBatch, traySkusForDesigns } from "./actions";
+import { setTierBatch, togglePortalBatch, runFashnBatch, approveAllPreflight, approveAllBatch, generateCopyBatch, pushWholesaleBatch, pushShopifyBatch, traySkusForDesigns, setDiscontinuedBatch } from "./actions";
 import { JobsTicker } from "./JobsTicker";
 
 // Studio board (§7.4): derived-state chips with live counts, rows with
@@ -27,6 +27,8 @@ import { JobsTicker } from "./JobsTicker";
 // generateCopyBatch / pushWholesaleBatch / pushShopifyBatch.
 const COPY_CHUNK = 10;
 const PUSH_CHUNK = 20;
+// Smaller: discontinuing makes a Shopify call for every design live there.
+const RETIRE_CHUNK = 12;
 
 const CHIP_ORDER: (DesignBadge | "all")[] = ["all", "awaiting_specs", "needs_photos", "in_review", "needs_copy", "ready", "live", "changes_pending"];
 
@@ -60,6 +62,10 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
   // OR, not AND: the job these serve is a sweep — "show me everything with a
   // gap in any of these" — not "everything missing all of them at once".
   const [missingFilter, setMissingFilter] = useState<Set<MissingKey>>(new Set());
+  // Retired products are OUT by default and everything else on this board —
+  // counts, filters, select-all — works on the visible set, so switching this
+  // on is the only way to touch one (0063).
+  const [showDiscontinued, setShowDiscontinued] = useState(false);
   const [query, setQuery] = useState("");
   const [scanOpen, setScanOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -96,35 +102,44 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
     }
   }, []);
 
+  // Every chip count below is over `live`, not `rows`: a board showing 287
+  // designs must not have chips that add up to 300 because retired ones are
+  // still being counted behind the scenes.
+  const retiredCount = useMemo(() => rows.filter((r) => r.discontinuedAt).length, [rows]);
+  const live = useMemo(
+    () => (showDiscontinued ? rows : rows.filter((r) => !r.discontinuedAt)),
+    [rows, showDiscontinued],
+  );
+
   const counts = useMemo(() => {
     const c = new Map<string, number>();
-    for (const r of rows) c.set(r.badge, (c.get(r.badge) ?? 0) + 1);
+    for (const r of live) c.set(r.badge, (c.get(r.badge) ?? 0) + 1);
     return c;
-  }, [rows]);
+  }, [live]);
 
   const specsCounts = useMemo(() => {
-    const confirmed = rows.filter((r) => r.specsVerified).length;
-    return { confirmed, awaiting: rows.length - confirmed };
-  }, [rows]);
+    const confirmed = live.filter((r) => r.specsVerified).length;
+    return { confirmed, awaiting: live.length - confirmed };
+  }, [live]);
 
   // Over every row, not the filtered set — the same rule the state, specs and
   // photo chips already follow, so the number on a chip is an inventory rather
   // than a reflection of whatever else is switched on.
   const missingTotals = useMemo(() => {
     const c = new Map<MissingKey, number>();
-    for (const r of rows) for (const k of r.missing ?? []) c.set(k, (c.get(k) ?? 0) + 1);
+    for (const r of live) for (const k of r.missing ?? []) c.set(k, (c.get(k) ?? 0) + 1);
     return c;
-  }, [rows]);
+  }, [live]);
 
   const photoCountTotals = useMemo(() => {
     const c = new Array(7).fill(0) as number[];
-    for (const r of rows) if (r.filledCount >= 0 && r.filledCount <= 6) c[r.filledCount] += 1;
+    for (const r of live) if (r.filledCount >= 0 && r.filledCount <= 6) c[r.filledCount] += 1;
     return c;
-  }, [rows]);
+  }, [live]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toUpperCase();
-    return rows.filter((r) => {
+    return live.filter((r) => {
       if (chip !== "all" && r.badge !== chip) return false;
       if (specsFilter === "confirmed" && !r.specsVerified) return false;
       if (specsFilter === "awaiting" && r.specsVerified) return false;
@@ -133,7 +148,7 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
       if (!q) return true;
       return [r.baseSku, r.color, r.title ?? "", r.category ?? ""].some((v) => v.toUpperCase().includes(q));
     });
-  }, [rows, chip, specsFilter, photoCounts, missingFilter, query]);
+  }, [live, chip, specsFilter, photoCounts, missingFilter, query]);
 
   const { sorted, sort, toggle } = useSort(filtered, {
     sku: (r) => `${r.baseSku}-${r.color}`,
@@ -158,6 +173,49 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
   // Stop takes effect at the next chunk boundary. The chunk already in flight
   // is a server action on its way to Anthropic or Shopify — it finishes and is
   // counted, because pretending otherwise would misreport what was spent.
+  // Bulk retire / restore. One routine, because the only difference is the
+  // direction and the words — duplicating it would be two places to fix the
+  // chunking, the Stop check and the tally.
+  function runRetire(discontinued: boolean, targetIds: string[]) {
+    const label = discontinued ? "Discontinuing" : "Restoring";
+    startTransition(async () => {
+      startRun();
+      let done = 0, skipped = 0, failed = 0, drafted = 0, stuck = 0, seen = 0;
+      let firstError: string | undefined;
+      runProgress(label, 0, targetIds.length, discontinued ? "each one live on Shopify is set to DRAFT" : undefined);
+      for (let i = 0; i < targetIds.length; i += RETIRE_CHUNK) {
+        if (stopRef.current) {
+          endProgress(label, targetIds.length, `stopped at ${seen} of ${targetIds.length} · ${done} done`, seen);
+          flash(`Stopped. ${done} done · ${targetIds.length - seen} not started`);
+          router.refresh();
+          return;
+        }
+        const chunk = targetIds.slice(i, i + RETIRE_CHUNK);
+        const r = await setDiscontinuedBatch(chunk, discontinued);
+        if (!r.ok) {
+          flash(r.error ?? "Failed");
+          endProgress(label, targetIds.length, `stopped at ${seen} of ${targetIds.length} — ${r.error ?? "failed"}`, seen);
+          return;
+        }
+        done += r.done ?? 0; skipped += r.skipped ?? 0; failed += r.failed ?? 0;
+        drafted += r.shopifyDrafted ?? 0; stuck += r.shopifyStuck ?? 0;
+        if (!firstError && r.firstError) firstError = r.firstError;
+        seen += chunk.length;
+        const tally = `${done} done${skipped ? ` · ${skipped} already` : ""}${failed ? ` · ${failed} failed` : ""}`;
+        runProgress(label, seen, targetIds.length, tally);
+        flash(`${label} ${seen}/${targetIds.length} · ${tally}`);
+      }
+      // Shopify still being up is the one outcome worth leading with.
+      const tail = stuck
+        ? ` · ${stuck} STILL ACTIVE IN SHOPIFY${firstError ? ` — ${firstError}` : ""}`
+        : drafted ? ` · ${drafted} set to DRAFT in Shopify` : "";
+      endProgress(label, targetIds.length, `${done} done${skipped ? ` · ${skipped} already` : ""}${failed ? ` · ${failed} failed` : ""}${tail}`);
+      flash(`${discontinued ? "Discontinued" : "Restored"} ${done}${skipped ? ` · ${skipped} already` : ""}${failed ? ` · ${failed} failed` : ""}${tail}`);
+      setSelected(new Set());
+      router.refresh();
+    });
+  }
+
   function requestStop() {
     stopRef.current = true;
     setProgress((p) => (p && !p.finished ? { ...p, stopping: true } : p));
@@ -189,6 +247,10 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
   }
 
   const ids = [...selected];
+  // A selection can span both states once retired products are shown, so the
+  // two buttons act on their own half rather than one of them half-failing.
+  const retiredSelected = useMemo(() => rows.filter((r) => selected.has(r.id) && r.discontinuedAt).map((r) => r.id), [rows, selected]);
+  const liveSelected = useMemo(() => rows.filter((r) => selected.has(r.id) && !r.discontinuedAt).map((r) => r.id), [rows, selected]);
   const dot = (on: boolean) => (on ? "✓" : "○");
   // Carry the active filters so the workbench's back link lands on the same
   // list — Grishma works down her filtered set one design at a time.
@@ -217,6 +279,9 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
         <span className="min-w-0 flex-1">
           <span className="font-mono block truncate" style={{ fontSize: 12, fontWeight: 700, color: palette.black }}>
             {r.baseSku} · {r.color} {r.tier === "hero" && <Crown size={11} className="inline" color={palette.goldDeep} />}
+            {r.discontinuedAt && (
+              <span className="font-body uppercase" style={{ marginLeft: 6, fontSize: 8, letterSpacing: "0.12em", color: "#9C3A31", border: "1px solid #9C3A31", padding: "2px 5px" }}>Discontinued</span>
+            )}
           </span>
           <span className="font-body block truncate" style={{ fontSize: 11.5, color: palette.softBlack }}>{r.title ?? "—"}</span>
           <span className="font-mono block mt-0.5" style={{ fontSize: 9.5, color: palette.mutedGreige }}>
@@ -407,6 +472,35 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
         )}
       </div>
 
+      {/* Discontinued (0063). Only appears once something IS retired — a chip
+          reading "Discontinued · 0" is a permanent reminder of a state the
+          board is not in. Switching it on brings them back into every count
+          and filter on the page, so a retired product can be found, looked at
+          and restored. */}
+      {retiredCount > 0 && (
+        <div className="flex items-center gap-2 mt-2">
+          <button
+            type="button"
+            aria-pressed={showDiscontinued}
+            onClick={() => setShowDiscontinued((v) => !v)}
+            className="font-body uppercase whitespace-nowrap"
+            style={{
+              fontSize: 9.5, letterSpacing: "0.1em", padding: "7px 10px",
+              background: showDiscontinued ? palette.black : palette.ivory,
+              color: showDiscontinued ? palette.ivory : palette.softBlack,
+              border: "1px solid rgba(26,26,26,0.12)",
+            }}
+          >
+            {showDiscontinued ? "Hide" : "Show"} discontinued · {retiredCount}
+          </button>
+          {showDiscontinued && (
+            <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+              Retired products are in the list and marked.
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Missing specs — MULTI-select and OR'd, because the job is a sweep.
           Origin leads the row: it picks the Shopify size ladder, and without
           it a design is listed in only the sizes physically in stock — which
@@ -475,7 +569,20 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
           </thead>
           <tbody>
             {sorted.map((r) => (
-              <tr key={r.id} className="cursor-pointer" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }} onClick={() => openRow(r.id)}>
+              <tr
+                key={r.id}
+                className="cursor-pointer"
+                style={{
+                  borderBottom: "1px solid rgba(26,26,26,0.06)",
+                  // Dimmed and struck through, not hidden behind a badge alone:
+                  // when the toggle is on these sit among live products and the
+                  // difference has to read at a glance.
+                  opacity: r.discontinuedAt ? 0.55 : 1,
+                  background: r.discontinuedAt ? "rgba(156,58,49,0.05)" : undefined,
+                }}
+                title={r.discontinuedAt ? `Discontinued ${new Date(r.discontinuedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })}${r.discontinuedBy ? ` by ${r.discontinuedBy}` : ""}${r.discontinuedNote ? ` — ${r.discontinuedNote}` : ""}` : undefined}
+                onClick={() => openRow(r.id)}
+              >
                 <td onClick={(e) => e.stopPropagation()} style={{ padding: "8px 4px" }}>
                   <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleRow(r.id)} aria-label={`Select ${r.baseSku}`} style={{ accentColor: palette.goldDeep }} />
                 </td>
@@ -484,6 +591,9 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
                 </td>
                 <td className="font-mono" style={{ fontSize: 12, fontWeight: 600, color: palette.black, padding: "8px 6px" }}>
                   {r.baseSku} · {r.color} {r.tier === "hero" && <Crown size={11} className="inline" color={palette.goldDeep} />}
+                  {r.discontinuedAt && (
+                    <span className="font-body uppercase" style={{ marginLeft: 6, fontSize: 8, letterSpacing: "0.12em", color: "#9C3A31", border: "1px solid #9C3A31", padding: "2px 5px" }}>Discontinued</span>
+                  )}
                 </td>
                 <td className="font-body" style={{ fontSize: 12, color: palette.softBlack, padding: "8px 6px", maxWidth: 260 }}>{r.title ?? "—"}</td>
                 <td style={{ padding: "8px 6px" }}>
@@ -563,7 +673,7 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               type="button"
               disabled={pending}
               onClick={() => {
-                if (!window.confirm(`Generate copy for ${ids.length} design(s)? One vision call each; unverified specs are skipped. Runs in batches of ${COPY_CHUNK} — leave this tab open.`)) return;
+                if (!window.confirm(`Generate copy for ${liveSelected.length} design(s)? One vision call each; unverified specs are skipped. Runs in batches of ${COPY_CHUNK} — leave this tab open.`)) return;
                 startTransition(async () => {
                   // The ACTION caps at 10 because each design is one Opus
                   // vision call run sequentially inside a Vercel function with
@@ -609,10 +719,16 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               type="button"
               disabled={pending}
               onClick={() => {
-                if (!window.confirm(`Push ${ids.length} design(s) to wholesale? Gate-blocked designs are skipped and reported.`)) return;
+                if (!window.confirm(`Push ${liveSelected.length} design(s) to wholesale? Gate-blocked designs are skipped and reported.`)) return;
                 startTransition(async () => {
                   let pushed = 0, blocked = 0, failed = 0, done = 0;
                   startRun();
+                  // Shadows the outer `ids` for this whole handler, so every
+                  // count, chunk and message below moves with it. A retired
+                  // design is gate-blocked anyway, but sending it would fill
+                  // the tally with blocks and invite someone to "fix" the
+                  // block by restoring the product.
+                  const ids = liveSelected;
                   runProgress("Pushing to wholesale", 0, ids.length);
                   for (let i = 0; i < ids.length; i += PUSH_CHUNK) {
                     if (stopRef.current) {
@@ -654,10 +770,11 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               type="button"
               disabled={pending}
               onClick={() => {
-                if (!window.confirm(`Push ${ids.length} design(s) to Shopify? New products are created as DRAFT; gate-blocked designs are skipped and reported.`)) return;
+                if (!window.confirm(`Push ${liveSelected.length} design(s) to Shopify? New products are created as DRAFT; gate-blocked designs are skipped and reported.`)) return;
                 startTransition(async () => {
                   let pushed = 0, blocked = 0, failed = 0, done = 0, firstError = "";
                   startRun();
+                  const ids = liveSelected;
                   runProgress("Pushing to Shopify", 0, ids.length, "new products are created as DRAFT");
                   for (let i = 0; i < ids.length; i += PUSH_CHUNK) {
                     if (stopRef.current) {
@@ -722,6 +839,48 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
             >
               Print tags
             </button>
+
+            {/* Retire / restore in bulk (Ansh, 23 Sep). Separated from the
+                push buttons by a rule and coloured against them: everything to
+                the left puts products OUT, these two take them off the board
+                and off the storefront. Restore only appears when the selection
+                actually holds retired products, which it only can while
+                "Show discontinued" is on. */}
+            <span style={{ width: 1, alignSelf: "stretch", background: "rgba(255,255,255,0.18)", margin: "0 2px" }} />
+            {retiredSelected.length > 0 && (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => runRetire(false, retiredSelected)}
+                className="font-body uppercase disabled:opacity-50"
+                style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}
+              >
+                Restore {retiredSelected.length}
+              </button>
+            )}
+            {liveSelected.length > 0 && (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => {
+                  const onShopify = liveSelected.filter((id) => {
+                    const r = rows.find((x) => x.id === id);
+                    const s = r?.targets.find((tg) => tg.portal === "shopify")?.state;
+                    return s === "live" || s === "changes_pending";
+                  }).length;
+                  if (!window.confirm(
+                    `Discontinue ${liveSelected.length} product(s)?\n\n` +
+                    `They leave this board, come out of the buyer catalog, and ${onShopify} of them will be set to DRAFT in Shopify.\n\n` +
+                    `They stay sellable at the counter and every past order keeps working. "Show discontinued" brings them back, and each one can be restored.`,
+                  )) return;
+                  runRetire(true, liveSelected);
+                }}
+                className="font-body uppercase disabled:opacity-50"
+                style={{ fontSize: 9, letterSpacing: "0.1em", color: "#E08A80", border: "1px solid #E08A80", padding: "8px 10px" }}
+              >
+                Discontinue {liveSelected.length}
+              </button>
+            )}
           </div>
           )}
         </div>

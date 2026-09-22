@@ -28,8 +28,13 @@ describe("buyer catalog gate", () => {
     // filter. Update this list deliberately — a new writer is a new way for the
     // catalog to fill up with things nobody pushed.
     const allowed = new Set([
-      "src/lib/studio/publish.ts",                      // publishWholesale
+      "src/lib/studio/publish.ts",                      // publishWholesale, and unpublish
       "src/app/admin/manage-catalog/actions.ts",        // staff pull it back
+      // setDiscontinued (0063). Retiring a product takes it out of the buyer
+      // catalog too — a product announced as discontinued that buyers can
+      // still order is a promise nobody meant to make. It only ever writes
+      // FALSE; restoring does not put it back, because that is a push.
+      "src/app/admin/studio/actions.ts",
     ]);
     const offenders: string[] = [];
     const walk = (dir: string) => {

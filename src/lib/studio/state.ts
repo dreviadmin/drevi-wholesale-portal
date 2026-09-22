@@ -31,7 +31,23 @@ export interface DesignStateInput {
   tier: "standard" | "hero" | null;
   /** designs.origin — 'drevi_original' | 'curated' | null. Shopify only. */
   origin?: string | null;
+  /** designs.discontinued_at is set (0063). Blocks BOTH portals. */
+  discontinued?: boolean;
 }
+
+// Retiring a product and then publishing it are contradictory acts, and until
+// this blocker existed the second silently undid the first: publishWholesale
+// writes buyer_visible: true for every size, which is the exact flag
+// setDiscontinued clears, so a retired garment went back in the buyer catalog
+// with discontinued_at still set and the board still hiding it. Reachable from
+// the board with "Show discontinued" on and Select-all, and nothing on screen
+// said so.
+//
+// It belongs in the GATE rather than in the two publish functions because the
+// gate is what the board, the batch routes and the workbench button all already
+// consult — one blocker disables the button, makes the bulk route count the
+// design as `blocked` instead of pushing it, and covers whatever calls it next.
+const DISCONTINUED_BLOCKER = "Discontinued — restore it first";
 
 export type DesignBadge =
   | "awaiting_specs"
@@ -60,6 +76,7 @@ export interface GateResult {
 // Wholesale gate: ≥1 filled slot AND a wholesale price on the group.
 export function wholesaleGate(s: DesignStateInput): GateResult {
   const blockers: string[] = [];
+  if (s.discontinued) blockers.push(DISCONTINUED_BLOCKER);
   if (!Object.values(s.filledAngles).some(Boolean)) blockers.push("No image yet");
   if (!s.wholesalePriceSet) blockers.push("Wholesale price not set");
   return { ready: blockers.length === 0, blockers };
@@ -83,6 +100,7 @@ export function wholesaleGate(s: DesignStateInput): GateResult {
 // field it does not use.
 export function shopifyGate(s: DesignStateInput): GateResult {
   const blockers: string[] = [];
+  if (s.discontinued) blockers.push(DISCONTINUED_BLOCKER);
   if (!s.filledAngles.front) blockers.push("Front image missing");
   if (!s.filledAngles.back) blockers.push("Back image missing");
   if (!s.copyPresent) blockers.push("Copy not written");

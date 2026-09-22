@@ -9,6 +9,8 @@ export const dynamic = "force-dynamic";
 // workbench (skeleton until Stage 5).
 export default async function StudioPage() {
   await requireAdminOrRedirect();
-  const rows = await loadBoard();
+  // The board carries retired designs down and hides them client-side —
+  // that is what lets "Show discontinued" work without a round trip.
+  const rows = await loadBoard({ includeDiscontinued: true });
   return <StudioBoard rows={rows} />;
 }
