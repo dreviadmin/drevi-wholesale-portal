@@ -380,16 +380,26 @@ export async function traySkusForDesigns(
  * 0062 drew. Restoring does not put it back in the catalog either — that is a
  * Studio push, and it should be a decision rather than a side effect.
  *
- * Shopify is left alone on purpose. Taking a live product down there is a call
- * to Shopify with its own failure modes, and burying it inside this one would
- * mean a half-applied retirement when it failed. The UI says so and points at
- * Unpublish.
+ * SHOPIFY IS TAKEN DOWN TOO (Ansh, 23 Sep, answering exactly that question).
+ * It reuses unpublish() rather than duplicating the mutation, so the target
+ * state, the audit line and the error path stay in one place.
+ *
+ * Order matters. The Shopify call goes FIRST, because it is the step that can
+ * fail and it is idempotent — setting a product to DRAFT twice is the same as
+ * once, so a retry after a dropped response is safe. The local writes follow
+ * and effectively cannot fail.
+ *
+ * A Shopify failure does NOT block the retirement. Being unable to retire a
+ * garment because Shopify is having a bad afternoon is the worse outcome, and
+ * the half-state is made loud rather than hidden: the result carries
+ * shopifyError, the caller says so, and publish_targets keeps its own error so
+ * the Shopify panel shows it with Unpublish sitting right there.
  */
 export async function setDiscontinued(
   designId: string,
   discontinued: boolean,
   note?: string,
-): Promise<{ ok: boolean; error?: string; hiddenSkus?: number; shopifyLive?: boolean }> {
+): Promise<{ ok: boolean; error?: string; hiddenSkus?: number; shopifyDrafted?: boolean; shopifyError?: string }> {
   let staff;
   try {
     staff = await requireAdmin();
@@ -406,6 +416,24 @@ export async function setDiscontinued(
   if (!design) return { ok: false, error: "Design not found" };
   if (discontinued && design.discontinued_at) return { ok: false, error: "Already discontinued" };
   if (!discontinued && !design.discontinued_at) return { ok: false, error: "This product is not discontinued" };
+
+  // Shopify first — see the note above on ordering.
+  let shopifyDrafted = false;
+  let shopifyError: string | undefined;
+  if (discontinued) {
+    const { data: sh } = await admin
+      .from("publish_targets")
+      .select("state")
+      .eq("design_id", designId)
+      .eq("portal", "shopify")
+      .maybeSingle();
+    if (sh?.state === "live" || sh?.state === "changes_pending") {
+      const { unpublish } = await import("@/lib/studio/publish");
+      const res = await unpublish(designId, "shopify", staff.id, staff.email);
+      if (res.ok) shopifyDrafted = true;
+      else shopifyError = res.error ?? "Shopify unpublish failed";
+    }
+  }
 
   const { error } = await admin
     .from("designs")
@@ -432,24 +460,73 @@ export async function setDiscontinued(
     }
   }
 
-  const { data: sh } = await admin
-    .from("publish_targets")
-    .select("state")
-    .eq("design_id", designId)
-    .eq("portal", "shopify")
-    .maybeSingle();
-  const shopifyLive = sh?.state === "live" || sh?.state === "changes_pending";
-
   await writeAuditEvent({
     eventType: "catalog_edit",
     staffUserId: staff.id,
     notes: discontinued
-      ? `DISCONTINUED ${design.base_sku}·${design.color} by ${staff.email}${note?.trim() ? ` — ${note.trim()}` : ""}${hiddenSkus ? ` (${hiddenSkus} variant(s) out of the catalog)` : ""}`
+      ? `DISCONTINUED ${design.base_sku}·${design.color} by ${staff.email}${note?.trim() ? ` — ${note.trim()}` : ""}` +
+        `${hiddenSkus ? ` (${hiddenSkus} variant(s) out of the catalog)` : ""}` +
+        `${shopifyDrafted ? ", Shopify set to DRAFT" : ""}${shopifyError ? `, SHOPIFY STILL ACTIVE: ${shopifyError}` : ""}`
       : `RESTORED ${design.base_sku}·${design.color} by ${staff.email}`,
   });
 
   revalidatePath("/admin/studio");
   revalidatePath(`/admin/studio/${designId}`);
   revalidatePath(`/admin/studio/master/${designId}`);
-  return { ok: true, hiddenSkus, shopifyLive: discontinued && shopifyLive };
+  return { ok: true, hiddenSkus, shopifyDrafted, ...(shopifyError ? { shopifyError } : {}) };
+}
+
+/**
+ * Bulk discontinue / restore (Ansh, 23 Sep).
+ *
+ * Capped at 12, well under the per-design cap the other bulk routes use,
+ * because discontinuing now makes a Shopify call for every design that is
+ * live there — the board chunks a larger selection the same way it chunks
+ * copy generation.
+ *
+ * Failures are counted and the FIRST is named. "3 failed" on its own sends the
+ * operator hunting through twelve designs, and the failure that matters here
+ * is specifically "Shopify is still active", which needs a name to act on.
+ */
+export async function setDiscontinuedBatch(
+  designIds: string[],
+  discontinued: boolean,
+): Promise<{
+  ok: boolean; error?: string;
+  done?: number; skipped?: number; failed?: number;
+  shopifyDrafted?: number; shopifyStuck?: number; firstError?: string;
+}> {
+  try {
+    await requireAdmin();
+  } catch {
+    return { ok: false, error: "Not authorized" };
+  }
+  if (designIds.length === 0) return { ok: false, error: "Nothing selected" };
+
+  let done = 0, skipped = 0, failed = 0, shopifyDrafted = 0, shopifyStuck = 0;
+  let firstError: string | undefined;
+  for (const id of designIds.slice(0, 12)) {
+    const res = await setDiscontinued(id, discontinued);
+    if (res.ok) {
+      done++;
+      if (res.shopifyDrafted) shopifyDrafted++;
+      if (res.shopifyError) {
+        shopifyStuck++;
+        if (!firstError) firstError = res.shopifyError;
+      }
+      continue;
+    }
+    // "Already discontinued" / "not discontinued" is a no-op, not a failure —
+    // a selection spanning both states is ordinary when the board is showing
+    // retired products alongside live ones.
+    if (res.error === "Already discontinued" || res.error === "This product is not discontinued") {
+      skipped++;
+      continue;
+    }
+    failed++;
+    if (!firstError) firstError = res.error;
+  }
+
+  revalidatePath("/admin/studio");
+  return { ok: true, done, skipped, failed, shopifyDrafted, shopifyStuck, ...(firstError ? { firstError } : {}) };
 }

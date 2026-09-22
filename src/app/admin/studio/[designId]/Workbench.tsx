@@ -699,7 +699,7 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
             disabled={pending}
             onClick={() => {
               const note = window.prompt(
-                "Discontinue this product?\n\nIt leaves the studio board (a Show discontinued switch brings it back) and comes out of the buyer catalog. It stays sellable at the counter and every past order keeps working.\n\nReason (optional):",
+                "Discontinue this product?\n\nIt leaves the studio board (a Show discontinued switch brings it back), comes out of the buyer catalog, and its Shopify product is set to DRAFT. It stays sellable at the counter and every past order keeps working.\n\nReason (optional):",
                 "",
               );
               // prompt returns null on Cancel and "" on OK with nothing typed —
@@ -711,10 +711,12 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
               startTransition(async () => {
                 const res = await setDiscontinued(board.id, true, note);
                 if (!res.ok) { flash(res.error ?? "Failed"); return; }
+                // A Shopify failure does not stop the retirement, so it has to
+                // be the thing the message leads with.
                 flash(
-                  res.shopifyLive
-                    ? "Discontinued — still ACTIVE in Shopify, use Unpublish to set it to draft"
-                    : `Discontinued${res.hiddenSkus ? ` · ${res.hiddenSkus} variant(s) out of the catalog` : ""}`,
+                  res.shopifyError
+                    ? `Discontinued, but SHOPIFY IS STILL ACTIVE — ${res.shopifyError}. Use Unpublish.`
+                    : `Discontinued${res.hiddenSkus ? ` · ${res.hiddenSkus} variant(s) out of the catalog` : ""}${res.shopifyDrafted ? " · Shopify set to DRAFT" : ""}`,
                 );
                 router.refresh();
               });
