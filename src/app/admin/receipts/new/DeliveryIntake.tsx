@@ -12,6 +12,7 @@ import { ColorCombobox } from "@/components/admin/ColorCombobox";
 import { DraftNotice } from "@/components/DraftNotice";
 import { useDraft, isDraftOlderThan, DRAFT_NOTICE_AFTER_MS, type DraftMeta } from "@/lib/useDraft";
 import { DEFAULT_HSN } from "@/lib/hsn-default";
+import { ORIGIN_OPTIONS } from "@/lib/studio/copy-prompt";
 import { palette } from "@/lib/palette";
 import { uuid } from "@/lib/uuid";
 import { formatINR } from "@/lib/format";
@@ -58,10 +59,30 @@ interface Garment {
   variantSkus: string[];
   isReorder: boolean;
   supplyStale?: boolean;
+  /** Specs filled here rather than in six master editors afterwards (22 Sep). */
+  specs: GarmentSpecs;
 }
 
+interface GarmentSpecs {
+  fabric: string;
+  handwork: string;
+  colorName: string;
+  origin: string;
+  wholesalePrice: string;
+  retailPrice: string;
+  specsVerified: boolean;
+}
+
+const emptySpecs = (): GarmentSpecs => ({
+  fabric: "", handwork: "", colorName: "", origin: "", wholesalePrice: "", retailPrice: "", specsVerified: false,
+});
+
+const specsFilled = (s: GarmentSpecs | undefined) =>
+  !!s && (!!s.fabric.trim() || !!s.handwork.trim() || !!s.colorName.trim() || !!s.origin ||
+          Number(s.wholesalePrice) > 0 || Number(s.retailPrice) > 0 || s.specsVerified);
+
 const emptyGarment = (): Garment => ({
-  key: uuid(), description: "", vendorSku: "", unitCost: "", hsn: DEFAULT_HSN, sizes: [], supply: {}, variantSkus: [], isReorder: false,
+  key: uuid(), description: "", vendorSku: "", unitCost: "", hsn: DEFAULT_HSN, sizes: [], supply: {}, variantSkus: [], isReorder: false, specs: emptySpecs(),
 });
 
 type Gst = { mode: "kaccha" | "pakka" | null; rate: number | null; inclusive: boolean | null };
@@ -198,6 +219,17 @@ export function DeliveryIntake({
           sizes: g.sizes,
           supply: g.supply,
           identImageId: g.identImageId,
+          // Blank fields write nothing server-side, so an untouched block is
+          // indistinguishable from not sending one.
+          specs: specsFilled(g.specs) ? {
+            fabric: g.specs.fabric.trim() || undefined,
+            handwork: g.specs.handwork.trim() || undefined,
+            colorName: g.specs.colorName.trim() || undefined,
+            origin: g.specs.origin || undefined,
+            wholesalePrice: Number(g.specs.wholesalePrice) || undefined,
+            retailPrice: Number(g.specs.retailPrice) || undefined,
+            specsVerified: g.specs.specsVerified || undefined,
+          } : undefined,
         })),
       });
       if (!res) { flash("Session expired — sign in again; the delivery is kept as a draft"); return; }
@@ -534,6 +566,7 @@ function GarmentSheet({
   // the other two never need it, and this screen runs on a shop phone.
   const [bases, setBases] = useState<BaseEntry[] | null>(null);
   const [baseQuery, setBaseQuery] = useState(garment.variantBase ?? "");
+  const [specsOpen, setSpecsOpen] = useState(false);
   const [supplyOpen, setSupplyOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
@@ -937,7 +970,53 @@ function GarmentSheet({
           <div>{label("Vendor SKU")}<input value={g.vendorSku} onChange={(e) => setG((s) => ({ ...s, vendorSku: e.target.value }))} className="font-body" style={input} /></div>
         </div>
 
-        {/* d. Supplier availability */}
+        {/* d. Specs (Ansh, 22 Sep: "add option to add specs - price(WH and
+            retail), fabric, color, etc while logging delivery as well").
+            Collapsed, because the fast path through this form is a bill and a
+            box of garments and nothing here is required — but the fabric is in
+            the person's hands and the price is on the invoice in front of
+            them, which is the one moment it is all knowable at once. Every
+            blank field writes nothing, so a reorder cannot wipe specs Rakesh
+            has already signed off. */}
+        <button type="button" onClick={() => setSpecsOpen((v) => !v)} className="flex items-center gap-1.5 font-body uppercase mt-5" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>
+          <ChevronDown size={12} style={{ transform: specsOpen ? "rotate(180deg)" : "none" }} /> Specs &amp; price
+          {specsFilled(g.specs) && <span className="font-body" style={{ fontSize: 9, color: palette.goldDeep, letterSpacing: 0 }}>· filled</span>}
+        </button>
+        {specsOpen && (
+          <div className="mt-2 p-3 flex flex-col gap-2.5" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.12)" }}>
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>{label("Wholesale price")}<input type="number" min="0" value={g.specs.wholesalePrice} onChange={(e) => setG((s) => ({ ...s, specs: { ...s.specs, wholesalePrice: e.target.value } }))} className="font-body" style={input} /></div>
+              <div>{label("Retail price (MRP)")}<input type="number" min="0" value={g.specs.retailPrice} onChange={(e) => setG((s) => ({ ...s, specs: { ...s.specs, retailPrice: e.target.value } }))} className="font-body" style={input} /></div>
+              <div>{label("Fabric")}<input value={g.specs.fabric} onChange={(e) => setG((s) => ({ ...s, specs: { ...s.specs, fabric: e.target.value } }))} placeholder="Net, Satin, Shimmer Tissue" className="font-body" style={input} /></div>
+              <div>{label("Colour name")}<input value={g.specs.colorName} onChange={(e) => setG((s) => ({ ...s, specs: { ...s.specs, colorName: e.target.value } }))} placeholder="Champagne Gold" className="font-body" style={input} /></div>
+            </div>
+            <div>{label("Handwork")}<input value={g.specs.handwork} onChange={(e) => setG((s) => ({ ...s, specs: { ...s.specs, handwork: e.target.value } }))} placeholder="Sequin and cutdana embroidery" className="font-body" style={input} /></div>
+            <div>
+              {/* Origin picks the Shopify size ladder and the product page's
+                  pricing tier, and the Shopify gate now blocks without it —
+                  so it is worth the two taps here. */}
+              {label("Origin")}
+              <div className="flex gap-1.5 flex-wrap">
+                {ORIGIN_OPTIONS.map((o) => (
+                  <button key={o.value} type="button"
+                    onClick={() => setG((s) => ({ ...s, specs: { ...s.specs, origin: s.specs.origin === o.value ? "" : o.value } }))}
+                    className="font-body" style={{ fontSize: 10, padding: "6px 9px", border: `1px solid ${g.specs.origin === o.value ? palette.black : "rgba(26,26,26,0.15)"}`, background: g.specs.origin === o.value ? palette.black : "transparent", color: g.specs.origin === o.value ? palette.ivory : palette.softBlack }}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <label className="flex items-center gap-2 font-body" style={{ fontSize: 11, color: palette.softBlack }}>
+              <input type="checkbox" checked={g.specs.specsVerified} onChange={(e) => setG((s) => ({ ...s, specs: { ...s.specs, specsVerified: e.target.checked } }))} style={{ accentColor: palette.goldDeep }} />
+              Specs confirmed — tick only if you are signing these off
+            </label>
+            <div className="font-body" style={{ fontSize: 9.5, color: palette.mutedGreige, lineHeight: 1.5 }}>
+              Anything left blank is untouched, so this never overwrites specs already on the design.
+            </div>
+          </div>
+        )}
+
+        {/* e. Supplier availability */}
         <button type="button" onClick={() => setSupplyOpen((v) => !v)} className="flex items-center gap-1.5 font-body uppercase mt-5" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>
           <ChevronDown size={12} style={{ transform: supplyOpen ? "rotate(180deg)" : "none" }} /> Supplier availability
           {g.supplyStale && <span className="font-body" style={{ fontSize: 9, color: "#8a6d1a", letterSpacing: 0 }}>· needs refresh</span>}

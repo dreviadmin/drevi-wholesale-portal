@@ -9,11 +9,12 @@ import { useSort, SortTh } from "@/components/sortable";
 import { withFrom } from "@/components/BackLink";
 import { palette } from "@/lib/palette";
 import { useToast } from "@/lib/use-toast";
+import { queueTray } from "@/app/admin/sku-generator/labels";
 import { MISSING_FIELDS, isMissingKey, type MissingKey } from "@/lib/studio/missing";
 import { BatchProgress, type BatchProgressState } from "@/components/admin/BatchProgress";
 import { BADGE_LABEL, type DesignBadge } from "@/lib/studio/state";
 import type { BoardRow } from "@/lib/studio/load";
-import { setTierBatch, togglePortalBatch, runFashnBatch, approveAllPreflight, approveAllBatch, generateCopyBatch, pushWholesaleBatch, pushShopifyBatch } from "./actions";
+import { setTierBatch, togglePortalBatch, runFashnBatch, approveAllPreflight, approveAllBatch, generateCopyBatch, pushWholesaleBatch, pushShopifyBatch, traySkusForDesigns } from "./actions";
 import { JobsTicker } from "./JobsTicker";
 
 // Studio board (§7.4): derived-state chips with live counts, rows with
@@ -690,6 +691,36 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.black, background: palette.gold, padding: "8px 10px" }}
             >
               Push SH
+            </button>
+            {/* Print tags (Ansh, 22 Sep). Reuses the print tray the SKU
+                generator already reads on mount and that Log delivery already
+                stages into — a tag is per SIZE, and the sizes are the one
+                thing a (base, colour) board row cannot answer for itself, so
+                the server resolves them from sku_registry. "merge" so a tray
+                someone was already building is added to, not thrown away. */}
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                startTransition(async () => {
+                  const res = await traySkusForDesigns(ids);
+                  if (!res.ok || !res.skus?.length) {
+                    flash(res.error ?? "No minted SKUs in the selection");
+                    return;
+                  }
+                  if (!queueTray(res.skus, "merge")) { flash("Could not write the print tray"); return; }
+                  const miss = res.missing?.length
+                    ? ` · no SKUs for ${res.missing.slice(0, 3).join(", ")}${res.missing.length > 3 ? ` +${res.missing.length - 3}` : ""}`
+                    : "";
+                  flash(`${res.skus.length} tag(s) queued from ${res.groups} design(s)${miss} — opening the print tray`);
+                  router.push("/admin/sku-generator?tab=print");
+                });
+              }}
+              className="font-body uppercase disabled:opacity-50"
+              style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}
+              title="Stages one label per size SKU on this device's print tray and opens it"
+            >
+              Print tags
             </button>
           </div>
           )}
