@@ -673,7 +673,7 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               type="button"
               disabled={pending}
               onClick={() => {
-                if (!window.confirm(`Generate copy for ${ids.length} design(s)? One vision call each; unverified specs are skipped. Runs in batches of ${COPY_CHUNK} — leave this tab open.`)) return;
+                if (!window.confirm(`Generate copy for ${liveSelected.length} design(s)? One vision call each; unverified specs are skipped. Runs in batches of ${COPY_CHUNK} — leave this tab open.`)) return;
                 startTransition(async () => {
                   // The ACTION caps at 10 because each design is one Opus
                   // vision call run sequentially inside a Vercel function with
@@ -719,10 +719,16 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               type="button"
               disabled={pending}
               onClick={() => {
-                if (!window.confirm(`Push ${ids.length} design(s) to wholesale? Gate-blocked designs are skipped and reported.`)) return;
+                if (!window.confirm(`Push ${liveSelected.length} design(s) to wholesale? Gate-blocked designs are skipped and reported.`)) return;
                 startTransition(async () => {
                   let pushed = 0, blocked = 0, failed = 0, done = 0;
                   startRun();
+                  // Shadows the outer `ids` for this whole handler, so every
+                  // count, chunk and message below moves with it. A retired
+                  // design is gate-blocked anyway, but sending it would fill
+                  // the tally with blocks and invite someone to "fix" the
+                  // block by restoring the product.
+                  const ids = liveSelected;
                   runProgress("Pushing to wholesale", 0, ids.length);
                   for (let i = 0; i < ids.length; i += PUSH_CHUNK) {
                     if (stopRef.current) {
@@ -764,10 +770,11 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               type="button"
               disabled={pending}
               onClick={() => {
-                if (!window.confirm(`Push ${ids.length} design(s) to Shopify? New products are created as DRAFT; gate-blocked designs are skipped and reported.`)) return;
+                if (!window.confirm(`Push ${liveSelected.length} design(s) to Shopify? New products are created as DRAFT; gate-blocked designs are skipped and reported.`)) return;
                 startTransition(async () => {
                   let pushed = 0, blocked = 0, failed = 0, done = 0, firstError = "";
                   startRun();
+                  const ids = liveSelected;
                   runProgress("Pushing to Shopify", 0, ids.length, "new products are created as DRAFT");
                   for (let i = 0; i < ids.length; i += PUSH_CHUNK) {
                     if (stopRef.current) {

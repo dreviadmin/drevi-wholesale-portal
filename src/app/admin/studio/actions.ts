@@ -421,15 +421,19 @@ export async function setDiscontinued(
   let shopifyDrafted = false;
   let shopifyError: string | undefined;
   if (discontinued) {
+    // Gated on a product EXISTING, not on the mirrored state. publish_targets
+    // drifts — going live from DRAFT is a human act in Shopify admin that never
+    // writes back here — so trusting the state would silently skip the
+    // take-down on a product that is genuinely on sale.
     const { data: sh } = await admin
       .from("publish_targets")
-      .select("state")
+      .select("state, remote_id")
       .eq("design_id", designId)
       .eq("portal", "shopify")
       .maybeSingle();
-    if (sh?.state === "live" || sh?.state === "changes_pending") {
+    if (sh?.remote_id) {
       const { unpublish } = await import("@/lib/studio/publish");
-      const res = await unpublish(designId, "shopify", staff.id, staff.email);
+      const res = await unpublish(designId, "shopify", staff.id, staff.email, { force: true });
       if (res.ok) shopifyDrafted = true;
       else shopifyError = res.error ?? "Shopify unpublish failed";
     }

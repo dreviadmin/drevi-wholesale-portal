@@ -171,6 +171,7 @@ export async function loadBoard(opts?: { includeDiscontinued?: boolean }): Promi
       wholesalePriceSet: priceSet.has(key),
       tier: d.tier,
       origin: d.origin,
+      discontinued: !!d.discontinued_at,
     };
     const { badge, portals } = deriveBadge(input);
     return {
