@@ -17,7 +17,7 @@ import { JobsTicker } from "../JobsTicker";
 // setBrandModel is deliberately absent: the picker it drove is not rendered
 // while fashn is parked (see the angle card). The action itself still exists.
 import { setBgStyle, setCopyPrompt as setCopyPromptAction, setCopyModel, setAnglePrompt, setAngleEngine, regenAngle, cancelAngleJob, generateCopy, saveCopyEdit, pushWholesale, pushShopify } from "./actions";
-import { unpublishDesign } from "../actions";
+import { unpublishDesign, setDiscontinued } from "../actions";
 import { BG_COLOURS, BG_MODE_DEFAULT, BG_MODE_LABEL, BG_MODE_SWATCH, resolveBackground, type BgMode, type BgSwatch } from "@/lib/studio/backgrounds";
 import { useToast } from "@/lib/use-toast";
 import { uploadSource, importFinished, applyImageDirectly, approveImage, rejectImage, saveCrop, setAngleSource, syncDrivePhotos } from "./image-actions";
@@ -553,6 +553,33 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           <div className="font-body uppercase inline-block mt-2 px-2 py-1" style={{ fontSize: 9, letterSpacing: "0.12em", fontWeight: 600, background: palette.ivoryDeep, color: palette.softBlack }}>
             {board.badgeLabel}
           </div>
+
+          {/* Discontinued (0063). The banner carries who and when, because a
+              stamp nobody can read is barely better than a boolean — and the
+              restore lives right on it, where someone who has just found the
+              product is standing. */}
+          {board.discontinuedAt && (
+            <div className="mt-2 p-2.5" style={{ border: "1px solid #9C3A31", background: "rgba(156,58,49,0.06)" }}>
+              <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", color: "#9C3A31" }}>Discontinued</div>
+              <div className="font-body mt-1" style={{ fontSize: 11, color: palette.softBlack, lineHeight: 1.6 }}>
+                {new Date(board.discontinuedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })}
+                {board.discontinuedBy ? ` · ${board.discontinuedBy}` : ""}
+                {board.discontinuedNote ? ` — ${board.discontinuedNote}` : ""}
+              </div>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => run(() => setDiscontinued(board.id, false), "Restored")}
+                className="mt-1.5 font-body uppercase disabled:opacity-40"
+                style={{ fontSize: 9, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", padding: "6px 10px" }}
+              >
+                Restore this product
+              </button>
+              <div className="font-body mt-1.5" style={{ fontSize: 9.5, color: palette.mutedGreige, lineHeight: 1.5 }}>
+                Restoring brings it back to the board. It does not put it back in the buyer catalog — push wholesale for that.
+              </div>
+            </div>
+          )}
         </div>
         <span className="flex items-center gap-3">
           <button
@@ -660,6 +687,45 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
           );
         })}
       </div>
+
+      {/* Retire the product (0063). Down here with the portal controls rather
+          than up beside Save, because it is the one button on this page that
+          takes a garment out of circulation. Not offered when it is already
+          retired — the banner at the top owns that state and its restore. */}
+      {!board.discontinuedAt && (
+        <div className="mt-3">
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => {
+              const note = window.prompt(
+                "Discontinue this product?\n\nIt leaves the studio board (a Show discontinued switch brings it back) and comes out of the buyer catalog. It stays sellable at the counter and every past order keeps working.\n\nReason (optional):",
+                "",
+              );
+              // prompt returns null on Cancel and "" on OK with nothing typed —
+              // only the first is a refusal.
+              if (note === null) return;
+              // Not run(): its success message is fixed, and the one thing
+              // worth saying here varies — a product still ACTIVE in Shopify
+              // is half-retired, and silence would let that pass.
+              startTransition(async () => {
+                const res = await setDiscontinued(board.id, true, note);
+                if (!res.ok) { flash(res.error ?? "Failed"); return; }
+                flash(
+                  res.shopifyLive
+                    ? "Discontinued — still ACTIVE in Shopify, use Unpublish to set it to draft"
+                    : `Discontinued${res.hiddenSkus ? ` · ${res.hiddenSkus} variant(s) out of the catalog` : ""}`,
+                );
+                router.refresh();
+              });
+            }}
+            className="font-body uppercase disabled:opacity-40"
+            style={{ fontSize: 9, letterSpacing: "0.12em", border: "1px solid #9C3A31", color: "#9C3A31", background: "transparent", padding: "7px 12px" }}
+          >
+            Discontinue this product
+          </button>
+        </div>
+      )}
 
       {/* Background (Ansh, 19 Sep) — ONE look per design, in three modes.
           Row 1 picks the mode; row 2 appears only for Coloured, where the six

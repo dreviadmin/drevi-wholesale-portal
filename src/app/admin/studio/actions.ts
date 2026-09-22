@@ -365,3 +365,91 @@ export async function traySkusForDesigns(
 
   return { ok: true, skus: [...new Set(skus)].sort(), groups: seenGroups.size, missing };
 }
+
+/**
+ * Retire a product, or bring it back (Ansh, 22 Sep).
+ *
+ * `discontinued_at` is a stamp rather than a boolean, so the row still answers
+ * who retired it and when — the questions anyone actually asks six months
+ * later. Clearing the stamp is the restore.
+ *
+ * It ALSO takes the product out of the buyer catalog, because a product
+ * announced as discontinued that buyers can still order is a promise nobody
+ * meant to make. It does NOT touch wholesale_visible: a retired garment still
+ * hanging in the showroom stays sellable at the counter, the same separation
+ * 0062 drew. Restoring does not put it back in the catalog either — that is a
+ * Studio push, and it should be a decision rather than a side effect.
+ *
+ * Shopify is left alone on purpose. Taking a live product down there is a call
+ * to Shopify with its own failure modes, and burying it inside this one would
+ * mean a half-applied retirement when it failed. The UI says so and points at
+ * Unpublish.
+ */
+export async function setDiscontinued(
+  designId: string,
+  discontinued: boolean,
+  note?: string,
+): Promise<{ ok: boolean; error?: string; hiddenSkus?: number; shopifyLive?: boolean }> {
+  let staff;
+  try {
+    staff = await requireAdmin();
+  } catch {
+    return { ok: false, error: "Not authorized" };
+  }
+  const admin = createAdminClient();
+
+  const { data: design } = await admin
+    .from("designs")
+    .select("id, base_sku, color, discontinued_at")
+    .eq("id", designId)
+    .maybeSingle();
+  if (!design) return { ok: false, error: "Design not found" };
+  if (discontinued && design.discontinued_at) return { ok: false, error: "Already discontinued" };
+  if (!discontinued && !design.discontinued_at) return { ok: false, error: "This product is not discontinued" };
+
+  const { error } = await admin
+    .from("designs")
+    .update(
+      discontinued
+        ? { discontinued_at: new Date().toISOString(), discontinued_by: staff.email, discontinued_note: note?.trim() || null }
+        : { discontinued_at: null, discontinued_by: null, discontinued_note: null },
+    )
+    .eq("id", designId);
+  if (error) return { ok: false, error: error.message };
+
+  let hiddenSkus = 0;
+  if (discontinued) {
+    const { data: variants } = await admin
+      .from("wholesale_products")
+      .select("sku")
+      .like("sku", `${design.base_sku}-%`);
+    const skus = (variants ?? [])
+      .map((v) => v.sku)
+      .filter((s) => s.toUpperCase().endsWith(`-${design.color.toUpperCase()}`));
+    if (skus.length) {
+      await admin.from("wholesale_products").update({ buyer_visible: false }).in("sku", skus);
+      hiddenSkus = skus.length;
+    }
+  }
+
+  const { data: sh } = await admin
+    .from("publish_targets")
+    .select("state")
+    .eq("design_id", designId)
+    .eq("portal", "shopify")
+    .maybeSingle();
+  const shopifyLive = sh?.state === "live" || sh?.state === "changes_pending";
+
+  await writeAuditEvent({
+    eventType: "catalog_edit",
+    staffUserId: staff.id,
+    notes: discontinued
+      ? `DISCONTINUED ${design.base_sku}·${design.color} by ${staff.email}${note?.trim() ? ` — ${note.trim()}` : ""}${hiddenSkus ? ` (${hiddenSkus} variant(s) out of the catalog)` : ""}`
+      : `RESTORED ${design.base_sku}·${design.color} by ${staff.email}`,
+  });
+
+  revalidatePath("/admin/studio");
+  revalidatePath(`/admin/studio/${designId}`);
+  revalidatePath(`/admin/studio/master/${designId}`);
+  return { ok: true, hiddenSkus, shopifyLive: discontinued && shopifyLive };
+}

@@ -38,6 +38,10 @@ export interface BoardRow {
   /** Spec fields this design is still short of — drives the board's Missing
    *  chips. Empty on a complete design. */
   missing: MissingKey[];
+  /** Retired (0063). The board hides these unless "Discontinued" is on. */
+  discontinuedAt: string | null;
+  discontinuedBy: string | null;
+  discontinuedNote: string | null;
   createdAt: string; // ISO from designs.created_at ('' if null)
 }
 
@@ -57,10 +61,12 @@ export async function loadBoard(): Promise<BoardRow[]> {
       origin: string | null; fabric: string | null; handwork: string | null;
       color_name: string | null; sub_category: string | null;
       mrp_override: number | null; auto_mrp: number | null;
+      discontinued_at: string | null; discontinued_by: string | null; discontinued_note: string | null;
     }>(
       admin, "designs",
       "id, base_sku, color, title, category, sub_category, tier, specs_verified, created_at, " +
-      "origin, fabric, handwork, color_name, mrp_override, auto_mrp",
+      "origin, fabric, handwork, color_name, mrp_override, auto_mrp, " +
+      "discontinued_at, discontinued_by, discontinued_note",
       // Board default: newest design first (§7.4 / Item 4). nullsFirst:false —
       // the column is nullable and Postgres floats NULLs to the top on DESC.
       // id desc is the stable tiebreak so paging never reshuffles equal stamps.
@@ -190,6 +196,9 @@ export async function loadBoard(): Promise<BoardRow[]> {
         mrpOverride: d.mrp_override, autoMrp: d.auto_mrp,
         wholesalePriceSet: input.wholesalePriceSet,
       }, vocab),
+      discontinuedAt: d.discontinued_at,
+      discontinuedBy: d.discontinued_by,
+      discontinuedNote: d.discontinued_note,
       createdAt: d.created_at ?? "",
     };
   });

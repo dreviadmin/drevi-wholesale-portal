@@ -60,6 +60,10 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
   // OR, not AND: the job these serve is a sweep — "show me everything with a
   // gap in any of these" — not "everything missing all of them at once".
   const [missingFilter, setMissingFilter] = useState<Set<MissingKey>>(new Set());
+  // Retired products are OUT by default and everything else on this board —
+  // counts, filters, select-all — works on the visible set, so switching this
+  // on is the only way to touch one (0063).
+  const [showDiscontinued, setShowDiscontinued] = useState(false);
   const [query, setQuery] = useState("");
   const [scanOpen, setScanOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -96,35 +100,44 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
     }
   }, []);
 
+  // Every chip count below is over `live`, not `rows`: a board showing 287
+  // designs must not have chips that add up to 300 because retired ones are
+  // still being counted behind the scenes.
+  const retiredCount = useMemo(() => rows.filter((r) => r.discontinuedAt).length, [rows]);
+  const live = useMemo(
+    () => (showDiscontinued ? rows : rows.filter((r) => !r.discontinuedAt)),
+    [rows, showDiscontinued],
+  );
+
   const counts = useMemo(() => {
     const c = new Map<string, number>();
-    for (const r of rows) c.set(r.badge, (c.get(r.badge) ?? 0) + 1);
+    for (const r of live) c.set(r.badge, (c.get(r.badge) ?? 0) + 1);
     return c;
-  }, [rows]);
+  }, [live]);
 
   const specsCounts = useMemo(() => {
-    const confirmed = rows.filter((r) => r.specsVerified).length;
-    return { confirmed, awaiting: rows.length - confirmed };
-  }, [rows]);
+    const confirmed = live.filter((r) => r.specsVerified).length;
+    return { confirmed, awaiting: live.length - confirmed };
+  }, [live]);
 
   // Over every row, not the filtered set — the same rule the state, specs and
   // photo chips already follow, so the number on a chip is an inventory rather
   // than a reflection of whatever else is switched on.
   const missingTotals = useMemo(() => {
     const c = new Map<MissingKey, number>();
-    for (const r of rows) for (const k of r.missing ?? []) c.set(k, (c.get(k) ?? 0) + 1);
+    for (const r of live) for (const k of r.missing ?? []) c.set(k, (c.get(k) ?? 0) + 1);
     return c;
-  }, [rows]);
+  }, [live]);
 
   const photoCountTotals = useMemo(() => {
     const c = new Array(7).fill(0) as number[];
-    for (const r of rows) if (r.filledCount >= 0 && r.filledCount <= 6) c[r.filledCount] += 1;
+    for (const r of live) if (r.filledCount >= 0 && r.filledCount <= 6) c[r.filledCount] += 1;
     return c;
-  }, [rows]);
+  }, [live]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toUpperCase();
-    return rows.filter((r) => {
+    return live.filter((r) => {
       if (chip !== "all" && r.badge !== chip) return false;
       if (specsFilter === "confirmed" && !r.specsVerified) return false;
       if (specsFilter === "awaiting" && r.specsVerified) return false;
@@ -133,7 +146,7 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
       if (!q) return true;
       return [r.baseSku, r.color, r.title ?? "", r.category ?? ""].some((v) => v.toUpperCase().includes(q));
     });
-  }, [rows, chip, specsFilter, photoCounts, missingFilter, query]);
+  }, [live, chip, specsFilter, photoCounts, missingFilter, query]);
 
   const { sorted, sort, toggle } = useSort(filtered, {
     sku: (r) => `${r.baseSku}-${r.color}`,
@@ -217,6 +230,9 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
         <span className="min-w-0 flex-1">
           <span className="font-mono block truncate" style={{ fontSize: 12, fontWeight: 700, color: palette.black }}>
             {r.baseSku} · {r.color} {r.tier === "hero" && <Crown size={11} className="inline" color={palette.goldDeep} />}
+            {r.discontinuedAt && (
+              <span className="font-body uppercase" style={{ marginLeft: 6, fontSize: 8, letterSpacing: "0.12em", color: "#9C3A31", border: "1px solid #9C3A31", padding: "2px 5px" }}>Discontinued</span>
+            )}
           </span>
           <span className="font-body block truncate" style={{ fontSize: 11.5, color: palette.softBlack }}>{r.title ?? "—"}</span>
           <span className="font-mono block mt-0.5" style={{ fontSize: 9.5, color: palette.mutedGreige }}>
@@ -407,6 +423,35 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
         )}
       </div>
 
+      {/* Discontinued (0063). Only appears once something IS retired — a chip
+          reading "Discontinued · 0" is a permanent reminder of a state the
+          board is not in. Switching it on brings them back into every count
+          and filter on the page, so a retired product can be found, looked at
+          and restored. */}
+      {retiredCount > 0 && (
+        <div className="flex items-center gap-2 mt-2">
+          <button
+            type="button"
+            aria-pressed={showDiscontinued}
+            onClick={() => setShowDiscontinued((v) => !v)}
+            className="font-body uppercase whitespace-nowrap"
+            style={{
+              fontSize: 9.5, letterSpacing: "0.1em", padding: "7px 10px",
+              background: showDiscontinued ? palette.black : palette.ivory,
+              color: showDiscontinued ? palette.ivory : palette.softBlack,
+              border: "1px solid rgba(26,26,26,0.12)",
+            }}
+          >
+            {showDiscontinued ? "Hide" : "Show"} discontinued · {retiredCount}
+          </button>
+          {showDiscontinued && (
+            <span className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+              Retired products are in the list and marked.
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Missing specs — MULTI-select and OR'd, because the job is a sweep.
           Origin leads the row: it picks the Shopify size ladder, and without
           it a design is listed in only the sizes physically in stock — which
@@ -475,7 +520,20 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
           </thead>
           <tbody>
             {sorted.map((r) => (
-              <tr key={r.id} className="cursor-pointer" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }} onClick={() => openRow(r.id)}>
+              <tr
+                key={r.id}
+                className="cursor-pointer"
+                style={{
+                  borderBottom: "1px solid rgba(26,26,26,0.06)",
+                  // Dimmed and struck through, not hidden behind a badge alone:
+                  // when the toggle is on these sit among live products and the
+                  // difference has to read at a glance.
+                  opacity: r.discontinuedAt ? 0.55 : 1,
+                  background: r.discontinuedAt ? "rgba(156,58,49,0.05)" : undefined,
+                }}
+                title={r.discontinuedAt ? `Discontinued ${new Date(r.discontinuedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })}${r.discontinuedBy ? ` by ${r.discontinuedBy}` : ""}${r.discontinuedNote ? ` — ${r.discontinuedNote}` : ""}` : undefined}
+                onClick={() => openRow(r.id)}
+              >
                 <td onClick={(e) => e.stopPropagation()} style={{ padding: "8px 4px" }}>
                   <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleRow(r.id)} aria-label={`Select ${r.baseSku}`} style={{ accentColor: palette.goldDeep }} />
                 </td>
@@ -484,6 +542,9 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
                 </td>
                 <td className="font-mono" style={{ fontSize: 12, fontWeight: 600, color: palette.black, padding: "8px 6px" }}>
                   {r.baseSku} · {r.color} {r.tier === "hero" && <Crown size={11} className="inline" color={palette.goldDeep} />}
+                  {r.discontinuedAt && (
+                    <span className="font-body uppercase" style={{ marginLeft: 6, fontSize: 8, letterSpacing: "0.12em", color: "#9C3A31", border: "1px solid #9C3A31", padding: "2px 5px" }}>Discontinued</span>
+                  )}
                 </td>
                 <td className="font-body" style={{ fontSize: 12, color: palette.softBlack, padding: "8px 6px", maxWidth: 260 }}>{r.title ?? "—"}</td>
                 <td style={{ padding: "8px 6px" }}>
