@@ -45,7 +45,17 @@ export interface BoardRow {
   createdAt: string; // ISO from designs.created_at ('' if null)
 }
 
-export async function loadBoard(): Promise<BoardRow[]> {
+/**
+ * opts.includeDiscontinued — retired designs are EXCLUDED by default (0063).
+ *
+ * Correct-by-default on purpose. This loader feeds the board, the staff
+ * attention inbox and the scan sheet, and the inbox counted retired designs
+ * while the board hid them: "9 designs awaiting photos" linking to a list of
+ * 7. Anything that wants them must now say so, and only two callers do — the
+ * board, which has a switch for them, and loadDesignDetail, which must still
+ * be able to open one to restore it.
+ */
+export async function loadBoard(opts?: { includeDiscontinued?: boolean }): Promise<BoardRow[]> {
   // Auto-kill, on the read path (Ansh, 20 Sep). The old sweep lived inside
   // regenAngle, which the Workbench hides while a job is in flight — the only
   // thing that could free a stuck angle was the button that angle had taken
@@ -132,7 +142,11 @@ export async function loadBoard(): Promise<BoardRow[]> {
     if (img && !groupThumb.has(key)) groupThumb.set(key, img);
   }
 
-  return designs.map((d) => {
+  const keep = opts?.includeDiscontinued
+    ? designs
+    : designs.filter((d) => !d.discontinued_at);
+
+  return keep.map((d) => {
     const key = `${d.base_sku}|${d.color}`;
     const dAngles = anglesByDesign.get(d.id) ?? [];
     const filledAngles: Partial<Record<Angle, boolean>> = {};
@@ -244,7 +258,9 @@ export async function loadDesignDetail(designId: string): Promise<{
   driveFolderId: string | null;
   activeJobs: { angleId: string | null; type: string; status: string; progress: number }[];
 } | null> {
-  const rows = await loadBoard();
+  // Retired designs included: the workbench is where the restore button is,
+  // so refusing to open one would strand it.
+  const rows = await loadBoard({ includeDiscontinued: true });
   const board = rows.find((r) => r.id === designId);
   if (!board) return null;
   const admin = createAdminClient();
