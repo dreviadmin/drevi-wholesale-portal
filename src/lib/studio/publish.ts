@@ -198,8 +198,19 @@ export async function publishWholesale(designId: string, staffId: string, staffE
         buyer_visible: true,
         locked_fields: [...locks],
       };
-      // Copy presence (not the approved stamp) writes the description — the
-      // same contract the shopify gate uses now.
+      // Copy presence (not the approved stamp) writes the NAME and the
+      // description — the same contract the shopify gate uses.
+      //
+      // The title was the omission: the push wrote the description and left
+      // the name alone, so a garment whose sheet row had no title went into
+      // the buyer catalog showing its raw SKU. 32 of the 125 visible products
+      // were in that state the morning of go-live, every one of them with a
+      // generated name already sitting in design_copy.
+      if (board.copyPresent && copy?.title?.trim()) {
+        patch.title = copy.title.trim();
+        locks.add("title");
+        patch.locked_fields = [...locks];
+      }
       if (board.copyPresent && copy?.description) {
         patch.description = copy.description;
         locks.add("description");

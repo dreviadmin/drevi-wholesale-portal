@@ -572,7 +572,7 @@ export async function sendCredentialsBatch(buyerIds: string[]): Promise<Credenti
   if (!buyerIds.length) return { ok: false, error: "Nothing selected" };
 
   const { sendBuyerCredentials } = await import("@/lib/interakt");
-  const { loginDisplay } = await import("@/lib/share");
+  const { loginDisplay, PORTAL_URL } = await import("@/lib/share");
   const admin = createAdminClient();
   const { data: rows } = await admin
     .from("buyers")
@@ -594,7 +594,7 @@ export async function sendCredentialsBatch(buyerIds: string[]): Promise<Credenti
     // Buyers sign in with a bare username; loginDisplay is what the manual
     // share already prints, so the template says the same thing the card does.
     const loginId = loginDisplay(b.email ?? "").value;
-    const res = await sendBuyerCredentials(b.phone, b.business_name ?? "there", "wholesale.drevifashion.com", loginId, password);
+    const res = await sendBuyerCredentials(b.phone, b.business_name ?? "there", PORTAL_URL, loginId, password);
     if (res.sent) {
       sent++;
       await writeAuditEvent({

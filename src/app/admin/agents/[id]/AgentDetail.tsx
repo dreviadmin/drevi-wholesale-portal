@@ -10,7 +10,7 @@ import { useToast } from "@/lib/use-toast";
 import { BackLink } from "@/components/BackLink";
 import { payoutCheck, type AgentTotals } from "@/lib/agent-core";
 import type { AgentOrderRow } from "@/lib/agent-ledger";
-import { recordAgentPayment, voidAgentPayment, updateAgent } from "../actions";
+import { recordAgentPayment, voidAgentPayment, updateAgent, addAgentAdjustment } from "../actions";
 
 interface PaymentRow {
   id: string; amount: number; method: string | null; reference: string | null;
@@ -39,6 +39,10 @@ export function AgentDetail({
   const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
   const [clientRef, setClientRef] = useState(() => crypto.randomUUID());
+  const [adjOpen, setAdjOpen] = useState(false);
+  const [adjDelta, setAdjDelta] = useState("");
+  const [adjNote, setAdjNote] = useState("");
+  const [adjOrder, setAdjOrder] = useState("");
 
   const check = payoutCheck(totals, Number(amount) || 0);
   const num = { fontVariantNumeric: "tabular-nums" } as const;
@@ -53,6 +57,22 @@ export function AgentDetail({
       setPayOpen(false); setAmount(""); setMethod(""); setReference(""); setNote("");
       setClientRef(crypto.randomUUID());
       flash("Payment recorded");
+      router.refresh();
+    });
+  }
+
+  function saveAdjustment() {
+    start(async () => {
+      const res = await addAgentAdjustment({
+        agentId: agent.id,
+        delta: Number(adjDelta) || 0,
+        note: adjNote,
+        orderId: adjOrder || null,
+        reason: adjOrder ? "order_revised" : "manual",
+      });
+      if (!res.ok) { flash(res.error ?? "Could not add it"); return; }
+      setAdjOpen(false); setAdjDelta(""); setAdjNote(""); setAdjOrder("");
+      flash("Adjustment recorded");
       router.refresh();
     });
   }
@@ -110,6 +130,10 @@ export function AgentDetail({
           style={{ fontSize: 10, letterSpacing: "0.16em", background: palette.gold, color: palette.black, padding: "10px 16px" }}>
           Record a payment
         </button>
+        <button type="button" onClick={() => setAdjOpen((v) => !v)} className="font-body uppercase"
+          style={{ fontSize: 10, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, background: "transparent", padding: "10px 14px" }}>
+          Adjust
+        </button>
         {buyers.length > 0 && (
           <span className="font-body" style={{ fontSize: 11, color: palette.softBlack }}>
             {buyers.length} buyer{buyers.length === 1 ? "" : "s"} linked:{" "}
@@ -152,6 +176,37 @@ export function AgentDetail({
               {pending ? "Recording…" : "Record"}
             </button>
             <button type="button" onClick={() => setPayOpen(false)} className="font-body uppercase"
+              style={{ fontSize: 10, letterSpacing: "0.14em", color: palette.softBlack, padding: "10px 12px" }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* A hand correction. The accrual itself is never edited — the frozen
+          figure is what was earned that day, and a correction is a second
+          fact, not a rewriting of the first. */}
+      {adjOpen && (
+        <div className="mt-3 p-4 flex flex-col gap-2.5" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.12)", maxWidth: 520 }}>
+          <div className="font-body" style={{ fontSize: 11, color: palette.mutedGreige, lineHeight: 1.5 }}>
+            Positive adds, negative claws back. Naming an order ties it to that order&apos;s collected share, so it becomes payable on the same terms as the commission it corrects.
+          </div>
+          <div className="grid grid-cols-2 gap-2.5">
+            <input autoFocus type="number" step="any" value={adjDelta} onChange={(e) => setAdjDelta(e.target.value)} placeholder="Amount (− to claw back)"
+              className="font-body" style={{ fontSize: 12, border: "1px solid rgba(26,26,26,0.15)", background: "#fff", color: palette.black, padding: "8px 10px" }} />
+            <select value={adjOrder} onChange={(e) => setAdjOrder(e.target.value)} className="font-body"
+              style={{ fontSize: 12, border: "1px solid rgba(26,26,26,0.15)", background: "#fff", color: palette.black, padding: "8px 10px" }}>
+              <option value="">Not tied to an order</option>
+              {orders.map((o) => <option key={o.orderId} value={o.orderId}>{o.orderNumber}{o.revisedSinceAccrual ? " · revised" : ""}</option>)}
+            </select>
+          </div>
+          <input value={adjNote} onChange={(e) => setAdjNote(e.target.value)} placeholder="Why — this shows on the statement"
+            className="font-body" style={{ fontSize: 11.5, border: "1px solid rgba(26,26,26,0.15)", background: "#fff", color: palette.black, padding: "7px 9px" }} />
+          <div className="flex gap-2">
+            <button type="button" disabled={pending || !adjNote.trim() || !(Number(adjDelta) || 0)} onClick={saveAdjustment}
+              className="font-body uppercase disabled:opacity-40"
+              style={{ fontSize: 10, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "10px 18px" }}>
+              {pending ? "Recording…" : "Record adjustment"}
+            </button>
+            <button type="button" onClick={() => setAdjOpen(false)} className="font-body uppercase"
               style={{ fontSize: 10, letterSpacing: "0.14em", color: palette.softBlack, padding: "10px 12px" }}>Cancel</button>
           </div>
         </div>

@@ -228,3 +228,68 @@ export async function listAgents(): Promise<{ id: string; name: string; defaultP
   const { data } = await admin.from("agents").select("id, name, default_commission_pct").eq("active", true).order("name");
   return (data ?? []).map((a) => ({ id: a.id, name: a.name, defaultPct: Number(a.default_commission_pct) || 0 }));
 }
+
+/**
+ * A hand-written correction on an agent's account.
+ *
+ * The only other writers of agent_adjustments are the two credit-note hooks,
+ * which means an order revised AFTER its commission was frozen showed a
+ * "revised" flag with nothing anyone could do about it — the accrual is a
+ * snapshot and setOrderAgent refuses to touch a frozen one, correctly. This is
+ * the pressure valve: signed, reasoned, attributed, and additive like every
+ * other movement here.
+ *
+ * Deliberately NOT an edit of the accrual. The frozen figure is what was
+ * earned on the day; a correction is a second fact, not a rewriting of the
+ * first.
+ */
+export async function addAgentAdjustment(input: {
+  agentId: string;
+  /** Signed: negative claws back, positive adds. */
+  delta: number;
+  note: string;
+  /** Optional — an order ties the correction to that order's collected share. */
+  orderId?: string | null;
+  reason?: "manual" | "order_revised";
+}): Promise<{ ok: boolean; error?: string }> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized" }; }
+  const delta = Math.round((Number(input.delta) || 0) * 100) / 100;
+  if (delta === 0) return { ok: false, error: "Enter an amount — positive adds, negative claws back" };
+  if (!input.note?.trim()) return { ok: false, error: "Say why. An unexplained movement on someone's account is worse than none." };
+
+  const admin = createAdminClient();
+  // When an order is named, hang the adjustment off its accrual so it picks up
+  // that order's collected share rather than being treated as fully payable.
+  let commissionId: string | null = null;
+  if (input.orderId) {
+    const { data: acc } = await admin
+      .from("agent_commissions")
+      .select("id, agent_id")
+      .eq("order_id", input.orderId)
+      .maybeSingle();
+    if (!acc) return { ok: false, error: "That order has no commission on it." };
+    if (acc.agent_id !== input.agentId) return { ok: false, error: "That order belongs to a different agent." };
+    commissionId = acc.id;
+  }
+
+  const { error } = await admin.from("agent_adjustments").insert({
+    agent_id: input.agentId,
+    order_id: input.orderId ?? null,
+    commission_id: commissionId,
+    delta,
+    reason: input.reason ?? "manual",
+    note: input.note.trim(),
+    created_by: staff.email,
+  });
+  if (error) return { ok: false, error: error.message };
+
+  await writeAuditEvent({
+    eventType: "agent_commission_adjusted",
+    staffUserId: staff.id,
+    notes: `manual ₹${delta} on agent ${input.agentId}${input.orderId ? ` (order ${input.orderId})` : ""} by ${staff.email} — ${input.note.trim()}`,
+  });
+  revalidatePath(`/admin/agents/${input.agentId}`);
+  revalidatePath("/admin/agents");
+  return { ok: true };
+}

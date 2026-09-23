@@ -2,7 +2,13 @@
 // (spec §7.6). Called from client handlers that invoke the Web Share API / wa.me
 // or trigger a .vcf download.
 
-const PORTAL_URL = "wholesale.drevifashion.com";
+// One setting, not a deploy: the link goes into every credential message and
+// into the WhatsApp share, and on 23 Sep — go-live morning —
+// wholesale.drevifashion.com did not resolve and the Vercel account had no
+// domains configured at all. NEXT_PUBLIC_ so the client-side share builds the
+// same link the server sends.
+export const PORTAL_URL =
+  (process.env.NEXT_PUBLIC_PORTAL_URL ?? "").trim() || "wholesale.drevifashion.com";
 const RAKESH_PHONE = "+91 88280 43555";
 
 // Buyers sign in with a bare username (first word of the business name).
