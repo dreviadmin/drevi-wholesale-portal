@@ -13,6 +13,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const BACKUP_TABLES = [
   // Parties, auth and access
   "buyers",
+  "agents",
+  "order_agents",
+  "buyer_agents",
+  "agent_commissions",
+  "agent_adjustments",
+  "agent_payments",
   "buyer_contacts",
   "staff_users",
   "auth_audit_log",

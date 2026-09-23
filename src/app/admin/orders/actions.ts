@@ -87,6 +87,22 @@ async function applyStatus(
     // 'submitted'. postOrderMovements('back') self-guards on stock_moved, so
     // a plain submitted order with nothing moved is a no-op.
     else if (status === "cancelled") await postOrderMovements(orderId, "back", staffEmail);
+
+    // Agent commission is earned when the order lands (0064). Inside the CAS,
+    // so only the transition that actually won gets here — the same guard that
+    // stops stock leaving the shelf twice — and unique(order_id) on
+    // agent_commissions is the second belt.
+    //
+    // Both terminal states, because 'fulfilled' is the legacy one and is still
+    // reachable from 'confirmed'; keying on delivered_at would have missed it,
+    // since all ten fulfilled orders on prod have that column null.
+    //
+    // Never awaited for its result: an accrual that fails must not roll back a
+    // delivery that has already happened.
+    if (status === "delivered" || status === "fulfilled") {
+      const { accrueCommission } = await import("@/lib/agent-ledger");
+      await accrueCommission(orderId, status, staffEmail);
+    }
   }
   return { ok: true };
 }

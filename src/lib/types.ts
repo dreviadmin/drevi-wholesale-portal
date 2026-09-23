@@ -53,7 +53,16 @@ export type AuditEventType =
   | "return_credit_note_raised"
   | "return_credit_note_voided"
   | "credit_settled"
-  | "order_bill_cancelled";
+  | "order_bill_cancelled"
+  // Agents (0064/0065). The enum values are added in their own migration —
+  // Postgres refuses to use a new enum value in the transaction that adds it.
+  | "agent_created"
+  | "agent_updated"
+  | "order_agent_set"
+  | "agent_commission_accrued"
+  | "agent_commission_adjusted"
+  | "agent_payment_recorded"
+  | "agent_payment_voided";
 
 /**
  * The buyer identity frozen onto a document at its issue date (0047) — carried

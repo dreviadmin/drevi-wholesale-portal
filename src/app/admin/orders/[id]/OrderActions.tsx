@@ -8,6 +8,8 @@ import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { downscalePhoto } from "@/lib/downscale-photo";
 import type { OrderStatus } from "@/lib/types";
+import { setOrderAgent } from "@/app/admin/agents/actions";
+import { AgentPrompt, type AgentOption, type AgentChoice } from "./AgentPrompt";
 import { useToast } from "@/lib/use-toast";
 
 export function OrderActions({
@@ -19,9 +21,16 @@ export function OrderActions({
   buyerPhone,
   courier,
   trackingNumber,
+  agents = [],
+  buyerAgentId = null,
+  buyerName = null,
 }: {
   orderId: string;
   status: OrderStatus;
+  /** Active agents, for the confirmation prompt. */
+  agents?: AgentOption[];
+  buyerAgentId?: string | null;
+  buyerName?: string | null;
   pdfUrl?: string | null;
   orderNumber?: string;
   total?: number;
@@ -33,6 +42,11 @@ export function OrderActions({
   const [isPending, start] = useTransition();
   const [toast, flash] = useToast();
   const [dispatchOpen, setDispatchOpen] = useState(false);
+  // Confirming is where the agent question is asked, because it is the one
+  // gate every order crosses. `pendingInvoice` remembers which of the two
+  // Confirm buttons opened it.
+  const [agentOpen, setAgentOpen] = useState(false);
+  const [pendingInvoice, setPendingInvoice] = useState(false);
   const [form, setForm] = useState<StageDetails>({ courier: courier ?? "", trackingNumber: trackingNumber ?? "", trackingNote: "" });
   const [sheet, setSheet] = useState<File | null>(null);
   const sheetCameraRef = useRef<HTMLInputElement>(null);
@@ -123,13 +137,47 @@ export function OrderActions({
     <button type="button" onClick={onClick} disabled={isPending} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.15em", padding: "7px 12px", background: primary ? palette.black : "transparent", color: primary ? palette.ivory : palette.black, border: primary ? "none" : `1px solid ${palette.black}` }}>{label}</button>
   );
 
+  function confirmWithAgent(choice: AgentChoice) {
+    start(async () => {
+      // Agent first, because the accrual reads it and a same-second delivery
+      // would otherwise accrue nothing. But the BUYER link waits: a confirm
+      // that fails should not have quietly re-pointed this buyer's standing
+      // agent, which affects every future order.
+      const a = await setOrderAgent(orderId, choice.agentId, choice.commissionPct, false);
+      if (!a.ok) { flash(a.error ?? "Could not set the agent"); return; }
+      const res = await setOrderStatus(orderId, "confirmed", { sendInvoice: pendingInvoice });
+      if (!res.ok) {
+        // Say what did land, so nobody re-opens the dialog wondering.
+        flash(`${res.error ?? "Could not confirm"} — the agent was set on the order, the buyer was not changed.`);
+        return;
+      }
+      if (choice.alsoLinkBuyer && choice.agentId) {
+        await setOrderAgent(orderId, choice.agentId, choice.commissionPct, true);
+      }
+      setAgentOpen(false);
+      flash(res.invoiceSent ? "Confirmed · invoice sent" : "Confirmed");
+      router.refresh();
+    });
+  }
+
   return (
     <div className="flex flex-col items-end gap-2">
+      {agentOpen && (
+        <AgentPrompt
+          agents={agents}
+          buyerAgentId={buyerAgentId}
+          buyerName={buyerName}
+          orderNumber={orderNumber ?? "this order"}
+          pending={isPending}
+          onCancel={() => setAgentOpen(false)}
+          onConfirm={confirmWithAgent}
+        />
+      )}
       <div className="flex gap-2 flex-wrap justify-end">
         {status === "submitted" && (
           <>
-            {btn("Confirm", () => act("confirmed"), true)}
-            {btn("Confirm & Send Invoice", () => act("confirmed", { sendInvoice: true }))}
+            {btn("Confirm", () => { setPendingInvoice(false); setAgentOpen(true); }, true)}
+            {btn("Confirm & Send Invoice", () => { setPendingInvoice(true); setAgentOpen(true); })}
           </>
         )}
         {status === "confirmed" && btn("Mark Packed", () => act("packed"), true)}

@@ -20,6 +20,12 @@ dotenv.config({ path: join(dirname(fileURLToPath(import.meta.url)), "..", ".env.
 // build if the two lists (or the migrations) ever drift apart again.
 const TABLES = [
   "buyers",
+  "agents",
+  "order_agents",
+  "buyer_agents",
+  "agent_commissions",
+  "agent_adjustments",
+  "agent_payments",
   "buyer_contacts",
   "staff_users",
   "auth_audit_log",

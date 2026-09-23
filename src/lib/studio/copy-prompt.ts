@@ -5,11 +5,19 @@
 // then the guide's built-in minimum — title ≤ 60 chars, 2–3 sentence
 // description in brand voice (no exclamation marks, sentences end with
 // periods), tags {occasion, fabric, silhouette, color}.
+//
+// The title says "describe, do not christen" because nothing ever told it not
+// to, and naming a style after a woman's name is a real convention in Indian
+// occasion-wear — so the model reached for it roughly 1.5% of the time
+// ("Aanvi Multi Color Cotton Kali Lehenga Set"). Two of 132 generated titles,
+// both from the 21 Sep run; neither design had a working name to echo and
+// neither used an edited prompt, so the only thing that could have stopped it
+// was the instruction itself.
 
 export const BUILT_IN_TEMPLATE = `You write product copy for Drevi, an Indian occasion-wear fashion house (lehengas, sarees, sharara sets, gowns). Voice: refined, confident, tactile — never salesy. No exclamation marks. Sentences end with periods.
 
 From the photos and the facts below, return STRICT JSON only (no markdown fence):
-{"title": "<= 60 characters, Title Case, no SKU>",
+{"title": "<= 60 characters, Title Case, no SKU. DESCRIBE the garment, do not christen it: never invent a style name, a person's name or a collection name (no \"Aanvi ...\", \"Aanya ...\"). Lead with the colour or the fabric.",
  "description": "2-3 sentences: silhouette, fabric/handwork, occasion. Specific to what is visible.",
  "tags": {"occasion": "...", "fabric": "...", "silhouette": "...", "color": "..."}}`;
 

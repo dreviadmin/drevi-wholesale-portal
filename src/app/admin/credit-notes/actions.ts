@@ -476,6 +476,17 @@ export async function createReturnCreditNote(input: {
     notes: `${note.note_number} against ${doc.number}: ${totals.items.length} line(s), ${formatINR(totals.total)} — ${reason}`,
   });
 
+  // If an agent earned commission on this order, claw back their share of
+  // what came back (0064). Netted from the NOTE, never from
+  // orders.credit_applied — credit is a party-level wallet and settleReturn
+  // lets a note raised on one order be set against another, so credit_applied
+  // would claw the same return back twice. Best-effort: a failure here must
+  // not undo a credit note that has already been issued to the customer.
+  {
+    const { adjustForReturn } = await import("@/lib/agent-ledger");
+    await adjustForReturn(note.id, staff.email);
+  }
+
   // No credit_ledger row: the note IS the grant (migration 0046), so the
   // credit can never go missing behind a document that was already shared.
   revalidatePath(`/admin/orders/${input.orderId}`);
@@ -719,6 +730,15 @@ export async function voidCreditNote(noteId: string, reason: string): Promise<{ 
       createdBy: staff.email,
     });
     if (!res.ok) moveFailed.push(sku);
+  }
+
+  // The return no longer exists, so neither should the commission clawback it
+  // caused (0066). Additive — the original claw stays on the agent's statement
+  // with its reversal underneath. Best-effort: a failure here must not undo a
+  // void that has already happened.
+  {
+    const { reverseReturnAdjustment } = await import("@/lib/agent-ledger");
+    await reverseReturnAdjustment(noteId, staff.email);
   }
 
   if (won.order_id) revalidatePath(`/admin/orders/${won.order_id}`);

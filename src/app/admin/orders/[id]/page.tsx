@@ -8,6 +8,7 @@ import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { NotesPanel } from "@/components/admin/NotesPanel";
 import { listEntityNotes } from "@/lib/entity-notes";
+import { OrderAgent } from "./OrderAgent";
 import { OrderActions } from "./OrderActions";
 import { RecordPayment } from "./RecordPayment";
 import { EditBuyerButton } from "./EditBuyerButton";
@@ -43,6 +44,16 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   const { data: order } = await admin.from("orders").select("*").eq("id", params.id).maybeSingle();
   if (!order) notFound();
   const o = order as Order;
+  // Active agents for the confirmation prompt (0064). Cheap, and the prompt is
+  // only reachable from this page.
+  const { data: agentRows } = await admin.from("agents").select("id, name, default_commission_pct").eq("active", true).order("name");
+  const agents = (agentRows ?? []).map((a) => ({ id: a.id, name: a.name, defaultPct: Number(a.default_commission_pct) || 0 }));
+  const [{ data: orderAgent }, { data: buyerAgent }, { data: accrualRow }] = await Promise.all([
+    admin.from("order_agents").select("agent_id, commission_pct").eq("order_id", o.id).maybeSingle(),
+    o.buyer_id ? admin.from("buyer_agents").select("agent_id").eq("buyer_id", o.buyer_id).maybeSingle() : Promise.resolve({ data: null }),
+    admin.from("agent_commissions").select("commission_amount").eq("order_id", o.id).maybeSingle(),
+  ]);
+
   const [{ data: buyer }, { data: takenBy }, { data: billRows }, credit, wallet, printedParty] = await Promise.all([
     admin.from("buyers").select("business_name, owner_name, phone, city, gstin, address, transport_details, broker_details").eq("id", o.buyer_id).maybeSingle(),
     o.assisted_by
@@ -286,7 +297,18 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
         </div>
         {isAdminRole(staff.role) && (
           <div className="flex flex-col items-end gap-2">
-            <OrderActions orderId={o.id} status={o.status} pdfUrl={o.pdf_url} orderNumber={o.order_number} total={o.total_amount} buyerPhone={buyer?.phone ?? null} courier={o.courier} trackingNumber={o.tracking_number} />
+            <OrderActions orderId={o.id} status={o.status} pdfUrl={o.pdf_url} orderNumber={o.order_number} total={o.total_amount} buyerPhone={buyer?.phone ?? null} courier={o.courier} trackingNumber={o.tracking_number}
+              agents={agents} buyerAgentId={buyerAgent?.agent_id ?? null} buyerName={o.buyer_business_name ?? buyer?.business_name ?? null} />
+            <OrderAgent
+              orderId={o.id}
+              status={o.status}
+              agents={agents}
+              currentAgentId={orderAgent?.agent_id ?? null}
+              currentPct={orderAgent?.commission_pct != null ? Number(orderAgent.commission_pct) : null}
+              buyerAgentId={buyerAgent?.agent_id ?? null}
+              buyerName={o.buyer_business_name ?? buyer?.business_name ?? null}
+              accruedAmount={accrualRow?.commission_amount != null ? Number(accrualRow.commission_amount) : null}
+            />
             <OrderEditor
               orderId={o.id}
               status={o.status}
