@@ -172,6 +172,8 @@ export async function loadBoard(opts?: { includeDiscontinued?: boolean }): Promi
       tier: d.tier,
       origin: d.origin,
       discontinued: !!d.discontinued_at,
+      // The same expression the Shopify push uses to price every variant.
+      retailPriceSet: Number(d.mrp_override ?? d.auto_mrp ?? 0) > 0,
     };
     const { badge, portals } = deriveBadge(input);
     return {

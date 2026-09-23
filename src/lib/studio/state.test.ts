@@ -19,8 +19,9 @@ const base: DesignStateInput = {
   wholesalePriceSet: false,
   tier: "standard",
   // Set on the fixture so the tests below keep testing what they were written
-  // to test. The origin blocker gets its own case.
+  // to test. The origin and price blockers each get their own case.
   origin: "curated",
+  retailPriceSet: true,
 };
 
 describe("wholesaleGate", () => {
@@ -36,6 +37,20 @@ describe("wholesaleGate", () => {
 });
 
 describe("shopifyGate", () => {
+  it("refuses Shopify without a retail price — the push would list it at 0.00", () => {
+    // Ansh saw a product reading Ready(SH) with no price. Nothing gated it,
+    // and shopify.ts prices every variant from
+    // `mrp_override ?? auto_mrp ?? 0`. Four prod designs were in that state.
+    const shot = { ...base, filledAngles: { front: true, back: true }, copyStatus: "draft" as const, copyPresent: true };
+    expect(shopifyGate({ ...shot, retailPriceSet: false }).blockers).toEqual(["Retail price not set"]);
+    expect(shopifyGate({ ...shot, retailPriceSet: undefined }).blockers).toEqual(["Retail price not set"]);
+    expect(shopifyGate(shot).ready).toBe(true);
+
+    // Wholesale has always had its own price check and must not gain a second
+    // one — the two prices are different numbers.
+    expect(wholesaleGate({ ...base, filledAngles: { front: true }, wholesalePriceSet: true, retailPriceSet: false }).ready).toBe(true);
+  });
+
   it("refuses BOTH portals for a discontinued design — publishing would undo the retirement", () => {
     // publishWholesale writes buyer_visible: true for every size, which is the
     // exact flag setDiscontinued clears. Before this blocker, Push WS on a

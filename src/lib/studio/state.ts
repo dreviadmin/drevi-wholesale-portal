@@ -33,6 +33,8 @@ export interface DesignStateInput {
   origin?: string | null;
   /** designs.discontinued_at is set (0063). Blocks BOTH portals. */
   discontinued?: boolean;
+  /** mrp_override ?? auto_mrp is a real number > 0. Shopify only. */
+  retailPriceSet?: boolean;
 }
 
 // Retiring a product and then publishing it are contradictory acts, and until
@@ -106,6 +108,18 @@ export function shopifyGate(s: DesignStateInput): GateResult {
   if (!s.copyPresent) blockers.push("Copy not written");
   if (!s.tier) blockers.push("Tier not set");
   if (!(s.origin ?? "").trim()) blockers.push("Origin not set");
+  // Ansh, 23 Sep: "I also saw a product being shown as ready(SH) even though
+  // it had no price set."
+  //
+  // Nothing gated on it, and the push reads
+  // `Number(mrp_override ?? auto_mrp ?? 0)` — so a design with no price read
+  // READY and would have created a Shopify product priced at 0.00, on every
+  // size. Four designs on prod were in exactly that state, none of them
+  // pushed yet.
+  //
+  // The wholesale gate has always checked its own price; this is the same
+  // check the other side of the house was missing.
+  if (!s.retailPriceSet) blockers.push("Retail price not set");
   return { ready: blockers.length === 0, blockers };
 }
 
