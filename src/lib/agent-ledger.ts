@@ -28,22 +28,23 @@ export async function accrueCommission(
 ): Promise<{ accrued: boolean; amount?: number; error?: string }> {
   const admin = createAdminClient();
   try {
-    const { data: order } = await admin
-      .from("orders")
-      .select("id, order_number, agent_id, agent_commission_pct, total_amount, tax_amount, items, lines_rev")
-      .eq("id", orderId)
-      .maybeSingle();
+    const [{ data: order }, { data: link }] = await Promise.all([
+      admin.from("orders").select("id, order_number, total_amount, tax_amount, items, lines_rev").eq("id", orderId).maybeSingle(),
+      // The association lives in its own staff-only table (0067) so a buyer
+      // cannot read their own agent's rate off the order row.
+      admin.from("order_agents").select("agent_id, commission_pct").eq("order_id", orderId).maybeSingle(),
+    ]);
     if (!order) return { accrued: false, error: "Order not found" };
-    if (!order.agent_id) return { accrued: false };
+    if (!link?.agent_id) return { accrued: false };
 
-    const pct = Number(order.agent_commission_pct ?? 0);
+    const pct = Number(link.commission_pct ?? 0);
     if (!(pct > 0)) return { accrued: false };
 
     const base = commissionBase(order);
     const amount = commissionAmount(base, pct);
 
     const { error } = await admin.from("agent_commissions").insert({
-      agent_id: order.agent_id,
+      agent_id: link.agent_id,
       order_id: orderId,
       commission_base: base,
       commission_pct: pct,
@@ -56,9 +57,22 @@ export async function accrueCommission(
     if (error && error.code !== "23505") return { accrued: false, error: error.message };
     if (error) return { accrued: false };
 
+    // Goods can come back before the order is marked delivered — the return
+    // flow only needs a bill, not a terminal status. Those notes were raised
+    // when there was no accrual to reduce, so sweep them now. adjustForReturn
+    // is idempotent on (agent_id, credit_note_id, reason), so this is a no-op
+    // on the ordinary path where nothing has been returned yet.
+    const { data: priorReturns } = await admin
+      .from("credit_notes")
+      .select("id")
+      .eq("order_id", orderId)
+      .eq("kind", "return")
+      .eq("status", "issued");
+    for (const n of priorReturns ?? []) await adjustForReturn(n.id, staffEmail);
+
     await writeAuditEvent({
       eventType: "agent_commission_accrued",
-      notes: `${order.order_number}: ₹${amount} to agent ${order.agent_id} (${pct}% of ₹${base}) on ${trigger} by ${staffEmail}`,
+      notes: `${order.order_number}: ₹${amount} to agent ${link.agent_id} (${pct}% of ₹${base}) on ${trigger} by ${staffEmail}`,
     });
     return { accrued: true, amount };
   } catch (e) {
@@ -84,7 +98,7 @@ export async function adjustForReturn(
   try {
     const { data: note } = await admin
       .from("credit_notes")
-      .select("id, note_number, order_id, subtotal, kind, status")
+      .select("id, note_number, order_id, subtotal, total, tax_amount, kind, status")
       .eq("id", creditNoteId)
       .maybeSingle();
     if (!note || note.kind !== "return" || note.status !== "issued" || !note.order_id) return { adjusted: false };
@@ -96,9 +110,17 @@ export async function adjustForReturn(
       .maybeSingle();
     if (!accrual) return { adjusted: false }; // no agent, or not delivered yet
 
-    // The note's SUBTOTAL — goods value after its pro-rata share of the bill's
-    // discount, before tax. The same basis the commission was charged on.
-    const delta = -commissionAmount(Number(note.subtotal) || 0, Number(accrual.commission_pct) || 0);
+    // total − tax, the exact mirror of commissionBase's total_amount −
+    // tax_amount. NOT note.subtotal: under tax_mode 'inclusive' the note's
+    // subtotal still carries the GST inside it, exactly as the order's total
+    // does, so clawing back on it would reverse more than was ever accrued —
+    // a fully returned 18% order landed at −₹720 of earned instead of zero,
+    // and that phantom debit then blocked every later payout.
+    //
+    // Identical to subtotal under 'none' and 'exclusive', where
+    // total = subtotal + tax.
+    const returnedBase = (Number(note.total) || 0) - (Number(note.tax_amount) || 0);
+    const delta = -commissionAmount(Math.max(0, returnedBase), Number(accrual.commission_pct) || 0);
     if (delta === 0) return { adjusted: false };
 
     const { error } = await admin.from("agent_adjustments").insert({

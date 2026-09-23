@@ -17,7 +17,7 @@ export default async function AgentsPage() {
     admin.from("agent_commissions").select("agent_id, order_id, commission_amount"),
     admin.from("agent_adjustments").select("agent_id, order_id, delta"),
     admin.from("agent_payments").select("agent_id, amount, voided_at"),
-    admin.from("buyers").select("id, agent_id").not("agent_id", "is", null),
+    admin.from("buyer_agents").select("buyer_id, agent_id"),
   ]);
 
   // One orders read for every accrual on the board, so the collected share —

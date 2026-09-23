@@ -57,8 +57,22 @@ describe("collectedShare", () => {
     expect(collectedShare({ total_amount: 100000, advance_amount: 0 })).toBe(0);
   });
 
-  it("counts credit applied as collected — the clawback rides on the adjustment, not here", () => {
+  it("treats credit as a reduction of what is owed, never as money received", () => {
+    // ₹60k written off, ₹40k actually paid — the buyer has settled everything
+    // that was still owed, so the commission is fully payable.
     expect(collectedShare({ total_amount: 100000, advance_amount: 40000, credit_applied: 60000 })).toBe(1);
+
+    // A goodwill note written off against a disputed order. The buyer paid
+    // nothing and never will; counting the credit as cash made the whole
+    // commission payable, and no clawback exists for a manual note.
+    expect(collectedShare({ total_amount: 100000, advance_amount: 0, credit_applied: 100000 })).toBe(0);
+
+    // A return credited to its own order. The buyer still owes ₹50k and has
+    // paid ₹0 — the old maths called that half collected.
+    expect(collectedShare({ total_amount: 100000, advance_amount: 0, credit_applied: 50000 })).toBe(0);
+
+    // …and once they pay the rest, it is fully collected.
+    expect(collectedShare({ total_amount: 100000, advance_amount: 50000, credit_applied: 50000 })).toBe(1);
   });
 
   it("never exceeds 1, and a zero-value order does not hold a payout hostage", () => {

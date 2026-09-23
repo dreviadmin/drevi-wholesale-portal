@@ -139,13 +139,21 @@ export function OrderActions({
 
   function confirmWithAgent(choice: AgentChoice) {
     start(async () => {
-      // Agent first: the accrual reads orders.agent_id, and although a
-      // confirm is not yet a delivery, writing it after would leave a window
-      // where a same-second delivery accrued nothing.
-      const a = await setOrderAgent(orderId, choice.agentId, choice.commissionPct, choice.alsoLinkBuyer);
+      // Agent first, because the accrual reads it and a same-second delivery
+      // would otherwise accrue nothing. But the BUYER link waits: a confirm
+      // that fails should not have quietly re-pointed this buyer's standing
+      // agent, which affects every future order.
+      const a = await setOrderAgent(orderId, choice.agentId, choice.commissionPct, false);
       if (!a.ok) { flash(a.error ?? "Could not set the agent"); return; }
       const res = await setOrderStatus(orderId, "confirmed", { sendInvoice: pendingInvoice });
-      if (!res.ok) { flash(res.error ?? "Failed"); return; }
+      if (!res.ok) {
+        // Say what did land, so nobody re-opens the dialog wondering.
+        flash(`${res.error ?? "Could not confirm"} — the agent was set on the order, the buyer was not changed.`);
+        return;
+      }
+      if (choice.alsoLinkBuyer && choice.agentId) {
+        await setOrderAgent(orderId, choice.agentId, choice.commissionPct, true);
+      }
       setAgentOpen(false);
       flash(res.invoiceSent ? "Confirmed · invoice sent" : "Confirmed");
       router.refresh();

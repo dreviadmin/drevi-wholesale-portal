@@ -105,14 +105,23 @@ export async function setOrderAgent(
     resolvedPct = commissionPct == null ? pct(agent.default_commission_pct) : pct(commissionPct);
   }
 
-  const { error } = await admin
-    .from("orders")
-    .update({ agent_id: agentId, agent_commission_pct: resolvedPct })
-    .eq("id", orderId);
+  // Its own table (0067), not a column on orders — a buyer can read their own
+  // order row, and PostgREST returns every column of a row it lets you see.
+  const { error } = agentId
+    ? (await admin.from("order_agents").upsert(
+        { order_id: orderId, agent_id: agentId, commission_pct: resolvedPct ?? 0, set_by: staff.email, set_at: new Date().toISOString() },
+        { onConflict: "order_id" },
+      ))
+    : (await admin.from("order_agents").delete().eq("order_id", orderId));
   if (error) return { ok: false, error: error.message };
 
   if (alsoLinkBuyer && order.buyer_id) {
-    const { error: bErr } = await admin.from("buyers").update({ agent_id: agentId }).eq("id", order.buyer_id);
+    const { error: bErr } = agentId
+      ? (await admin.from("buyer_agents").upsert(
+          { buyer_id: order.buyer_id, agent_id: agentId, set_by: staff.email, set_at: new Date().toISOString() },
+          { onConflict: "buyer_id" },
+        ))
+      : (await admin.from("buyer_agents").delete().eq("buyer_id", order.buyer_id));
     if (bErr) return { ok: false, error: `Order updated, but linking the buyer failed: ${bErr.message}` };
   }
 
@@ -145,7 +154,12 @@ export async function setBuyerAgent(buyerId: string, agentId: string | null): Pr
   let staff;
   try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized" }; }
   const admin = createAdminClient();
-  const { error } = await admin.from("buyers").update({ agent_id: agentId }).eq("id", buyerId);
+  const { error } = agentId
+    ? (await admin.from("buyer_agents").upsert(
+        { buyer_id: buyerId, agent_id: agentId, set_by: staff.email, set_at: new Date().toISOString() },
+        { onConflict: "buyer_id" },
+      ))
+    : (await admin.from("buyer_agents").delete().eq("buyer_id", buyerId));
   if (error) return { ok: false, error: error.message };
   await writeAuditEvent({ eventType: "buyer_profile_updated", buyerId, staffUserId: staff.id, notes: `agent ${agentId ?? "cleared"} by ${staff.email}` });
   revalidatePath(`/admin/buyers/${buyerId}`);

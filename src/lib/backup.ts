@@ -14,6 +14,8 @@ export const BACKUP_TABLES = [
   // Parties, auth and access
   "buyers",
   "agents",
+  "order_agents",
+  "buyer_agents",
   "agent_commissions",
   "agent_adjustments",
   "agent_payments",

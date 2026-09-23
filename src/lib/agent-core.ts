@@ -97,8 +97,20 @@ export function collectedShare(order: {
 }): number {
   const total = num(order.total_amount);
   if (total <= 0) return 1; // nothing to collect — do not hold the payout hostage
-  const got = num(order.advance_amount) + num(order.credit_applied);
-  return Math.min(1, Math.max(0, got / total));
+  const credit = Math.max(0, num(order.credit_applied));
+  // Credit REDUCES what is owed; it is not money received.
+  //
+  // Counting it as collected paid commission on cash that never arrived and
+  // never would: a goodwill note written off against a disputed order made the
+  // order read 100% collected, and adjustForReturn only fires on kind='return',
+  // so no clawback ever balanced it. A return credited to its own order did the
+  // same thing more quietly — payable rose on the half the buyer had not paid.
+  //
+  // Dividing by what is left to pay keeps both honest and still reaches 1 the
+  // moment the buyer actually settles the remainder.
+  const owed = Math.max(0, total - credit);
+  if (owed <= 0) return 0;
+  return Math.min(1, Math.max(0, num(order.advance_amount) / owed));
 }
 
 /**

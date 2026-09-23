@@ -21,6 +21,8 @@ dotenv.config({ path: join(dirname(fileURLToPath(import.meta.url)), "..", ".env.
 const TABLES = [
   "buyers",
   "agents",
+  "order_agents",
+  "buyer_agents",
   "agent_commissions",
   "agent_adjustments",
   "agent_payments",
