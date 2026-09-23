@@ -115,24 +115,39 @@ describe("agentTotals", () => {
 });
 
 describe("payoutCheck", () => {
+  const T = (earned: number, payable: number, paid: number) => ({ earned, payable, paid, balance: payable - paid });
+
   it("caps at payable, not at earned", () => {
-    expect(payoutCheck(516, 500)).toEqual({ ok: true });
-    expect(payoutCheck(516, 516)).toEqual({ ok: true });
-    expect(payoutCheck(516, 4000).ok).toBe(false);
-    expect(payoutCheck(516, 4000).error).toContain("516");
+    expect(payoutCheck(T(4000, 516, 0), 500)).toEqual({ ok: true });
+    expect(payoutCheck(T(4000, 516, 0), 516)).toEqual({ ok: true });
+    const over = payoutCheck(T(4000, 516, 0), 4000);
+    expect(over.ok).toBe(false);
+    expect(over.error).toContain("516");
   });
 
-  it("blocks while the balance is zero or the agent is ahead", () => {
-    expect(payoutCheck(0, 100).ok).toBe(false);
-    expect(payoutCheck(0, 100).error).toContain("paid for everything collected");
-    const ahead = payoutCheck(-3000, 100);
+  it("tells the three zero-balance stories apart", () => {
+    // Earned but the buyer has not paid — the common case, and the one the
+    // first version described as "has been paid", which was simply untrue.
+    const unpaid = payoutCheck(T(3030, 0, 0), 1000);
+    expect(unpaid.ok).toBe(false);
+    expect(unpaid.error).toContain("buyers on these orders have not paid");
+
+    const nothing = payoutCheck(T(0, 0, 0), 1000);
+    expect(nothing.error).toContain("Nothing earned yet");
+
+    const settled = payoutCheck(T(3030, 3030, 3030), 100);
+    expect(settled.error).toContain("paid for everything collected");
+  });
+
+  it("explains a negative balance as a clawback that carries forward", () => {
+    const ahead = payoutCheck(T(1000, 1000, 4000), 100);
     expect(ahead.ok).toBe(false);
     expect(ahead.error).toContain("ahead");
     expect(ahead.error).toContain("next commission");
   });
 
   it("refuses a zero or negative amount", () => {
-    expect(payoutCheck(1000, 0).ok).toBe(false);
-    expect(payoutCheck(1000, -50).ok).toBe(false);
+    expect(payoutCheck(T(4000, 4000, 0), 0).ok).toBe(false);
+    expect(payoutCheck(T(4000, 4000, 0), -50).ok).toBe(false);
   });
 });

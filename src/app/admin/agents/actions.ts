@@ -152,7 +152,7 @@ export async function recordAgentPayment(input: {
 
   // Checked against PAYABLE, not earned — the whole point of the split.
   const { totals } = await loadAgentAccount(input.agentId);
-  const check = payoutCheck(totals.balance, input.amount);
+  const check = payoutCheck(totals, input.amount);
   if (!check.ok) return { ok: false, error: check.error };
 
   const { error } = await admin.from("agent_payments").insert({

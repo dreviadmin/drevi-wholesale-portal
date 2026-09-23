@@ -137,7 +137,9 @@ export function agentTotals(
 }
 
 /**
- * What a payout may be for.
+ * What a payout may be for. Takes the whole totals object rather than just the
+ * balance, because a zero balance has three different causes and only one of
+ * them is "already paid".
  *
  * Capped at the payable balance, never at earned — that is the whole point of
  * the split. A balance at or below zero blocks the payout outright: it means
@@ -145,17 +147,29 @@ export function agentTotals(
  * return clawed commission back after they were paid. The debit carries
  * forward and nets against their next order rather than being written off.
  */
-export function payoutCheck(balance: number, amount: number): { ok: boolean; error?: string } {
-  const b = money(num(balance));
+export function payoutCheck(totals: AgentTotals, amount: number): { ok: boolean; error?: string } {
+  const b = money(num(totals.balance));
   const a = money(num(amount));
   if (a <= 0) return { ok: false, error: "Enter an amount" };
-  if (b <= 0) {
+
+  if (b < 0) {
     return {
       ok: false,
-      error: b === 0
-        ? "Nothing payable — this agent has been paid for everything collected so far."
-        : `This agent is ₹${Math.abs(b).toLocaleString("en-IN")} ahead after a clawback. It nets against their next commission.`,
+      error: `This agent is ₹${Math.abs(b).toLocaleString("en-IN")} ahead after a clawback. It nets against their next commission.`,
     };
+  }
+  if (b === 0) {
+    // Two very different situations reach zero, and telling someone their
+    // agent "has been paid" when the agent has had nothing is the kind of
+    // wrong message that gets a feature distrusted. The discriminator is
+    // whether anything has gone out at all.
+    if (num(totals.paid) === 0 && num(totals.earned) > 0) {
+      return { ok: false, error: "Nothing payable yet — the buyers on these orders have not paid. Commission becomes payable as they do." };
+    }
+    if (num(totals.earned) === 0) {
+      return { ok: false, error: "Nothing earned yet — commission is earned when one of their orders is delivered." };
+    }
+    return { ok: false, error: "Nothing payable — this agent has been paid for everything collected so far." };
   }
   if (a > b + 0.001) return { ok: false, error: `Only ₹${b.toLocaleString("en-IN")} is payable right now.` };
   return { ok: true };

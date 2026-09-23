@@ -40,7 +40,7 @@ export function AgentDetail({
   const [note, setNote] = useState("");
   const [clientRef, setClientRef] = useState(() => crypto.randomUUID());
 
-  const check = payoutCheck(totals.balance, Number(amount) || 0);
+  const check = payoutCheck(totals, Number(amount) || 0);
   const num = { fontVariantNumeric: "tabular-nums" } as const;
 
   function pay() {
