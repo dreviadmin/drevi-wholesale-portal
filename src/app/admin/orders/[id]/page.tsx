@@ -43,8 +43,13 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   const { data: order } = await admin.from("orders").select("*").eq("id", params.id).maybeSingle();
   if (!order) notFound();
   const o = order as Order;
+  // Active agents for the confirmation prompt (0064). Cheap, and the prompt is
+  // only reachable from this page.
+  const { data: agentRows } = await admin.from("agents").select("id, name, default_commission_pct").eq("active", true).order("name");
+  const agents = (agentRows ?? []).map((a) => ({ id: a.id, name: a.name, defaultPct: Number(a.default_commission_pct) || 0 }));
+
   const [{ data: buyer }, { data: takenBy }, { data: billRows }, credit, wallet, printedParty] = await Promise.all([
-    admin.from("buyers").select("business_name, owner_name, phone, city, gstin, address, transport_details, broker_details").eq("id", o.buyer_id).maybeSingle(),
+    admin.from("buyers").select("business_name, owner_name, phone, city, gstin, address, transport_details, broker_details, agent_id").eq("id", o.buyer_id).maybeSingle(),
     o.assisted_by
       ? admin.from("staff_users").select("name, email").eq("id", o.assisted_by).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -286,7 +291,8 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
         </div>
         {isAdminRole(staff.role) && (
           <div className="flex flex-col items-end gap-2">
-            <OrderActions orderId={o.id} status={o.status} pdfUrl={o.pdf_url} orderNumber={o.order_number} total={o.total_amount} buyerPhone={buyer?.phone ?? null} courier={o.courier} trackingNumber={o.tracking_number} />
+            <OrderActions orderId={o.id} status={o.status} pdfUrl={o.pdf_url} orderNumber={o.order_number} total={o.total_amount} buyerPhone={buyer?.phone ?? null} courier={o.courier} trackingNumber={o.tracking_number}
+              agents={agents} buyerAgentId={buyer?.agent_id ?? null} buyerName={o.buyer_business_name ?? buyer?.business_name ?? null} />
             <OrderEditor
               orderId={o.id}
               status={o.status}
