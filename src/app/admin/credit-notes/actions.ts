@@ -732,6 +732,15 @@ export async function voidCreditNote(noteId: string, reason: string): Promise<{ 
     if (!res.ok) moveFailed.push(sku);
   }
 
+  // The return no longer exists, so neither should the commission clawback it
+  // caused (0066). Additive — the original claw stays on the agent's statement
+  // with its reversal underneath. Best-effort: a failure here must not undo a
+  // void that has already happened.
+  {
+    const { reverseReturnAdjustment } = await import("@/lib/agent-ledger");
+    await reverseReturnAdjustment(noteId, staff.email);
+  }
+
   if (won.order_id) revalidatePath(`/admin/orders/${won.order_id}`);
   revalidatePath("/admin/orders");
   revalidatePath("/admin/credit-notes");

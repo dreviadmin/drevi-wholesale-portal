@@ -86,7 +86,7 @@ export async function setOrderAgent(
   agentId: string | null,
   commissionPct: number | null,
   alsoLinkBuyer: boolean,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; accrued?: number }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized" }; }
   const admin = createAdminClient();
@@ -116,6 +116,20 @@ export async function setOrderAgent(
     if (bErr) return { ok: false, error: `Order updated, but linking the buyer failed: ${bErr.message}` };
   }
 
+  // An order that is ALREADY terminal has no transition left to fire, so
+  // attaching an agent to one would have earned them nothing and said nothing
+  // about it. Accrue here instead — unique(order_id) keeps it to one, and
+  // clearing the agent obviously accrues nothing.
+  let accruedNow: number | undefined;
+  if (agentId) {
+    const { data: st } = await admin.from("orders").select("status").eq("id", orderId).maybeSingle();
+    if (st?.status === "delivered" || st?.status === "fulfilled") {
+      const { accrueCommission } = await import("@/lib/agent-ledger");
+      const res = await accrueCommission(orderId, st.status, staff.email);
+      if (res.accrued) accruedNow = res.amount;
+    }
+  }
+
   await writeAuditEvent({
     eventType: "order_agent_set",
     staffUserId: staff.id,
@@ -123,7 +137,7 @@ export async function setOrderAgent(
   });
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/agents");
-  return { ok: true };
+  return { ok: true, ...(accruedNow != null ? { accrued: accruedNow } : {}) };
 }
 
 /** The buyer page's own control — same relation, no order involved. */

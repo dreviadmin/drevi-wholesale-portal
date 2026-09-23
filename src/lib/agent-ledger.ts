@@ -212,3 +212,52 @@ export async function loadAgentAccount(agentId: string): Promise<{
     })),
   };
 }
+
+/**
+ * Give back a clawback when the return behind it is voided.
+ *
+ * voidCreditNote un-issues the note, and without this the agent's commission
+ * stayed reduced for a return that no longer exists. Additive: the original
+ * clawback remains on the statement with its reversal underneath, rather than
+ * disappearing as if it had never been made. unique(agent_id, credit_note_id,
+ * reason) allows exactly one of each and blocks a second reversal.
+ */
+export async function reverseReturnAdjustment(
+  creditNoteId: string,
+  staffEmail: string,
+): Promise<{ reversed: boolean; delta?: number; error?: string }> {
+  const admin = createAdminClient();
+  try {
+    const { data: original } = await admin
+      .from("agent_adjustments")
+      .select("id, agent_id, order_id, commission_id, delta, note")
+      .eq("credit_note_id", creditNoteId)
+      .eq("reason", "return")
+      .maybeSingle();
+    if (!original) return { reversed: false };
+
+    const delta = -(Number(original.delta) || 0);
+    if (delta === 0) return { reversed: false };
+
+    const { error } = await admin.from("agent_adjustments").insert({
+      agent_id: original.agent_id,
+      order_id: original.order_id,
+      commission_id: original.commission_id,
+      delta,
+      reason: "correction",
+      credit_note_id: creditNoteId,
+      note: `${original.note ?? "return"} — voided, commission restored`,
+      created_by: staffEmail,
+    });
+    if (error && error.code !== "23505") return { reversed: false, error: error.message };
+    if (error) return { reversed: false };
+
+    await writeAuditEvent({
+      eventType: "agent_commission_adjusted",
+      notes: `credit note ${creditNoteId} voided: ₹${delta} restored to agent ${original.agent_id} by ${staffEmail}`,
+    });
+    return { reversed: true, delta };
+  } catch (e) {
+    return { reversed: false, error: (e as Error).message };
+  }
+}
