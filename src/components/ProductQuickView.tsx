@@ -22,6 +22,7 @@ export function ProductQuickView({
   showPrices = true,
   enforceCaps = true,
   readOnly = false,
+  showStock = true,
 }: {
   product: WholesaleProduct;
   cartQty?: number;
@@ -31,6 +32,8 @@ export function ProductQuickView({
   enforceCaps?: boolean;
   // Browse-only surfaces (View Catalog, Price Check): no cart controls.
   readOnly?: boolean;
+  /** Buyer surfaces pass false: stock state and MOQ are not buyer-facing. */
+  showStock?: boolean;
 }) {
   const images = product.image_urls ?? [];
   const [selected, setSelected] = useState(0);
@@ -86,7 +89,7 @@ export function ProductQuickView({
           </div>
           <div className="font-body mt-1" style={{ fontSize: 10, letterSpacing: "0.1em", color: palette.mutedGreige }}>{product.sku}</div>
 
-          <div className="mt-2.5"><StockPill product={product} /></div>
+          {showStock && <div className="mt-2.5"><StockPill product={product} /></div>}
 
           {showPrices && (
             <div className="font-display mt-3" style={{ fontSize: 20, fontWeight: 600, color: palette.black }}>
@@ -94,7 +97,7 @@ export function ProductQuickView({
             </div>
           )}
 
-          {product.min_order_qty ? (
+          {showStock && product.min_order_qty ? (
             <div className="font-body mt-1" style={{ color: palette.goldDeep, fontSize: 10, letterSpacing: "0.05em" }}>
               Minimum {product.min_order_qty} pieces
             </div>

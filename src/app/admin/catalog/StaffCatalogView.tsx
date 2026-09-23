@@ -146,13 +146,20 @@ export function StaffCatalogView({ products, hiddenSkus = [], lastSynced = null 
               cartBySku={{}}
               onChangeQty={() => {}}
               readOnly
+              // The point of this page is to see what the BUYER sees, and the
+              // buyer catalog has passed showStock={false} since stock and MOQ
+              // stopped being buyer-facing. Leaving the default on here meant
+              // staff were checking the storefront against a card the
+              // storefront does not render — "IN STOCK", "MADE TO ORDER" and
+              // "Minimum 1 pieces" appear nowhere a buyer can reach.
+              showStock={false}
               onOpenDetail={setDetail}
             />
           ))}
         </div>
       )}
 
-      {detail && <ProductQuickView product={detail} onClose={() => setDetail(null)} readOnly />}
+      {detail && <ProductQuickView product={detail} onClose={() => setDetail(null)} readOnly showStock={false} />}
 
       {scanning && <QrScanner title="Scan a tag" onScan={handleScan} onClose={() => setScanning(false)} />}
     </div>
