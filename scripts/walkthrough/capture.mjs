@@ -23,9 +23,63 @@ fs.mkdirSync(OUT, { recursive: true });
 const BASE = "https://drevi-wholesale-portal-swart.vercel.app";
 const DPR = 3;
 
+const MASK = process.argv.includes("--mask-prices");
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: DPR, isMobile: true, hasTouch: true });
 const page = await ctx.newPage();
+
+// What the film must not show. Runs in the page on every navigation and again
+// after React settles, over every text node:
+//   - Rakesh's number, wherever the portal prints it (Ansh, 25 Sep: "do not
+//     show the phone number") — always.
+//   - Prices, with --mask-prices: the public onboarding versions sit behind a
+//     link on the retail website, and retail customers must not read wholesale
+//     rates. Digits are ZEROED, then the element is blurred. Blur alone can be
+//     partly legible and, in principle, reversed; zeroed digits cannot be.
+// Passed as a real function with an argument, not as script text: two layers
+// of string escaping had already turned the patterns into ones that matched
+// nothing. And __scrub is exposed FIRST — an init script that throws before
+// that line (the observer did, on a document with no root yet) fails silently
+// and every capture goes out unscrubbed, which is what the leak check found.
+await page.addInitScript(({ mask }) => {
+  // "(+91 88280 43555)" and "+91 8828043555" both: the 0 can sit on either side of the space.
+  const PHONE = /[(]?[+]?\s?91[\s-]?8828[\s-]?0[\s-]?43555[)]?|[(]?8828043555[)]?/g;
+  const PRICE = /₹\s?[0-9][0-9,]*(?:\.[0-9]+)?/g;
+  function scrub(root) {
+    if (!root) return;
+    const it = document.createNodeIterator(root, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    let n;
+    while ((n = it.nextNode())) {
+      const t = n.nodeValue; if (!t) continue;
+      let v = t.replace(PHONE, "");
+      PRICE.lastIndex = 0;
+      if (mask && PRICE.test(v)) {
+        PRICE.lastIndex = 0;
+        v = v.replace(PRICE, (m) => m.replace(/[0-9]/g, "0"));
+        const el = n.parentElement; if (el) { el.style.filter = "blur(7px)"; el.style.userSelect = "none"; }
+      }
+      if (v !== t) n.nodeValue = v;
+      nodes.push(n);
+    }
+    // The number sits in its own element, so its parentheses are in the text
+    // nodes either side of it. With the number gone, an opening bracket that is
+    // followed (across empty nodes) by a closing one is an empty pair: drop both.
+    for (let i = 0; i < nodes.length; i++) {
+      if (!/\(\s*$/.test(nodes[i].nodeValue)) continue;
+      let j = i + 1; while (j < nodes.length && /^\s*$/.test(nodes[j].nodeValue)) j++;
+      if (j < nodes.length && /^\s*\)/.test(nodes[j].nodeValue)) {
+        nodes[i].nodeValue = nodes[i].nodeValue.replace(/\s*\(\s*$/, "");
+        nodes[j].nodeValue = nodes[j].nodeValue.replace(/^\s*\)/, "");
+      }
+    }
+    for (const x of nodes) if (/\(\s*\)/.test(x.nodeValue)) x.nodeValue = x.nodeValue.replace(/\s*\(\s*\)/g, "");
+  }
+  const run = () => { try { scrub(document.body || document.documentElement); } catch {} };
+  window.__scrub = run;
+  const arm = () => { try { new MutationObserver(() => { clearTimeout(window.__scrubT); window.__scrubT = setTimeout(run, 40); }).observe(document.documentElement, { childList: true, subtree: true, characterData: true }); } catch {} run(); };
+  if (document.documentElement) arm(); else document.addEventListener("DOMContentLoaded", arm);
+}, { mask: MASK });
 const manifest = {};
 
 async function box(locator) {
@@ -41,8 +95,18 @@ async function box(locator) {
 async function capture(name, targets = {}, opts = {}) {
   await page.waitForLoadState("networkidle").catch(() => {});
   await page.waitForTimeout(opts.settle ?? 1400);
-  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.evaluate(() => { window.__scrub && window.__scrub(); window.scrollTo(0, 0); });
   await page.waitForTimeout(250);
+  // Do not trust the scrub — read the page back and say so if anything leaked.
+  const leak = await page.evaluate((mask) => {
+    const txt = document.body.innerText;
+    const phone = /43555/.test(txt);
+    const price = mask && /₹\s?[0-9,]*[1-9]/.test(txt);
+    return { phone, price, scrubbed: typeof window.__scrub === "function" };
+  }, MASK);
+  if (!leak.scrubbed) console.log(`    !! scrub not installed in ${name}`);
+  if (leak.phone) console.log(`    !! PHONE LEAK in ${name}`);
+  if (leak.price) console.log(`    !! PRICE LEAK in ${name}`);
   const measured = {};
   for (const [k, loc] of Object.entries(targets)) {
     const b = await box(loc);
@@ -143,7 +207,7 @@ await T.remove().nth(1).click(); await page.waitForTimeout(2200);
 await capture("cart-removed", { "cart.plus.line1": T.inc().first(), "cart.note": T.note(), "cart.submit": T.submit() }, { settle: 600 });
 
 // ── submit ────────────────────────────────────────────────────────────────
-await T.note().fill("Demo order for the walkthrough video — please ignore.");
+await T.note().fill("Please share the delivery date.");
 await T.submit().click();
 await page.waitForURL((u) => u.pathname.startsWith("/order/"), { timeout: 40000 });
 await capture("order-received", { "order.myOrders": T.myOrders() }, { settle: 3000 });

@@ -13,7 +13,7 @@ const SANS = "-apple-system, Helvetica Neue, Helvetica, Arial, sans-serif";
 const manifest = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"));
 
 // WhatsApp — mirrors src/lib/share.ts buildWhatsAppMessage, password masked.
-const lines = [["Welcome to Drevi Wholesale Portal", "b"], ["", ""], ["Link: drevi-wholesale-portal-swart.vercel.app", "link"], ["Username: royal", ""], ["Password: ••••••••", ""], ["", ""], ["Save this message. Tap the link anytime to", ""], ["browse our full catalog with wholesale pricing.", ""], ["", ""], ["- Rakesh", ""], ["+91 88280 43555", ""]];
+const lines = [["Welcome to Drevi Wholesale Portal", "b"], ["", ""], ["Link: drevi-wholesale-portal-swart.vercel.app", "link"], ["Username: royal", ""], ["Password: ••••••••", ""], ["", ""], ["Save this message. Tap the link anytime to", ""], ["browse our full catalog with wholesale pricing.", ""], ["", ""], ["- Rakesh", ""]];
 let y = 420; const rows = []; let linkBox = null;
 for (const [txt, kind] of lines) {
   if (txt) {
@@ -37,7 +37,7 @@ const outro = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}
 <text x="${W / 2}" y="1150" text-anchor="middle" font-family="Didot, Georgia, serif" font-size="40" letter-spacing="14" fill="#B08D3F">WHOLESALE PORTAL</text>
 <line x1="${W / 2 - 90}" y1="1230" x2="${W / 2 + 90}" y2="1230" stroke="#B08D3F" stroke-width="4"/>
 <text x="${W / 2}" y="1360" text-anchor="middle" font-family="${SANS}" font-size="50" fill="#1A1A1A">Questions? Reply on WhatsApp</text>
-<text x="${W / 2}" y="1450" text-anchor="middle" font-family="${SANS}" font-size="44" fill="#6B6355">Rakesh · +91 88280 43555</text></svg>`;
+<text x="${W / 2}" y="1450" text-anchor="middle" font-family="${SANS}" font-size="44" fill="#6B6355">Rakesh, Drevi Fashion</text></svg>`;
 await sharp(Buffer.from(outro)).png().toFile(path.join(dir, "outro.png"));
 manifest.outro = { file: "outro.png", width: W, height: H, viewportH: H, header: { sticky: false, height: 0 }, targets: {} };
 fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(manifest, null, 1));
