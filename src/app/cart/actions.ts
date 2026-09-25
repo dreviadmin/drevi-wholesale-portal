@@ -148,7 +148,13 @@ export async function submitOrder(_prev: SubmitState, formData: FormData): Promi
 
   const cart = await getDetailedCart(buyer.id);
   if (cart.lines.length === 0) return { error: "Your cart is empty." };
-  if (cart.hasBlock) return { error: "Some items are below their minimum order quantity. Adjust them (or request a special quantity) before submitting." };
+  // NO MINIMUM-ORDER BLOCK. The buyer submits whatever quantity they actually
+  // want and Rakesh takes it from there on the confirmation call (Ansh, 25 Sep).
+  // The old guard told buyers to "request a special quantity" through a control
+  // that does not exist on any buyer screen, and never showed them what the
+  // minimum was — so it was an unexplained dead end that generated phone calls.
+  // min_order_qty still applies in the admin/exhibition flow, which is staff-facing
+  // and can override it knowingly.
 
   // Unpriced (₹0) catalog items cannot be self-ordered — the price is on the
   // physical tag only until the sheet is filled (audit fix).
