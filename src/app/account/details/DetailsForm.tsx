@@ -54,7 +54,7 @@ const EDITABLE: [keyof DetailsFields, string, string][] = [
 const IDENTITY_LABEL: Record<IdentityField, string> = { business_name: "Business name", gstin: "GSTIN" };
 
 const sig = (f: DetailsFields) => JSON.stringify(f);
-const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
 
 const LABEL_STYLE = { fontSize: 9, letterSpacing: "0.16em", color: palette.softBlack } as const;
 const INPUT_STYLE = { borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "6px 2px", fontSize: 13.5 } as const;

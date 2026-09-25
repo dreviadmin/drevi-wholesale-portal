@@ -30,7 +30,7 @@ function itemStateLabel(item: OrderItem): string {
 }
 
 function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
 }
 
 export default async function OrderConfirmationPage({ params }: { params: { id: string } }) {

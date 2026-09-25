@@ -10,7 +10,7 @@ import type { Order } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
 }
 
 const STATUS_LABEL: Record<string, string> = {
