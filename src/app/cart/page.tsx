@@ -33,7 +33,6 @@ export default async function CartPage() {
       }))}
       subtotal={cart?.subtotal ?? 0}
       maxLeadDays={cart?.maxLeadDays ?? 0}
-      hasBlock={cart?.hasBlock ?? false}
     />
   );
 }

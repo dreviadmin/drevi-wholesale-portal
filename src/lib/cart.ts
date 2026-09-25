@@ -28,7 +28,6 @@ export interface DetailedCart {
   subtotal: number;
   count: number; // distinct lines (for the header badge)
   totalQty: number;
-  hasBlock: boolean; // any line below its MOQ
   maxLeadDays: number; // max restock_days among Made-to-Order lines
 }
 
@@ -45,7 +44,7 @@ export async function getRawCart(buyerId: string): Promise<RawCartItem[]> {
 export async function getDetailedCart(buyerId: string): Promise<DetailedCart> {
   const items = await getRawCart(buyerId);
   if (items.length === 0) {
-    return { lines: [], subtotal: 0, count: 0, totalQty: 0, hasBlock: false, maxLeadDays: 0 };
+    return { lines: [], subtotal: 0, count: 0, totalQty: 0, maxLeadDays: 0 };
   }
 
   const supabase = createAdminClient();
@@ -72,10 +71,9 @@ export async function getDetailedCart(buyerId: string): Promise<DetailedCart> {
 
   const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0);
   const totalQty = lines.reduce((s, l) => s + l.qty, 0);
-  const hasBlock = lines.some((l) => l.belowMoq && !l.special);
   const maxLeadDays = lines
     .filter((l) => l.stockState === "made_to_order")
     .reduce((m, l) => Math.max(m, l.product.restock_days ?? 0), 0);
 
-  return { lines, subtotal, count: lines.length, totalQty, hasBlock, maxLeadDays };
+  return { lines, subtotal, count: lines.length, totalQty, maxLeadDays };
 }

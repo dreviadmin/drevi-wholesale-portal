@@ -57,7 +57,6 @@ export function CartView({
    * computing them without touching this file again.
    */
   maxLeadDays?: number;
-  hasBlock?: boolean;
 }) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
