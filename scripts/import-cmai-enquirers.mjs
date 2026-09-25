@@ -151,6 +151,26 @@ function parsePhone(raw) {
   return { phone: null, reason: `${d.length} digits — incomplete` };
 }
 
+/**
+ * Register lines the OWNER has confirmed are an existing buyer under another
+ * spelling. S.No -> that buyer's login (the local part of its email).
+ *
+ * #103 "Vaparimal Savaldas" +919888206700 against the visiting-card buyer
+ * "Vaparimal Savaldas Wholesale Studio (Naren Pearl)" +918888206700 — one
+ * leading digit apart. The card buyer's own notes say "Phone numbers confirmed
+ * complete from re-captured card in Slot2", so the 8- number is the verified
+ * one and the register's 9- is a misread of the same shop. Merged on Ansh's
+ * call, 25 Sep: no second buyer row and no second login.
+ *
+ * The register's number is still written as a CONTACT. It is never a send
+ * target — every WhatsApp path reads buyers.phone and nothing reads
+ * buyer_contacts — but it is what the dedup keys on, so recording it stops the
+ * next import from recreating exactly this duplicate.
+ */
+const MANUAL_MERGES = {
+  "103": "vaparimalsavaldas",
+};
+
 const clean = (s) => String(s ?? "").trim().replace(/\s+/g, " ") || null;
 const slug = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const nameKey = (s) => slug(s);
@@ -273,8 +293,19 @@ for (const b of [...(existing ?? [])].sort((a, b2) => String(a.created_at).local
   if (k && !nameToBuyer.has(k)) nameToBuyer.set(k, b);
 }
 
-const matched = [], fresh = [];
+const byLogin = new Map((existing ?? []).map((b) => [(b.email || "").split("@")[0].toLowerCase(), b]));
+const matched = [], fresh = [], merges = [];
 for (const c of rowsIn) {
+  const wantLogin = MANUAL_MERGES[String(c.sn)];
+  if (wantLogin) {
+    const target = byLogin.get(wantLogin);
+    // A merge target that does not exist is a typo in the table above, not a
+    // reason to quietly insert the duplicate the merge was meant to prevent.
+    if (!target) { console.error(`  ! MANUAL_MERGES #${c.sn} -> "${wantLogin}" matches no buyer — aborting`); process.exit(1); }
+    matched.push({ ...c, buyer: target, how: "merged" });
+    merges.push({ ...c, buyer: target });
+    continue;
+  }
   const byP = c.phone ? phoneToBuyer.get(c.phone) : null;
   const byN = byP ? null : nameToBuyer.get(nameKey(c.business_name));
   if (byP || byN) matched.push({ ...c, buyer: byP ?? byN, how: byP ? "phone" : "name" });
@@ -314,6 +345,14 @@ console.log(`  -> already a buyer (skipped): ${matched.length}   [${matched.filt
 console.log(`  -> to insert:                 ${fresh.length}   (${fresh.filter((f) => f.phone).length} with a usable phone, ${fresh.filter((f) => !f.phone).length} without)`);
 console.log(`  -> skipped, unusable row:     ${skipped.length}`);
 
+if (merges.length) {
+  console.log("\nMERGED INTO AN EXISTING BUYER (your call — no new row, no new login):");
+  for (const m of merges) {
+    console.log(`  #${String(m.sn).padStart(3)} "${m.business_name}" ${m.phone ?? "(no phone)"}`);
+    console.log(`        -> ${m.buyer.business_name} (${m.buyer.phone ?? "no phone"})`);
+    console.log(`        register number kept as a contact; it is never a send target`);
+  }
+}
 if (matched.length) {
   console.log("\nALREADY IN THE PORTAL (left untouched):");
   for (const m of matched) console.log(`  ${m.how.padEnd(5)} #${String(m.sn).padStart(3)} ${m.business_name}  ->  ${m.buyer.business_name}`);
@@ -350,6 +389,7 @@ const planFile = `backups/cmai-plan-${PROD ? "prod" : "dev"}.json`;
 fs.writeFileSync(planFile, JSON.stringify({
   matched: matched.map((m) => ({ sn: m.sn, sheet: m.business_name, buyer: m.buyer.business_name, how: m.how })),
   insert: fresh.map((f) => ({ sn: f.sn, name: f.business_name, phone: f.phone, username: f.username, password: f.password })),
+  merges: merges.map((m) => ({ sn: m.sn, sheet: m.business_name, into: m.buyer.business_name, phone: m.phone })),
   skipped,
 }, null, 1));
 console.log(`\nplan written: ${planFile}`);
@@ -412,7 +452,29 @@ if (PROD) {
   if (!fresh.length) { console.log("\nEverything in the plan already exists — nothing written."); process.exit(0); }
 }
 
-let inserted = 0, credentialed = 0, contactRows = 0;
+let inserted = 0, credentialed = 0, contactRows = 0, mergedRows = 0;
+
+// Merges first: they only ever ADD to a buyer that already exists, so doing
+// them before any insert means a failure here cannot leave a half-written batch.
+for (const m of merges) {
+  if (m.phone) {
+    const { data: already } = await admin.from("buyer_contacts").select("phone").eq("buyer_id", m.buyer.id);
+    const have = new Set((already ?? []).map((r) => r.phone).filter(Boolean));
+    if (!have.has(m.phone)) {
+      const { error } = await admin.from("buyer_contacts").insert({
+        buyer_id: m.buyer.id, phone: m.phone, is_primary: false,
+        position: (already?.length ?? 0) + 1, source: "cmai_register", created_by: "import",
+      });
+      if (error) console.error(`  ! merge contact ${m.phone}: ${error.message}`);
+      else contactRows++;
+    }
+  }
+  const note = [m.buyer.notes, `[${BATCH}] register line #${m.sn} "${m.business_name}" merged here${m.phone ? ` — register number ${m.phone} (unverified, one digit off the confirmed card number)` : ""}`]
+    .filter(Boolean).join("\n");
+  const { error: nErr } = await admin.from("buyers").update({ notes: note }).eq("id", m.buyer.id);
+  if (nErr) console.error(`  ! merge note for ${m.buyer.business_name}: ${nErr.message}`);
+  else mergedRows++;
+}
 // Second layer, because the re-read above is a SNAPSHOT: it is taken before
 // the first insert, so it can only catch rows that already existed when the
 // loop started, never a duplicate created by the loop itself.
@@ -468,4 +530,4 @@ for (const f of fresh) {
   if (!bErr) credentialed++;
 }
 
-console.log(`\nDONE — inserted ${inserted}, contacts ${contactRows}, logins ${credentialed}`);
+console.log(`\nDONE — inserted ${inserted}, merged ${mergedRows}, contacts ${contactRows}, logins ${credentialed}`);
