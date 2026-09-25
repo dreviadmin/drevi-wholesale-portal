@@ -1,0 +1,386 @@
+{
+  "_readme": "Clip skeleton for the portal walkthrough. Each clip is ONE voiceover recording. Actions are scheduled relative to the clip: `at` is seconds after the clip's voice starts; `over` is a [start,end] fraction of the clip. States are the captured screen images; targets are element boxes measured at capture time.",
+  "fps": 30,
+  "clips": [
+    {
+      "id": "c01",
+      "scene": "whatsapp",
+      "state": "whatsapp",
+      "intent": "This video shows how to use the Drevi wholesale portal, step by step.",
+      "actions": []
+    },
+    {
+      "id": "c02",
+      "scene": "whatsapp",
+      "state": "whatsapp",
+      "intent": "Open the message you received on WhatsApp and tap the link in it.",
+      "actions": [
+        {
+          "type": "tap",
+          "target": "wa.link",
+          "at": 0.9,
+          "then": "login-empty"
+        }
+      ]
+    },
+    {
+      "id": "c03",
+      "scene": "login",
+      "state": "login-empty",
+      "intent": "Type the username exactly as written in the message — not your own Gmail or email.",
+      "actions": [
+        {
+          "type": "typing",
+          "states": [
+            "login-u1",
+            "login-u2",
+            "login-u3",
+            "login-u4"
+          ],
+          "target": "login.username",
+          "over": [
+            0.15,
+            0.85
+          ]
+        }
+      ]
+    },
+    {
+      "id": "c04",
+      "scene": "login",
+      "state": "login-u4",
+      "intent": "Then type the password from the same message.",
+      "actions": [
+        {
+          "type": "typing",
+          "states": [
+            "login-p1",
+            "login-p2",
+            "login-p3"
+          ],
+          "target": "login.password",
+          "over": [
+            0.15,
+            0.85
+          ]
+        }
+      ]
+    },
+    {
+      "id": "c05",
+      "scene": "login",
+      "state": "login-p3",
+      "intent": "Now tap Sign In.",
+      "actions": [
+        {
+          "type": "tap",
+          "target": "login.signin",
+          "at": 0.5,
+          "then": "home"
+        }
+      ]
+    },
+    {
+      "id": "c06",
+      "scene": "home",
+      "state": "home",
+      "intent": "This is your home screen. New designs and the categories are right here.",
+      "actions": [
+        {
+          "type": "point",
+          "target": "home.chip.lehenga",
+          "at": 1.2
+        }
+      ]
+    },
+    {
+      "id": "c07",
+      "scene": "home",
+      "state": "home",
+      "intent": "The menu is the three lines at the top left. Catalog, Cart and My Orders are all in there.",
+      "actions": [
+        {
+          "type": "scroll",
+          "to": 0,
+          "over": [
+            0.0,
+            0.3
+          ]
+        },
+        {
+          "type": "tap",
+          "target": "home.menu",
+          "at": 1.6,
+          "then": "home-menu"
+        }
+      ]
+    },
+    {
+      "id": "c08",
+      "scene": "home",
+      "state": "home-menu",
+      "intent": "Tap Catalog.",
+      "actions": [
+        {
+          "type": "tap",
+          "target": "menu.catalog",
+          "at": 0.5,
+          "then": "catalog-all"
+        }
+      ]
+    },
+    {
+      "id": "c09",
+      "scene": "catalog",
+      "state": "catalog-all",
+      "intent": "Every design is here, with its photo, name, SKU and wholesale price.",
+      "actions": [
+        {
+          "type": "scroll",
+          "to": 1100,
+          "over": [
+            0.15,
+            0.95
+          ]
+        }
+      ]
+    },
+    {
+      "id": "c10",
+      "scene": "catalog",
+      "state": "catalog-all",
+      "intent": "To narrow the list, choose a category at the top — for example Lehenga.",
+      "actions": [
+        {
+          "type": "scroll",
+          "to": 0,
+          "over": [
+            0.0,
+            0.35
+          ]
+        },
+        {
+          "type": "tap",
+          "target": "catalog.chip.lehenga",
+          "at": 1.8,
+          "then": "catalog-lehenga"
+        }
+      ]
+    },
+    {
+      "id": "c11",
+      "scene": "catalog",
+      "state": "catalog-lehenga",
+      "intent": "You can also search by name or SKU.",
+      "actions": [
+        {
+          "type": "tap",
+          "target": "catalog.search",
+          "at": 0.6,
+          "then": "catalog-search"
+        }
+      ]
+    },
+    {
+      "id": "c12",
+      "scene": "product",
+      "state": "catalog-lehenga",
+      "intent": "Tap any design's photo to open it.",
+      "actions": [
+        {
+          "type": "tap",
+          "target": "catalog.card.first",
+          "at": 0.6,
+          "then": "product-top"
+        }
+      ]
+    },
+    {
+      "id": "c13",
+      "scene": "product",
+      "state": "product-top",
+      "intent": "All the details are here — the fabric, the work on it, and the price.",
+      "actions": [
+        {
+          "type": "scroll",
+          "toTarget": "product.qty",
+          "over": [
+            0.2,
+            0.95
+          ]
+        }
+      ]
+    },
+    {
+      "id": "c14",
+      "scene": "product",
+      "state": "product-top",
+      "intent": "The quantity is below. Tap plus to add pieces.",
+      "actions": [
+        {
+          "type": "tap",
+          "target": "product.plus",
+          "at": 1.2,
+          "then": "product-qty2"
+        },
+        {
+          "type": "tap",
+          "target": "product.plus",
+          "at": 1.9,
+          "then": "product-qty3"
+        }
+      ]
+    },
+    {
+      "id": "c15",
+      "scene": "product",
+      "state": "product-qty3",
+      "intent": "Now tap Add to Cart.",
+      "actions": [
+        {
+          "type": "tap",
+          "target": "product.addToCart",
+          "at": 0.5,
+          "then": "product-added"
+        }
+      ]
+    },
+    {
+      "id": "c16",
+      "scene": "cart",
+      "state": "product-added",
+      "intent": "Tap the cart icon at the top right.",
+      "actions": [
+        {
+          "type": "tap",
+          "target": "header.cart",
+          "at": 0.7,
+          "then": "cart"
+        }
+      ]
+    },
+    {
+      "id": "c17",
+      "scene": "cart",
+      "state": "cart",
+      "intent": "You can change quantities here too. The total updates by itself.",
+      "actions": [
+        {
+          "type": "tap",
+          "target": "cart.plus.line1",
+          "at": 1.4,
+          "then": "cart-plus"
+        }
+      ]
+    },
+    {
+      "id": "c18",
+      "scene": "cart",
+      "state": "cart-plus",
+      "intent": "To remove an item, tap the cross.",
+      "actions": [
+        {
+          "type": "tap",
+          "target": "cart.remove.line2",
+          "at": 0.9,
+          "then": "cart-removed"
+        }
+      ]
+    },
+    {
+      "id": "c19",
+      "scene": "submit",
+      "state": "cart-removed",
+      "intent": "Further down you can write a note — anything Rakesh should know about this order.",
+      "actions": [
+        {
+          "type": "point",
+          "target": "cart.note",
+          "at": 0.6
+        }
+      ]
+    },
+    {
+      "id": "c20",
+      "scene": "submit",
+      "state": "cart-removed",
+      "intent": "Then tap Submit Order Request. No payment happens here.",
+      "actions": [
+        {
+          "type": "tap",
+          "target": "cart.submit",
+          "at": 0.6,
+          "then": "order-received"
+        }
+      ]
+    },
+    {
+      "id": "c21",
+      "scene": "confirm",
+      "state": "order-received",
+      "intent": "Your request has reached us. Rakesh will call within 24 hours to confirm availability and pricing.",
+      "actions": []
+    },
+    {
+      "id": "c22",
+      "scene": "confirm",
+      "state": "order-received",
+      "intent": "All your orders and bills are in My Orders.",
+      "actions": [
+        {
+          "type": "tap",
+          "target": "order.myOrders",
+          "at": 1.6,
+          "then": "my-orders"
+        }
+      ]
+    },
+    {
+      "id": "c23",
+      "scene": "forgot",
+      "state": "login-empty",
+      "intent": "One more thing. If you ever forget your password, tap Forgot Password on the login page.",
+      "actions": [
+        {
+          "type": "tap",
+          "target": "login.forgot",
+          "at": 2.4,
+          "then": "forgot"
+        }
+      ]
+    },
+    {
+      "id": "c24",
+      "scene": "forgot",
+      "state": "forgot",
+      "intent": "Type your username and tap Message Rakesh on WhatsApp. He will send you a new password.",
+      "actions": [
+        {
+          "type": "typing",
+          "states": [
+            "forgot-u1",
+            "forgot-u2"
+          ],
+          "target": "forgot.username",
+          "over": [
+            0.08,
+            0.38
+          ]
+        },
+        {
+          "type": "tap",
+          "target": "forgot.message",
+          "at": 3.6,
+          "then": "forgot-typed"
+        }
+      ]
+    },
+    {
+      "id": "c25",
+      "scene": "outro",
+      "state": "outro",
+      "intent": "Any question at all — just reply on WhatsApp. Thank you.",
+      "actions": []
+    }
+  ]
+}
