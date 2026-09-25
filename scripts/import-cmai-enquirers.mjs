@@ -31,6 +31,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import readline from "node:readline/promises";
 import { createClient } from "@supabase/supabase-js";
+import { generateMemorablePassword } from "./lib/password.mjs";
 import dotenv from "dotenv";
 
 const PROD = process.argv.includes("--prod");
@@ -331,7 +332,11 @@ for (const f of fresh) {
   // strong to swallow — so it is surfaced for a human instead.
   if (u !== base) f.usernameClash = base;
   f.username = u;
-  f.password = `${u}xdrevi`;
+  // Not derived from the username (Ansh, 25 Sep). A <username>+suffix scheme
+  // is computable by anyone who knows the shop name, and a trailing "123"
+  // trips the breach warnings in phone keyboards and password managers.
+  // Same generator the admin's own credential button uses.
+  f.password = generateMemorablePassword();
 }
 const clashes = fresh.filter((f) => f.usernameClash);
 

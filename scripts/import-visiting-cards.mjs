@@ -28,7 +28,8 @@
  *  7. Re-issues EVERY buyer's login on the owner's scheme:
  *        username = business name, lowercased, a-z0-9, capped at 20 chars on a
  *                   word boundary; collisions get the next word, then a digit
- *        password = <username>xdrevi
+ *        password = generateMemorablePassword(), i.e. Word-Word-4digits — NOT
+ *                   derived from the username (changed 25 Sep)
  *     Owner asked for the existing 49 to be moved onto it too, so their
  *     usernames and passwords BOTH change — they have to be told.
  */
@@ -38,6 +39,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import readline from "node:readline/promises";
 import { createClient } from "@supabase/supabase-js";
+import { generateMemorablePassword } from "./lib/password.mjs";
 import sharp from "sharp";
 import { execFileSync } from "node:child_process";
 import dotenv from "dotenv";
@@ -335,11 +337,11 @@ function claim(businessName) {
 // Existing buyers first, oldest first, so the shortest names keep their slot.
 for (const b of [...(existing ?? [])].sort((a, b2) => String(a.created_at).localeCompare(String(b2.created_at)))) {
   const u = claim(b.business_name);
-  identities.push({ buyerId: b.id, name: b.business_name, username: u, password: `${u}xdrevi`, existing: true });
+  identities.push({ buyerId: b.id, name: b.business_name, username: u, password: generateMemorablePassword(), existing: true });
 }
 for (const p of plan.insert) {
   const u = claim(p.card.business_name);
-  p.username = u; p.password = `${u}xdrevi`;
+  p.username = u; p.password = generateMemorablePassword();
   identities.push({ buyerId: null, name: p.card.business_name, username: u, password: p.password, existing: false });
 }
 
