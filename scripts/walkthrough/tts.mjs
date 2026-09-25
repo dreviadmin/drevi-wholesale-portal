@@ -21,10 +21,13 @@ dotenv.config({ path: ".env.development.local" });
 const KEY = process.env.FAL_KEY;
 if (!KEY) { console.error("Missing FAL_KEY"); process.exit(1); }
 const [langFile, outDir] = process.argv.slice(2);
+const argOf = (n, d) => { const i = process.argv.indexOf(`--${n}`); return i >= 0 ? process.argv[i + 1] : d; };
+const LANG_CODE = argOf("lang", "Hindi (India)");           // fal enum value
+const LANG_NAME = LANG_CODE.replace(/\s*\(.*\)$/, "");       // "Hindi" / "English" / "Gujarati"
 fs.mkdirSync(outDir, { recursive: true });
 
 const STYLE =
-  "Speak in warm, natural Indian Hindi, unhurried and friendly, like a shopkeeper " +
+  `Speak in warm, natural Indian ${LANG_NAME}, unhurried and friendly, like a shopkeeper ` +
   "explaining something helpful to another shopkeeper on the phone. Not a newsreader, not an " +
   "advertisement. Read the English words (login, Sign In, Add to Cart, Submit Order Request, " +
   "My Orders, Catalog, Cart, WhatsApp, Password, Forgot Password) as ordinary spoken words, " +
@@ -69,33 +72,40 @@ const clips = JSON.parse(fs.readFileSync(langFile, "utf8"));
 const cacheFile = path.join(outDir, "cache.json");
 const cache = fs.existsSync(cacheFile) ? JSON.parse(fs.readFileSync(cacheFile, "utf8")) : {};
 const out = [];
+const failed = [];
 let spent = 0;
 for (const c of clips) {
-  const hash = crypto.createHash("sha1").update(c.hindi + "|" + STYLE).digest("hex").slice(0, 12);
+  const text = c.text ?? c.hindi;
+  const hash = crypto.createHash("sha1").update(text + "|" + STYLE + "|" + LANG_CODE).digest("hex").slice(0, 12);
   const raw = path.join(outDir, `${c.id}.raw.wav`), trimmed = path.join(outDir, `${c.id}.wav`);
   if (cache[c.id] === hash && fs.existsSync(trimmed)) {
     const { sr, samples } = parseWav(fs.readFileSync(trimmed));
     out.push({ id: c.id, file: trimmed, duration: samples.length / sr, cached: true });
     console.log(`  ${c.id} cached ${(samples.length / sr).toFixed(2)}s`); continue;
   }
-  process.stdout.write(`  ${c.id} (${c.hindi.length} ch) … `);
+  process.stdout.write(`  ${c.id} (${text.length} ch) … `);
   const res = await fetch("https://fal.run/fal-ai/gemini-3.1-flash-tts", {
     method: "POST", headers: { Authorization: `Key ${KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt: c.hindi, style_instructions: STYLE, voice: "Charon", language_code: "Hindi (India)", output_format: "wav", temperature: 0.7 }),
+    body: JSON.stringify({ prompt: text, style_instructions: STYLE, voice: "Charon", language_code: LANG_CODE, output_format: "wav", temperature: 0.7 }),
   });
-  const text = await res.text();
-  if (!res.ok) { console.log(`FAILED ${res.status} ${text.slice(0, 160)}`); process.exit(1); }
-  const url = JSON.parse(text)?.audio?.url; if (!url) { console.log("no audio url"); process.exit(1); }
+  const body = await res.text();
+  // One flagged line must not cost the other twenty-four. fal's content
+  // checker refused an English line about typing a username, so a failure is
+  // recorded and the run continues; reword the clip and re-run — cached clips
+  // are skipped, so only the fix is regenerated.
+  if (!res.ok) { console.log(`FAILED ${res.status} ${body.slice(0, 120)}`); failed.push(c.id); continue; }
+  const url = JSON.parse(body)?.audio?.url; if (!url) { console.log("no audio url"); failed.push(c.id); continue; }
   const buf = Buffer.from(await (await fetch(url)).arrayBuffer());
   fs.writeFileSync(raw, buf);
   const { sr, samples } = parseWav(buf);
   const t = trim(samples, sr);
   fs.writeFileSync(trimmed, writeWav(t, sr));
-  cache[c.id] = hash; spent += c.hindi.length;
+  cache[c.id] = hash; spent += text.length;
   out.push({ id: c.id, file: trimmed, duration: t.length / sr, rawDuration: samples.length / sr });
   console.log(`${(samples.length / sr).toFixed(2)}s raw -> ${(t.length / sr).toFixed(2)}s speech`);
 }
 fs.writeFileSync(cacheFile, JSON.stringify(cache, null, 1));
+if (failed.length) { console.log(`\nFAILED: ${failed.join(", ")} — durations.json NOT written; reword and re-run`); fs.writeFileSync(cacheFile, JSON.stringify(cache, null, 1)); process.exit(2); }
 fs.writeFileSync(path.join(outDir, "durations.json"), JSON.stringify(out, null, 1));
 const total = out.reduce((s, o) => s + o.duration, 0);
 console.log(`\n${out.length} clips · speech ${total.toFixed(1)}s · ${spent} chars ≈ $${(spent / 1000 * 0.05).toFixed(3)}`);
