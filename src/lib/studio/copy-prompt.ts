@@ -4,7 +4,15 @@
 // Template: docs/reference/copy-template.md when ANSH-02 drops it in; until
 // then the guide's built-in minimum — title ≤ 60 chars, 2–3 sentence
 // description in brand voice (no exclamation marks, sentences end with
-// periods), tags {occasion, fabric, silhouette, color}.
+// periods), tags {occasion, fabric, silhouette, color, handwork}.
+//
+// handwork joined the tags on 25 Sep so the Shopify draft takes it from the
+// photos instead of the Specs field. That field is free text and had drifted
+// badly: 147 DISTINCT values across 155 designs on prod, many of them a whole
+// garment description pasted in ("Powder blue flared net work lehenga with
+// floral zari work on soft net and blouse with chokker net dupatta"). As a
+// storefront facet that is one bucket per product, which is no facet at all —
+// hence the prompt pinning it to the technique in a few words.
 //
 // The title says "describe, do not christen" because nothing ever told it not
 // to, and naming a style after a woman's name is a real convention in Indian
@@ -19,7 +27,7 @@ export const BUILT_IN_TEMPLATE = `You write product copy for Drevi, an Indian oc
 From the photos and the facts below, return STRICT JSON only (no markdown fence):
 {"title": "<= 60 characters, Title Case, no SKU. DESCRIBE the garment, do not christen it: never invent a style name, a person's name or a collection name (no \"Aanvi ...\", \"Aanya ...\"). Lead with the colour or the fabric.",
  "description": "2-3 sentences: silhouette, fabric/handwork, occasion. Specific to what is visible.",
- "tags": {"occasion": "...", "fabric": "...", "silhouette": "...", "color": "..."}}`;
+ "tags": {"occasion": "...", "fabric": "...", "silhouette": "...", "color": "...", "handwork": "the embellishment TECHNIQUES visible, 1-4 words, Title Case — e.g. \"Mirror Work\", \"Zari and Cutdana\", \"Sequin Embroidery\", \"Thread Work\". Name the technique only: never a sentence, never the garment, never the colour."}}`;
 
 // designs.origin is a two-option field since 0051. The stored values are
 // machine tokens; these are the only words anyone — a model, a buyer, the

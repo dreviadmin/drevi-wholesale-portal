@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { shopifyTagsFrom, splitOccasions } from "./shopify-tags";
+import { BUILT_IN_TEMPLATE } from "./studio/copy-prompt";
 
 // The occasion tag decides which collections a product lands in, and the copy
 // model writes it two ways. These are real values from the 180 prod copy rows.
@@ -116,5 +117,32 @@ describe("splitOccasions", () => {
   // What shopify.ts writes as the list metafield value.
   it("serialises to the JSON array the list metafield takes", () => {
     expect(JSON.stringify(splitOccasions("Sangeet and Mehendi"))).toBe('["Sangeet","Mehendi"]');
+  });
+});
+
+describe("handwork as the fifth vision tag (25 Sep)", () => {
+  it("is asked for in the prompt, so the Shopify draft can stop using the Specs field", () => {
+    expect(BUILT_IN_TEMPLATE).toContain('"handwork"');
+    // The failure this guards is the reason it was added: a free-text handwork
+    // gave 147 distinct values across 155 designs. The prompt must keep
+    // pinning it to the technique, not let it drift back to a sentence.
+    expect(BUILT_IN_TEMPLATE).toMatch(/handwork[^}]*TECHNIQUES/);
+    expect(BUILT_IN_TEMPLATE).toMatch(/handwork[^}]*never a sentence/);
+  });
+
+  it("reaches the tag list whole — its 'and' joins techniques, it is not a list", () => {
+    expect(shopifyTagsFrom({ handwork: "Zari and Cutdana" })).toEqual(["Zari and Cutdana"]);
+    // Reducing it the way occasion is reduced would turn "Mirror Work" into
+    // "Mirror", which is a material, not a technique.
+    expect(shopifyTagsFrom({ handwork: "Mirror Work" })).toEqual(["Mirror Work"]);
+  });
+
+  it("still splits occasion while leaving handwork alone in the same object", () => {
+    expect(shopifyTagsFrom({ occasion: "Sangeet and Mehendi", handwork: "Sequin and Bead Work" }))
+      .toEqual(["Sangeet", "Mehendi", "Sequin and Bead Work"]);
+  });
+
+  it("drops a blank handwork rather than tagging an empty string", () => {
+    expect(shopifyTagsFrom({ handwork: "   " })).toEqual([]);
   });
 });
