@@ -62,7 +62,7 @@ export async function loadBoard(opts?: { includeDiscontinued?: boolean }): Promi
   // away. Opening the studio now clears anything that has outlived its budget.
   await sweepStaleJobs(createAdminClient());
   const admin = createAdminClient();
-  const [designs, angles, activeImages, copies, targets, products, notifies, vocab] = await Promise.all([
+  const [designs, angles, activeImages, copies, targets, products, notifies, publishedFronts, vocab] = await Promise.all([
     fetchAll<{
       id: string; base_sku: string; color: string; title: string | null; category: string | null;
       tier: "standard" | "hero"; specs_verified: boolean; created_at: string | null;
@@ -95,11 +95,26 @@ export async function loadBoard(opts?: { includeDiscontinued?: boolean }): Promi
     fetchAll<{ sku: string; wholesale_price: number; image_urls: string[] | null }>(
       admin, "wholesale_products", "sku, wholesale_price, image_urls"),
     fetchAll<{ sku_base: string; color: string }>(admin, "notify_me", "sku_base, color", (q) => q.is("fulfilled_at", null)),
+    // The PUBLISHED front, which is what a pushed product actually shows.
+    fetchAll<{ sku_base: string; color: string; storage_path: string; published_at: string | null }>(
+      admin, "product_images", "sku_base, color, storage_path, published_at", (q) => q.eq("angle", "front")),
     // For the colour check only: a design carrying GLD with no color_name is
     // not missing a colour, because the vocabulary answers "Gold" — and that
     // is the name the title and the metafield already use.
     loadVocab(),
   ]);
+  // Keyed the same way as groupThumb. `?v=` is the published stamp: a reshoot
+  // reuses the same deterministic storage path, so without it the URL never
+  // changes and a cached copy keeps showing the old photograph.
+  const { data: pubUrl } = admin.storage.from("product-images").getPublicUrl("x");
+  const bucketBase = pubUrl.publicUrl.replace(/\/x$/, "");
+  const publishedFront = new Map<string, string>();
+  for (const f of publishedFronts) {
+    const k = `${f.sku_base}|${f.color}`.toUpperCase();
+    const v = f.published_at ? `?v=${Date.parse(f.published_at)}` : "";
+    if (!publishedFront.has(k)) publishedFront.set(k, `${bucketBase}/${f.storage_path}${v}`);
+  }
+
   const notifyByGroup = new Map<string, number>();
   for (const n of notifies) {
     const key = `${n.sku_base.toUpperCase()}|${n.color.toUpperCase()}`;
@@ -200,10 +215,21 @@ export async function loadBoard(opts?: { includeDiscontinued?: boolean }): Promi
         wholesale: gateFor("wholesale", input),
         shopify: gateFor("shopify", input),
       },
-      // Published group photo first; otherwise the design's own front image —
-      // /api/drive-photo is staff-gated, cookie-authed and next/image renders
-      // it `unoptimized`, so a root-relative URL needs no loader config.
-      thumb: groupThumb.get(key) ?? (frontRef ? `/api/drive-photo?id=${encodeURIComponent(frontRef)}&s=200` : null),
+      // THE PUBLISHED FRONT WINS (Ansh, 25 Sep: "only the front image is used as
+      // the thumbnail for pushed products, not the older image from catalog").
+      //
+      // This used to read image_urls[0] first. That column is catalog data — the
+      // master sheet writes it, and publishWholesale only overwrites it when a
+      // design is actually pushed through that path. Anything published before
+      // the lock existed, or photographed outside it, kept an old
+      // product-photos/<sku>.png there and the board showed that instead of the
+      // front the design actually has. product_images is the published set; if a
+      // front is registered, it IS the thumbnail. image_urls stays as the
+      // fallback for designs with no published front, and the staff-gated
+      // /api/drive-photo ref as the last resort.
+      thumb: publishedFront.get(key.toUpperCase())
+        ?? groupThumb.get(key)
+        ?? (frontRef ? `/api/drive-photo?id=${encodeURIComponent(frontRef)}&s=200` : null),
       wholesalePriceSet: input.wholesalePriceSet,
       notifyCount: notifyByGroup.get(key.toUpperCase()) ?? 0,
       missing: missingFields({
