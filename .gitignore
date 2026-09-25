@@ -67,3 +67,6 @@ pipeline/.env
 pipeline/*-sa.json
 pipeline/__pycache__/
 pipeline/.venv/
+
+# one-off import plans: contain buyer logins
+backups/
