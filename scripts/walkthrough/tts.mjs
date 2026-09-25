@@ -26,6 +26,7 @@ const LANG_CODE = argOf("lang", "Hindi (India)");           // fal enum value
 const LANG_NAME = LANG_CODE.replace(/\s*\(.*\)$/, "");       // "Hindi" / "English" / "Gujarati"
 fs.mkdirSync(outDir, { recursive: true });
 
+const ENDPOINT_URL = "https://fal.run/fal-ai/gemini-3.1-flash-tts";
 const STYLE =
   `Speak in warm, natural Indian ${LANG_NAME}, unhurried and friendly, like a shopkeeper ` +
   "explaining something helpful to another shopkeeper on the phone. Not a newsreader, not an " +
@@ -84,7 +85,7 @@ for (const c of clips) {
     console.log(`  ${c.id} cached ${(samples.length / sr).toFixed(2)}s`); continue;
   }
   process.stdout.write(`  ${c.id} (${text.length} ch) … `);
-  const res = await fetch("https://fal.run/fal-ai/gemini-3.1-flash-tts", {
+  const res = await fetch(ENDPOINT_URL, {
     method: "POST", headers: { Authorization: `Key ${KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({ prompt: text, style_instructions: STYLE, voice: "Charon", language_code: LANG_CODE, output_format: "wav", temperature: 0.7 }),
   });
@@ -95,17 +96,34 @@ for (const c of clips) {
   // are skipped, so only the fix is regenerated.
   if (!res.ok) { console.log(`FAILED ${res.status} ${body.slice(0, 120)}`); failed.push(c.id); continue; }
   const url = JSON.parse(body)?.audio?.url; if (!url) { console.log("no audio url"); failed.push(c.id); continue; }
-  const buf = Buffer.from(await (await fetch(url)).arrayBuffer());
+  let buf = Buffer.from(await (await fetch(url)).arrayBuffer());
+  let parsed = parseWav(buf), t = trim(parsed.samples, parsed.sr);
+  // The model sometimes keeps talking long past the text — an English 76-char
+  // line once came back as 111 seconds of speech, which no trimmer can fix
+  // because it is not silence. Anything far beyond what the character count
+  // allows (~19 chars/s, generous headroom) is a bad generation: regenerate.
+  const ceiling = text.length / 9 + 3;
+  for (let attempt = 1; attempt <= 3 && t.length / parsed.sr > ceiling; attempt++) {
+    process.stdout.write(`(${(t.length / parsed.sr).toFixed(1)}s > ${ceiling.toFixed(1)}s ceiling, retry ${attempt}) `);
+    const r2 = await fetch(ENDPOINT_URL, { method: "POST", headers: { Authorization: `Key ${KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ prompt: text, style_instructions: STYLE, voice: "Charon", language_code: LANG_CODE, output_format: "wav", temperature: 0.7 }) });
+    const b2 = await r2.text(); if (!r2.ok) break;
+    const u2 = JSON.parse(b2)?.audio?.url; if (!u2) break;
+    buf = Buffer.from(await (await fetch(u2)).arrayBuffer()); parsed = parseWav(buf); t = trim(parsed.samples, parsed.sr);
+  }
+  if (t.length / parsed.sr > ceiling) { console.log(`STILL ${(t.length / parsed.sr).toFixed(1)}s — giving up on this clip`); failed.push(c.id); continue; }
   fs.writeFileSync(raw, buf);
-  const { sr, samples } = parseWav(buf);
-  const t = trim(samples, sr);
+  const { sr, samples } = parsed;
   fs.writeFileSync(trimmed, writeWav(t, sr));
   cache[c.id] = hash; spent += text.length;
   out.push({ id: c.id, file: trimmed, duration: t.length / sr, rawDuration: samples.length / sr });
   console.log(`${(samples.length / sr).toFixed(2)}s raw -> ${(t.length / sr).toFixed(2)}s speech`);
 }
 fs.writeFileSync(cacheFile, JSON.stringify(cache, null, 1));
-if (failed.length) { console.log(`\nFAILED: ${failed.join(", ")} — durations.json NOT written; reword and re-run`); fs.writeFileSync(cacheFile, JSON.stringify(cache, null, 1)); process.exit(2); }
+if (failed.length) {
+  // A stale durations.json from an earlier run would let the renderer proceed
+  // against clips that no longer exist — remove it so the failure is loud.
+  try { fs.unlinkSync(path.join(outDir, "durations.json")); } catch {}
+  console.log(`\nFAILED: ${failed.join(", ")} — durations.json removed; reword and re-run`); fs.writeFileSync(cacheFile, JSON.stringify(cache, null, 1)); process.exit(2); }
 fs.writeFileSync(path.join(outDir, "durations.json"), JSON.stringify(out, null, 1));
 const total = out.reduce((s, o) => s + o.duration, 0);
 console.log(`\n${out.length} clips · speech ${total.toFixed(1)}s · ${spent} chars ≈ $${(spent / 1000 * 0.05).toFixed(3)}`);

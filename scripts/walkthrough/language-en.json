@@ -13,13 +13,13 @@
  },
  {
   "id": "c03",
-  "text": "Type the username just as it appears in the message. Not your own email address.",
+  "text": "Type the login name exactly as it is written in the message. Do not use your own Gmail.",
   "roman": "",
   "caption": "Type the username from the message"
  },
  {
   "id": "c04",
-  "text": "Then type the password from the same message.",
+  "text": "Next, type the password that is given in the message.",
   "roman": "",
   "caption": "Now type the password"
  },
