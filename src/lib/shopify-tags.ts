@@ -80,11 +80,12 @@ export function splitOccasions(raw: string | null | undefined): string[] {
 /**
  * The copy's tag object -> the tag list Shopify receives.
  *
- * ONLY `occasion` is split and reduced. The other three keys are deliberately
+ * ONLY `occasion` is split and reduced. The other four keys are deliberately
  * left whole, because their "and" is descriptive rather than a list —
  * silhouette "Bustier and Draped Sharara Set", fabric "Net with Sequin and
- * Cutdana Embroidery". Splitting those would invent tags for garment parts
- * nobody filters on, and reducing them to one word would destroy them.
+ * Cutdana Embroidery", handwork "Zari and Cutdana". Splitting those would
+ * invent tags for garment parts nobody filters on, and reducing them to one
+ * word would destroy them: handwork "Mirror Work" would become "Mirror".
  */
 export function shopifyTagsFrom(tagObj: Record<string, string> | null | undefined): string[] {
   if (!tagObj) return [];

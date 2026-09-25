@@ -299,14 +299,19 @@ export async function publishShopify(designId: string, staffId: string, staffEma
       { category: designRow.category, subCategory: designRow.sub_category, color: designRow.color, colorName: designRow.color_name },
       vocab,
     );
-    // The four descriptive attributes the storefront filters on come from the
-    // VISION pass (Ansh, 21 Sep) — it is the thing that has actually looked at
-    // the garment. The verified spec stays underneath as the floor, never the
+    // The five descriptive attributes the storefront filters on come from the
+    // VISION pass (Ansh, 21 Sep; handwork joined them 25 Sep) — it is the thing
+    // that has actually looked at the garment. The verified spec stays underneath as the floor, never the
     // other way round: 96 of the 194 designs on prod carry a verified fabric
     // and no copy row yet, so taking the vision value ALONE would strip
     // custom.fabric off every one of them on the next push.
     //
     // silhouette has no verified counterpart, so it is vision or nothing.
+    //
+    // handwork keeps the same vision-over-spec order as fabric rather than
+    // becoming vision-only: 155 designs carry a hand-entered handwork today and
+    // taking vision ALONE would blank custom.handwork on every one that has no
+    // copy row yet.
     const visionTags = copy?.tags ?? {};
     const fromVision = (key: string): string | null => {
       const v = visionTags[key];
@@ -329,7 +334,7 @@ export async function publishShopify(designId: string, staffId: string, staffEma
     // Codes never leave the portal: the metafields carry the words a customer
     // reads ("Pre-Draped", not "PRD"; "Drevi Originals", not "drevi_original").
     const metaValues: Record<MetaKey, string | null> = {
-      handwork: designRow.handwork?.trim() || null,
+      handwork: fromVision("handwork") ?? (designRow.handwork?.trim() || null),
       fabric: fromVision("fabric") ?? (designRow.fabric?.trim() || null),
       sub_category: facts.subCategoryName?.trim() || null,
       category: facts.categoryName?.trim() || null,
