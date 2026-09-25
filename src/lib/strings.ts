@@ -29,6 +29,7 @@ const STRINGS = {
     "nav.dashboard": "Dashboard",
     "nav.orders": "Orders",
     "nav.buyers": "Buyers",
+    "nav.agents": "Agents",
     "nav.manage_catalog": "Manage Catalog",
     "nav.lovs": "Lists",
     "nav.audit": "Audit Log",

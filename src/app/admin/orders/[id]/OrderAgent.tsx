@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { palette } from "@/lib/palette";
 import { formatINR } from "@/lib/format";
 import { useToast } from "@/lib/use-toast";
-import { setOrderAgent } from "@/app/admin/agents/actions";
+import { setOrderAgent, createAgent } from "@/app/admin/agents/actions";
 import type { AgentOption } from "./AgentPrompt";
 
 /**
@@ -42,16 +42,26 @@ export function OrderAgent({
   const [agentId, setAgentId] = useState<string | null>(currentAgentId);
   const [pctText, setPctText] = useState(currentPct != null ? String(currentPct) : "");
   const [alsoLink, setAlsoLink] = useState(false);
+  // Agents created from right here. The picker offered "No agent" and a chip
+  // per EXISTING agent, so on a portal with none it offered nothing at all and
+  // there was no route from an order to creating one (Ansh, 25 Sep). Newly
+  // created ones are held locally as well as refreshed from the server, so the
+  // chip is selectable immediately instead of after a round trip.
+  const [minted, setMinted] = useState<AgentOption[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newPct, setNewPct] = useState("");
 
-  const current = agents.find((a) => a.id === currentAgentId) ?? null;
-  const chosen = agents.find((a) => a.id === agentId) ?? null;
+  const allAgents = [...agents, ...minted.filter((m) => !agents.some((a) => a.id === m.id))];
+  const current = allAgents.find((a) => a.id === currentAgentId) ?? null;
+  const chosen = allAgents.find((a) => a.id === agentId) ?? null;
   const frozen = accruedAmount != null;
 
   if (status === "cancelled") return null;
 
   function pick(id: string | null) {
     setAgentId(id);
-    const a = agents.find((x) => x.id === id);
+    const a = allAgents.find((x) => x.id === id);
     setPctText(a ? String(a.defaultPct) : "");
     setAlsoLink(false);
   }
@@ -105,13 +115,45 @@ export function OrderAgent({
               style={{ fontSize: 9.5, letterSpacing: "0.1em", padding: "6px 9px", background: agentId === null ? palette.black : "transparent", color: agentId === null ? palette.ivory : palette.softBlack, border: "1px solid rgba(26,26,26,0.2)" }}>
               No agent
             </button>
-            {agents.map((a) => (
+            {allAgents.map((a) => (
               <button key={a.id} type="button" onClick={() => pick(a.id)} className="font-body uppercase"
                 style={{ fontSize: 9.5, letterSpacing: "0.1em", padding: "6px 9px", background: agentId === a.id ? palette.black : "transparent", color: agentId === a.id ? palette.ivory : palette.softBlack, border: "1px solid rgba(26,26,26,0.2)" }}>
                 {a.name}{a.id === buyerAgentId ? " ·" : ""}
               </button>
             ))}
+            <button type="button" onClick={() => setCreating((v) => !v)} className="font-body uppercase"
+              style={{ fontSize: 9.5, letterSpacing: "0.1em", padding: "6px 9px", background: "transparent", color: palette.goldDeep, border: `1px dashed ${palette.goldDeep}` }}>
+              + New agent
+            </button>
           </div>
+
+          {creating && (
+            <div className="flex flex-wrap items-center gap-1.5 mt-2">
+              <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Agent name"
+                className="font-body" style={{ fontSize: 12, width: 160, border: "1px solid rgba(26,26,26,0.15)", background: "#fff", color: palette.black, padding: "6px 8px" }} />
+              <input type="number" min="0" max="100" step="0.01" value={newPct} onChange={(e) => setNewPct(e.target.value)} placeholder="%"
+                className="font-body text-right" style={{ fontSize: 12, width: 70, border: "1px solid rgba(26,26,26,0.15)", background: "#fff", color: palette.black, padding: "6px 8px" }} />
+              <button type="button" disabled={pending || !newName.trim()} className="font-body uppercase disabled:opacity-40"
+                style={{ fontSize: 9, letterSpacing: "0.12em", border: `1px solid ${palette.black}`, background: palette.black, color: palette.ivory, padding: "6px 10px" }}
+                onClick={() => start(async () => {
+                  const pct = Number(newPct) || 0;
+                  const res = await createAgent({ name: newName.trim(), phone: "", city: "", defaultCommissionPct: pct });
+                  if (!res.ok || !res.id) { flash(res.error ?? "Could not create the agent"); return; }
+                  const made = { id: res.id, name: newName.trim(), defaultPct: pct };
+                  setMinted((m) => [...m, made]);
+                  setAgentId(made.id);
+                  setPctText(String(pct));
+                  setCreating(false); setNewName(""); setNewPct("");
+                  flash(`${made.name} created`);
+                  router.refresh();
+                })}>
+                Create
+              </button>
+              <span className="font-body" style={{ fontSize: 9.5, color: palette.mutedGreige }}>
+                phone and city can be added on the agent&apos;s page
+              </span>
+            </div>
+          )}
           {chosen && (
             <>
               <div className="flex items-center gap-1 mt-2">
