@@ -6,8 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   House, Store, Boxes, Palette, Briefcase, ScanLine,
   Tag, QrCode, LayoutGrid, Tent, Truck, PackageCheck, Users,
-  ShoppingBag, ScrollText, Shield, BarChart3, SlidersHorizontal, RefreshCw,
-} from "lucide-react";
+  ShoppingBag, ScrollText, Shield, BarChart3, SlidersHorizontal, RefreshCw, Handshake,} from "lucide-react";
 import { SignOutButton } from "@/components/SignOutButton";
 import { palette } from "@/lib/palette";
 import { t } from "@/lib/strings";
@@ -37,6 +36,7 @@ const ITEM_ICONS: Record<string, typeof Tag> = {
   "/admin/dashboard": BarChart3,
   "/admin/orders": ShoppingBag,
   "/admin/buyers": Users,
+  "/admin/agents": Handshake,
   "/admin/manage-catalog": SlidersHorizontal,
   "/admin/lovs": SlidersHorizontal,
   "/admin/audit": ScrollText,

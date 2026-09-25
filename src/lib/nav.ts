@@ -77,12 +77,13 @@ export const SPACES: Space[] = [
       { label: "nav.dashboard", href: "/admin/dashboard" },
       { label: "nav.orders", href: "/admin/orders" },
       { label: "nav.buyers", href: "/admin/buyers" },
+      { label: "nav.agents", href: "/admin/agents" },
       { label: "nav.manage_catalog", href: "/admin/manage-catalog" },
       { label: "nav.lovs", href: "/admin/lovs" },
       { label: "nav.audit", href: "/admin/audit" },
       { label: "nav.staff", href: "/admin/staff", roles: SUPER_ONLY },
       // /admin/credit-notes is deliberately NOT a tab (11 Sep): Office already
-      // reaches 7 items for super_admin and the sub-tab strip overflows at six,
+      // reaches 8 items for super_admin and the sub-tab strip overflows at six,
       // so the register is reached from the Dashboard's Credit tile and the
       // buyer Wallet card instead. spaceForPath then matches no item, so a
       // drill-in lights no Office tab — acceptable for a register opened from
