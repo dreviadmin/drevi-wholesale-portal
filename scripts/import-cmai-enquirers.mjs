@@ -336,7 +336,7 @@ for (const f of fresh) {
   // is computable by anyone who knows the shop name, and a trailing "123"
   // trips the breach warnings in phone keyboards and password managers.
   // Same generator the admin's own credential button uses.
-  f.password = generateBuyerPassword();
+  f.password = generateBuyerPassword(null, f.business_name);
 }
 const clashes = fresh.filter((f) => f.usernameClash);
 
