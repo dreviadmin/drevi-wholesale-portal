@@ -21,8 +21,11 @@ const only = (() => { const i = process.argv.indexOf("--only"); return i >= 0 ? 
 const list = JSON.parse(fs.readFileSync(listFile, "utf8")).filter((r) => !only || r.sku === only);
 const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const BY = "ansh@drevifashion.com (fix-handwork script)";
-const STAFF_ID = "◇ injected env (16) from .env.local // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
-3f1b2578-5c3d-4618-a480-16de516869ff"; // the audit row needs a real staff_users id
+// The push's audit event has a foreign key on staff_users; look the id up here
+// rather than pass it in from a shell — dotenv prints a banner to stdout and a
+// $(...) capture of that is banner + id, which is how the first run failed.
+const { data: staffRow } = await admin.from("staff_users").select("id").eq("email", "ansh@drevifashion.com").single();
+const STAFF_ID = staffRow.id;
 
 let ok = 0, noTag = 0, pushed = 0; const problems = [];
 for (const r of list) {
