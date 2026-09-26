@@ -7,6 +7,8 @@ import { fetchProductImageUrls } from "@/lib/shopify-auth";
 import { drivePhotosEnabled, fetchSkuImagesBytes } from "@/lib/drive";
 import { uploadProductPhoto } from "@/lib/storage";
 import { ingestDesigns } from "@/lib/studio/ingest";
+import { loadVocab } from "@/lib/sku/vocab-live";
+import { catalogCategoryFor } from "@/lib/studio/category-from-sku";
 
 // Logical key -> Master Sheet display header (matched by suffix). Descriptive
 // fields come from the pipeline's known columns; the wholesale-specific columns
@@ -199,18 +201,24 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
   const vendorInfo: Array<Record<string, unknown>> = [];
   const seenVendor = new Set<string>();
 
+  // Category / sub-category: the sheet's typed value wins, a blank falls back
+  // to the SKU's own codes (Ansh, 27 Sep: "you can always get the category
+  // from the SKU"). Before this, a blank Category cell became a NULL column
+  // and the design vanished from every category on the buyer home.
+  const vocab = await loadVocab();
   const push = (row: Record<string, string>, opts: { price: number; liveUrl: string | null; restockable: boolean; restockDays: number | null }) => {
     // Canonicalize to uppercase — the PK is case-sensitive, and every set/map
     // (included, ignored, qualifying, existingBySku, onConflict) keys on the
     // uppercase form. Storing mixed case here would split a re-cased sheet SKU
     // into a duplicate row and drop its locks. (See migration 0011.)
     const sku = row.sku.trim().toUpperCase();
+    const names = catalogCategoryFor({ category: row.category, subCategory: row.sub_category }, sku, vocab);
     products.push({
       sku,
       title: row.title || null,
       description: row.description || null,
-      category: row.category || null,
-      sub_category: row.sub_category || null,
+      category: names.category,
+      sub_category: names.subCategory,
       color: row.color || null,
       primary_fabric: row.primary_fabric || null,
       // Only SET hsn when the sheet actually provides one — the sheet has no
