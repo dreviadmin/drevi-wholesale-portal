@@ -79,6 +79,13 @@ so a halfway failure cannot double-send, pacing, per-language media URL).
     priority by your own call; noted so it is not forgotten.
 18. **Signature image** for the invoice signatory block (from 14 Sep).
 19. **FASHN credits** are still exhausted.
+20. **Sheet-sync cron looks stalled.** The GitHub Actions job is meant to hit
+    `/api/cron/sync-products` every 10 minutes, but prod's last sync ran at
+    17:28 UTC on 26 Sep and none fired in the 10-minute window I watched after
+    the category backfill. Likely cause: the Action's `PORTAL_URL` secret points
+    at the dead wholesale.drevifashion.com. Either fix the domain (item 14) or
+    point the secret at drevi-wholesale-portal-swart.vercel.app; say which and
+    I check the Actions log.
 
 ---
 
