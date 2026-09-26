@@ -31,6 +31,13 @@ export async function POST(req: Request) {
   // Local testing only: hand the code back so a dev can log in without a
   // WhatsApp round-trip. Both guards must hold; production never returns it.
   const reveal = process.env.NODE_ENV !== "production" && (process.env.WALLET_DEV_RETURN_OTP ?? "").toLowerCase() === "true";
+  // A code that was never sent must not leave the customer staring at an
+  // empty WhatsApp. Say so, with the provider's reason (not secret) so the
+  // person testing can tell "no API key" from "wrong campaign name".
+  if (!wa.sent && !wa.dryRun) {
+    return json(req, { ok: false, error: "We couldn't send the code just now. Please try again in a minute.",
+      sent: false, dry_run: false, reason: wa.error ?? "provider_rejected" }, 502);
+  }
   return json(req, {
     ok: true,
     sent: wa.sent,
