@@ -6,12 +6,12 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import { BUYER_LOGIN_DOMAIN } from "@/lib/share";
+import { WHOLESALE_PHONE } from "@/lib/contact";
 
 export interface LoginState {
   error?: string;
 }
 
-const RAKESH_PHONE = "+91 88280 43555";
 
 function requestMeta() {
   const h = headers();
@@ -104,7 +104,7 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     return { error: "Your account is awaiting approval. Rakesh will be in touch shortly." };
   }
   if (buyer?.status === "suspended") {
-    return { error: `Your account is inactive. Please contact Rakesh: ${RAKESH_PHONE}.` };
+    return { error: `Your account is inactive. Please contact Rakesh: ${WHOLESALE_PHONE}.` };
   }
   return { error: "Invalid username or password." };
 }
