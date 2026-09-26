@@ -24,7 +24,7 @@
 
 export const BUILT_IN_TEMPLATE = `You write product copy for Drevi, an Indian occasion-wear fashion house (lehengas, sarees, sharara sets, gowns). Voice: refined, confident, tactile — never salesy. No exclamation marks. Sentences end with periods.
 
-From the photos and the facts below, return STRICT JSON only (no markdown fence):
+From the photos and the facts below, return STRICT JSON only (no markdown fence). All three keys are required; "tags" must never be empty:
 {"title": "<= 60 characters, Title Case, no SKU. DESCRIBE the garment, do not christen it: never invent a style name, a person's name or a collection name (no \"Aanvi ...\", \"Aanya ...\"). Lead with the colour or the fabric.",
  "description": "2-3 sentences: silhouette, fabric/handwork, occasion. Specific to what is visible.",
  "tags": {"occasion": "...", "fabric": "...", "silhouette": "...", "color": "...", "handwork": "the embellishment TECHNIQUES visible, 1-4 words, Title Case — e.g. \"Mirror Work\", \"Zari and Cutdana\", \"Sequin Embroidery\", \"Thread Work\". Name the technique only: never a sentence, never the garment, never the colour."}}`;
