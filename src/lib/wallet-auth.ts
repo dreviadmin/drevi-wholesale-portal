@@ -3,6 +3,7 @@ import "server-only";
 import { createHmac, createHash, randomInt, timingSafeEqual } from "node:crypto";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { normalizePhone } from "@/lib/wallet-core";
 import { WALLET_DEFAULTS } from "@/lib/wallet-core";
 
 // Who is this phone? Two halves. A one-time code over WhatsApp proves the
@@ -27,8 +28,24 @@ function otpHash(phone: string, code: string): string {
 }
 
 export type OtpIssue =
-  | { ok: true; code: string; id: string }
+  | { ok: true; code: string; id: string; fixed?: boolean }
   | { ok: false; reason: "rate_limited_phone" | "rate_limited_ip" };
+
+/**
+ * Test phones with a fixed code, from WALLET_FIXED_OTPS ("91XXXXXXXXXX=816999,
+ * 91YYYYYYYYYY=123456"). Such a phone gets no WhatsApp message and no stored
+ * code: the listed code simply verifies, so an automated test can log in
+ * without a handset. Keep the list to numbers the business owns.
+ */
+export function fixedOtpFor(phone: string): string | null {
+  const raw = process.env.WALLET_FIXED_OTPS ?? "";
+  for (const pair of raw.split(",")) {
+    const [p, c] = pair.split("=").map((s) => (s ?? "").trim());
+    if (!p || !c) continue;
+    if (normalizePhone(p) === phone && /^\d{6}$/.test(c)) return c;
+  }
+  return null;
+}
 
 /**
  * Mint a 6-digit code for a phone. Rate-limited per phone and per IP by
@@ -37,6 +54,8 @@ export type OtpIssue =
  * stored, only its HMAC.
  */
 export async function issueOtp(phone: string, ip: string | null): Promise<OtpIssue> {
+  const fixed = fixedOtpFor(phone);
+  if (fixed) return { ok: true, code: fixed, id: "fixed", fixed: true };
   const admin = createAdminClient();
   const since = new Date(Date.now() - OTP_WINDOW_MS).toISOString();
 
@@ -71,6 +90,8 @@ export type OtpVerify = { ok: true } | { ok: false; reason: "no_code" | "expired
 
 /** Check a code against the newest unconsumed one for the phone. */
 export async function verifyOtp(phone: string, code: string): Promise<OtpVerify> {
+  const fixed = fixedOtpFor(phone);
+  if (fixed) return code.replace(/\D/g, "") === fixed ? { ok: true } : { ok: false, reason: "wrong" };
   const admin = createAdminClient();
   const { data: row } = await admin
     .from("wallet_otps")
