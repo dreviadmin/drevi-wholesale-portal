@@ -5,6 +5,8 @@ import { fetchImageByRef } from "@/lib/design-image-store";
 import { uploadPublishedImage } from "@/lib/storage";
 import { writeAuditEvent } from "@/lib/audit";
 import { loadDesignDetail } from "./load";
+import { loadVocab } from "@/lib/sku/vocab-live";
+import { categoryNamesForDesign } from "./category-from-sku";
 import { ALL_ANGLES } from "./state";
 
 // Stage 7a — wholesale publish (build guide §11.2). Idempotent: Re-push runs
@@ -159,6 +161,18 @@ export async function publishWholesale(designId: string, staffId: string, staffE
     const publishedCount = set.count ?? webUrls.length;
     const nowIso = new Date().toISOString();
 
+    // The push is the second writer of category / sub_category (the sheet sync
+    // being the first). A design reaches the buyer catalog through this push
+    // before the sheet ever hears of it, so writing the names here — from the
+    // design's own codes, SKU as fallback — is what puts it in its category on
+    // the buyer home from the first minute. Locked, like title and
+    // description: Studio is the product page now, the sheet does not move it.
+    const [{ data: designCodes }, vocab] = await Promise.all([
+      admin.from("designs").select("category, sub_category").eq("id", designId).maybeSingle(),
+      loadVocab(),
+    ]);
+    const names = categoryNamesForDesign({ category: designCodes?.category, subCategory: designCodes?.sub_category }, board.baseSku, vocab);
+
     // Every size variant of the (base, color) group gets the published set.
     const { data: variants, error: vErr } = await admin
       .from("wholesale_products")
@@ -186,7 +200,13 @@ export async function publishWholesale(designId: string, staffId: string, staffE
       // the push now says so. The lock stays: the flag is an app decision and
       // the sheet must not move it back.
       locks.add("wholesale_visible");
+      // Each column on its own: a design whose category resolves but whose sub
+      // code does not must not blank (and lock) a sub-category someone typed.
+      if (names.category) locks.add("category");
+      if (names.subCategory) locks.add("sub_category");
       const patch: Record<string, unknown> = {
+        ...(names.category ? { category: names.category } : {}),
+        ...(names.subCategory ? { sub_category: names.subCategory } : {}),
         image_urls: webUrls,
         images_fetched_at: nowIso,
         wholesale_visible: true,

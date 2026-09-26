@@ -9,11 +9,15 @@ WhatsApp, 6 without any phone.
 
 ### A. AiSensy — the credential send
 
-1. **Template 1 (Rakesh's greeting, Marketing).** Strip the Link / Username /
-   Password block — marketing sends drop silently at the per-user cap (error
-   131049 arrives as a 200 with a message id), and a login cannot ride in a
-   message allowed to fail silently. Keep the URL button and *Stop promotions*.
-   Submit explicitly as **Marketing**.
+1. **Template 1 (Rakesh's greeting, Marketing).** Keep the Link / Username /
+   Password block — Ansh, 27 Sep: Rakesh says the login is below in the video,
+   so the message must carry it. It stays a Marketing template (video, "now
+   live", *Stop promotions*), which means Meta may drop it for buyers at their
+   per-user marketing cap (error 131049 arrives as a 200 with a message id).
+   That is fine ONLY because Template 2 carries the same credentials as a
+   Utility send: T2 is the guaranteed copy, T1 the friendly one. Both sends
+   must read the same stored password in the same run — never rotate between
+   them. Submit explicitly as **Marketing**.
 2. **Template 2 (walkthrough + login, Utility).** Keep `+91 99300 86178` —
    the portal now shows the same number on forgot-password, the suspended
    login message and the share text. Submit as **Utility** with
@@ -38,14 +42,12 @@ so a halfway failure cannot double-send, pacing, per-language media URL).
 
 ### B. Data the new home navigation exposes
 
-7. **62 designs (65 rows) have NO category** — nearly half the visible
-   catalog sits outside the new category → sub-category tree and is reachable
-   only through *View all designs*. Their SKUs already encode it
-   (`DD-LEH-FLR-144` = Lehenga / Flared-Kali, `DD-SAR-PRD-091` = Saree /
-   Pre-Draped, `DD-SEP-SKT-008` = Separates / Skirt). Say the word and I derive
-   category + sub_category from the SKU code via the vocab and lock the two
-   fields against the sheet cron. Your call because the sheet owns those
-   columns today.
+7. ~~62 designs (65 rows) have NO category~~ — **DONE 27 Sep.** "You can
+   always get the category from the SKU": the sheet sync and the Studio push
+   now derive category / sub-category from the SKU codes whenever the sheet
+   cell is blank, and the 75 blank prod rows were backfilled (46 Lehenga /
+   Flared-Kali, 9 Palazzo Suit, 7 Pre-Draped Saree, 6 Skirt, 4 Mermaid, 3
+   Indo-Western). Nothing left for you here.
 8. **Traditional / Indo-Western (`style`)** is a Specs dropdown now but set on
    0 of 297 designs. It drives nothing until it is filled.
 9. **Origin** is set on 155 of 297; the Shopify `custom.origin` metafield is
