@@ -3,9 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { palette } from "@/lib/palette";
-
-const RAKESH_PHONE = "+91 88280 43555";
-const RAKESH_WA = "918828043555";
+import { WHOLESALE_PHONE, WHOLESALE_PHONE_DIGITS } from "@/lib/contact";
 
 export default function ForgotPasswordPage() {
   // Buyers log in with a username (staff with an email) — either identifies
@@ -15,7 +13,7 @@ export default function ForgotPasswordPage() {
   // Credentials are managed by Rakesh (there is no self-serve reset), so this
   // page routes the buyer to him with a pre-filled WhatsApp message rather than
   // sending a reset link that lands nowhere.
-  const waHref = `https://wa.me/${RAKESH_WA}?text=${encodeURIComponent(
+  const waHref = `https://wa.me/${WHOLESALE_PHONE_DIGITS}?text=${encodeURIComponent(
     `Hi Rakesh, please reset my Drevi wholesale portal password${loginId.trim() ? ` for ${loginId.trim()}` : ""}.`,
   )}`;
 
@@ -34,7 +32,7 @@ export default function ForgotPasswordPage() {
         <div style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)", padding: 28 }}>
           <p className="font-body" style={{ fontSize: 12, color: palette.softBlack, lineHeight: 1.7 }}>
             Your login is managed by the Drevi team. Enter your username and tap below to message Rakesh on
-            WhatsApp ({RAKESH_PHONE}) — he&apos;ll reset your password and send it back.
+            WhatsApp ({WHOLESALE_PHONE}) — he&apos;ll reset your password and send it back.
           </p>
           <label className="flex flex-col gap-1.5 mt-4">
             <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>
