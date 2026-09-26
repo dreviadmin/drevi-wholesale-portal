@@ -1,5 +1,86 @@
 # Needed from Ansh
 
+## Pending from you — 27 Sep 2026 (launch order)
+
+Everything below is blocked on you; everything not listed is done and live.
+Prod facts as of this morning: 248 buyers, all active, all with a login on
+the firstname+3digits scheme (rotated 26 Sep, audited); 242 reachable on
+WhatsApp, 6 without any phone.
+
+### A. AiSensy — the credential send
+
+1. **Template 1 (Rakesh's greeting, Marketing).** Strip the Link / Username /
+   Password block — marketing sends drop silently at the per-user cap (error
+   131049 arrives as a 200 with a message id), and a login cannot ride in a
+   message allowed to fail silently. Keep the URL button and *Stop promotions*.
+   Submit explicitly as **Marketing**.
+2. **Template 2 (walkthrough + login, Utility).** Keep `+91 99300 86178` —
+   the portal now shows the same number on forgot-password, the suspended
+   login message and the share text. Submit as **Utility** with
+   `hindi-private.mp4` as the header sample (prices visible; this goes 1:1).
+   Sample values on the new password scheme: `royal` / `royal482`. Optional
+   `{{1}}` shop-name greeting.
+3. **After approval:** one **Live API campaign** per template. Send me both
+   campaign names exactly as typed (case and spacing) — the API addresses
+   campaigns, not templates.
+4. **Rakesh's greeting video file** (H.264, under 16 MB). I host it the same
+   way as the walkthrough.
+5. **Stop promotions handling:** check AiSensy Manage → opt-out keywords
+   covers the quick-reply text; if not, I add a webhook and a
+   `marketing_opt_out` column so the button is not decorative.
+6. **Confirm the waves:** you first (both templates), then five buyers, then
+   the rest. T1, then T2 about fifteen minutes later. 242 recipients sits
+   under Meta's 250-unique-recipients/24h starting tier.
+
+Then it is mine: the AiSensy adapter replacing `src/lib/interakt.ts`
+(`success === "true"`, stored `submitted_message_id`, `credentials_sent_at`
+so a halfway failure cannot double-send, pacing, per-language media URL).
+
+### B. Data the new home navigation exposes
+
+7. **62 designs (65 rows) have NO category** — nearly half the visible
+   catalog sits outside the new category → sub-category tree and is reachable
+   only through *View all designs*. Their SKUs already encode it
+   (`DD-LEH-FLR-144` = Lehenga / Flared-Kali, `DD-SAR-PRD-091` = Saree /
+   Pre-Draped, `DD-SEP-SKT-008` = Separates / Skirt). Say the word and I derive
+   category + sub_category from the SKU code via the vocab and lock the two
+   fields against the sheet cron. Your call because the sheet owns those
+   columns today.
+8. **Traditional / Indo-Western (`style`)** is a Specs dropdown now but set on
+   0 of 297 designs. It drives nothing until it is filled.
+9. **Origin** is set on 155 of 297; the Shopify `custom.origin` metafield is
+   simply absent on the rest.
+10. **MRM-076 and PLZ-050:** copy was generated with the spec check bypassed.
+    Verify their specs; I regenerate copy if anything was wrong.
+11. **Six buyers with no phone at all:** house of arradhiya · Neeta Lahrani -
+    Bespoke Couture · Namo Designer · Shilpa - Old Story · Ganpati Saree ·
+    Mansi Vora. Numbers, or they get credentials another way.
+
+### C. Decisions
+
+12. **Supplier phone on tax documents.** `src/lib/supplier.ts` still prints the
+    retail line (+91 88280 43555). Retail bills and wholesale invoices share
+    that block — keep it, or split so wholesale invoices carry 99300 86178.
+13. **Where alerts land.** Inquiry / order / pending-review alerts are
+    addressed to the 88280 handset. Keep, or move to the wholesale line.
+14. **wholesale.drevifashion.com** is still dead (DNS → Vercel, no domain on
+    the project). Add the domain to the prod Vercel project + DNS; until then
+    every link says drevi-wholesale-portal-swart.vercel.app. The dev project
+    also lacks `NEXT_PUBLIC_PORTAL_URL`.
+15. **Public onboarding page.** The three price-masked walkthroughs (Hindi,
+    English, Gujarati) are in `~/Downloads/Drevi_Portal_Video/v3/`. Tell me
+    where they live (Shopify page on the theme?) and I build it.
+16. **Sheet sync retirement** (~end Sep, decided 2 Aug): say when and I flip
+    `SHEET_SYNC_ENABLED=false` and drop the guard.
+17. **One `PORTAL_PASSWORD_MASTER_KEY` across dev and prod** — still true.
+    Rotating means re-encrypting every buyers.encrypted_password row. Low
+    priority by your own call; noted so it is not forgotten.
+18. **Signature image** for the invoice signatory block (from 14 Sep).
+19. **FASHN credits** are still exhausted.
+
+---
+
+
 Living checklist of everything that is blocked on you — kept current through the
 UX sprint (30 Jul 2026). Everything else in the sprint is done and verified on
 dev; none of it touches production.
