@@ -43,7 +43,7 @@ const page = await ctx.newPage();
 // and every capture goes out unscrubbed, which is what the leak check found.
 await page.addInitScript(({ mask }) => {
   // "(+91 88280 43555)" and "+91 8828043555" both: the 0 can sit on either side of the space.
-  const PHONE = /[(]?[+]?\s?91[\s-]?8828[\s-]?0[\s-]?43555[)]?|[(]?8828043555[)]?/g;
+  const PHONE = /[(]?[+]?\s?91[\s-]?(?:8828[\s-]?0[\s-]?43555|9930[\s-]?0[\s-]?86178)[)]?|[(]?(?:8828043555|9930086178)[)]?/g;
   const PRICE = /₹\s?[0-9][0-9,]*(?:\.[0-9]+)?/g;
   function scrub(root) {
     if (!root) return;

@@ -1,3 +1,5 @@
+import { WHOLESALE_PHONE } from "@/lib/contact";
+
 // Pure builders for the WhatsApp credential message (spec §6.5) and the vCard
 // (spec §7.6). Called from client handlers that invoke the Web Share API / wa.me
 // or trigger a .vcf download.
@@ -9,7 +11,6 @@
 // same link the server sends.
 export const PORTAL_URL =
   (process.env.NEXT_PUBLIC_PORTAL_URL ?? "").trim() || "wholesale.drevifashion.com";
-const RAKESH_PHONE = "+91 88280 43555";
 
 // Buyers sign in with a bare username (first word of the business name).
 // Supabase Auth still requires an email, so the portal stores
@@ -42,7 +43,7 @@ export function buildWhatsAppMessage(email: string, password: string): string {
     "browse our full catalog with wholesale pricing.",
     "",
     "- Rakesh",
-    RAKESH_PHONE,
+    WHOLESALE_PHONE,
   ].join("\n");
 }
 
