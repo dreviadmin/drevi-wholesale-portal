@@ -32,7 +32,24 @@ type EnvKey =
   | "HANDLING_DAYS"              // 2
   | "AVAILABILITY_BUFFER_DAYS"   // 3
   | "LIMITED_THRESHOLD"          // 5
-  | "SUPPLY_STALE_DAYS";         // 60
+  | "SUPPLY_STALE_DAYS"           // 60
+  // Drevi Wallet (26 Sep) — see docs/wallet.md. All optional except the two
+  // Shopify credentials, which must be the "Drevi Admin Automation" app: the
+  // portal's own app ("Drevi Pipeline") has no customer/discount/order scopes.
+  | "WALLET_SHOPIFY_CLIENT_ID"
+  | "WALLET_SHOPIFY_CLIENT_SECRET"
+  | "WALLET_SESSION_SECRET"       // >=32 chars; derived from the master key when absent
+  | "WALLET_ALLOWED_ORIGINS"      // comma list; defaults to drevifashion.com + myshopify
+  | "WALLET_WA_LIVE"              // 'true' to actually send WhatsApp; anything else is a dry run
+  | "WALLET_DEV_RETURN_OTP"       // 'true' + non-production: OTP echoed in the send response
+  | "AISENSY_API_KEY"
+  | "AISENSY_CAMPAIGN_OTP"        // campaign names as created in AiSensy
+  | "AISENSY_CAMPAIGN_WELCOME"
+  | "AISENSY_CAMPAIGN_BALANCE"
+  | "WALLET_WELCOME_PAISE"        // 100000
+  | "WALLET_EARN_PERCENT"         // 10
+  | "WALLET_MIN_ORDER_PAISE"      // 500000
+  | "WALLET_EXPIRY_MONTHS";       // 12
 
 // Vars Phase 1 needs to run. Interakt (Phase 4) is intentionally excluded.
 const REQUIRED_PHASE_1: EnvKey[] = [

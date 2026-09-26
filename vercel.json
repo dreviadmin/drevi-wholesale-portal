@@ -6,6 +6,10 @@
     {
       "path": "/api/cron/sync-products",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/wallet-expire",
+      "schedule": "30 3 * * *"
     }
   ],
   "git": {
