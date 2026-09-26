@@ -26,7 +26,17 @@ function live(): boolean {
   return (process.env.WALLET_WA_LIVE ?? "").toLowerCase() === "true";
 }
 
-async function send(campaignEnv: string, fallbackName: string, phone: string, userName: string, params: string[], tags: string[] = []): Promise<WaResult> {
+/**
+ * Meta's component format for a template button that takes a parameter —
+ * the copy-code button on an Authentication template. AiSensy passes it
+ * through. Without it Meta rejects the send with "Required parameter is
+ * missing" (seen on the first live test): an OTP template needs the code
+ * twice, once for the body and once for the button.
+ */
+type ButtonParam = { type: "button"; sub_type: "url"; index: number; parameters: Array<{ type: "text"; text: string }> };
+const copyCodeButton = (code: string): ButtonParam[] => [{ type: "button", sub_type: "url", index: 0, parameters: [{ type: "text", text: code }] }];
+
+async function send(campaignEnv: string, fallbackName: string, phone: string, userName: string, params: string[], tags: string[] = [], buttons?: ButtonParam[]): Promise<WaResult> {
   const campaignName = process.env[campaignEnv] || fallbackName;
   const apiKey = process.env.AISENSY_API_KEY;
   if (!live()) {
@@ -49,6 +59,7 @@ async function send(campaignEnv: string, fallbackName: string, phone: string, us
         source: "drevi-wallet",
         templateParams: params,
         tags: ["wallet", ...tags],
+        ...(buttons ? { buttons } : {}),
       }),
       signal: AbortSignal.timeout(8000),
     });
@@ -67,7 +78,7 @@ async function send(campaignEnv: string, fallbackName: string, phone: string, us
 }
 
 export function sendWalletOtp(phone: string, code: string): Promise<WaResult> {
-  return send("AISENSY_CAMPAIGN_OTP", "drevi_wallet_otp", phone, "Customer", [code]);
+  return send("AISENSY_CAMPAIGN_OTP", "drevi_wallet_otp", phone, "Customer", [code], [], copyCodeButton(code));
 }
 
 export function sendWalletWelcome(phone: string, name: string | null, balancePaise: number): Promise<WaResult> {
