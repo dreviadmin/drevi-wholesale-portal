@@ -198,25 +198,45 @@ export function BuyerHome({ businessName, city, cartCount, data, wallet }: {
           </>
         )}
 
-        {/* Categories */}
-        {data.categories.length > 0 && (
-          <>
-            <div className="font-body uppercase mt-6" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>Shop by category</div>
-            <div className="flex gap-1.5 mt-2 flex-wrap">
-              {data.categories.map((c) => (
-                <Link key={c} href={`/catalog?cat=${encodeURIComponent(c)}`} className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.1em", padding: "8px 12px", background: "#fff", border: "1px solid rgba(26,26,26,0.12)", color: palette.softBlack }}>
-                  {c}
-                </Link>
-              ))}
-            </div>
-          </>
-        )}
-
-        {data.reorder.length === 0 && data.newThisWeek.length === 0 && (
-          <Link href="/catalog" className="block text-center font-body uppercase mt-8" style={{ fontSize: 10.5, letterSpacing: "0.18em", background: palette.black, color: palette.gold, padding: "14px 0" }}>
-            Browse the catalog
+        {/* Browse — "View all designs" first, then category → sub-category,
+            the way the Shopify storefront navigates. Only non-empty branches
+            reach this component (buildCategoryTree), so nothing here is a
+            dead end. */}
+        <div className="font-body uppercase mt-6" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>Shop by category</div>
+        <div className="flex flex-col gap-2 mt-2">
+          <Link href="/catalog" className="flex items-center justify-between" style={{ background: palette.black, color: palette.gold, padding: "13px 14px" }}>
+            <span className="font-body uppercase" style={{ fontSize: 10.5, letterSpacing: "0.18em" }}>View all designs</span>
+            <span className="flex items-center gap-1 font-body" style={{ fontSize: 10.5, letterSpacing: "0.06em", opacity: 0.9 }}>
+              {data.totalDesigns}
+              <ChevronRight size={15} strokeWidth={2} />
+            </span>
           </Link>
-        )}
+          {data.categories.map((c) => (
+            <div key={c.name} style={{ background: "#fff", border: "1px solid rgba(26,26,26,0.08)" }}>
+              <Link href={`/catalog?cat=${encodeURIComponent(c.name)}`} className="flex items-center justify-between" style={{ padding: "11px 14px" }}>
+                <span className="font-display" style={{ fontSize: 14.5, fontWeight: 600, color: palette.black }}>{c.name}</span>
+                <span className="flex items-center gap-1 font-body" style={{ fontSize: 10, letterSpacing: "0.06em", color: palette.mutedGreige }}>
+                  {c.count} {c.count === 1 ? "design" : "designs"}
+                  <ChevronRight size={14} strokeWidth={2} />
+                </span>
+              </Link>
+              {c.subs.length > 0 && (
+                <div className="flex flex-wrap gap-1.5" style={{ padding: "0 14px 12px" }}>
+                  {c.subs.map((s) => (
+                    <Link key={s.name} href={`/catalog?cat=${encodeURIComponent(c.name)}&sub=${encodeURIComponent(s.name)}`} className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.1em", padding: "7px 10px", border: "1px solid rgba(26,26,26,0.12)", color: palette.softBlack }}>
+                      {s.name} <span style={{ color: palette.mutedGreige, marginLeft: 3 }}>{s.count}</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+          {data.totalDesigns === 0 && (
+            <div className="font-body text-center" style={{ fontSize: 11, color: palette.mutedGreige, padding: "12px 0" }}>
+              New designs appear here as they are published.
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Buyer scan FAB */}

@@ -1,14 +1,13 @@
 /**
- * Re-issue every buyer's password on the memorable scheme.
+ * Re-issue every buyer's password on the current buyer scheme.
  *
- *   node scripts/rotate-buyer-passwords.mjs [--prod] [--dry-run]
+ *   node scripts/rotate-buyer-passwords.mjs [--prod] [--dry-run] [--force]
  *
- * WHY: passwords were bulk-issued as <username>xdrevi (and once as
- * <username>123). Both are derivable by anyone who knows the shop name, and a
- * trailing "123" is flagged as breached by phone keyboards and password
- * managers. This moves every buyer onto generateBuyerPassword() —
- * Word-Word-4digits — which is what the admin's own credential button and
- * staff creation have always issued.
+ * WHY: passwords were bulk-issued as <username>xdrevi, then <username>123,
+ * then one-word+4digits. Ansh settled the scheme on 26 Sep: the owner's first
+ * name and three digits ("rakhi482"), security concern raised and accepted.
+ * This moves every buyer onto generateBuyerPassword(owner, business), the
+ * same generator the admin's own Regenerate button issues from.
  *
  * SAFE TO RUN ONLY BECAUSE NOTHING HAS BEEN SENT: auth_audit_log carries zero
  * credential-share events and zero buyer logins (every login_success row is a
@@ -58,11 +57,11 @@ if (shares.length || buyerLogins.length) {
 }
 
 const { data: buyers } = await admin
-  .from("buyers").select("id, business_name, email, encrypted_password").not("email", "is", null).order("business_name").range(0, 9999);
+  .from("buyers").select("id, business_name, owner_name, email, encrypted_password").not("email", "is", null).order("business_name").range(0, 9999);
 console.log(`buyers to rotate: ${buyers.length}`);
 if (DRY) {
   console.log("\nsample of what would be issued:");
-  buyers.slice(0, 5).forEach((b) => console.log(`  ${(b.business_name ?? "").padEnd(38)} ${b.email.split("@")[0].padEnd(22)} ${generateBuyerPassword()}`));
+  buyers.slice(0, 5).forEach((b) => console.log(`  ${(b.business_name ?? "").padEnd(38)} ${b.email.split("@")[0].padEnd(22)} ${generateBuyerPassword(b.owner_name, b.business_name)}`));
   console.log("\n--dry-run — nothing written.");
   process.exit(0);
 }
@@ -72,7 +71,7 @@ const authByEmail = new Map((page?.users ?? []).map((u) => [(u.email || "").toLo
 
 let done = 0; const failed = []; const issued = [];
 for (const b of buyers) {
-  const pw = generateBuyerPassword();
+  const pw = generateBuyerPassword(b.owner_name, b.business_name);
   const hit = authByEmail.get(b.email.toLowerCase());
   if (!hit) { failed.push(`${b.business_name} <${b.email}> — no auth user`); continue; }
   const { error: aErr } = await admin.auth.admin.updateUserById(hit.id, { password: pw, email_confirm: true });

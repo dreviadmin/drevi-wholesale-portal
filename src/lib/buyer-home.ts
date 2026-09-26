@@ -2,6 +2,9 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { BUYER_PRODUCT_COLUMNS, type WholesaleProduct } from "@/lib/types";
+import { buildCategoryTree, type CategoryNode } from "@/lib/category-tree";
+
+export type { CategoryNode } from "@/lib/category-tree";
 
 // Buyer storefront home data (build guide §13). PRICING FIREWALL: everything
 // returned here is buyer-safe — list wholesale prices only, never cost,
@@ -25,7 +28,10 @@ export interface BuyerHomeData {
   reorder: ReorderItem[];
   newThisWeek: WholesaleProduct[];
   backInStock: { sku: string; title: string | null; imageUrl: string | null }[];
-  categories: string[];
+  /** Every buyer-visible design, including the ones with no category yet. */
+  totalDesigns: number;
+  /** Category → sub-category tree, biggest first; nothing with 0 designs. */
+  categories: CategoryNode[];
 }
 
 export async function loadBuyerHome(buyerId: string): Promise<BuyerHomeData> {
@@ -123,7 +129,7 @@ export async function loadBuyerHome(buyerId: string): Promise<BuyerHomeData> {
     if (match) backInStock.push({ sku: match.sku, title: match.title, imageUrl: (match.image_urls as string[] | null)?.[0] ?? null });
   }
 
-  const categories = [...new Set((products ?? []).map((p) => p.category).filter((c): c is string => !!c))].sort();
+  const { totalDesigns, categories } = buildCategoryTree((products ?? []) as WholesaleProduct[]);
 
-  return { activeOrder, reorder, newThisWeek: newThisWeek.slice(0, 8), backInStock, categories };
+  return { activeOrder, reorder, newThisWeek: newThisWeek.slice(0, 8), backInStock, totalDesigns, categories };
 }

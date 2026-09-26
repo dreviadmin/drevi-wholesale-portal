@@ -28,7 +28,7 @@
  *  7. Re-issues EVERY buyer's login on the owner's scheme:
  *        username = business name, lowercased, a-z0-9, capped at 20 chars on a
  *                   word boundary; collisions get the next word, then a digit
- *        password = generateBuyerPassword(), i.e. Word-Word-4digits — NOT
+ *        password = generateBuyerPassword(owner, business), i.e. firstname+3digits — NOT
  *                   derived from the username (changed 25 Sep)
  *     Owner asked for the existing 49 to be moved onto it too, so their
  *     usernames and passwords BOTH change — they have to be told.
@@ -337,11 +337,12 @@ function claim(businessName) {
 // Existing buyers first, oldest first, so the shortest names keep their slot.
 for (const b of [...(existing ?? [])].sort((a, b2) => String(a.created_at).localeCompare(String(b2.created_at)))) {
   const u = claim(b.business_name);
-  identities.push({ buyerId: b.id, name: b.business_name, username: u, password: generateBuyerPassword(), existing: true });
+  identities.push({ buyerId: b.id, name: b.business_name, username: u, password: generateBuyerPassword(b.owner_name, b.business_name), existing: true });
 }
 for (const p of plan.insert) {
   const u = claim(p.card.business_name);
-  p.username = u; p.password = generateBuyerPassword();
+  const owner0 = p.card.contacts?.[0] ? [p.card.contacts[0].first_name, p.card.contacts[0].last_name].filter(Boolean).join(" ") : null;
+  p.username = u; p.password = generateBuyerPassword(owner0, p.card.business_name);
   identities.push({ buyerId: null, name: p.card.business_name, username: u, password: p.password, existing: false });
 }
 

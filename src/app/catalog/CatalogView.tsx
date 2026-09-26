@@ -8,19 +8,34 @@ import { FilterChips } from "@/components/FilterChips";
 import { GroupedProductCard } from "@/components/GroupedProductCard";
 import { QrScanner } from "@/components/QrScanner";
 import { setQty as setCartQty } from "@/app/cart/actions";
-import { groupByBase } from "@/lib/variants";
+import { baseSkuOf, groupByBase } from "@/lib/variants";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
 import { toastDuration } from "@/lib/use-toast";
 
-// Preferred chip order (prototype); unknown categories are appended.
-const PREFERRED = ["Sarees", "Lehengas", "Indo-Western", "Co-ords", "Drape Skirts", "Jackets"];
+// Chips in the same order as the buyer home's category tree: the category
+// with the most designs (SKU bases, i.e. cards) first, ties by name. One
+// ordering rule on both screens, so a buyer who taps "Lehenga" second on the
+// home page finds it second here too.
+function orderedByDesigns(products: WholesaleProduct[], keyOf: (p: WholesaleProduct) => string | null): string[] {
+  const bases = new Map<string, Set<string>>();
+  for (const p of products) {
+    const k = keyOf(p)?.trim();
+    if (!k) continue;
+    if (!bases.has(k)) bases.set(k, new Set());
+    bases.get(k)!.add(baseSkuOf(p.sku));
+  }
+  return [...bases.entries()].sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0])).map(([k]) => k);
+}
 
 function buildCategories(products: WholesaleProduct[]): string[] {
-  const present = new Set(products.map((p) => p.category).filter((c): c is string => !!c));
-  const ordered = PREFERRED.filter((c) => present.has(c));
-  const extras = Array.from(present).filter((c) => !PREFERRED.includes(c)).sort();
-  return ["All", ...ordered, ...extras];
+  return ["All", ...orderedByDesigns(products, (p) => p.category)];
+}
+
+// Sub-categories of ONE category, only those with at least one design.
+function buildSubCategories(products: WholesaleProduct[], category: string): string[] {
+  if (category === "All") return [];
+  return orderedByDesigns(products.filter((p) => p.category === category), (p) => p.sub_category);
 }
 
 export function CatalogView({
@@ -34,10 +49,15 @@ export function CatalogView({
 }) {
   const router = useRouter();
   const [category, setCategory] = useState("All");
-  // Buyer-home category chips deep-link /catalog?cat=…
+  // Sub-category within `category`; null = every design in the category.
+  const [sub, setSub] = useState<string | null>(null);
+  // Buyer-home category tree deep-links /catalog?cat=…&sub=…
   useEffect(() => {
-    const c = new URLSearchParams(window.location.search).get("cat");
+    const params = new URLSearchParams(window.location.search);
+    const c = params.get("cat");
     if (c) setCategory(c);
+    const s = params.get("sub");
+    if (c && s) setSub(s);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [query, setQuery] = useState("");
@@ -51,14 +71,16 @@ export function CatalogView({
   cartRef.current = cart;
 
   const categories = useMemo(() => buildCategories(products), [products]);
+  const subCategories = useMemo(() => buildSubCategories(products, category), [products, category]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return products.filter((p) => {
       if (category !== "All" && p.category !== category) return false;
+      if (sub && p.sub_category !== sub) return false;
       if (!q) return true;
       return (p.title?.toLowerCase().includes(q) ?? false) || p.sku.toLowerCase().includes(q);
     });
-  }, [category, query, products]);
+  }, [category, sub, query, products]);
   const groups = useMemo(() => groupByBase(filtered), [filtered]);
 
   const cartCount = useMemo(() => Object.values(cart).filter((q) => q > 0).length, [cart]);
@@ -105,7 +127,10 @@ export function CatalogView({
   return (
     <div className="min-h-screen flex flex-col" style={{ background: palette.ivory }}>
       <DreviHeader businessName={businessName} cartCount={cartCount} onCart={() => router.push("/cart")} />
-      <FilterChips categories={categories} active={category} onSelect={setCategory} />
+      <FilterChips categories={categories} active={category} onSelect={(c) => { setCategory(c); setSub(null); }} />
+      {subCategories.length > 0 && (
+        <FilterChips categories={["All", ...subCategories]} active={sub ?? "All"} onSelect={(s) => setSub(s === "All" ? null : s)} />
+      )}
 
       {/* Search + scan */}
       <div className="px-4 py-3" style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.05)" }}>

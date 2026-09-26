@@ -41,7 +41,7 @@ const mode = process.argv[2];
 if (mode === "create") {
   const { data: clash } = await admin.from("buyers").select("id, business_name").eq("email", DEMO.email).maybeSingle();
   if (clash && clash.business_name !== DEMO.name) { console.error(`login "${DEMO.username}" already belongs to ${clash.business_name} — refusing`); process.exit(1); }
-  const password = generateBuyerPassword();
+  const password = generateBuyerPassword(null, DEMO.name);
   let id = clash?.id;
   if (!id) {
     const { data, error } = await admin.from("buyers").insert({

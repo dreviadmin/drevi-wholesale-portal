@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 
-// Memorable password generator: {Word}-{Word}-{4digits} (spec §6.4). Words from
-// a curated, pronounceable list; ~12+ chars with solid entropy. Server-side use.
+// Memorable password generator for STAFF: {Word}-{Word}-{4digits} (spec §6.4).
+// Words from a curated, pronounceable list; ~12+ chars with solid entropy.
+// Server-side use.
 const WORDS = [
   "Tulip", "Lotus", "Jasmine", "Marigold", "Saffron", "Indigo", "Amber", "Coral",
   "Maroon", "Ivory", "Crimson", "Emerald", "Champagne", "Velvet", "Silk", "Brocade",
@@ -19,20 +20,54 @@ export function generateMemorablePassword(): string {
   return `${pick()}-${pick()}-${digits}`;
 }
 
+// Courtesy titles that sometimes lead an owner's name on a visiting card.
+// Dropped so "Mr. Rakesh" yields "rakesh", not "mrrakesh".
+const HONORIFICS = new Set(["mr", "mrs", "ms", "mx", "dr", "shri", "smt", "sri"]);
+
 /**
- * BUYER passwords: one word and four digits, all lowercase — `lotus4821`.
+ * BUYER passwords: the owner's first name and three digits — `rakhi482`.
  *
- * Ansh, 26 Sep: the Word-Word-4digits form was too long for a shop owner on a
- * phone keyboard. This is nine or ten characters with no shift key, still not
- * derivable from anything about the shop (the old <username>xdrevi was), and
- * a ~550,000-way space that the sign-in rate limit makes impractical to guess.
- * Words over seven letters are skipped so "champagne" never lands on someone.
+ * Ansh, 26 Sep: "keep firstname + 3 numbers only. don't worry about security."
+ * Two earlier schemes (Word-Word-4digits, then word+4digits) were judged too
+ * long for a shop owner typing on a phone; a password built from a name the
+ * buyer already knows is the one they will actually remember. The security
+ * trade-off was raised and explicitly accepted — the GoTrue sign-in rate limit
+ * is what stands between a guess and an account.
  *
+ * The stem is the first word of the owner's name, falling back to the business
+ * name when no owner is recorded (132 of 248 prod buyers on 26 Sep). Letters
+ * only, lowercase, accents folded ("Réné" → "rene"). A first word shorter than
+ * three letters pulls in the following words ("Om (Kolours)" → "omkolours",
+ * "GJ4 Fashion" → "gjfashion") so the result always clears GoTrue's
+ * six-character minimum; a buyer with no usable name at all gets "drevi".
+ * Digits run 100–999 so the number always reads as three digits.
+ *
+ * Mirrored in scripts/lib/password.mjs; password.test.ts pins the two copies.
  * Staff keep generateMemorablePassword(): an admin login gets the long form.
  */
-export function generateBuyerPassword(): string {
-  const short = WORDS.filter((w) => w.length <= 7);
-  const word = short[crypto.randomInt(short.length)].toLowerCase();
-  return `${word}${crypto.randomInt(1000, 10000)}`;
+export function buyerPasswordStem(ownerName: string | null | undefined, businessName: string | null | undefined): string {
+  const wordsOf = (s: string | null | undefined): string[] => {
+    const all = (s ?? "")
+      .normalize("NFKD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase()
+      .replace(/[^a-z]+/g, " ")
+      .trim()
+      .split(" ")
+      .filter(Boolean);
+    const named = all.filter((w) => !HONORIFICS.has(w));
+    return named.length ? named : all;
+  };
+  const owner = wordsOf(ownerName);
+  const words = owner.length ? owner : wordsOf(businessName);
+  let stem = "";
+  for (const w of words) {
+    if (stem.length >= 3) break;
+    stem += w;
+  }
+  return stem || "drevi";
 }
 
+export function generateBuyerPassword(ownerName: string | null | undefined, businessName: string | null | undefined): string {
+  return `${buyerPasswordStem(ownerName, businessName)}${crypto.randomInt(100, 1000)}`;
+}
