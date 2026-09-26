@@ -89,6 +89,17 @@ export async function generateCopyForDesign(designId: string, requestedBy: strin
     ? saved.prompt
     : defaultCopyPrompt(promptDesignFrom(design, opts?.vocab ?? (await loadVocab())));
   const model = saved?.model_override || defaultCopyModel(design.tier);
+
+  // A copy response without its tags is incomplete, not a success. Opus 5,
+  // on its thinking path, will now and then return a JSON object that closes
+  // after "description" with no "tags" key at all (stop_reason end_turn — it
+  // simply stops). 17 of the 135 rows in the 25 Sep bulk run came back that
+  // way; one design did it four times out of four. Every downstream consumer
+  // — the Shopify metafields, the tag list, the missing-fields chips — reads
+  // the tags, so the call is made again once before giving up.
+  let parsed: { title?: string; description?: string; tags?: Record<string, string> } | null = null;
+  let text = "";
+  for (let attempt = 1; attempt <= 2; attempt++) {
   const res = await fetch(ANTHROPIC_URL, {
     method: "POST",
     headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
@@ -107,17 +118,20 @@ export async function generateCopyForDesign(designId: string, requestedBy: strin
   const body = await res.json();
   // Opus 5 prepends a `thinking` block — the copy JSON is in the text block(s),
   // not necessarily content[0].
-  const text: string = ((body.content ?? []) as { type: string; text?: string }[])
+  text = ((body.content ?? []) as { type: string; text?: string }[])
     .filter((c) => c.type === "text")
     .map((c) => c.text ?? "")
     .join("");
-  let parsed: { title?: string; description?: string; tags?: Record<string, string> };
   try {
     parsed = JSON.parse(text.replace(/^```(json)?|```$/g, "").trim());
   } catch {
     return { ok: false, error: `Model returned non-JSON copy: ${text.slice(0, 120)}` };
   }
-  if (!parsed.title || !parsed.description) return { ok: false, error: "Copy response missing title/description" };
+  if (!parsed?.title || !parsed?.description) return { ok: false, error: "Copy response missing title/description" };
+  const hasTags = !!parsed.tags && typeof parsed.tags === "object" && !Array.isArray(parsed.tags) && Object.keys(parsed.tags).length > 0;
+  if (hasTags || attempt === 2) break;
+  }
+  if (!parsed) return { ok: false, error: "No copy response" };
   const copy = {
     title: String(parsed.title).slice(0, 60),
     description: String(parsed.description),
