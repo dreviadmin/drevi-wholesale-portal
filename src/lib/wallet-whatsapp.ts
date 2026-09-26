@@ -34,8 +34,8 @@ async function send(campaignEnv: string, fallbackName: string, phone: string, us
     return { sent: false, dryRun: true };
   }
   if (!apiKey) {
-    console.warn(`[wallet-wa] skipped ${campaignName}: no AISENSY_API_KEY`);
-    return { sent: false, skipped: true };
+    console.error(`[wallet-wa] NOT SENT ${campaignName} -> +${phone}: AISENSY_API_KEY is not set in this deployment`);
+    return { sent: false, skipped: true, error: "no_api_key" };
   }
   try {
     const res = await fetch(ENDPOINT, {
@@ -52,12 +52,16 @@ async function send(campaignEnv: string, fallbackName: string, phone: string, us
       }),
       signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
+    const text = await res.text().catch(() => "");
+    // AiSensy answers 200 with {"success":"true"} — and, for a bad campaign
+    // name or destination, sometimes 200 with an error body. Read the body.
+    if (!res.ok || !/"success"\s*:\s*"?true"?/.test(text)) {
+      console.error(`[wallet-wa] NOT SENT ${campaignName} -> +${phone}: HTTP ${res.status} ${text.slice(0, 300)}`);
       return { sent: false, error: `${res.status} ${text.slice(0, 200)}` };
     }
     return { sent: true };
   } catch (e) {
+    console.error(`[wallet-wa] NOT SENT ${campaignName} -> +${phone}: ${(e as Error).message}`);
     return { sent: false, error: (e as Error).message };
   }
 }
