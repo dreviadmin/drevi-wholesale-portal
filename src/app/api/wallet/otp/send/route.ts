@@ -27,7 +27,9 @@ export async function POST(req: Request) {
       : "Too many requests. Try again in a few minutes.", 429);
   }
 
-  const wa = await sendWalletOtp(phone, issued.code);
+  // A test phone with a fixed code (WALLET_FIXED_OTPS) skips WhatsApp: the
+  // point is a login that does not depend on a handset or on Meta delivery.
+  const wa = issued.fixed ? { sent: true, dryRun: false } : await sendWalletOtp(phone, issued.code);
   // Local testing only: hand the code back so a dev can log in without a
   // WhatsApp round-trip. Both guards must hold; production never returns it.
   const reveal = process.env.NODE_ENV !== "production" && (process.env.WALLET_DEV_RETURN_OTP ?? "").toLowerCase() === "true";

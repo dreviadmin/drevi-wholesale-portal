@@ -86,3 +86,12 @@ Theme setting: **Theme settings → Drevi — Integrations → Wallet API base U
 - Shopify evaluates the COD/Partial-COD shipping-rate conditions on the subtotal **after** discounts, so a wallet redemption can move a ₹15,500 cart under the ₹15,000 tier.
 - One wallet redemption per order.
 - Removing an applied wallet code from the cart uses the Cart API `discount` field with a `/discount/` redirect as fallback; confirm on the live theme.
+
+## Test login without a handset
+
+`WALLET_FIXED_OTPS` lists phones with a fixed six-digit code, e.g.
+`918169992981=816999` (comma-separated for more). Such a phone gets no
+WhatsApp message and no stored code: the listed code simply verifies. Set on
+production and in `.env.development.local` for the owner's number so an
+automated test can log in regardless of Meta delivery. Keep it to numbers
+the business owns.

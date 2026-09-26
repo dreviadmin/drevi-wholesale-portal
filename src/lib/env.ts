@@ -39,6 +39,7 @@ type EnvKey =
   | "WALLET_SHOPIFY_CLIENT_ID"
   | "WALLET_SHOPIFY_CLIENT_SECRET"
   | "WALLET_SESSION_SECRET"       // >=32 chars; derived from the master key when absent
+  | "WALLET_FIXED_OTPS"           // test phones with a fixed code: "91XXXXXXXXXX=816999,..."; no WhatsApp for them
   | "WALLET_ALLOWED_ORIGINS"      // comma list; defaults to drevifashion.com + myshopify
   | "WALLET_WA_LIVE"              // 'true' to actually send WhatsApp; anything else is a dry run
   | "WALLET_DEV_RETURN_OTP"       // 'true' + non-production: OTP echoed in the send response
