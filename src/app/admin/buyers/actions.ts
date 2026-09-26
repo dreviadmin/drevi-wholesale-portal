@@ -7,7 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin, requireStaff } from "@/lib/staff";
 import { writeAuditEvent } from "@/lib/audit";
 import { encryptPassword, decryptPassword } from "@/lib/crypto";
-import { generateMemorablePassword } from "@/lib/password";
+import { generateBuyerPassword } from "@/lib/password";
 import { uploadBuyerCardImage } from "@/lib/storage";
 import type { BuyerStatus } from "@/lib/types";
 
@@ -154,7 +154,7 @@ export async function regeneratePassword(buyerId: string): Promise<CredResult> {
   const admin = createAdminClient();
   const { data: buyer } = await admin.from("buyers").select("email").eq("id", buyerId).maybeSingle();
   if (!buyer) return { ok: false, error: "Buyer not found." };
-  const password = generateMemorablePassword();
+  const password = generateBuyerPassword();
   try {
     await setAuthPassword(admin, buyer.email, password);
   } catch (e) {

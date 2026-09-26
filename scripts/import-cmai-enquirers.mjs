@@ -31,7 +31,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import readline from "node:readline/promises";
 import { createClient } from "@supabase/supabase-js";
-import { generateMemorablePassword } from "./lib/password.mjs";
+import { generateBuyerPassword } from "./lib/password.mjs";
 import dotenv from "dotenv";
 
 const PROD = process.argv.includes("--prod");
@@ -336,7 +336,7 @@ for (const f of fresh) {
   // is computable by anyone who knows the shop name, and a trailing "123"
   // trips the breach warnings in phone keyboards and password managers.
   // Same generator the admin's own credential button uses.
-  f.password = generateMemorablePassword();
+  f.password = generateBuyerPassword();
 }
 const clashes = fresh.filter((f) => f.usernameClash);
 

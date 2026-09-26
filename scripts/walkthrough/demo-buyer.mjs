@@ -17,7 +17,7 @@
 import crypto from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
-import { generateMemorablePassword } from "../lib/password.mjs";
+import { generateBuyerPassword } from "../lib/password.mjs";
 
 dotenv.config({ path: ".env.local", override: true });
 const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
@@ -41,7 +41,7 @@ const mode = process.argv[2];
 if (mode === "create") {
   const { data: clash } = await admin.from("buyers").select("id, business_name").eq("email", DEMO.email).maybeSingle();
   if (clash && clash.business_name !== DEMO.name) { console.error(`login "${DEMO.username}" already belongs to ${clash.business_name} — refusing`); process.exit(1); }
-  const password = generateMemorablePassword();
+  const password = generateBuyerPassword();
   let id = clash?.id;
   if (!id) {
     const { data, error } = await admin.from("buyers").insert({
