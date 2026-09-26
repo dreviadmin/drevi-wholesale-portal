@@ -7,6 +7,10 @@ interface ImageProduct {
   image_urls?: string[] | null;
 }
 
+// 9:16, not 4:5: the product photos are shot at 675x1200, exactly 9:16, and
+// the storefront theme shows them that way. A 4:5 box with object-cover took
+// 22% off the height — the head, on most full-length outfits (Ansh, 26 Sep).
+//
 // Real image from image_urls[0]; falls back to the prototype's stylized
 // gradient placeholder when empty. DREVI watermark (top-left) and SKU
 // (bottom-right) are preserved in both modes (spec §7.1).
@@ -32,7 +36,7 @@ export function ProductImage({ product, large = false }: { product: ImageProduct
 
   if (src) {
     return (
-      <div className="relative w-full overflow-hidden" style={{ aspectRatio: "4/5" }}>
+      <div className="relative w-full overflow-hidden" style={{ aspectRatio: "9/16" }}>
         <Image
           src={src}
           alt={product.title ?? product.sku}
@@ -50,7 +54,7 @@ export function ProductImage({ product, large = false }: { product: ImageProduct
   // Gradient placeholder
   const [c1, c2] = HUES[hueForSku(product.sku)] ?? HUES.sage;
   return (
-    <div className="relative w-full overflow-hidden" style={{ aspectRatio: "4/5", background: `linear-gradient(135deg, ${c1} 0%, ${c2} 100%)` }}>
+    <div className="relative w-full overflow-hidden" style={{ aspectRatio: "9/16", background: `linear-gradient(135deg, ${c1} 0%, ${c2} 100%)` }}>
       <div
         className="absolute inset-0 opacity-20 mix-blend-overlay"
         style={{

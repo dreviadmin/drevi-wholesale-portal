@@ -23,7 +23,7 @@ import {
 } from "@/app/admin/buyers/actions";
 import { buyerEditDraftKey, buyerEditSignature, type BuyerEditFields } from "@/app/admin/orders/[id]/EditBuyerButton";
 import { unapplyCredit } from "@/app/admin/credit-notes/actions";
-import { buildWhatsAppMessage, shareWhatsApp, buildVCard, downloadVCard } from "@/lib/share";
+import { loginDisplay, buildWhatsAppMessage, shareWhatsApp, buildVCard, downloadVCard } from "@/lib/share";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { downscalePhoto } from "@/lib/downscale-photo";
@@ -620,7 +620,10 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet, changeRe
         <section className="mt-7">
           <h2 className="font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.2em", color: palette.gold }}>Credentials</h2>
           <div className="mt-3 font-body" style={{ fontSize: 13, color: palette.black }}>
-            <div>Email: {buyer.email}</div>
+            {/* The rule in src/lib/share.ts: a buyer signs in with a bare username and
+                never sees the synthetic @buyers.drevifashion.com address — so staff
+                must not read it out either. loginDisplay labels a real email as Email. */}
+            <div>{buyer.email ? `${loginDisplay(buyer.email).label}: ${loginDisplay(buyer.email).value}` : "No login yet"}</div>
             <div className="flex items-center gap-2 mt-1.5">
               Password: <span style={{ fontWeight: 600 }}>{revealed ?? "●●●●●●●●●●●●●"}</span>
               <button type="button" onClick={reveal} aria-label="Reveal" style={{ color: palette.mutedGreige }}>{revealed ? <EyeOff size={14} /> : <Eye size={14} />}</button>

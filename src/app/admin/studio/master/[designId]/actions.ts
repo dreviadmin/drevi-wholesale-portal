@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import { applyMovement, setStock } from "@/lib/stock-ledger";
 import { autoMrpFrom, autoWholesaleFrom, clampMultiplier, DEFAULT_MARKUP_MULTIPLIER, DEFAULT_WHOLESALE_MULTIPLIER } from "@/lib/pricing";
-import { isOriginValue } from "@/lib/studio/copy-prompt";
+import { isOriginValue, isStyleValue } from "@/lib/studio/copy-prompt";
 import type { SupplyBlock } from "@/app/admin/receipts/new/delivery-actions";
 
 // Product Master editor actions (build guide §12.1). Every save is admin+,
@@ -93,7 +93,7 @@ async function writeGroupCost(admin: Admin, skus: string[], existing: VendorRow[
 
 export async function saveSpecs(
   designId: string,
-  patch: { fabric: string; handwork: string; origin: string; colorName?: string; specsVerified: boolean; supply?: SupplyBlock },
+  patch: { fabric: string; handwork: string; origin: string; style?: string; colorName?: string; specsVerified: boolean; supply?: SupplyBlock },
 ): Promise<Res> {
   let staff;
   try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
@@ -106,6 +106,8 @@ export async function saveSpecs(
     // match. Anything else is a stale draft from before the dropdown and is
     // stored as "not set" rather than failing the whole specs save.
     origin: isOriginValue(patch.origin) ? patch.origin : null,
+    // 0069 — Traditional / Indo-Western, same two-token contract as origin.
+    style: isStyleValue(patch.style) ? patch.style : null,
     // The human colour ("Champagne Gold") beside the SKU code — the copy and
     // image prompts read it (Ansh, 3 Sep).
     color_name: patch.colorName?.trim() || null,

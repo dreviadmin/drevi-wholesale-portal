@@ -56,6 +56,12 @@ export const BACKUP_TABLES = [
   "entity_notes",
   "notify_me",
   "shopify_tokens",
+  // 0068 wallet (26 Sep) — store credit; the OTP table is short-lived but still ours to restore
+  "wallet_accounts",
+  "wallet_ledger",
+  "wallet_otps",
+  "wallet_redemptions",
+  "wallet_webhook_events",
 ] as const;
 
 const PAGE = 1000;

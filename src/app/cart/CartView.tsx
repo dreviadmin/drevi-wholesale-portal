@@ -117,7 +117,7 @@ export function CartView({
           <div className="flex flex-col gap-3 max-w-2xl mx-auto">
             {lines.map((l) => (
               <div key={l.sku} className="flex gap-3 p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
-                <Link href={`/product/${encodeURIComponent(l.sku)}`} className="relative flex-shrink-0" style={{ width: 96, height: 120, background: palette.ivoryDeep }}>
+                <Link href={`/product/${encodeURIComponent(l.sku)}`} className="relative flex-shrink-0" style={{ width: 96, height: 171, background: palette.ivoryDeep }}>
                   {l.image && <Image src={l.image} alt={l.title} fill sizes="96px" className="object-cover" />}
                 </Link>
 

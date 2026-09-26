@@ -136,7 +136,7 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
             const img = it.image_url ?? imgBySku.get(it.sku) ?? null;
             return (
               <div key={`${it.sku}-${idx}`} className="flex items-start gap-3 py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
-                <div className="relative flex-shrink-0" style={{ width: 56, height: 70, background: palette.ivoryDeep }}>
+                <div className="relative flex-shrink-0" style={{ width: 56, height: 100, background: palette.ivoryDeep }}>
                   {img && <Image src={img} alt={it.title} fill sizes="56px" className="object-cover" />}
                 </div>
                 <div className="min-w-0 flex-1 pr-3">

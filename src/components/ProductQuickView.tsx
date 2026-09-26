@@ -59,7 +59,7 @@ export function ProductQuickView({
                 onClick={() => setZoomed(true)}
                 aria-label="Enlarge photo"
                 className="relative w-full block"
-                style={{ aspectRatio: "4/5", cursor: "zoom-in", padding: 0, border: "none", background: palette.ivoryDeep }}
+                style={{ aspectRatio: "9/16", cursor: "zoom-in", padding: 0, border: "none", background: palette.ivoryDeep }}
               >
                 <Image src={images[selected]} alt={product.title ?? product.sku} fill sizes="(max-width:768px) 100vw, 400px" className="object-cover" />
               </button>

@@ -58,6 +58,11 @@ const TABLES = [
   "entity_notes",
   "notify_me",
   "shopify_tokens",
+  "wallet_accounts",
+  "wallet_ledger",
+  "wallet_otps",
+  "wallet_redemptions",
+  "wallet_webhook_events",
 ];
 const KEEP = 14;
 const PAGE = 1000;

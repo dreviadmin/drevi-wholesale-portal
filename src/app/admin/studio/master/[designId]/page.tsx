@@ -22,7 +22,7 @@ export default async function MasterPage({ params }: { params: { designId: strin
 
   const { data: design } = await admin
     .from("designs")
-    .select("fabric, handwork, origin, color_name, specs_verified, tier, markup_multiplier, auto_mrp, mrp_override, wholesale_multiplier, auto_wholesale, wholesale_override, supply_mode, vendor_stock_qty, making_days, making_moq, delivery_days, supply_note, supply_updated_at, vendor_sku, ident_image_id, updated_at")
+    .select("fabric, handwork, origin, style, color_name, specs_verified, tier, markup_multiplier, auto_mrp, mrp_override, wholesale_multiplier, auto_wholesale, wholesale_override, supply_mode, vendor_stock_qty, making_days, making_moq, delivery_days, supply_note, supply_updated_at, vendor_sku, ident_image_id, updated_at")
     .eq("id", params.designId)
     .single();
   const { data: allVariants } = await admin
@@ -64,6 +64,7 @@ export default async function MasterPage({ params }: { params: { designId: strin
         colorName: design?.color_name ?? "",
         handwork: design?.handwork ?? "",
         origin: design?.origin ?? "",
+        style: design?.style ?? "",
         specsVerified: design?.specs_verified ?? false,
         tier: design?.tier ?? "standard",
         markupMultiplier: Number(design?.markup_multiplier ?? 2.5),
