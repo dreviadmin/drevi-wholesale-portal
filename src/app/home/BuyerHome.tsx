@@ -72,14 +72,14 @@ export function BuyerHome({ businessName, city, cartCount, data, wallet }: {
             <button type="button" onClick={() => setMenuOpen((v) => !v)} aria-label="Menu">
               {menuOpen ? <X size={20} color={palette.ivory} strokeWidth={1.5} /> : <Menu size={20} color={palette.ivory} strokeWidth={1.5} />}
             </button>
-            <div>
-              <div className="font-display" style={{ fontSize: 14, letterSpacing: "0.28em", color: palette.ivory, fontWeight: 600 }}>
-                DREVI <span className="font-body" style={{ fontSize: 8, letterSpacing: "0.2em", color: palette.gold }}>WHOLESALE</span>
-              </div>
-              <div className="font-body mt-0.5" style={{ fontSize: 10.5, color: palette.champagne }}>
-                {businessName}{city ? ` · ${city}` : ""}
-              </div>
+            <div className="font-display" style={{ fontSize: 14, letterSpacing: "0.28em", color: palette.ivory, fontWeight: 600 }}>
+              DREVI <span className="font-body" style={{ fontSize: 8, letterSpacing: "0.2em", color: palette.gold }}>WHOLESALE</span>
             </div>
+          </div>
+          {/* The shop's name sits in the middle of the bar, not tucked under
+              the wordmark (Ansh, 26 Sep, after logging in as a buyer). */}
+          <div className="font-body flex-1 text-center truncate px-3" style={{ fontSize: 11.5, color: palette.champagne, letterSpacing: "0.03em" }}>
+            {businessName}{city ? ` · ${city}` : ""}
           </div>
           <Link href="/cart" className="relative" aria-label="Cart">
             <ShoppingCart size={19} color={palette.ivory} />
@@ -153,9 +153,9 @@ export function BuyerHome({ businessName, city, cartCount, data, wallet }: {
                 <div key={r.sku} style={{ background: "#fff", border: "1px solid rgba(26,26,26,0.08)" }}>
                   <Link href={`/product/${encodeURIComponent(r.sku)}`} className="block relative">
                     {r.imageUrl ? (
-                      <Image src={r.imageUrl} alt={r.title ?? r.sku} width={220} height={275} className="w-full object-cover" style={{ aspectRatio: "4/5" }} unoptimized />
+                      <Image src={r.imageUrl} alt={r.title ?? r.sku} width={220} height={391} className="w-full object-cover" style={{ aspectRatio: "9/16" }} unoptimized />
                     ) : (
-                      <div className="flex items-center justify-center w-full" style={{ aspectRatio: "4/5", background: palette.ivoryDeep }}><ImageOff size={16} color={palette.mutedGreige} /></div>
+                      <div className="flex items-center justify-center w-full" style={{ aspectRatio: "9/16", background: palette.ivoryDeep }}><ImageOff size={16} color={palette.mutedGreige} /></div>
                     )}
                   </Link>
                   <div className="p-2">
@@ -184,7 +184,7 @@ export function BuyerHome({ businessName, city, cartCount, data, wallet }: {
               {data.newThisWeek.map((p) => (
                 <Link key={p.sku} href={`/product/${encodeURIComponent(p.sku)}`} className="flex-shrink-0" style={{ width: 132, background: "#fff", border: "1px solid rgba(26,26,26,0.08)" }}>
                   {(p.image_urls as string[] | null)?.[0] ? (
-                    <Image src={(p.image_urls as string[])[0]} alt={p.title ?? p.sku} width={132} height={165} className="object-cover" unoptimized />
+                    <Image src={(p.image_urls as string[])[0]} alt={p.title ?? p.sku} width={132} height={235} className="object-cover" style={{ aspectRatio: "9/16" }} unoptimized />
                   ) : (
                     <div className="flex items-center justify-center" style={{ width: 132, height: 165, background: palette.ivoryDeep }}><ImageOff size={14} color={palette.mutedGreige} /></div>
                   )}

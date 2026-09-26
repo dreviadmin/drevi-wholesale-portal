@@ -41,6 +41,20 @@ export const ORIGIN_OPTIONS = [
 
 export type OriginValue = (typeof ORIGIN_OPTIONS)[number]["value"];
 
+// Style is the second two-option classification (Ansh, 26 Sep): the split the
+// buyer catalog groups by. Same contract as origin — tokens in the column, only
+// these labels on screen.
+export const STYLE_OPTIONS = [
+  { value: "traditional", label: "Traditional" },
+  { value: "indo_western", label: "Indo-Western" },
+] as const;
+
+export type StyleValue = (typeof STYLE_OPTIONS)[number]["value"];
+
+export function isStyleValue(value: unknown): value is StyleValue {
+  return STYLE_OPTIONS.some((o) => o.value === value);
+}
+
 export function isOriginValue(value: unknown): value is OriginValue {
   return ORIGIN_OPTIONS.some((o) => o.value === value);
 }
