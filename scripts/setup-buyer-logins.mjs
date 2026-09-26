@@ -41,7 +41,7 @@
 import crypto from "node:crypto";
 import readline from "node:readline/promises";
 import { createClient } from "@supabase/supabase-js";
-import { generateMemorablePassword } from "./lib/password.mjs";
+import { generateBuyerPassword } from "./lib/password.mjs";
 import dotenv from "dotenv";
 
 const BUYER_LOGIN_DOMAIN = "buyers.drevifashion.com"; // keep equal to src/lib/share.ts
@@ -197,7 +197,7 @@ for (const b of keepers) {
   }
   // WAS `${username}123`, which phone keyboards and password managers flag as
   // a breached password, and which anyone knowing the shop name could guess.
-  const password = generateMemorablePassword();
+  const password = generateBuyerPassword();
   if (password.length < 6) {
     // GoTrue's minimum password length would reject it anyway.
     plan.push({ buyer: b, action: `REFUSED: "${username}" too short for the password policy — set manually` });

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { generateMemorablePassword } from "./password";
+import { generateMemorablePassword, generateBuyerPassword } from "./password";
 
 /** The word list is duplicated in scripts/lib/password.mjs because a plain
  *  .mjs script cannot import this TypeScript module. Drift between the two
@@ -30,5 +30,18 @@ describe("generateMemorablePassword", () => {
     const script = words(readFileSync("scripts/lib/password.mjs", "utf8"));
     expect(script).toEqual(app);
     expect(app.length).toBe(64);
+  });
+
+  it("buyer passwords are one short lowercase word and four digits — typeable on a phone", () => {
+    for (let i = 0; i < 300; i++) {
+      const p = generateBuyerPassword();
+      expect(p).toMatch(/^[a-z]{3,7}[0-9]{4}$/);
+      expect(p.length).toBeLessThanOrEqual(11);
+    }
+  });
+
+  it("buyer passwords never end in 123 as a suffix scheme and are not derivable", () => {
+    const seen = new Set(Array.from({ length: 500 }, () => generateBuyerPassword()));
+    expect(seen.size).toBeGreaterThan(490);
   });
 });
