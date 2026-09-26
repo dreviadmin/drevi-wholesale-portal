@@ -152,9 +152,9 @@ export async function regeneratePassword(buyerId: string): Promise<CredResult> {
     return { ok: false, error: "Not authorized." };
   }
   const admin = createAdminClient();
-  const { data: buyer } = await admin.from("buyers").select("email").eq("id", buyerId).maybeSingle();
+  const { data: buyer } = await admin.from("buyers").select("email, owner_name, business_name").eq("id", buyerId).maybeSingle();
   if (!buyer) return { ok: false, error: "Buyer not found." };
-  const password = generateBuyerPassword();
+  const password = generateBuyerPassword(buyer.owner_name, buyer.business_name);
   try {
     await setAuthPassword(admin, buyer.email, password);
   } catch (e) {

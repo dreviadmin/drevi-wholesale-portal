@@ -111,7 +111,7 @@ const staffUsernames = new Set(staffRows.map((s) => s.email.split("@")[0].toLowe
 
 const { data: buyers, error: bErr } = await admin
   .from("buyers")
-  .select("id, business_name, phone, email, status, created_at, encrypted_password")
+  .select("id, business_name, owner_name, phone, email, status, created_at, encrypted_password")
   .order("created_at", { ascending: true });
 if (bErr) throw bErr;
 
@@ -197,7 +197,7 @@ for (const b of keepers) {
   }
   // WAS `${username}123`, which phone keyboards and password managers flag as
   // a breached password, and which anyone knowing the shop name could guess.
-  const password = generateBuyerPassword();
+  const password = generateBuyerPassword(b.owner_name, b.business_name);
   if (password.length < 6) {
     // GoTrue's minimum password length would reject it anyway.
     plan.push({ buyer: b, action: `REFUSED: "${username}" too short for the password policy — set manually` });
