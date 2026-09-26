@@ -10,7 +10,7 @@ import { useDraft } from "@/lib/useDraft";
 import { withFrom } from "@/components/BackLink";
 import { supplyAge } from "@/lib/availability";
 import { autoMrpFrom, autoWholesaleFrom, clampMultiplier, DEFAULT_MARKUP_MULTIPLIER, DEFAULT_WHOLESALE_MULTIPLIER } from "@/lib/pricing";
-import { ORIGIN_OPTIONS } from "@/lib/studio/copy-prompt";
+import { ORIGIN_OPTIONS, STYLE_OPTIONS } from "@/lib/studio/copy-prompt";
 import type { BoardRow } from "@/lib/studio/load";
 import { useToast } from "@/lib/use-toast";
 import type { SupplyBlock } from "@/app/admin/receipts/new/delivery-actions";
@@ -25,7 +25,7 @@ import { DraftNotice } from "@/components/DraftNotice";
 // honest without blocking editor adoption.
 
 interface DesignFields {
-  fabric: string; handwork: string; origin: string; colorName?: string | null; specsVerified: boolean;
+  fabric: string; handwork: string; origin: string; style?: string; colorName?: string | null; specsVerified: boolean;
   tier: string; markupMultiplier: number; autoMrp: number | null; mrpOverride: number | null;
   wholesaleMultiplier: number; autoWholesale: number | null; wholesaleOverride: number | null;
   vendorSku?: string | null;
@@ -56,7 +56,7 @@ export function MasterEditor({ board, design, variants, lastCost, lastCostLocked
   // size rows come from wholesale_products, so their seed is their base.
   const draftKey = `drevi:draft:master:${board.id}`;
   const specsSeed = {
-    fabric: design.fabric, handwork: design.handwork, origin: design.origin,
+    fabric: design.fabric, handwork: design.handwork, origin: design.origin, style: design.style ?? "",
     colorName: design.colorName ?? "", specsVerified: design.specsVerified,
     supply: design.supply ?? {},
   };
@@ -177,6 +177,18 @@ export function MasterEditor({ board, design, variants, lastCost, lastCostLocked
           <select value={specs.origin} onChange={(e) => setSpecs((s) => ({ ...s, origin: e.target.value }))} className="w-full mt-1 font-body" style={inputStyle}>
             <option value="">Not set</option>
             {ORIGIN_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
+        {/* Ansh (26 Sep) — the buyer catalog will group by this, the way the
+            storefront's collections do. Optional for now: it is not one of the
+            missing-spec blockers, so nothing already live is held back by it. */}
+        <label className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+          <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Style</span>
+          <select value={specs.style ?? ""} onChange={(e) => setSpecs((s) => ({ ...s, style: e.target.value }))} className="w-full mt-1 font-body" style={inputStyle}>
+            <option value="">Not set</option>
+            {STYLE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>

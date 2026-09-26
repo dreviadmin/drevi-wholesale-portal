@@ -81,7 +81,7 @@ export function ProductDetailView({
         <div className="md:w-1/2">
           {images.length > 0 ? (
             <>
-              <div className="relative w-full overflow-hidden" style={{ aspectRatio: "4/5" }}>
+              <div className="relative w-full overflow-hidden" style={{ aspectRatio: "9/16" }}>
                 <Image src={images[selected]} alt={product.title ?? product.sku} fill sizes="(max-width:768px) 100vw, 50vw" className="object-cover" />
               </div>
               {images.length > 1 && (
