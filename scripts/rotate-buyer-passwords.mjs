@@ -6,7 +6,7 @@
  * WHY: passwords were bulk-issued as <username>xdrevi (and once as
  * <username>123). Both are derivable by anyone who knows the shop name, and a
  * trailing "123" is flagged as breached by phone keyboards and password
- * managers. This moves every buyer onto generateMemorablePassword() —
+ * managers. This moves every buyer onto generateBuyerPassword() —
  * Word-Word-4digits — which is what the admin's own credential button and
  * staff creation have always issued.
  *
@@ -24,7 +24,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
-import { generateMemorablePassword } from "./lib/password.mjs";
+import { generateBuyerPassword } from "./lib/password.mjs";
 
 const PROD = process.argv.includes("--prod");
 const DRY = process.argv.includes("--dry-run");
@@ -62,7 +62,7 @@ const { data: buyers } = await admin
 console.log(`buyers to rotate: ${buyers.length}`);
 if (DRY) {
   console.log("\nsample of what would be issued:");
-  buyers.slice(0, 5).forEach((b) => console.log(`  ${(b.business_name ?? "").padEnd(38)} ${b.email.split("@")[0].padEnd(22)} ${generateMemorablePassword()}`));
+  buyers.slice(0, 5).forEach((b) => console.log(`  ${(b.business_name ?? "").padEnd(38)} ${b.email.split("@")[0].padEnd(22)} ${generateBuyerPassword()}`));
   console.log("\n--dry-run — nothing written.");
   process.exit(0);
 }
@@ -72,7 +72,7 @@ const authByEmail = new Map((page?.users ?? []).map((u) => [(u.email || "").toLo
 
 let done = 0; const failed = []; const issued = [];
 for (const b of buyers) {
-  const pw = generateMemorablePassword();
+  const pw = generateBuyerPassword();
   const hit = authByEmail.get(b.email.toLowerCase());
   if (!hit) { failed.push(`${b.business_name} <${b.email}> — no auth user`); continue; }
   const { error: aErr } = await admin.auth.admin.updateUserById(hit.id, { password: pw, email_confirm: true });

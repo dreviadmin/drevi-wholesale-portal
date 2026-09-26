@@ -24,4 +24,11 @@ export function generateMemorablePassword() {
   return `${pick()}-${pick()}-${digits}`;
 }
 
+/** Buyers: one word + four digits, lowercase — mirrors src/lib/password.ts. */
+export function generateBuyerPassword() {
+  const short = WORDS.filter((w) => w.length <= 7);
+  const word = short[crypto.randomInt(short.length)].toLowerCase();
+  return `${word}${crypto.randomInt(1000, 10000)}`;
+}
+
 export { WORDS };

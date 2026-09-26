@@ -18,3 +18,21 @@ export function generateMemorablePassword(): string {
   const digits = String(crypto.randomInt(1000, 10000));
   return `${pick()}-${pick()}-${digits}`;
 }
+
+/**
+ * BUYER passwords: one word and four digits, all lowercase — `lotus4821`.
+ *
+ * Ansh, 26 Sep: the Word-Word-4digits form was too long for a shop owner on a
+ * phone keyboard. This is nine or ten characters with no shift key, still not
+ * derivable from anything about the shop (the old <username>xdrevi was), and
+ * a ~550,000-way space that the sign-in rate limit makes impractical to guess.
+ * Words over seven letters are skipped so "champagne" never lands on someone.
+ *
+ * Staff keep generateMemorablePassword(): an admin login gets the long form.
+ */
+export function generateBuyerPassword(): string {
+  const short = WORDS.filter((w) => w.length <= 7);
+  const word = short[crypto.randomInt(short.length)].toLowerCase();
+  return `${word}${crypto.randomInt(1000, 10000)}`;
+}
+
