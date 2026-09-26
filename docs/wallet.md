@@ -62,7 +62,7 @@ Add to the portal's Vercel env (and `.env.development.local` for dev):
 | `WALLET_DEV_RETURN_OTP` | `true` on dev only — echoes the code in the API response for testing |
 
 Theme setting: **Theme settings → Drevi — Integrations → Wallet API base URL**
-= the portal origin (e.g. `https://wholesale.drevifashion.com`), no trailing slash.
+= the portal origin, `https://drevi-wholesale-portal-swart.vercel.app` (the custom domain is not set up yet), no trailing slash.
 
 ## Go-live order
 
