@@ -65,7 +65,16 @@ export async function walletGql<T>(query: string, variables: Record<string, unkn
   let res = await call(await token());
   if (res.status === 401) res = await call(await token(true));
   if (!res.ok) throw new Error(`wallet Shopify GraphQL ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const body = await res.json();
+  let body = await res.json();
+  // A scope failure is a 200 with ACCESS_DENIED in the body, and it means the
+  // cached token was minted by the wrong app (the credentials changed after
+  // it was cached). Mint once with the current credentials before giving up,
+  // otherwise a fixed env keeps failing until the day-old token expires.
+  if (Array.isArray(body.errors) && body.errors.some((e: { extensions?: { code?: string } }) => e.extensions?.code === "ACCESS_DENIED")) {
+    res = await call(await token(true));
+    if (!res.ok) throw new Error(`wallet Shopify GraphQL ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    body = await res.json();
+  }
   if (body.errors?.length) throw new Error(`Shopify: ${JSON.stringify(body.errors).slice(0, 300)}`);
   return body.data as T;
 }
