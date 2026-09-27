@@ -17,6 +17,10 @@ import {
   isRedemptionCode,
   describeLedgerKind,
   WALLET_DEFAULTS,
+  linePaidPaise,
+  orderWalletTotals,
+  walletReturnOwedPaise,
+  refundRef,
 } from "./wallet-core";
 
 describe("normalizePhone", () => {
@@ -157,5 +161,60 @@ describe("codes and words", () => {
     expect(WALLET_DEFAULTS.minOrderPaise).toBe(500_000);
     expect(WALLET_DEFAULTS.expiryMonths).toBe(12);
     expect(WALLET_DEFAULTS.earnPercent).toBe(10);
+  });
+});
+
+describe("earning on what was actually paid", () => {
+  it("takes every discount off the line, the wallet code included", () => {
+    // ₹15,999 line, ₹1,000 wallet code allocated to it: paid ₹14,999.
+    expect(linePaidPaise(1_599_900, [100_000])).toBe(1_499_900);
+    expect(earnAmountPaise(earnBasePaise([{ productType: "Lehenga", discountedTotalPaise: linePaidPaise(1_599_900, [100_000]), quantity: 1 }]))).toBe(149_900);
+  });
+  it("never goes below zero", () => {
+    expect(linePaidPaise(50_000, [40_000, 30_000])).toBe(0);
+  });
+});
+
+describe("an order's wallet position", () => {
+  it("counts refund reversals, so a second refund takes back only its own share", () => {
+    // Earned ₹1,000 on a 2-unit order; first refund of 1 unit reversed ₹500.
+    const rows = [
+      { kind: "earn", amount_paise: 100_000 },
+      { kind: "reverse_earn", amount_paise: -50_000 },
+    ];
+    const { earnedNetPaise } = orderWalletTotals(rows);
+    expect(earnedNetPaise).toBe(50_000);
+    // Second unit refunded: base after refunds is 0, so ₹500 more — not ₹1,000.
+    expect(earnReversalPaise({ earnedNetPaise, baseAfterRefundPaise: 0 })).toBe(-50_000);
+  });
+  it("nets spend against what came back", () => {
+    expect(orderWalletTotals([
+      { kind: "redeem", amount_paise: -100_000 },
+      { kind: "reverse_redeem", amount_paise: 40_000 },
+    ]).spentPaise).toBe(60_000);
+  });
+  it("a cancel after a full reversal finds nothing left", () => {
+    expect(orderWalletTotals([
+      { kind: "earn", amount_paise: 100_000 },
+      { kind: "reverse_earn", amount_paise: -100_000 },
+    ]).earnedNetPaise).toBe(0);
+  });
+});
+
+describe("wallet credit returned on a refund", () => {
+  const line = { quantity: 2, walletAllocPaise: 100_000 };
+  it("returns the wallet share of the refunded units", () => {
+    expect(walletReturnOwedPaise({ lines: [{ ...line, refundedQuantity: 1 }], spentPaise: 100_000, alreadyReturnedPaise: 0 })).toBe(50_000);
+  });
+  it("does not return the same share twice", () => {
+    expect(walletReturnOwedPaise({ lines: [{ ...line, refundedQuantity: 1 }], spentPaise: 50_000, alreadyReturnedPaise: 50_000 })).toBe(0);
+    expect(walletReturnOwedPaise({ lines: [{ ...line, refundedQuantity: 2 }], spentPaise: 50_000, alreadyReturnedPaise: 50_000 })).toBe(50_000);
+  });
+  it("never returns more than was spent", () => {
+    expect(walletReturnOwedPaise({ lines: [{ quantity: 1, refundedQuantity: 1, walletAllocPaise: 200_000 }], spentPaise: 100_000, alreadyReturnedPaise: 0 })).toBe(100_000);
+  });
+  it("files refund rows under their order", () => {
+    expect(refundRef("gid://shopify/Order/1", "gid://shopify/Refund/9")).toBe("gid://shopify/Order/1#gid://shopify/Refund/9");
+    expect(describeLedgerKind("reverse_redeem", "shopify_refund", "gid://shopify/Order/7725351305457#gid://shopify/Refund/9", null)).toBe("Returned to wallet — refund on order #5457");
   });
 });

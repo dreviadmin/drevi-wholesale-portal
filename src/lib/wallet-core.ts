@@ -79,9 +79,10 @@ export function formatPaise(paise: number): string {
 
 /**
  * The amount an order earns on. "Actually paid" means: every merchandise line
- * at its discounted total — which already nets out the wallet code and any
- * other discount — and nothing for the fee helpers (COD fee, alteration),
- * which are charges, not purchases. Shipping and tax are outside it.
+ * at what the customer paid for it after EVERY discount — the wallet code and
+ * any promo included (see linePaidPaise) — and nothing for the fee helpers
+ * (COD fee, alteration), which are charges, not purchases. Shipping and tax
+ * are outside it.
  */
 export interface EarnLine {
   productType: string | null | undefined;
@@ -107,6 +108,63 @@ export function earnBasePaise(lines: EarnLine[]): number {
     base += Math.floor((l.discountedTotalPaise * (q - rq)) / q);
   }
   return base;
+}
+
+/**
+ * What a line actually cost the customer: its original total less every
+ * discount allocated to it, line-level and order-level alike. Shopify's
+ * discountedTotal leaves order-level discounts in, and the wallet code is
+ * one, so earning on it paid 10% back on the wallet's own rupees.
+ */
+export function linePaidPaise(originalTotalPaise: number, allocationsPaise: number[]): number {
+  const off = allocationsPaise.reduce((s, a) => s + Math.max(0, a), 0);
+  return Math.max(0, originalTotalPaise - off);
+}
+
+/** Ledger rows that belong to one order, as read back for a cancel or refund. */
+export interface OrderMovement { kind: string; amount_paise: number }
+
+/**
+ * The wallet position of one order: credit spent on it net of what has been
+ * returned, and 10% earned net of what has been reversed. Refund rows must be
+ * included — leaving them out is what let a second refund, or a cancel after
+ * a refund, take the same 10% back twice.
+ */
+export function orderWalletTotals(rows: OrderMovement[]): { spentPaise: number; earnedNetPaise: number } {
+  let spent = 0, earned = 0;
+  for (const r of rows) {
+    if (r.kind === "redeem") spent += -r.amount_paise;
+    else if (r.kind === "reverse_redeem") spent -= r.amount_paise;
+    else if (r.kind === "earn" || r.kind === "reverse_earn") earned += r.amount_paise;
+  }
+  return { spentPaise: Math.max(0, spent), earnedNetPaise: Math.max(0, earned) };
+}
+
+/**
+ * Wallet credit owed back after a refund: the wallet's share of each refunded
+ * unit, less what has already gone back. Never negative.
+ */
+export function walletReturnOwedPaise(input: {
+  lines: Array<{ quantity: number; refundedQuantity: number; walletAllocPaise: number }>;
+  spentPaise: number;
+  alreadyReturnedPaise: number;
+}): number {
+  let target = 0;
+  for (const l of input.lines) {
+    const q = Math.max(0, l.quantity);
+    if (q === 0 || l.walletAllocPaise <= 0) continue;
+    const rq = Math.min(q, Math.max(0, l.refundedQuantity));
+    target += Math.floor((l.walletAllocPaise * rq) / q);
+  }
+  // Never hand back more than the order took from the wallet in the first place.
+  const cap = input.spentPaise + input.alreadyReturnedPaise;
+  target = Math.min(target, cap);
+  return Math.max(0, target - input.alreadyReturnedPaise);
+}
+
+/** Ledger reference for a refund: the order it belongs to, then the refund. */
+export function refundRef(orderId: string, refundId: string): string {
+  return `${orderId}#${refundId}`;
 }
 
 /** 10% of the base, whole rupees, rounded down. Never negative. */
@@ -196,6 +254,11 @@ export function isRedemptionCode(code: string | null | undefined): boolean {
 /** A plain-words line for the statement. */
 export function describeLedgerKind(kind: string, refType: string | null, refId: string | null, note: string | null): string {
   const order = refType === "shopify_order" && refId ? ` on order ${orderLabel(refId)}` : "";
+  if (refType === "shopify_refund" && refId) {
+    const label = orderLabel(refId.split("#")[0]);
+    if (kind === "reverse_redeem") return `Returned to wallet — refund on order ${label}`;
+    if (kind === "reverse_earn") return `10% back reversed — refund on order ${label}`;
+  }
   switch (kind) {
     case "welcome": return "Welcome credit";
     case "earn": return `10% back${order}`;

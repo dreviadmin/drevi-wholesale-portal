@@ -10,9 +10,13 @@ import {
   earnReversalPaise,
   isExpired,
   isRedemptionCode,
+  orderWalletTotals,
   redeemablePaise,
   redemptionCodeFrom,
+  refundRef,
+  walletReturnOwedPaise,
   WALLET_DEFAULTS,
+  type OrderMovement,
 } from "@/lib/wallet-core";
 import {
   addCustomerTags,
@@ -233,6 +237,14 @@ export async function createRedemption(input: { account: WalletAccount; subtotal
   });
   if (error) {
     await deleteDiscount(discountId).catch(() => {});
+    // Two tabs raced: both voided nothing and both minted. The unique index
+    // on open redemptions (0070) lets exactly one in; the loser hands back
+    // the winner's code, so the wallet is never reserved twice.
+    if (error.code === "23505") {
+      const { data: open } = await admin.from("wallet_redemptions").select("code, amount_paise, expires_at")
+        .eq("account_id", input.account.id).eq("status", "open").maybeSingle<{ code: string; amount_paise: number; expires_at: string }>();
+      if (open) return { ok: true, code: open.code, amountPaise: open.amount_paise, expiresAt: open.expires_at };
+    }
     throw new Error(`wallet_redemptions insert: ${error.message}`);
   }
   return { ok: true, code, amountPaise: r.amount, expiresAt };
@@ -255,6 +267,22 @@ export async function recordWebhookOnce(id: string, topic: string, orderId: stri
   if (error && error.code === "23505") return false;
   if (error) throw new Error(`wallet_webhook_events: ${error.message}`);
   return true;
+}
+
+/**
+ * Every ledger row that belongs to one order: those filed under the order,
+ * and those filed under its refunds ("<order>#<refund>"). Cancels and refunds
+ * both read this, so neither can undo what the other already did.
+ */
+async function orderMovements(accountId: string, orderId: string): Promise<OrderMovement[]> {
+  const admin = createAdminClient();
+  const [direct, viaRefund] = await Promise.all([
+    admin.from("wallet_ledger").select("kind, amount_paise").eq("account_id", accountId).eq("ref_type", "shopify_order").eq("ref_id", orderId),
+    admin.from("wallet_ledger").select("kind, amount_paise").eq("account_id", accountId).eq("ref_type", "shopify_refund").like("ref_id", `${orderId}#%`),
+  ]);
+  if (direct.error) throw new Error(`wallet_ledger read: ${direct.error.message}`);
+  if (viaRefund.error) throw new Error(`wallet_ledger read: ${viaRefund.error.message}`);
+  return [...(direct.data ?? []), ...(viaRefund.data ?? [])] as OrderMovement[];
 }
 
 async function accountForOrder(order: WalletOrder): Promise<WalletAccount | null> {
@@ -328,7 +356,7 @@ export async function onOrderPaidOrFulfilled(orderId: string): Promise<string> {
   if (!paid || !fulfilled) return `waiting: paid=${paid} fulfilled=${fulfilled}`;
   const account = await ensureAccountForOrder(order);
   if (!account) return "no phone on order";
-  const base = earnBasePaise(order.lines.map((l) => ({ productType: l.productType, discountedTotalPaise: l.discountedTotalPaise, quantity: l.quantity, refundedQuantity: l.quantity - l.currentQuantity })));
+  const base = earnBasePaise(order.lines.map((l) => ({ productType: l.productType, discountedTotalPaise: l.paidPaise, quantity: l.quantity, refundedQuantity: l.quantity - l.currentQuantity })));
   const amount = earnAmountPaise(base, cfg().earnPercent);
   if (amount <= 0) return "nothing to earn";
   const row = await postMovement({ accountId: account.id, kind: "earn", amountPaise: amount, refType: "shopify_order", refId: order.id, note: `10% back on ${order.name}` });
@@ -341,15 +369,7 @@ export async function onOrderCancelled(orderId: string): Promise<string> {
   if (!order) return "order not found";
   const account = await accountForOrder(order);
   if (!account) return "no wallet";
-  const admin = createAdminClient();
-  const { data: rows } = await admin.from("wallet_ledger").select("kind, amount_paise").eq("account_id", account.id).eq("ref_type", "shopify_order").eq("ref_id", order.id);
-  let spent = 0, earned = 0;
-  for (const r of (rows ?? []) as Array<{ kind: string; amount_paise: number }>) {
-    if (r.kind === "redeem") spent += -r.amount_paise;
-    if (r.kind === "reverse_redeem") spent -= r.amount_paise;
-    if (r.kind === "earn") earned += r.amount_paise;
-    if (r.kind === "reverse_earn") earned += r.amount_paise;
-  }
+  const { spentPaise: spent, earnedNetPaise: earned } = orderWalletTotals(await orderMovements(account.id, order.id));
   const notes: string[] = [];
   if (spent > 0) { await postMovement({ accountId: account.id, kind: "reverse_redeem", amountPaise: spent, refType: "shopify_order", refId: order.id, note: `${order.name} cancelled` }); notes.push(`returned ${spent}`); }
   if (earned > 0) { await postMovement({ accountId: account.id, kind: "reverse_earn", amountPaise: -earned, refType: "shopify_order", refId: order.id, note: `${order.name} cancelled`, clamp: true }); notes.push(`reversed earning ${earned}`); }
@@ -362,13 +382,30 @@ export async function onRefund(orderId: string, refundId: string): Promise<strin
   if (!order) return "order not found";
   const account = await accountForOrder(order);
   if (!account) return "no wallet";
-  const admin = createAdminClient();
-  const { data: rows } = await admin.from("wallet_ledger").select("kind, amount_paise").eq("account_id", account.id).eq("ref_type", "shopify_order").eq("ref_id", order.id).in("kind", ["earn", "reverse_earn"]);
-  const earnedNet = ((rows ?? []) as Array<{ amount_paise: number }>).reduce((s, r) => s + r.amount_paise, 0);
-  if (earnedNet <= 0) return "nothing earned to reverse";
-  const baseNow = earnBasePaise(order.lines.map((l) => ({ productType: l.productType, discountedTotalPaise: l.discountedTotalPaise, quantity: l.quantity, refundedQuantity: l.quantity - l.currentQuantity })));
-  const delta = earnReversalPaise({ earnedNetPaise: earnedNet, baseAfterRefundPaise: baseNow, percent: cfg().earnPercent });
-  if (delta >= 0) return "no reversal owed";
-  const row = await postMovement({ accountId: account.id, kind: "reverse_earn", amountPaise: delta, refType: "refund", refId: refundId, note: `Refund on ${order.name}`, clamp: true });
-  return row ? `reversed ${-delta}` : "already reversed";
+  const rows = await orderMovements(account.id, order.id);
+  const { spentPaise, earnedNetPaise } = orderWalletTotals(rows);
+  const alreadyReturned = rows.filter((r) => r.kind === "reverse_redeem").reduce((s, r) => s + r.amount_paise, 0);
+  const ref = refundRef(order.id, refundId);
+  const notes: string[] = [];
+
+  // Credit spent on the refunded pieces goes back to the wallet; the refund
+  // itself covers only what the customer paid.
+  const owed = walletReturnOwedPaise({
+    lines: order.lines.map((l) => ({ quantity: l.quantity, refundedQuantity: l.quantity - l.currentQuantity, walletAllocPaise: l.walletAllocPaise })),
+    spentPaise, alreadyReturnedPaise: alreadyReturned,
+  });
+  if (owed > 0) {
+    const row = await postMovement({ accountId: account.id, kind: "reverse_redeem", amountPaise: owed, refType: "shopify_refund", refId: ref, note: `Refund on ${order.name}` });
+    notes.push(row ? `returned ${owed}` : "already returned");
+  }
+
+  if (earnedNetPaise > 0) {
+    const baseNow = earnBasePaise(order.lines.map((l) => ({ productType: l.productType, discountedTotalPaise: l.paidPaise, quantity: l.quantity, refundedQuantity: l.quantity - l.currentQuantity })));
+    const delta = earnReversalPaise({ earnedNetPaise, baseAfterRefundPaise: baseNow, percent: cfg().earnPercent });
+    if (delta < 0) {
+      const row = await postMovement({ accountId: account.id, kind: "reverse_earn", amountPaise: delta, refType: "shopify_refund", refId: ref, note: `Refund on ${order.name}`, clamp: true });
+      notes.push(row ? `reversed ${-delta}` : "already reversed");
+    }
+  }
+  return notes.join("; ") || "nothing to change";
 }

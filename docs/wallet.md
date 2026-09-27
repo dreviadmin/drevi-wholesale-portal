@@ -89,9 +89,15 @@ Theme setting: **Theme settings → Drevi — Integrations → Wallet API base U
 
 ## Test login without a handset
 
-`WALLET_FIXED_OTPS` lists phones with a fixed six-digit code, e.g.
-`918169992981=816999` (comma-separated for more). Such a phone gets no
-WhatsApp message and no stored code: the listed code simply verifies. Set on
-production and in `.env.development.local` for the owner's number so an
-automated test can log in regardless of Meta delivery. Keep it to numbers
-the business owns.
+`WALLET_FIXED_OTPS` (`91XXXXXXXXXX=NNNNNN`, comma-separated for more) names
+phones whose login code is known in advance. The only difference from a real
+login is that no WhatsApp message goes out: the code is stored hashed and
+goes through the same per-phone and per-IP rate limits, the 10-minute expiry
+and the attempt cap.
+
+- Never write the real value in the repo, a doc or a chat. Keep it in Vercel
+  and in `.env.development.local` only.
+- Leave it unset in production except while a test is running, and remove it
+  afterwards.
+- If the value is ever written down, rotate it and rotate
+  `WALLET_SESSION_SECRET` (that signs every login, so it logs everyone out).

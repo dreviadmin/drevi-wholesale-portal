@@ -32,10 +32,12 @@ export type OtpIssue =
   | { ok: false; reason: "rate_limited_phone" | "rate_limited_ip" };
 
 /**
- * Test phones with a fixed code, from WALLET_FIXED_OTPS ("91XXXXXXXXXX=816999,
- * 91YYYYYYYYYY=123456"). Such a phone gets no WhatsApp message and no stored
- * code: the listed code simply verifies, so an automated test can log in
- * without a handset. Keep the list to numbers the business owns.
+ * Test phones with a known code, from WALLET_FIXED_OTPS ("91XXXXXXXXXX=NNNNNN").
+ * The ONLY difference from a real login is that no WhatsApp message is sent:
+ * the code is stored hashed like any other, so the same per-phone and per-IP
+ * rate limits, 10-minute expiry and attempt cap apply. Keep the value out of
+ * the repo and rotate it if it is ever written down; unset in production
+ * unless a test is actually running.
  */
 export function fixedOtpFor(phone: string): string | null {
   const raw = process.env.WALLET_FIXED_OTPS ?? "";
@@ -55,7 +57,6 @@ export function fixedOtpFor(phone: string): string | null {
  */
 export async function issueOtp(phone: string, ip: string | null): Promise<OtpIssue> {
   const fixed = fixedOtpFor(phone);
-  if (fixed) return { ok: true, code: fixed, id: "fixed", fixed: true };
   const admin = createAdminClient();
   const since = new Date(Date.now() - OTP_WINDOW_MS).toISOString();
 
@@ -71,7 +72,7 @@ export async function issueOtp(phone: string, ip: string | null): Promise<OtpIss
     if ((byIp ?? 0) >= WALLET_DEFAULTS.otpPerIpPer10Min) return { ok: false, reason: "rate_limited_ip" };
   }
 
-  const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+  const code = fixed ?? String(randomInt(0, 1_000_000)).padStart(6, "0");
   const { data, error } = await admin
     .from("wallet_otps")
     .insert({
@@ -83,15 +84,13 @@ export async function issueOtp(phone: string, ip: string | null): Promise<OtpIss
     .select("id")
     .single();
   if (error) throw new Error(`otp insert: ${error.message}`);
-  return { ok: true, code, id: data.id as string };
+  return { ok: true, code, id: data.id as string, ...(fixed ? { fixed: true } : {}) };
 }
 
 export type OtpVerify = { ok: true } | { ok: false; reason: "no_code" | "expired" | "too_many_attempts" | "wrong" };
 
 /** Check a code against the newest unconsumed one for the phone. */
 export async function verifyOtp(phone: string, code: string): Promise<OtpVerify> {
-  const fixed = fixedOtpFor(phone);
-  if (fixed) return code.replace(/\D/g, "") === fixed ? { ok: true } : { ok: false, reason: "wrong" };
   const admin = createAdminClient();
   const { data: row } = await admin
     .from("wallet_otps")
