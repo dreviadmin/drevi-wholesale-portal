@@ -4,7 +4,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getEnv } from "@/lib/env";
-import { paiseToDecimal, toPaise, WALLET_DEFAULTS } from "@/lib/wallet-core";
+import { isRedemptionCode, linePaidPaise, paiseToDecimal, toPaise, WALLET_DEFAULTS } from "@/lib/wallet-core";
 
 // The wallet's Shopify client. It does NOT share the portal's app: "Drevi
 // Pipeline" holds product/inventory scopes only, and the wallet needs
@@ -169,7 +169,8 @@ export interface WalletOrder {
   fulfillmentStatus: string | null;
   customerId: string | null;
   phones: string[];
-  lines: Array<{ productType: string | null; quantity: number; currentQuantity: number; discountedTotalPaise: number }>;
+  /** paidPaise: the line after every discount, wallet included. walletAllocPaise: the wallet code's share of it. */
+  lines: Array<{ productType: string | null; quantity: number; currentQuantity: number; paidPaise: number; walletAllocPaise: number }>;
   /** paise allocated to each discount code on this order, by code */
   codeAllocations: Record<string, number>;
   refundedMerchandisePaise: number;
@@ -182,7 +183,7 @@ export async function fetchWalletOrder(orderId: string): Promise<WalletOrder | n
     phone: string | null; customer: { id: string; phone: string | null } | null;
     shippingAddress: { phone: string | null } | null; billingAddress: { phone: string | null } | null;
     lineItems: { nodes: Array<{ quantity: number; currentQuantity: number; product: { productType: string | null } | null;
-      discountedTotalSet: { shopMoney: { amount: string } };
+      originalTotalSet: { shopMoney: { amount: string } };
       discountAllocations: Array<{ allocatedAmountSet: { shopMoney: { amount: string } }; discountApplication: { code?: string } }> }> };
     refunds: Array<{ refundLineItems: { nodes: Array<{ subtotalSet: { shopMoney: { amount: string } }; lineItem: { product: { productType: string | null } | null } }> } }>;
   } }>(
@@ -190,7 +191,7 @@ export async function fetchWalletOrder(orderId: string): Promise<WalletOrder | n
       id name cancelledAt displayFinancialStatus displayFulfillmentStatus phone
       customer{ id phone } shippingAddress{ phone } billingAddress{ phone }
       lineItems(first:100){ nodes{ quantity currentQuantity product{ productType }
-        discountedTotalSet{ shopMoney{ amount } }
+        originalTotalSet{ shopMoney{ amount } }
         discountAllocations{ allocatedAmountSet{ shopMoney{ amount } } discountApplication{ ... on DiscountCodeApplication { code } } } } }
       refunds{ refundLineItems(first:100){ nodes{ subtotalSet{ shopMoney{ amount } } lineItem{ product{ productType } } } } }
     } }`, { id: gid });
@@ -217,12 +218,19 @@ export async function fetchWalletOrder(orderId: string): Promise<WalletOrder | n
     fulfillmentStatus: o.displayFulfillmentStatus,
     customerId: o.customer?.id ?? null,
     phones: [o.customer?.phone, o.phone, o.shippingAddress?.phone, o.billingAddress?.phone].filter((p): p is string => !!p),
-    lines: o.lineItems.nodes.map((li) => ({
-      productType: li.product?.productType ?? null,
-      quantity: li.quantity,
-      currentQuantity: li.currentQuantity,
-      discountedTotalPaise: toPaise(li.discountedTotalSet.shopMoney.amount),
-    })),
+    lines: o.lineItems.nodes.map((li) => {
+      const allocs = li.discountAllocations.map((a) => toPaise(a.allocatedAmountSet.shopMoney.amount));
+      const walletAlloc = li.discountAllocations
+        .filter((a) => isRedemptionCode(a.discountApplication?.code))
+        .reduce((s, a) => s + toPaise(a.allocatedAmountSet.shopMoney.amount), 0);
+      return {
+        productType: li.product?.productType ?? null,
+        quantity: li.quantity,
+        currentQuantity: li.currentQuantity,
+        paidPaise: linePaidPaise(toPaise(li.originalTotalSet.shopMoney.amount), allocs),
+        walletAllocPaise: walletAlloc,
+      };
+    }),
     codeAllocations,
     refundedMerchandisePaise: refundedMerch,
   };
