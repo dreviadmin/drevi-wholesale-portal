@@ -18,6 +18,7 @@ import { saveSpecs, savePricing, saveVariant, setStockForSku, saveDesignHsn, tog
 import { HsnInput } from "@/components/admin/HsnInput";
 import { BackLink } from "@/components/BackLink";
 import { DraftNotice } from "@/components/DraftNotice";
+import type { LastVendor } from "@/lib/last-vendor";
 
 // Master editor client (§12.1). Group-level fields save once per design;
 // size-level rows save per variant. Sheet-owned live prices keep flowing
@@ -35,13 +36,15 @@ interface DesignFields {
 }
 interface VariantRow { sku: string; current_qty: number; wholesale_price: number; wholesale_visible: boolean; hsn?: string | null; location?: string | null }
 
-export function MasterEditor({ board, design, variants, lastCost, lastCostLocked, sheetMrp, hsn, hsnOptions }: {
+export function MasterEditor({ board, design, variants, lastCost, lastCostLocked, sheetMrp, hsn, hsnOptions, lastVendor }: {
   board: BoardRow;
   design: DesignFields;
   variants: VariantRow[];
   lastCost: number;
   lastCostLocked: boolean;
   sheetMrp: number;
+  /** Who last supplied this design (src/lib/last-vendor.ts); null when nothing names one. */
+  lastVendor?: LastVendor | null;
   hsn: string;
   hsnOptions: string[];
 }) {
@@ -163,6 +166,38 @@ export function MasterEditor({ board, design, variants, lastCost, lastCostLocked
       {/* Specs */}
       {section("Specs")}
       <div className="mt-2 p-3.5 flex flex-col gap-2" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
+        {/* Last vendor (Ansh, 28 Sep). Read-only: it is a fact about the last
+            delivery, changed by logging a delivery, not by typing here. */}
+        <div className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
+          <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Last vendor</span>
+          {lastVendor ? (
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5" style={{ fontSize: 12.5, color: palette.black }}>
+              {lastVendor.vendorId ? (
+                <Link href={`/admin/vendors/${lastVendor.vendorId}`} className="underline" style={{ fontWeight: 600, textUnderlineOffset: 3 }}>{lastVendor.name}</Link>
+              ) : (
+                <span style={{ fontWeight: 600 }}>{lastVendor.name}</span>
+              )}
+              {lastVendor.vendorSku && <span style={{ color: palette.softBlack }}>· their code {lastVendor.vendorSku}</span>}
+              {(lastVendor.date || lastVendor.receiptNumber) && (
+                <span style={{ color: palette.softBlack }}>
+                  · {lastVendor.source === "sheet" ? "last delivered" : "received"}
+                  {lastVendor.date ? ` ${new Date(`${lastVendor.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })}` : ""}
+                  {lastVendor.receiptId && lastVendor.receiptNumber && (
+                    <>
+                      {" on "}
+                      <Link href={`/admin/receipts/${lastVendor.receiptId}`} className="underline font-mono" style={{ textUnderlineOffset: 3 }}>{lastVendor.receiptNumber}</Link>
+                    </>
+                  )}
+                </span>
+              )}
+              {lastVendor.source !== "receipt" && (
+                <span style={{ color: palette.mutedGreige, fontSize: 10.5 }}>({lastVendor.source === "sheet" ? "from the sheet — no portal delivery yet" : "from when the design was logged"})</span>
+              )}
+            </div>
+          ) : (
+            <div className="mt-1" style={{ fontSize: 12.5, color: palette.softBlack }}>No vendor recorded yet — it appears here once a delivery is logged.</div>
+          )}
+        </div>
         {(["fabric", "handwork"] as const).map((f) => (
           <label key={f} className="font-body" style={{ fontSize: 10, color: palette.mutedGreige }}>
             <span className="uppercase" style={{ letterSpacing: "0.14em" }}>{f}</span>
