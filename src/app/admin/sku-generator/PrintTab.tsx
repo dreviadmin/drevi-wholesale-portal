@@ -17,6 +17,12 @@ export function PrintTab({ tray, setTray, bases, flash }: {
 }) {
   const [cal, setCal] = useState<Calibration>(DEFAULT_CAL);
   const [withPrice, setWithPrice] = useState(false);
+  // ?price=1 (the Studio hand-off) opens on "With price". Read after mount,
+  // not in the initialiser: the server render has no URL, and a first client
+  // render that disagrees with it is a hydration mismatch.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("price") === "1") setWithPrice(true);
+  }, []);
   const [priceData, setPriceData] = useState<Map<string, PrintDatum> | null>(null);
   const [fetching, setFetching] = useState(false);
   const [building, setBuilding] = useState(false);
@@ -99,6 +105,14 @@ export function PrintTab({ tray, setTray, bases, flash }: {
       setFetching(false);
     }
   }
+
+  // With price on, the data fetches itself: the manual "Fetch price data"
+  // step was the easy one to miss, and without it the roll printed dashes.
+  // Keyed on the tray, so an edit re-fetches; the button stays as Refetch.
+  useEffect(() => {
+    if (withPrice && tray.length > 0 && priceData === null && !fetching) void fetchPrices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [withPrice, trayKey, priceData]);
 
   const missing = useMemo(
     () => (priceData ? tray.filter((t) => priceData.get(t.sku)?.found === false).map((t) => t.sku) : []),

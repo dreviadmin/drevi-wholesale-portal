@@ -1,27 +1,16 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { designKeyOf, resolveLabelDatum, type DesignPriceRow, type VendorInfoRow } from "@/lib/label-data";
 
 export const dynamic = "force-dynamic";
 
 // Label print data. Staff can print labels, so this endpoint returns ONLY the
 // derived, deliberately-obfuscated strings — never raw cost or wholesale
-// numbers. Phase 1 reads only the sheet-synced tables (behavioural parity
-// with the reference tool); receipts become the cost source at Phase 3.
-
-// kf: 1250 -> '01.2', 12500 -> '12.5', missing/NaN -> '--.-'
-// The spec's 1250 example demands truncation to one decimal, not rounding.
-function kf(v: unknown): string {
-  const n = parseFloat(String(v ?? "").replace(/[^0-9.]/g, ""));
-  if (!Number.isFinite(n) || String(v ?? "").trim() === "") return "--.-";
-  const k = (Math.floor(n / 100) / 10).toFixed(1);
-  return n / 1000 < 10 ? k.padStart(4, "0") : k;
-}
-
-function v2(vendorName: unknown): string {
-  const letters = String(vendorName ?? "").replace(/[^A-Za-z]/g, "").toUpperCase();
-  return letters.length >= 2 ? letters.slice(0, 2) : "--";
-}
+// numbers. The rule for each field lives in src/lib/label-data.ts: the
+// sheet-era column first (so nothing that printed before changes), then the
+// portal's own record — vendor by vendor_id, the design's MRP, vendor SKU and
+// wholesale price — for garments that came in through Log delivery or Studio.
 
 export async function POST(request: Request) {
   try {
@@ -40,24 +29,49 @@ export async function POST(request: Request) {
   if (skus.length > 500) return NextResponse.json({ error: "Too many SKUs (max 500)" }, { status: 400 });
 
   const admin = createAdminClient();
-  const [{ data: vend }, { data: prods }] = await Promise.all([
-    admin.from("product_vendor_info").select("sku, vendor_name, vendor_sku, last_cost, retail_price").in("sku", skus),
+  const bases = [...new Set(skus.map((s) => designKeyOf(s)?.split("|")[0]).filter((b): b is string => !!b))];
+  const [vendRes, prodRes, designRes] = await Promise.all([
+    admin.from("product_vendor_info").select("sku, vendor_name, vendor_id, vendor_sku, last_cost, retail_price").in("sku", skus),
     admin.from("wholesale_products").select("sku, wholesale_price").in("sku", skus),
+    bases.length
+      ? admin.from("designs").select("base_sku, color, vendor_id, vendor_sku, mrp_override, auto_mrp, wholesale_override, auto_wholesale").in("base_sku", bases)
+      : Promise.resolve({ data: [], error: null }),
   ]);
-  const vendBySku = new Map((vend ?? []).map((r) => [r.sku.toUpperCase(), r]));
-  const prodBySku = new Map((prods ?? []).map((r) => [r.sku.toUpperCase(), r]));
+  // A failed read must not print a roll of dashes that looks like real tags.
+  const failed = [vendRes, prodRes, designRes].find((r) => r.error);
+  if (failed?.error) return NextResponse.json({ error: `Could not read label data: ${failed.error.message}` }, { status: 500 });
+
+  const vendBySku = new Map((vendRes.data ?? []).map((r) => [r.sku.toUpperCase(), r as VendorInfoRow]));
+  const prodBySku = new Map((prodRes.data ?? []).map((r) => [r.sku.toUpperCase(), r]));
+  const designByKey = new Map(
+    ((designRes.data ?? []) as (DesignPriceRow & { base_sku: string; color: string })[]).map((d) => [`${d.base_sku.toUpperCase()}|${d.color.toUpperCase()}`, d]),
+  );
+
+  // Vendor names for every uuid either source points at, in one read.
+  const vendorIds = new Set<string>();
+  for (const v of vendBySku.values()) if (v.vendor_id) vendorIds.add(v.vendor_id);
+  for (const d of designByKey.values()) if (d.vendor_id) vendorIds.add(d.vendor_id);
+  // vendor_id on product_vendor_info is text: the sheet wrote its own codes
+  // there, the portal writes uuids. Only uuids can name a vendors row.
+  const uuids = [...vendorIds].filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
+  const vendorNameById = new Map<string, string>();
+  if (uuids.length) {
+    const { data: vrows, error: vErr } = await admin.from("vendors").select("id, name").in("id", uuids);
+    if (vErr) return NextResponse.json({ error: `Could not read vendors: ${vErr.message}` }, { status: 500 });
+    for (const r of vrows ?? []) vendorNameById.set(r.id, r.name);
+  }
 
   const items = skus.map((sku) => {
-    const v = vendBySku.get(sku);
+    const key = designKeyOf(sku);
     const p = prodBySku.get(sku);
-    const found = !!(v || p);
-    if (!found) return { sku, found: false, vendorCode: "---------", mrp: "" };
-    const cost = v?.last_cost != null && Number(v.last_cost) > 0 ? Number(v.last_cost) : "";
-    const wholesale = p?.wholesale_price != null && Number(p.wholesale_price) > 0 ? Number(p.wholesale_price) : "";
-    const vendorCode = `${v2(v?.vendor_name)}-${v?.vendor_sku?.trim() || "-"}-${kf(cost)}-${kf(wholesale)}`;
-    const mrpNum = v?.retail_price != null && Number(v.retail_price) > 0 ? Math.round(Number(v.retail_price)) : null;
-    const mrp = mrpNum != null ? mrpNum.toLocaleString("en-IN") : "";
-    return { sku, found: true, vendorCode, mrp };
+    return resolveLabelDatum({
+      sku,
+      vendorInfo: vendBySku.get(sku),
+      wholesalePrice: p?.wholesale_price,
+      inCatalog: !!p,
+      design: key ? designByKey.get(key) : null,
+      vendorNameById,
+    });
   });
 
   return NextResponse.json({ items });

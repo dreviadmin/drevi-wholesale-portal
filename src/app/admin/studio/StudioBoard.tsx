@@ -830,7 +830,10 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
                     ? ` · no SKUs for ${res.missing.slice(0, 3).join(", ")}${res.missing.length > 3 ? ` +${res.missing.length - 3}` : ""}`
                     : "";
                   flash(`${res.skus.length} tag(s) queued from ${res.groups} design(s)${miss} — opening the print tray`);
-                  router.push("/admin/sku-generator?tab=print");
+                  // price=1: tags from Studio are shop-floor tags, so the tray
+                  // opens on "With price" and fetches the vendor line and MRP
+                  // itself (Ansh, 28 Sep: they came out blank).
+                  router.push("/admin/sku-generator?tab=print&price=1");
                 });
               }}
               className="font-body uppercase disabled:opacity-50"
