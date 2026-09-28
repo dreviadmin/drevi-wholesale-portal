@@ -7,6 +7,7 @@ import { listEntityNotes } from "@/lib/entity-notes";
 import { MasterEditor } from "./MasterEditor";
 import { listKnownHsnCodes } from "@/lib/hsn";
 import { DEFAULT_WHOLESALE_MULTIPLIER } from "@/lib/pricing";
+import { pickLastVendor, type ReceiptVendor } from "@/lib/last-vendor";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,7 @@ export default async function MasterPage({ params }: { params: { designId: strin
 
   const { data: design } = await admin
     .from("designs")
-    .select("fabric, handwork, origin, style, color_name, specs_verified, tier, markup_multiplier, auto_mrp, mrp_override, wholesale_multiplier, auto_wholesale, wholesale_override, supply_mode, vendor_stock_qty, making_days, making_moq, delivery_days, supply_note, supply_updated_at, vendor_sku, ident_image_id, updated_at")
+    .select("vendor_id, fabric, handwork, origin, style, color_name, specs_verified, tier, markup_multiplier, auto_mrp, mrp_override, wholesale_multiplier, auto_wholesale, wholesale_override, supply_mode, vendor_stock_qty, making_days, making_moq, delivery_days, supply_note, supply_updated_at, vendor_sku, ident_image_id, updated_at")
     .eq("id", params.designId)
     .single();
   const { data: allVariants } = await admin
@@ -53,6 +54,36 @@ export default async function MasterPage({ params }: { params: { designId: strin
   const lastCostLocked = (pvi ?? []).some((p) => {
     const locks = (p as { locked_fields?: unknown }).locked_fields;
     return Array.isArray(locks) && locks.includes("last_cost");
+  });
+
+  // Last vendor (Ansh, 28 Sep). Receipt lines are read by the SKU prefix, not
+  // just the catalog's size rows: a size can be received before it is ever in
+  // wholesale_products, and it is still this design's delivery.
+  const { data: lineRows } = await admin
+    .from("goods_receipt_lines")
+    .select("receipt_id, sku, vendor_sku")
+    .ilike("sku", `${detail.board.baseSku}-%`)
+    .range(0, 1999);
+  const groupLines = (lineRows ?? []).filter((l) => l.sku.toUpperCase().endsWith(`-${detail.board.color.toUpperCase()}`));
+  const receiptIds = [...new Set(groupLines.map((l) => l.receipt_id))];
+  const { data: receiptRows } = receiptIds.length
+    ? await admin.from("goods_receipts").select("id, receipt_number, receipt_date, created_at, vendor_id").in("id", receiptIds)
+    : { data: [] as { id: string; receipt_number: string; receipt_date: string | null; created_at: string | null; vendor_id: string }[] };
+  const vendorIds = [...new Set([...(receiptRows ?? []).map((r) => r.vendor_id), design?.vendor_id].filter((v): v is string => !!v))];
+  const { data: vendorRows } = vendorIds.length ? await admin.from("vendors").select("id, name").in("id", vendorIds) : { data: [] as { id: string; name: string }[] };
+  const vendorName = new Map((vendorRows ?? []).map((v) => [v.id, v.name]));
+  const receiptById = new Map((receiptRows ?? []).map((r) => [r.id, r]));
+  const receiptVendors: ReceiptVendor[] = groupLines.flatMap((l) => {
+    const r = receiptById.get(l.receipt_id);
+    return r ? [{ receiptId: r.id, receiptNumber: r.receipt_number, receiptDate: r.receipt_date, createdAt: r.created_at, vendorId: r.vendor_id, vendorName: vendorName.get(r.vendor_id) ?? null, vendorSku: l.vendor_sku ?? null }] : [];
+  });
+  const { data: sheetVendorRows } = skus.length
+    ? await admin.from("product_vendor_info").select("vendor_name, vendor_sku, last_receipt_date").in("sku", skus)
+    : { data: [] as { vendor_name: string | null; vendor_sku: string | null; last_receipt_date: string | null }[] };
+  const lastVendor = pickLastVendor({
+    receipts: receiptVendors,
+    sheet: (sheetVendorRows ?? []).map((p) => ({ vendorName: p.vendor_name, vendorSku: p.vendor_sku, lastReceiptDate: p.last_receipt_date })),
+    design: { vendorId: design?.vendor_id ?? null, vendorName: design?.vendor_id ? vendorName.get(design.vendor_id) ?? null : null, vendorSku: design?.vendor_sku ?? null },
   });
 
   return (
@@ -91,6 +122,7 @@ export default async function MasterPage({ params }: { params: { designId: strin
       lastCost={lastCost}
       lastCostLocked={lastCostLocked}
       sheetMrp={sheetMrp}
+      lastVendor={lastVendor}
     />
     <div className="px-4 md:px-8 pb-10 max-w-2xl">
       <NotesPanel entityType="design" entityId={params.designId} notes={await listEntityNotes("design", params.designId)} revalidate={`/admin/studio/master/${params.designId}`} />
