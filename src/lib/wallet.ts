@@ -10,7 +10,9 @@ import {
   earnReversalPaise,
   isExpired,
   isRedemptionCode,
+  normalizePhone,
   orderWalletTotals,
+  phoneClaimDecision,
   redeemablePaise,
   redemptionCodeFrom,
   refundRef,
@@ -20,11 +22,14 @@ import {
 } from "@/lib/wallet-core";
 import {
   addCustomerTags,
-  createCustomer,
   deleteDiscount,
   fetchWalletOrder,
-  findCustomerByPhone,
+  getCustomer,
   mintRedemptionCode,
+  removeCustomerTags,
+  setCustomerNames,
+  setCustomerPhone,
+  type ShopifyCustomerFull,
   type WalletOrder,
 } from "@/lib/wallet-shopify";
 
@@ -74,6 +79,14 @@ export const walletConfig = cfg;
 export async function getAccountByPhone(phone: string): Promise<WalletAccount | null> {
   const admin = createAdminClient();
   const { data, error } = await admin.from("wallet_accounts").select("*").eq("phone", phone).maybeSingle<WalletAccount>();
+  if (error) throw new Error(`wallet_accounts read: ${error.message}`);
+  return data ?? null;
+}
+
+export async function getAccountByCustomer(customerGid: string): Promise<WalletAccount | null> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.from("wallet_accounts").select("*").eq("shopify_customer_id", customerGid)
+    .order("created_at", { ascending: true }).limit(1).maybeSingle<WalletAccount>();
   if (error) throw new Error(`wallet_accounts read: ${error.message}`);
   return data ?? null;
 }
@@ -137,18 +150,6 @@ export async function ensureAccount(input: {
   return { account, created: true };
 }
 
-/** Link (or create) the Shopify customer for a phone, tagging it for WhatsApp. */
-export async function linkShopifyCustomer(input: { phone: string; name?: string | null; tags: string[] }): Promise<string> {
-  const found = await findCustomerByPhone(input.phone);
-  if (found) {
-    const missing = input.tags.filter((t) => !found.tags.includes(t));
-    if (missing.length) await addCustomerTags(found.id, missing);
-    return found.id;
-  }
-  const [firstName, ...rest] = (input.name ?? "").trim().split(/\s+/).filter(Boolean);
-  const c = await createCustomer({ e164: input.phone, firstName: firstName || null, lastName: rest.join(" ") || null, tags: input.tags, note: "Created by the Drevi Wallet" });
-  return c.id;
-}
 
 // ---- Ledger ----------------------------------------------------------------
 
@@ -408,4 +409,138 @@ export async function onRefund(orderId: string, refundId: string): Promise<strin
     }
   }
   return notes.join("; ") || "nothing to change";
+}
+
+// ---- Signing up and joining (email sign-in) ------------------------------
+
+/** Tags that say "this customer has a wallet"; the theme reads the first. */
+export const WALLET_TAGS = ["drevi-wallet", "source:wallet"];
+
+/**
+ * Open (or find) the wallet of a SIGNED-IN customer for the phone they give.
+ * Sign-in proves the email, not the phone, so phoneClaimDecision decides
+ * whether an existing wallet on that phone can be moved here. Also writes
+ * the phone, name and WhatsApp choice onto the Shopify customer.
+ */
+export async function openWalletForCustomer(input: {
+  customerGid: string;
+  phone: string;
+  name?: string | null;
+  consent: boolean;
+  source: "popup" | "seed" | "order" | "manual";
+}): Promise<{ ok: true; account: WalletAccount; created: boolean; phoneReview: boolean } | { ok: false; reason: "invalid_phone" | "phone_in_use" | "no_customer" }> {
+  const phone = normalizePhone(input.phone);
+  if (!phone) return { ok: false, reason: "invalid_phone" };
+  const customer = await getCustomer(input.customerGid);
+  if (!customer) return { ok: false, reason: "no_customer" };
+  const admin = createAdminClient();
+  const name = (input.name ?? "").trim().slice(0, 80) || null;
+
+  let account = await getAccountByCustomer(input.customerGid);
+  let created = false;
+  let phoneReview = false;
+
+  if (!account) {
+    const byPhone = await getAccountByPhone(phone);
+    let other: ShopifyCustomerFull | null = null;
+    if (byPhone?.shopify_customer_id && byPhone.shopify_customer_id !== input.customerGid) {
+      other = await getCustomer(byPhone.shopify_customer_id).catch(() => null);
+    }
+    const decision = phoneClaimDecision({ walletExists: !!byPhone, walletCustomerId: byPhone?.shopify_customer_id, me: input.customerGid, otherHasEmail: !!other?.email });
+    if (decision === "in_use") return { ok: false, reason: "phone_in_use" };
+    if (decision === "relink" && byPhone) {
+      await admin.from("wallet_accounts").update({ shopify_customer_id: input.customerGid, updated_at: new Date().toISOString() }).eq("id", byPhone.id);
+      phoneReview = true;
+      if (other) await addCustomerTags(other.id, ["wallet-relinked", "phone-review"]).catch(() => {});
+      account = { ...byPhone, shopify_customer_id: input.customerGid };
+    } else {
+      const r = await ensureAccount({ phone, name, shopifyCustomerId: input.customerGid, source: input.source, waOptIn: input.consent });
+      account = r.account;
+      created = r.created;
+    }
+  }
+
+  // The Shopify record: phone (unless another customer holds it), name if
+  // empty, and tags the theme and your reports read.
+  if ((customer.phone ?? "").replace(/\s/g, "") !== "+" + phone) {
+    const r = await setCustomerPhone(input.customerGid, phone).catch((e) => { console.warn("[wallet] set phone:", (e as Error).message); return "taken" as const; });
+    if (r === "taken") phoneReview = true;
+  }
+  if (!customer.firstName && name) {
+    const [first, ...rest] = name.split(/\s+/);
+    await setCustomerNames(input.customerGid, first, rest.join(" ") || null).catch(() => {});
+  }
+  const tags = [...WALLET_TAGS, ...(input.consent ? ["wa-opt-in"] : []), ...(phoneReview ? ["phone-review"] : [])];
+  await addCustomerTags(input.customerGid, tags).catch((e) => console.warn("[wallet] tags:", (e as Error).message));
+  if (!input.consent && customer.tags.includes("wa-opt-in")) await removeCustomerTags(input.customerGid, ["wa-opt-in"]).catch(() => {});
+
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString(), wa_opt_in_at: input.consent ? (account.wa_opt_in_at ?? new Date().toISOString()) : null };
+  if (!account.name && name) patch.name = name;
+  const { data } = await admin.from("wallet_accounts").update(patch).eq("id", account.id).select("*").single<WalletAccount>();
+  return { ok: true, account: data ?? account, created, phoneReview };
+}
+
+export interface WalletSignup { id: string; email: string; name: string | null; phone: string; wa_opt_in: boolean; created_at: string }
+
+/** Public form budget: 10 per IP and 5 per email in ten minutes. */
+export async function signupBudgetOk(ip: string | null, email: string): Promise<boolean> {
+  const admin = createAdminClient();
+  const since = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  if (ip) {
+    const { count } = await admin.from("wallet_signups").select("*", { count: "exact", head: true }).eq("ip", ip).gte("created_at", since);
+    if ((count ?? 0) >= 10) return false;
+  }
+  const { count: byEmail } = await admin.from("wallet_signups").select("*", { count: "exact", head: true }).eq("email", email).gte("created_at", since);
+  return (byEmail ?? 0) < 5;
+}
+
+export async function recordSignup(input: { email: string; name: string | null; phone: string; consent: boolean; ip: string | null; shopifyCustomerId: string | null }): Promise<void> {
+  const admin = createAdminClient();
+  const { error } = await admin.from("wallet_signups").insert({
+    email: input.email, name: input.name, phone: input.phone, wa_opt_in: input.consent, ip: input.ip, shopify_customer_id: input.shopifyCustomerId,
+  });
+  if (error) throw new Error(`wallet_signups insert: ${error.message}`);
+}
+
+async function latestUnclaimedSignup(email: string): Promise<WalletSignup | null> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("wallet_signups").select("id, email, name, phone, wa_opt_in, created_at")
+    .eq("email", email.toLowerCase()).is("claimed_at", null).order("created_at", { ascending: false }).limit(1).maybeSingle<WalletSignup>();
+  return data ?? null;
+}
+
+/**
+ * What a signed-in shopper's wallet is, opening it on the way when we can:
+ * from the sign-up form they filled before signing in (matched by the email
+ * Shopify just verified), or from a phone already on their Shopify record.
+ * Otherwise the theme asks for their number.
+ */
+export async function walletForSignedIn(customerGid: string): Promise<{
+  account: WalletAccount | null;
+  customer: ShopifyCustomerFull | null;
+  reason?: "phone_in_use";
+  suggestedPhone?: string | null;
+}> {
+  const existing = await getAccountByCustomer(customerGid);
+  if (existing) return { account: existing, customer: null };
+  const customer = await getCustomer(customerGid);
+  if (!customer) return { account: null, customer: null };
+  const fullName = [customer.firstName, customer.lastName].filter(Boolean).join(" ") || null;
+
+  if (customer.email) {
+    const s = await latestUnclaimedSignup(customer.email);
+    if (s) {
+      const r = await openWalletForCustomer({ customerGid, phone: s.phone, name: s.name ?? fullName, consent: s.wa_opt_in, source: "popup" });
+      const admin = createAdminClient();
+      await admin.from("wallet_signups").update({ claimed_at: new Date().toISOString(), shopify_customer_id: customerGid, claim_note: r.ok ? (r.phoneReview ? "phone-review" : null) : r.reason }).eq("id", s.id);
+      if (r.ok) return { account: r.account, customer };
+      if (r.reason === "phone_in_use") return { account: null, customer, reason: "phone_in_use", suggestedPhone: s.phone };
+    }
+  }
+  const shopPhone = normalizePhone(customer.phone);
+  if (shopPhone) {
+    const r = await openWalletForCustomer({ customerGid, phone: shopPhone, name: fullName, consent: customer.tags.includes("wa-opt-in"), source: "popup" });
+    if (r.ok) return { account: r.account, customer };
+  }
+  return { account: null, customer };
 }

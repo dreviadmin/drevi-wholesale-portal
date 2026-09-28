@@ -5,7 +5,6 @@
  *   node scripts/wallet-seed.mjs                 dry run against DEV: counts and a sample, writes nothing
  *   node scripts/wallet-seed.mjs --apply         create the wallets in DEV
  *   node scripts/wallet-seed.mjs --apply --prod  create them in PROD (asks you to type the store name)
- *   node scripts/wallet-seed.mjs --send          also send the welcome on WhatsApp (needs WALLET_WA_LIVE=true)
  *
  * Safe to re-run: a phone that already has a wallet is skipped, and the
  * welcome credit is idempotent in the database (one 'welcome' per phone).
@@ -24,7 +23,6 @@ const envFile = target === "prod" ? ".env.local" : ".env.development.local";
 dotenv.config({ path: ".env.local" });
 dotenv.config({ path: envFile, override: true });
 const APPLY = args.has("--apply");
-const SEND = args.has("--send");
 
 const WELCOME_PAISE = Number(process.env.WALLET_WELCOME_PAISE ?? 100000);
 const EXPIRY_MONTHS = Number(process.env.WALLET_EXPIRY_MONTHS ?? 12);
@@ -77,26 +75,9 @@ async function allCustomers(token) {
   return out;
 }
 
-async function sendWelcome(phone, name, balancePaise) {
-  if ((process.env.WALLET_WA_LIVE ?? "").toLowerCase() !== "true") return { dryRun: true };
-  const res = await fetch("https://backend.aisensy.com/campaign/t1/api/v2", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      apiKey: process.env.AISENSY_API_KEY,
-      campaignName: process.env.AISENSY_CAMPAIGN_WELCOME || "drevi_wallet_welcome",
-      destination: "+" + phone,
-      userName: name || "there",
-      source: "drevi-wallet-seed",
-      templateParams: [name || "there", "₹" + Math.floor(balancePaise / 100).toLocaleString("en-IN")],
-      tags: ["wallet", "welcome", "seed"],
-    }),
-  });
-  return { sent: res.ok, status: res.status };
-}
 
 async function main() {
-  console.log(`Target: ${target.toUpperCase()} (${envFile})  mode: ${APPLY ? "APPLY" : "DRY RUN"}${SEND ? " + SEND" : ""}`);
+  console.log(`Target: ${target.toUpperCase()} (${envFile})  mode: ${APPLY ? "APPLY" : "DRY RUN"}`);
   if (APPLY && target === "prod") {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     const ans = await rl.question("This opens wallets with real credit on the LIVE database. Type the store name to continue: ");
@@ -130,7 +111,7 @@ async function main() {
 
   if (!APPLY) { console.log("\nDry run — nothing written. Add --apply to create them."); return; }
 
-  let created = 0, credited = 0, sent = 0, failed = 0;
+  let created = 0, credited = 0, failed = 0;
   for (const [phone, v] of todo) {
     const { data: acc, error } = await supabase
       .from("wallet_accounts")
@@ -145,14 +126,8 @@ async function main() {
     });
     if (e2) { failed++; console.error(`  ${phone}: welcome failed: ${e2.message}`); continue; }
     if (row) credited++;
-    if (SEND) {
-      const r = await sendWelcome(phone, v.name, WELCOME_PAISE);
-      if (r.sent) sent++;
-      else if (!r.dryRun) console.warn(`  ${phone}: WhatsApp ${r.status}`);
-      await new Promise((r) => setTimeout(r, 250));
-    }
   }
-  console.log(`\ncreated ${created} wallet(s), credited ${credited}, WhatsApp sent ${sent}, failed ${failed}`);
+  console.log(`\ncreated ${created} wallet(s), credited ${credited}, failed ${failed}`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

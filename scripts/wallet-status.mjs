@@ -33,5 +33,6 @@ for (const a of accs ?? []) {
 const { data: wh } = await s.from("wallet_webhook_events").select("topic, shopify_order_id, received_at").order("received_at", { ascending: false }).limit(10);
 console.log(`\nwebhook deliveries received: ${(wh ?? []).length ? "" : "none yet"}`);
 for (const w of wh ?? []) console.log(`   ${w.received_at.slice(0, 19)}  ${w.topic.padEnd(18)} order ${w.shopify_order_id?.split("/").pop() ?? "—"}`);
-const { count: nOtp } = await s.from("wallet_otps").select("*", { count: "exact", head: true });
-console.log(`otp codes issued so far: ${nOtp ?? 0}`);
+const { count: nSign } = await s.from("wallet_signups").select("*", { count: "exact", head: true });
+const { count: nOpen } = await s.from("wallet_signups").select("*", { count: "exact", head: true }).is("claimed_at", null);
+console.log(`sign-up forms: ${nSign ?? 0} (${nOpen ?? 0} not yet signed in)`);

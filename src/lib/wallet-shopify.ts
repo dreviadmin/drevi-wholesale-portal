@@ -89,6 +89,62 @@ function throwUserErrors(what: string, errors: UserError[] | null | undefined): 
 
 export interface ShopifyCustomerLite { id: string; phone: string | null; firstName: string | null; lastName: string | null; tags: string[] }
 
+export interface ShopifyCustomerFull extends ShopifyCustomerLite { email: string | null }
+
+const CUSTOMER_FIELDS = "id email phone firstName lastName tags";
+
+export async function getCustomer(gid: string): Promise<ShopifyCustomerFull | null> {
+  const d = await walletGql<{ customer: ShopifyCustomerFull | null }>(`query($id:ID!){ customer(id:$id){ ${CUSTOMER_FIELDS} } }`, { id: gid });
+  return d.customer;
+}
+
+/** Exact email match only. */
+export async function findCustomerByEmail(email: string): Promise<ShopifyCustomerFull | null> {
+  const d = await walletGql<{ customers: { nodes: ShopifyCustomerFull[] } }>(
+    `query($q:String!){ customers(first:5, query:$q){ nodes{ ${CUSTOMER_FIELDS} } } }`, { q: `email:"${email.replace(/"/g, "")}"` });
+  return d.customers.nodes.find((c) => (c.email ?? "").toLowerCase() === email.toLowerCase()) ?? null;
+}
+
+/** Exact phone match only (Shopify keeps phones unique across customers). */
+export async function customerWithPhone(e164: string): Promise<ShopifyCustomerFull | null> {
+  const d = await walletGql<{ customers: { nodes: ShopifyCustomerFull[] } }>(
+    `query($q:String!){ customers(first:5, query:$q){ nodes{ ${CUSTOMER_FIELDS} } } }`, { q: `phone:+${e164}` });
+  return d.customers.nodes.find((c) => (c.phone ?? "").replace(/\s/g, "") === "+" + e164) ?? null;
+}
+
+export async function createCustomerWithEmail(input: { email: string; e164?: string | null; firstName?: string | null; lastName?: string | null; tags: string[]; note?: string }): Promise<ShopifyCustomerFull> {
+  const d = await walletGql<{ customerCreate: { customer: ShopifyCustomerFull | null; userErrors: UserError[] } }>(
+    `mutation($input: CustomerInput!){ customerCreate(input:$input){ customer{ ${CUSTOMER_FIELDS} } userErrors{ field message } } }`,
+    { input: { email: input.email, phone: input.e164 ? "+" + input.e164 : undefined, firstName: input.firstName ?? undefined, lastName: input.lastName ?? undefined, tags: input.tags, note: input.note } },
+  );
+  throwUserErrors("customerCreate", d.customerCreate.userErrors);
+  if (!d.customerCreate.customer) throw new Error("customerCreate returned no customer");
+  return d.customerCreate.customer;
+}
+
+/** Put the phone on the customer. "taken" when another customer already holds it. */
+export async function setCustomerPhone(gid: string, e164: string): Promise<"ok" | "taken"> {
+  const d = await walletGql<{ customerUpdate: { userErrors: UserError[] } }>(
+    `mutation($input: CustomerInput!){ customerUpdate(input:$input){ userErrors{ field message } } }`, { input: { id: gid, phone: "+" + e164 } });
+  const errs = d.customerUpdate.userErrors;
+  if (errs.some((e) => /taken|already/i.test(e.message))) return "taken";
+  throwUserErrors("customerUpdate(phone)", errs);
+  return "ok";
+}
+
+export async function setCustomerNames(gid: string, firstName: string | null, lastName: string | null): Promise<void> {
+  const d = await walletGql<{ customerUpdate: { userErrors: UserError[] } }>(
+    `mutation($input: CustomerInput!){ customerUpdate(input:$input){ userErrors{ field message } } }`,
+    { input: { id: gid, firstName: firstName ?? undefined, lastName: lastName ?? undefined } });
+  throwUserErrors("customerUpdate(name)", d.customerUpdate.userErrors);
+}
+
+export async function removeCustomerTags(customerId: string, tags: string[]): Promise<void> {
+  const d = await walletGql<{ tagsRemove: { userErrors: UserError[] } }>(
+    `mutation($id:ID!, $tags:[String!]!){ tagsRemove(id:$id, tags:$tags){ userErrors{ field message } } }`, { id: customerId, tags });
+  throwUserErrors("tagsRemove", d.tagsRemove.userErrors);
+}
+
 /** Find by phone. Shopify stores E.164 with the plus; search both spellings. */
 export async function findCustomerByPhone(e164: string): Promise<ShopifyCustomerLite | null> {
   const q = `phone:+${e164} OR phone:${e164}`;

@@ -38,15 +38,9 @@ type EnvKey =
   // portal's own app ("Drevi Pipeline") has no customer/discount/order scopes.
   | "WALLET_SHOPIFY_CLIENT_ID"
   | "WALLET_SHOPIFY_CLIENT_SECRET"
-  | "WALLET_SESSION_SECRET"       // >=32 chars; derived from the master key when absent
-  | "WALLET_FIXED_OTPS"           // test phones with a fixed code: "91XXXXXXXXXX=NNNNNN"; no WhatsApp, same limits; never commit the value
+  | "WALLET_STOREFRONT_SECRET"    // >=32 chars; same value as the shop metafield drevi.wallet_key the theme signs with
   | "WALLET_ALLOWED_ORIGINS"      // comma list; defaults to drevifashion.com + myshopify
-  | "WALLET_WA_LIVE"              // 'true' to actually send WhatsApp; anything else is a dry run
-  | "WALLET_DEV_RETURN_OTP"       // 'true' + non-production: OTP echoed in the send response
-  | "AISENSY_API_KEY"
-  | "AISENSY_CAMPAIGN_OTP"        // campaign names as created in AiSensy
-  | "AISENSY_CAMPAIGN_WELCOME"
-  | "AISENSY_CAMPAIGN_BALANCE"
+  | "AISENSY_API_KEY"             // wholesale launch messages (scripts/aisensy-send.mjs); not used by the wallet
   | "WALLET_WELCOME_PAISE"        // 100000
   | "WALLET_EARN_PERCENT"         // 10
   | "WALLET_MIN_ORDER_PAISE"      // 500000

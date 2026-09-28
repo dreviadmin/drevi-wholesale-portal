@@ -60,7 +60,7 @@ const TABLES = [
   "shopify_tokens",
   "wallet_accounts",
   "wallet_ledger",
-  "wallet_otps",
+  "wallet_signups",
   "wallet_redemptions",
   "wallet_webhook_events",
 ];

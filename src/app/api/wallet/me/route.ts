@@ -1,8 +1,8 @@
 import { formatPhone } from "@/lib/wallet-core";
-import { verifySession } from "@/lib/wallet-auth";
-import { getAccountByPhone, reservedPaise, statement, sweepExpiry, walletConfig } from "@/lib/wallet";
+import { reservedPaise, statement, sweepExpiry, walletConfig, walletForSignedIn } from "@/lib/wallet";
+import { customerFromRequest } from "@/lib/wallet-identity";
 import { fetchCustomerOrders } from "@/lib/wallet-shopify";
-import { bearer, fail, json, preflight } from "@/lib/wallet-http";
+import { fail, json, preflight } from "@/lib/wallet-http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,12 +17,23 @@ export function OPTIONS(req: Request) {
 }
 
 export async function GET(req: Request) {
-  const phone = verifySession(bearer(req));
-  if (!phone) return fail(req, "Not signed in.", 401);
+  const customerGid = customerFromRequest(req);
+  if (!customerGid) return fail(req, "Please sign in again.", 401);
 
-  const found = await getAccountByPhone(phone);
-  if (!found) return fail(req, "No wallet for this number.", 404);
-  const account = await sweepExpiry(found);
+  // Opens the wallet on the way if the shopper filled the sign-up form before
+  // signing in, or already has a phone on their Shopify record.
+  const w = await walletForSignedIn(customerGid);
+  if (!w.account) {
+    const c = w.customer;
+    return json(req, {
+      ok: true,
+      joined: false,
+      reason: w.reason ?? null,
+      name: c ? [c.firstName, c.lastName].filter(Boolean).join(" ") || null : null,
+      phone: w.suggestedPhone ?? null,
+    });
+  }
+  const account = await sweepExpiry(w.account);
 
   const url = new URL(req.url);
   const wantOrders = url.searchParams.get("orders") !== "0";
@@ -34,6 +45,7 @@ export async function GET(req: Request) {
   const cfg = walletConfig();
   return json(req, {
     ok: true,
+    joined: true,
     wallet: {
       phone: formatPhone(account.phone),
       name: account.name,

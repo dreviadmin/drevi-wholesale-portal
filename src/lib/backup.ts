@@ -59,7 +59,7 @@ export const BACKUP_TABLES = [
   // 0068 wallet (26 Sep) — store credit; the OTP table is short-lived but still ours to restore
   "wallet_accounts",
   "wallet_ledger",
-  "wallet_otps",
+  "wallet_signups",
   "wallet_redemptions",
   "wallet_webhook_events",
 ] as const;
