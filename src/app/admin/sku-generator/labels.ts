@@ -5,6 +5,7 @@
 // against the physical printer — do not tweak).
 import { jsPDF } from "jspdf";
 import QRCode from "qrcode";
+import { wrapAtHyphens } from "@/lib/label-wrap";
 
 export interface Calibration {
   rollW: number; // label width mm
@@ -78,17 +79,25 @@ function drawLabelAt(
     doc.setFontSize(5.6);
     doc.setTextColor(20, 20, 20);
     const skuLines = doc.splitTextToSize(sku, textW) as string[];
+    // The coded vendor line wraps too (Ansh, 28 Sep: "DR-0069-08.9-10." ran
+    // off the label). Measured at its own 5.4 pt, then the SKU size restored.
+    doc.setFontSize(5.4);
+    const codeLines = wrapAtHyphens((t) => doc.getTextWidth(t), datum?.vendorCode ?? "---------", textW);
+    doc.setFontSize(5.6);
     const lineH = 2.05;
     const codeH = 2.0;
     const priceH = 3.2;
-    const blockH = skuLines.length * lineH + codeH + priceH + 1.2;
+    const blockH = skuLines.length * lineH + codeLines.length * codeH + priceH + 1.2;
     let y = Math.max(2.6, (H - blockH) / 2 + 1.8);
     for (const line of skuLines) {
       doc.text(line, textX0, y);
       y += lineH;
     }
     doc.setFontSize(5.4);
-    doc.text(datum?.vendorCode ?? "---------", textX0, y + 0.3);
+    codeLines.forEach((line, i) => {
+      doc.text(line, textX0, y + 0.3);
+      if (i < codeLines.length - 1) y += codeH;
+    });
     y += codeH + 0.9;
     const mrpText = datum?.mrp ? `Rs ${datum.mrp}` : "Rs -";
     doc.setFont("helvetica", "bold");
