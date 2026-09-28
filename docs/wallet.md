@@ -1,31 +1,56 @@
 # Drevi Wallet
 
-A store-credit balance for retail customers, keyed on **phone number**, with a
-statement. Built 26 Sep 2026 (Ansh's decisions: ₹1,000 welcome for everyone,
-10% of the amount actually paid on every fulfilled-and-paid order, rolling
-12-month expiry, ₹5,000 minimum order to redeem).
+A store-credit balance for retail customers, with a statement. Built 26 Sep
+2026 (Ansh's decisions: ₹1,000 welcome for everyone, 10% of the amount
+actually paid on every fulfilled-and-paid order, rolling 12-month expiry,
+₹5,000 minimum order to redeem). Sign-in moved from a WhatsApp code to
+Shopify's own email sign-in on 28 Sep 2026, when WhatsApp delivery was
+blocked (Meta error 131037) and launch could not wait.
 
-## Why it isn't Shopify's store credit
+## Identity: Shopify sign-in plus a mandatory phone
 
-Shopify store credit only works inside a Shopify customer account, and those
-log in by **email**. 217 of the 222 retail customers have a phone and no
-email, and on the Basic plan third-party phone-OTP login can't create a
-Shopify account session (that needs Multipass, which is Plus-only). So the
-wallet lives in the portal's Supabase, the customer logs in with a WhatsApp
-code, and value is settled at checkout as a single-use discount code minted
-for that cart. No gift card, no Shopify login.
+- **Authentication is Shopify's.** The store runs new customer accounts:
+  email plus a one-time code Shopify sends, no password, accounts optional,
+  login not required at checkout.
+- **The phone is ours to require.** A wallet opens only once the customer
+  has given a mobile number, through the sign-up form (popup, bag, My
+  Account). The phone is written onto the Shopify customer and keys the
+  wallet row.
+- **The theme vouches for who is signed in.** For a signed-in customer the
+  theme renders `"<customerId>.<unixSeconds>.<hmac>"` with Liquid's
+  `hmac_sha256` and the key in the shop metafield `drevi.wallet_key`. The
+  portal checks it with the same key (`WALLET_STOREFRONT_SECRET`), and
+  accepts it for 24 hours (`src/lib/wallet-token.ts`, with tests).
+- **The phone is not verified.** Guards: ₹1,000 is usable only on orders of
+  ₹5,000+; one welcome per phone and per wallet; COD King checks the phone
+  on COD orders. A wallet already on another *signed-in* account is never
+  handed over by typing its number (`phoneClaimDecision`). A wallet on a
+  phone-only record (a past COD buyer) moves to the signed-in account and
+  both records are tagged `phone-review` so they can be merged in Shopify.
 
-## How it moves
+## Sign-up and joining
+
+| Who | What they do | What happens |
+|---|---|---|
+| Not signed in | Fill the form: name, email, mobile, WhatsApp box (ticked by default, optional) | `POST /api/wallet/signup` keeps the lead in `wallet_signups`; if the email is new to Shopify, creates the customer with email + phone + tags (`source:wallet`, `wallet-signup`, `wa-opt-in` if ticked). An existing customer is left untouched until they sign in. The theme sends them to Shopify's sign-in with `login_hint` (email pre-filled) and `return_to`. |
+| Just signed in | Nothing | `GET /api/wallet/me` finds their unclaimed sign-up by the email Shopify verified and opens the wallet with ₹1,000, writing the phone, name and tags onto the customer (`drevi-wallet`). |
+| Signed in, no sign-up, phone already on their Shopify record | Nothing | `me` opens the wallet from that phone. |
+| Signed in, no phone anywhere | Add their mobile in the popup, the bag or My Account | `POST /api/wallet/join` opens the wallet. |
+
+The public sign-up never changes an existing Shopify customer and answers
+identically whether an email or phone is known, so it can't be used to look
+people up. Budget: 10 per IP and 5 per email per ten minutes, plus a
+honeypot field.
+
+## How money moves
 
 | Event | What happens |
 |---|---|
-| Popup submitted (name, phone, WhatsApp box ticked) | Shopify customer found-or-created and tagged `enquiry`, `wa-opt-in`, `source:popup`; wallet opened with ₹1,000; welcome sent on WhatsApp (AiSensy also adds them to the list) |
-| Phone logs in for the first time (OTP) | Wallet opened with ₹1,000 if none existed — logging in *is* joining |
-| "Use ₹X from your wallet" ticked in the cart | A `WLT-XXXXXXXX` discount code is minted for that amount (30-min life, one use, ₹5,000 minimum baked in) and applied to the cart. **Nothing is debited yet.** |
+| "Use ₹X from your wallet" ticked in the cart | A `WLT-XXXXXXXX` discount code is minted for that amount (30-min life, one use, ₹5,000 minimum baked in) and applied to the cart. **Nothing is debited yet.** One open code per wallet (unique index, 0070). |
 | `orders/create` with a `WLT-` code | The amount Shopify actually allocated to the code is debited; the redemption is marked used |
-| `orders/paid` + `orders/fulfilled` — both true | 10% of the merchandise total (after all discounts, excluding fee-helper lines) credited, whole rupees, once per order |
-| `orders/cancelled` | Spend returned; earning reversed |
-| `refunds/create` | Earning clawed back in proportion to what was refunded |
+| `orders/paid` + `orders/fulfilled`, both true | 10% of what was paid for the merchandise (original line total less every allocated discount, wallet included; fee-helper lines excluded) credited, whole rupees, once per order |
+| `orders/cancelled` | Spend returned; earning reversed, net of anything a refund already did |
+| `refunds/create` | Wallet share of refunded pieces returned; earning reversed in proportion. Filed as `shopify_refund` / `<order>#<refund>` so cancels and later refunds see it |
 | 12 months with no credit | Balance lapses (lazily on next read, and nightly by cron) |
 
 Every movement is a `wallet_ledger` row with `balance_after`, posted through
@@ -34,70 +59,39 @@ the `wallet_post_movement` RPC, which locks the account and is idempotent on
 
 ## Files
 
-- `supabase/migrations/0068_wallet.sql` — tables + the RPC
-- `src/lib/wallet-core.ts` (+ tests) — pure rules: phone normalising, paise, earn base, redeemable amount, expiry
-- `src/lib/wallet.ts` — accounts, ledger, redemptions, what each webhook means
-- `src/lib/wallet-shopify.ts` — customers, discount codes, order reads, webhook HMAC (uses the **Drevi Admin Automation** app)
-- `src/lib/wallet-auth.ts` — OTP issue/verify, 30-day session tokens
-- `src/lib/wallet-whatsapp.ts` — AiSensy sends (dry run unless `WALLET_WA_LIVE=true`)
-- `src/app/api/wallet/{otp/send,otp/verify,me,redeem,join}` — the storefront's API
-- `src/app/api/wallet/webhooks/shopify` — the receiver
-- `src/app/api/cron/wallet-expire` — nightly lapse sweep
-- `scripts/wallet-seed.mjs` — open wallets for existing customers (dry run by default)
-- `scripts/wallet-register-webhooks.mjs` — point Shopify at the receiver
-- Theme: `snippets/drevi-wallet-store.liquid`, `sections/drevi-wallet.liquid`, `templates/page.wallet.json`, plus the header chip, cart block, PDP nudge and the popup's `phone` mode
+- `supabase/migrations/0068_wallet.sql` (tables + RPC), `0070` (one open code), `0071` (`wallet_signups`; drops the old OTP table)
+- `src/lib/wallet-core.ts` (+ tests): pure rules
+- `src/lib/wallet-token.ts` (+ tests): the storefront customer token
+- `src/lib/wallet-identity.ts`: token from a request
+- `src/lib/wallet.ts`: accounts, sign-ups, joining, ledger, redemptions, webhooks
+- `src/lib/wallet-shopify.ts`: customers, discount codes, order reads, webhook HMAC (uses the **Drevi Admin Automation** app)
+- `src/app/api/wallet/{signup,join,me,redeem}`: the storefront's API
+- `src/app/api/wallet/webhooks/shopify`, `src/app/api/cron/wallet-expire`
+- `scripts/wallet-status.mjs` (read-only), `scripts/wallet-seed.mjs`, `scripts/wallet-register-webhooks.mjs`
+- Theme: `snippets/drevi-wallet-store.liquid` (renders the token), `sections/drevi-wallet.liquid` (My Account), `sections/drevi-popup.liquid` (mode `phone` = wallet sign-up), the cart block, header chip and PDP nudge
 
 ## Environment
 
-Add to the portal's Vercel env (and `.env.development.local` for dev):
-
 | Var | Value |
 |---|---|
-| `WALLET_SHOPIFY_CLIENT_ID` / `_SECRET` | the **Drevi Admin Automation** app. The portal's own app (Drevi Pipeline) has no customer/discount/order scopes |
-| `WALLET_SESSION_SECRET` | any 32+ char random string (derived from the master key if absent) |
-| `WALLET_ALLOWED_ORIGINS` | optional; defaults to `https://drevifashion.com,https://www.drevifashion.com,https://uqc34b-5y.myshopify.com` |
-| `AISENSY_API_KEY` | already set |
-| `AISENSY_CAMPAIGN_OTP` / `_WELCOME` / `_BALANCE` | the campaign names created in AiSensy (defaults `drevi_wallet_otp`, `drevi_wallet_welcome`, `drevi_wallet_balance`) |
-| `WALLET_WA_LIVE` | `true` only when the templates are approved and you want real sends |
-| `WALLET_DEV_RETURN_OTP` | `true` on dev only — echoes the code in the API response for testing |
+| `WALLET_SHOPIFY_CLIENT_ID` / `_SECRET` | the **Drevi Admin Automation** app |
+| `WALLET_STOREFRONT_SECRET` | 32+ random characters; **must equal** the shop metafield `drevi.wallet_key`. Rotating it means updating both, and signs every shopper out of the wallet (not out of Shopify) until their next page load |
+| `WALLET_ALLOWED_ORIGINS` | optional; defaults to the storefront origins |
 
 Theme setting: **Theme settings → Drevi — Integrations → Wallet API base URL**
-= the portal origin, `https://drevi-wholesale-portal-swart.vercel.app` (the custom domain is not set up yet), no trailing slash.
-
-## Go-live order
-
-1. `npm run db:migrate` (dev), then with `--prod` once tested.
-2. Set the env vars above. Deploy the portal.
-3. AiSensy: create the three templates from `docs/wallet-aisensy-templates.md`, wait for Meta approval, create one API campaign per template, put the campaign names in env.
-4. `node scripts/wallet-register-webhooks.mjs --url https://<portal>/api/wallet/webhooks/shopify`
-5. Theme: set the Wallet API base URL, push the theme, publish the `wallet` page (it is created unpublished), switch the popup on with mode **Phone number**.
-6. `node scripts/wallet-seed.mjs` (dry run) → `--apply --prod` → `--send` once `WALLET_WA_LIVE=true`.
-7. Turn **off** "login required at checkout" in Shopify — a Shopify login is by email and would block phone-only customers.
+= `https://drevi-wholesale-portal-swart.vercel.app`, no trailing slash. Blank
+switches every wallet surface off.
 
 ## Test before prod
 
-- One real COD order with a wallet code applied, end to end: code applies at checkout → order created → debit posts → mark paid + fulfilled → 10% credits → cancel → both reverse. This is the combination the docs don't cover.
+- Sign up signed out → land back signed in → wallet shows ₹1,000, customer has the phone and `drevi-wallet` tag.
+- Sign in with an account that has no phone → popup or My Account asks for it once.
+- One real COD order with a wallet code applied, end to end: code applies → order created → debit → paid + fulfilled → 10% credits → cancel → both reverse.
 - A cart at ₹4,999 must refuse; ₹5,000 must accept.
-- The header chip must survive a page reload without an API call (it reads the cached session).
 
 ## Known limits
 
-- The wallet is applied in the **cart**, not at checkout: on Basic, Shopify's checkout takes no custom UI. The header chip and the PDP nudge keep it in view before the cart.
-- Shopify evaluates the COD/Partial-COD shipping-rate conditions on the subtotal **after** discounts, so a wallet redemption can move a ₹15,500 cart under the ₹15,000 tier.
+- The wallet is applied in the **cart**, not at checkout: on Basic, Shopify's checkout takes no custom UI.
+- Shopify evaluates the COD/Partial-COD rate conditions on the total **after** discounts, so a wallet redemption can move a ₹15,500 cart under the ₹15,000 tier.
 - One wallet redemption per order.
-- Removing an applied wallet code from the cart uses the Cart API `discount` field with a `/discount/` redirect as fallback; confirm on the live theme.
-
-## Test login without a handset
-
-`WALLET_FIXED_OTPS` (`91XXXXXXXXXX=NNNNNN`, comma-separated for more) names
-phones whose login code is known in advance. The only difference from a real
-login is that no WhatsApp message goes out: the code is stored hashed and
-goes through the same per-phone and per-IP rate limits, the 10-minute expiry
-and the attempt cap.
-
-- Never write the real value in the repo, a doc or a chat. Keep it in Vercel
-  and in `.env.development.local` only.
-- Leave it unset in production except while a test is running, and remove it
-  afterwards.
-- If the value is ever written down, rotate it and rotate
-  `WALLET_SESSION_SECRET` (that signs every login, so it logs everyone out).
+- Phones are not verified; see the guards above.

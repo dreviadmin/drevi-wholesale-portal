@@ -274,3 +274,25 @@ function orderLabel(gidOrName: string): string {
   const m = gidOrName.match(/(\d+)$/);
   return gidOrName.startsWith("#") ? gidOrName : m ? `#${m[1].slice(-4)}` : gidOrName;
 }
+
+/** Lower-cased, trimmed email if it looks deliverable, else null. */
+export function normalizeEmail(raw: string | null | undefined): string | null {
+  const e = (raw ?? "").trim().toLowerCase();
+  if (e.length < 6 || e.length > 254) return null;
+  return /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(e) ? e : null;
+}
+
+/**
+ * Who may take a wallet by typing a phone number. Sign-in proves the email,
+ * not the phone, so a wallet already tied to another REAL account (one with
+ * an email a person signs in with) is never handed over. A wallet that sits
+ * on a phone-only record — a past COD buyer, most of the customer list — is
+ * moved to the signed-in account, and both records are flagged for review.
+ */
+export type PhoneClaim = "new" | "mine" | "relink" | "in_use";
+export function phoneClaimDecision(input: { walletExists: boolean; walletCustomerId: string | null | undefined; me: string; otherHasEmail: boolean }): PhoneClaim {
+  if (!input.walletExists) return "new";
+  if (input.walletCustomerId === input.me) return "mine";
+  if (!input.walletCustomerId) return "relink";
+  return input.otherHasEmail ? "in_use" : "relink";
+}

@@ -21,6 +21,8 @@ import {
   orderWalletTotals,
   walletReturnOwedPaise,
   refundRef,
+  normalizeEmail,
+  phoneClaimDecision,
 } from "./wallet-core";
 
 describe("normalizePhone", () => {
@@ -216,5 +218,31 @@ describe("wallet credit returned on a refund", () => {
   it("files refund rows under their order", () => {
     expect(refundRef("gid://shopify/Order/1", "gid://shopify/Refund/9")).toBe("gid://shopify/Order/1#gid://shopify/Refund/9");
     expect(describeLedgerKind("reverse_redeem", "shopify_refund", "gid://shopify/Order/7725351305457#gid://shopify/Refund/9", null)).toBe("Returned to wallet — refund on order #5457");
+  });
+});
+
+describe("sign-up inputs", () => {
+  it("normalises email", () => {
+    expect(normalizeEmail("  Ansh@Drevi.COM ")).toBe("ansh@drevi.com");
+    expect(normalizeEmail("not-an-email")).toBeNull();
+    expect(normalizeEmail("a@b")).toBeNull();
+    expect(normalizeEmail("")).toBeNull();
+  });
+});
+
+describe("who can take a wallet by phone", () => {
+  const me = "gid://shopify/Customer/1";
+  it("opens a new wallet when the phone has none", () => {
+    expect(phoneClaimDecision({ walletExists: false, walletCustomerId: null, me, otherHasEmail: false })).toBe("new");
+  });
+  it("recognises the customer's own wallet", () => {
+    expect(phoneClaimDecision({ walletExists: true, walletCustomerId: me, me, otherHasEmail: true })).toBe("mine");
+  });
+  it("moves a wallet off a phone-only record or an unlinked one", () => {
+    expect(phoneClaimDecision({ walletExists: true, walletCustomerId: "gid://shopify/Customer/2", me, otherHasEmail: false })).toBe("relink");
+    expect(phoneClaimDecision({ walletExists: true, walletCustomerId: null, me, otherHasEmail: false })).toBe("relink");
+  });
+  it("never takes a wallet from another signed-in account", () => {
+    expect(phoneClaimDecision({ walletExists: true, walletCustomerId: "gid://shopify/Customer/2", me, otherHasEmail: true })).toBe("in_use");
   });
 });
