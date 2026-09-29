@@ -18,7 +18,7 @@ WhatsApp, 6 without any phone.
    Utility send: T2 is the guaranteed copy, T1 the friendly one. Both sends
    must read the same stored password in the same run — never rotate between
    them. Submit explicitly as **Marketing**.
-2. **Template 2 (walkthrough + login, Utility).** Keep `+91 99300 86178` —
+2. **Template 2 (walkthrough + login, Utility).** Change the number to `+91 86553 55958` (29 Sep: the new wholesale WhatsApp line, now used everywhere) —
    the portal now shows the same number on forgot-password, the suspended
    login message and the share text. Submit as **Utility** with
    `hindi-private.mp4` as the header sample (prices visible; this goes 1:1).
@@ -62,7 +62,7 @@ so a halfway failure cannot double-send, pacing, per-language media URL).
 
 12. **Supplier phone on tax documents.** `src/lib/supplier.ts` still prints the
     retail line (+91 88280 43555). Retail bills and wholesale invoices share
-    that block — keep it, or split so wholesale invoices carry 99300 86178.
+    that block — keep it, or split so wholesale invoices carry 86553 55958.
 13. **Where alerts land.** Inquiry / order / pending-review alerts are
     addressed to the 88280 handset. Keep, or move to the wholesale line.
 14. **wholesale.drevifashion.com** is still dead (DNS → Vercel, no domain on
