@@ -29,6 +29,27 @@ export function billableLines(order: Pick<Order, "items" | "status">): { item: O
     .filter(({ item }) => effectiveLineState(item, order.status) === "confirmed");
 }
 
+/**
+ * Why the next bill would be empty (Ansh, 30 Sep: "the bill generation shows
+ * no items confirmed even when all were"). They WERE all confirmed — and a
+ * first "Bill now" had already billed every one; a stale second press then got
+ * "confirm something first", which blamed the wrong thing. "Everything is
+ * billed" and "nothing is confirmed yet" are different answers.
+ */
+export function emptyBillReason(
+  order: Pick<Order, "items" | "status">,
+): { kind: "already_billed"; billed: number } | { kind: "nothing_ready"; pending: number; held: number; billed: number } {
+  let pending = 0, held = 0, billed = 0;
+  for (const it of order.items ?? []) {
+    const s = effectiveLineState(it, order.status);
+    if (s === "pending") pending++;
+    else if (s === "hold") held++;
+    else if (s === "billed") billed++;
+  }
+  if (billed > 0 && pending === 0 && held === 0) return { kind: "already_billed", billed };
+  return { kind: "nothing_ready", pending, held, billed };
+}
+
 /** Lines still owed to the customer (on hold, or simply not confirmed yet). */
 export function pendingLines(order: Pick<Order, "items" | "status">): { item: OrderItem; index: number; state: "hold" | "pending" }[] {
   return (order.items ?? [])

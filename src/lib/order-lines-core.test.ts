@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { effectiveLineState, billableLines, pendingLines, computeBillTotals, validateBillDate, billDateToIso } from "./order-lines-core";
+import { effectiveLineState, billableLines, pendingLines, computeBillTotals, validateBillDate, billDateToIso, emptyBillReason } from "./order-lines-core";
 import type { OrderItem } from "./types";
 
 const line = (over: Partial<OrderItem> = {}): OrderItem => ({
@@ -25,6 +25,19 @@ describe("effectiveLineState", () => {
     expect(effectiveLineState(line(), "confirmed")).toBe("confirmed");
     expect(effectiveLineState(line(), "delivered")).toBe("confirmed");
     expect(effectiveLineState(line(), "cancelled")).toBe("pending");
+  });
+});
+
+describe("emptyBillReason — the message when there is nothing to bill", () => {
+  const L = (x: Partial<OrderItem>): OrderItem => ({ sku: "DD-A-B-001-M-RED", title: "x", unit_price: 100, qty: 1, stock_state: "ready", restock_days: null, image_url: null, ...x } as OrderItem);
+  it("every line already billed → points at the bill, never at confirmation (IS-20260930-001)", () => {
+    expect(emptyBillReason({ status: "packed", items: [L({ billed_in: "b1" }), L({ billed_in: "b1" })] })).toEqual({ kind: "already_billed", billed: 2 });
+  });
+  it("pending and held lines are counted", () => {
+    expect(emptyBillReason({ status: "submitted", items: [L({}), L({ line_state: "hold" }), L({ billed_in: "b1" })] })).toEqual({ kind: "nothing_ready", pending: 1, held: 1, billed: 1 });
+  });
+  it("an empty order is nothing_ready with zero counts", () => {
+    expect(emptyBillReason({ status: "confirmed", items: [] })).toEqual({ kind: "nothing_ready", pending: 0, held: 0, billed: 0 });
   });
 });
 

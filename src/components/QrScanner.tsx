@@ -43,7 +43,8 @@ export function QrScanner({
   caption = "Keep scanning — each QR adds to the cart. Tap Done when finished.",
   extra,
 }: {
-  onScan: (text: string) => ScanFeedback;
+  /** May answer later: a Promise shows "checking…" and beeps on the real result. */
+  onScan: (text: string) => ScanFeedback | Promise<ScanFeedback>;
   onClose: () => void;
   onGoToCart?: () => void;
   title?: string;
@@ -93,12 +94,24 @@ export function QrScanner({
     if (now - lastRef.current.at < GENERAL_COOLDOWN_MS) return;
     lastRef.current = { code, at: now };
 
-    const result = onScan(code);
-    beep(result.ok);
-    if (result.ok) setAdded((n) => n + 1);
-    setFeedback(result);
-    if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
-    if (!holdFeedback) feedbackTimer.current = setTimeout(() => setFeedback(null), 1800);
+    const apply = (result: ScanFeedback) => {
+      beep(result.ok);
+      if (result.ok) setAdded((n) => n + 1);
+      setFeedback(result);
+      if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+      if (!holdFeedback) feedbackTimer.current = setTimeout(() => setFeedback(null), 1800);
+    };
+    const answer = onScan(code);
+    if (answer && typeof (answer as Promise<ScanFeedback>).then === "function") {
+      // An answer that needs the server (a code the page's list does not know):
+      // say so, and only beep pass/fail when the real verdict is in — a success
+      // beep for something not yet added was a lie (30 Sep review).
+      if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+      setFeedback({ ok: true, message: `${code} — checking…` });
+      (answer as Promise<ScanFeedback>).then(apply, () => apply({ ok: false, message: `${code} — could not check; retry` }));
+    } else {
+      apply(answer as ScanFeedback);
+    }
   }
 
   useEffect(() => {

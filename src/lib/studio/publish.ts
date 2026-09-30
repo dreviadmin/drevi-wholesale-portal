@@ -187,8 +187,8 @@ export async function publishWholesale(designId: string, staffId: string, staffE
       // AND MAKE IT VISIBLE (Ansh, 20 Sep: "the live designs pushed to Shopify
       // and wholesale are still not visible in the catalog — why so?").
       //
-      // Because nothing ever turned them on. Log delivery mints every SKU with
-      // wholesale_visible FALSE and locks it that way (delivery-actions §5.7),
+      // Because nothing ever turned them on. Log delivery minted every SKU with
+      // wholesale_visible FALSE (until 30 Sep; it now mints them sellable) and locked it that way (delivery-actions §5.7),
       // deliberately — a garment counted into stock is not automatically for
       // sale. publishWholesale then wrote images, description and state='live'
       // and never touched the flag, so the board said LIVE, the buyer catalog

@@ -1,13 +1,13 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { X, Plus, Search, ScanLine, Camera, Image as ImageIcon } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { ZoomImage } from "@/components/Lightbox";
 import { DraftNotice } from "@/components/DraftNotice";
-import { updateOrderItems, type OrderEditLine, type OrderEditTerms } from "@/app/admin/orders/actions";
+import { updateOrderItems, findOrderableSku, type OrderEditLine, type OrderEditTerms } from "@/app/admin/orders/actions";
 import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { useDraft } from "@/lib/useDraft";
@@ -277,6 +277,9 @@ export function OrderEditor({
     else seedFromServer();
     setQuery("");
     setError(null);
+    // Reload the catalog list behind the picker, so a garment logged in
+    // another tab since this page loaded is offerable right away (30 Sep).
+    router.refresh();
   }
 
   // The notice's Discard / Use server re-seeds the open editor from the order
@@ -320,7 +323,9 @@ export function OrderEditor({
         title: p.title ?? p.sku,
         image_url: p.image_url,
         qty: "1",
-        price: String(p.wholesale_price),
+        // A just-received garment can be unpriced (₹0). Prefilling "0" only
+        // earned a "Set a price" error on Save; an empty box asks for one.
+        price: p.wholesale_price > 0 ? String(p.wholesale_price) : "",
         factor: "1",
         catalogPrice: p.wholesale_price,
       },
@@ -328,19 +333,47 @@ export function OrderEditor({
     setQuery("");
   }
 
+  // A SKU typed in full that the loaded list does not know is asked of the
+  // server — the list is as old as the page, a delivery logged since is not.
+  const [remote, setRemote] = useState<{ key: string; product?: PickerProduct; reason?: "withdrawn" | "sold_out" | "missing" | "error" } | null>(null);
+  // Remote hits, remembered: the camera loop keeps the first render's list, so
+  // a repeat scan of the same new SKU must find it here, not ask again.
+  const remoteHits = useRef(new Map<string, PickerProduct>());
+  const skuQuery = /^DD-[A-Z0-9]+-[A-Z0-9]+-\d{3}-[A-Z0-9]+-[A-Z0-9]+$/i.test(query.trim()) ? query.trim().toUpperCase() : null;
+  useEffect(() => {
+    if (!skuQuery || productBySku.has(skuQuery)) { setRemote(null); return; }
+    let live = true;
+    const t = setTimeout(async () => {
+      const r = await findOrderableSku(skuQuery).catch(() => null);
+      if (r?.product) remoteHits.current.set(skuQuery, r.product);
+      if (live) setRemote({ key: skuQuery, product: r?.product, reason: !r || r.error ? "error" : r.reason });
+    }, 300);
+    return () => { live = false; clearTimeout(t); };
+  }, [skuQuery, productBySku]);
+
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
-    return products
+    const local = products
       .filter((p) => p.sku.toLowerCase().includes(q) || (p.title ?? "").toLowerCase().includes(q))
       .slice(0, 6);
-  }, [query, products]);
+    if (remote?.product && remote.key === skuQuery && !local.some((p) => p.sku === remote.product!.sku)) return [remote.product, ...local];
+    return local;
+  }, [query, products, remote, skuQuery]);
+  const skuNote =
+    skuQuery && matches.length === 0 && remote?.key === skuQuery
+      ? remote.reason === "withdrawn"
+        ? `${skuQuery} is withdrawn from billing — make it sellable in Manage Catalog to add it as itself.`
+        : remote.reason === "sold_out"
+          ? `${skuQuery} is sold out.`
+          : remote.reason === "error"
+            ? `Could not check ${skuQuery} — retry.`
+            : `${skuQuery} is not in the catalog yet.`
+      : null;
 
   // QR scan → add the product, or bump the qty of a line that already has it.
-  function handleAddScan(text: string): ScanFeedback {
-    const key = text.trim().toUpperCase();
-    const p = productBySku.get(key);
-    if (!p) return { ok: false, message: `${text.trim()} — not in the catalog` };
+  function addOrBump(p: PickerProduct): ScanFeedback {
+    const key = p.sku.trim().toUpperCase();
     const existing = linesRef.current.find((l) => l.sku.trim().toUpperCase() === key);
     if (existing) {
       const newQty = Math.max(0, Math.floor(Number(existing.qty) || 0)) + 1;
@@ -352,7 +385,24 @@ export function OrderEditor({
       return { ok: true, message: `${formatINR(p.wholesale_price)} — ${p.sku} · qty ${newQty}` };
     }
     addProduct(p);
-    return { ok: true, message: `${formatINR(p.wholesale_price)} — ${p.sku} added` };
+    return { ok: true, message: `${p.wholesale_price > 0 ? formatINR(p.wholesale_price) : "Set a price"} — ${p.sku} added` };
+  }
+
+  function handleAddScan(text: string): ScanFeedback | Promise<ScanFeedback> {
+    const key = text.trim().toUpperCase();
+    const p = productBySku.get(key) ?? remoteHits.current.get(key);
+    if (p) return addOrBump(p);
+    // Not in the list loaded with the page — ask the server (a garment logged
+    // since is sellable at once). The scanner waits for this answer.
+    return findOrderableSku(key)
+      .then((r): ScanFeedback => {
+        if (r?.product) { remoteHits.current.set(key, r.product); return addOrBump(r.product); }
+        if (!r || r.error) return { ok: false, message: `${key} — could not check${r?.error ? ` (${r.error})` : ""}` };
+        if (r.reason === "withdrawn") return { ok: false, message: `${key} — withdrawn from billing (Manage Catalog)` };
+        if (r.reason === "sold_out") return { ok: false, message: `${key} — sold out` };
+        return { ok: false, message: `${key} — not in the catalog` };
+      })
+      .catch((): ScanFeedback => ({ ok: false, message: `${key} — could not check; retry` }));
   }
 
   // Live preview from the editable billing terms — the server recomputes
@@ -560,6 +610,9 @@ export function OrderEditor({
                     </button>
                   ))}
                 </div>
+              )}
+              {skuNote && (
+                <div className="font-body mt-2" style={{ fontSize: 10.5, color: palette.crimsonText, lineHeight: 1.5 }}>{skuNote}</div>
               )}
               <button
                 type="button"
