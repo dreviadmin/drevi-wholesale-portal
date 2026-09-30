@@ -75,6 +75,19 @@ export async function uploadOrderPdf(orderId: string, orderNumber: string, pdf: 
   return data.signedUrl;
 }
 
+/**
+ * A fresh signed link to an order or bill PDF that is already stored, valid for
+ * a year. The link saved on the row lives 30 days, so a bill shared on WhatsApp
+ * from the order page used to die a month later; minting at render time keeps
+ * every Share / WhatsApp / Copy link working for the buyer. Returns null when
+ * the file is not there (callers fall back to the saved link).
+ */
+export async function freshOrderPdfUrl(orderId: string, number: string): Promise<string | null> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.storage.from(PDF_BUCKET).createSignedUrl(`${orderId}/${number}.pdf`, 60 * 60 * 24 * 365);
+  return error || !data ? null : data.signedUrl;
+}
+
 // Upload a buyer's visiting card / photo; returns the storage path (stored in
 // buyers.card_image_path — signed URLs are generated on read).
 export async function uploadBuyerCardImage(buyerId: string, file: File): Promise<string> {

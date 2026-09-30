@@ -6,6 +6,7 @@ import { Check, PauseCircle, RotateCcw, ReceiptText } from "lucide-react";
 import { palette } from "@/lib/palette";
 import { useToast } from "@/lib/use-toast";
 import { setLineState, generateOrderBill } from "@/app/admin/orders/actions";
+import { billResultKey } from "./BillResultNote";
 
 // Line-level confirmation + split billing (Ansh, 18 Aug).
 // Chip semantics: Pending (untouched) · Confirmed (stock reserved, will be on
@@ -135,11 +136,28 @@ export function GenerateBillBar({
 
   function run() {
     start(async () => {
-      const r = await generateOrderBill(orderId, { billDate: date });
-      if (!r.ok) { flash(r.error ?? "Failed"); return; }
-      flash(`${r.billNumber} generated`);
-      setOpen(false);
-      router.refresh();
+      // Always end on fresh data. A request that errored or timed out used to
+      // leave this bar up with "Bill now" live over lines the server HAD
+      // billed; the next press then got a misleading refusal (30 Sep).
+      // The bar unmounts once nothing is left to bill, so the outcome is also
+      // handed to the Bills section, which outlives the refresh.
+      const say = (text: string, bad = false) => {
+        flash(text);
+        try { sessionStorage.setItem(billResultKey(orderId), JSON.stringify({ text, bad, at: Date.now() })); } catch { /* best-effort */ }
+      };
+      try {
+        const r = await generateOrderBill(orderId, { billDate: date });
+        if (!r.ok) { flash(r.error ?? "Failed"); return; }
+        setOpen(false);
+        if (r.alreadyBilled) say(`Already billed${r.billNumber ? ` on ${r.billNumber}` : ""} — share it from the bill below.`);
+        else if (r.pdfError) say(`${r.billNumber} generated, but its PDF failed (${r.pdfError}). Use Make PDF on the bill below.`, true);
+        else say(`${r.billNumber} generated — share it with the buttons on the bill below.`);
+      } catch {
+        setOpen(false);
+        say("No answer from the server — the bill may already have gone through. Refreshed: check the bills below.", true);
+      } finally {
+        router.refresh();
+      }
     });
   }
 

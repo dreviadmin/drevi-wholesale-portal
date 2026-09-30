@@ -16,12 +16,14 @@ import type { Order } from "@/lib/types";
 // `notify` defaults to true (initial submission). Edits pass notify:false so a
 // staff correction regenerates the invoice PDF silently instead of pinging the
 // buyer a fresh "order confirmed, total ₹X" message for every tweak.
-export async function finalizeOrder(orderId: string, opts: { notify?: boolean } = {}): Promise<void> {
+// Returns the stored PDF link, or the reason there is none — "Send Invoice"
+// used to report "PDF refreshed" when the upload had failed (30 Sep).
+export async function finalizeOrder(orderId: string, opts: { notify?: boolean } = {}): Promise<{ pdfUrl?: string; error?: string }> {
   const notify = opts.notify ?? true;
   const admin = createAdminClient();
   try {
     const { data: order } = await admin.from("orders").select("*").eq("id", orderId).maybeSingle();
-    if (!order) return;
+    if (!order) return { error: "Order not found." };
     const o = order as Order;
     // This overwrites the stored file at orders.pdf_url, so it has to reprint
     // the party frozen at submission — a live read here would let one edit to a
@@ -32,7 +34,7 @@ export async function finalizeOrder(orderId: string, opts: { notify?: boolean } 
     const url = await uploadOrderPdf(o.id, o.order_number, pdf);
     await admin.from("orders").update({ pdf_url: url }).eq("id", o.id);
 
-    if (!notify) return;
+    if (!notify) return { pdfUrl: url };
 
     // A DOCUMENT prints who the party was; a MESSAGE has to reach who they are
     // now. "Send Invoice" can fire months after submission, by which time the
@@ -49,7 +51,9 @@ export async function finalizeOrder(orderId: string, opts: { notify?: boolean } 
     if (conf.sent) {
       await admin.from("orders").update({ pdf_sent_via: conf.channel ?? "whatsapp", pdf_sent_at: new Date().toISOString() }).eq("id", o.id);
     }
+    return { pdfUrl: url };
   } catch (e) {
     console.error("finalizeOrder failed (order stands; download fallback available):", (e as Error).message);
+    return { error: (e as Error).message };
   }
 }
