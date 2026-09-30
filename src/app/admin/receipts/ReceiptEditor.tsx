@@ -187,7 +187,9 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku, onCa
     try {
       if (editMode) {
         const res = await updateReceipt(initial!.id!, input);
+        if (!res) { setError("Your session has expired — sign in again, then save."); return; }
         if (!res.ok) { setError(res.error ?? "Failed"); return; }
+        if (res.notes?.length) window.alert(res.notes.join("\n"));
         draftMeta.clear();
         if (billFile) {
           const fd = new FormData();
