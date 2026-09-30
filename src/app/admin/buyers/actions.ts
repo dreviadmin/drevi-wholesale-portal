@@ -652,7 +652,7 @@ export async function sendCredentialsBatch(buyerIds: string[]): Promise<Credenti
     const link = await getOrCreateLoginToken(b.id, staff.id);
     if (!link.ok) { failed++; if (!firstError) firstError = `${b.business_name}: ${link.error}`; continue; }
     if (!preflighted) {
-      const pre = await preflightLoginLink(link.token);
+      const pre = await preflightLoginLink("login", link.token);
       if (!pre.ok) return { ok: false, error: `Not sent — ${pre.error}` };
       preflighted = true;
     }

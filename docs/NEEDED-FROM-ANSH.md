@@ -25,10 +25,12 @@ exist as the fallback on a new phone.
    video (`WhatsApp Video 2026-09-25 at 18.17.27.mp4`, 7 MB H.264, fits the
    16 MB limit as is). Body: the current caption with the login block
    (Link / Username / Password) replaced by
-   `नीचे *Catalog खोलें* button दबाइए, आपका account सीधे खुल जाएगा।`
-   No body variables. Buttons, **URL button first**: `Catalog खोलें` →
-   `https://<domain>/go/{{1}}` (sample value `qYRtI0BmROLMNtO9ffouAA`), then the
-   *Stop promotions* quick reply.
+   `अपना login देखने के लिए नीचे button दबाइए।`
+   No body variables. Buttons, **URL button first**: `अपना Login देखें` →
+   `https://<domain>/id/{{1}}` (sample value `qYRtI0BmROLMNtO9ffouAA`), then the
+   *Stop promotions* quick reply. (Ansh, 30 Sep: no reshoot — Rakesh says the
+   login is below, and this button opens a page with their Username and
+   Password plus an "Open account" button that signs them in.)
 3. **Template 2 — walkthrough (Utility, English).** Header: the walkthrough
    video. Body:
    > *Welcome to the Drevi Wholesale Portal.*

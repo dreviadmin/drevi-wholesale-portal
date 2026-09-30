@@ -208,7 +208,7 @@ for (const b of batch) {
 
   // Before the first message: does the site the buttons open know this token?
   if (!preflighted) {
-    const pre = await preflightLoginLink(link.token);
+    const pre = await preflightLoginLink(kind, link.token);
     if (!pre.ok) { console.error(`\nStopped before sending anything: ${pre.error}`); process.exit(1); }
     preflighted = true;
   }
