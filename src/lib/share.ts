@@ -30,14 +30,18 @@ export function loginDisplay(email: string): { label: "Username" | "Email"; valu
   return { label: "Email", value: email };
 }
 
-export function buildWhatsAppMessage(email: string, password: string): string {
+// With a one-tap link (0073) it leads the message — tapping it is the whole
+// login — and the username/password follow for a new phone or the installed
+// app, which keeps its own cookies.
+export function buildWhatsAppMessage(email: string, password: string, loginUrl?: string | null): string {
   const login = loginDisplay(email);
+  const credentials = [`${login.label}: ${login.value}`, `Password: ${password}`];
   return [
     "Welcome to Drevi Wholesale Portal",
     "",
-    `Link: ${PORTAL_URL}`,
-    `${login.label}: ${login.value}`,
-    `Password: ${password}`,
+    ...(loginUrl
+      ? ["Tap to open your account:", loginUrl, "", `Or log in at ${new URL(loginUrl).host}`, ...credentials]
+      : [`Link: ${PORTAL_URL}`, ...credentials]),
     "",
     "Save this message. Tap the link anytime to",
     "browse our full catalog with wholesale pricing.",

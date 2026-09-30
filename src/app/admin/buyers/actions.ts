@@ -8,6 +8,7 @@ import { requireAdmin, requireStaff } from "@/lib/staff";
 import { writeAuditEvent } from "@/lib/audit";
 import { encryptPassword, decryptPassword } from "@/lib/crypto";
 import { generateBuyerPassword } from "@/lib/password";
+import { getOrCreateLoginToken, resetLoginToken, loginUrlFor } from "@/lib/login-link";
 import { uploadBuyerCardImage } from "@/lib/storage";
 import type { BuyerStatus } from "@/lib/types";
 
@@ -50,7 +51,16 @@ function revalidate(buyerId: string) {
 export interface CredResult {
   ok: boolean;
   password?: string;
+  /** The buyer's one-tap login link (0073), when one could be made. */
+  loginUrl?: string;
   error?: string;
+}
+
+// Best effort: a share still goes out with username + password when the link
+// can't be made (e.g. the migration is not applied yet on this database).
+async function loginUrlOrNull(buyerId: string, staffId: string): Promise<string | undefined> {
+  const r = await getOrCreateLoginToken(buyerId, staffId);
+  return r.ok ? loginUrlFor(r.token) : undefined;
 }
 
 /**
@@ -119,7 +129,7 @@ export async function setCredentials(
   const { ip, userAgent } = reqMeta();
   await writeAuditEvent({ eventType: "credential_created", buyerId, staffUserId: staff.id, ipAddress: ip, userAgent });
   revalidate(buyerId);
-  return { ok: true, password };
+  return { ok: true, password, loginUrl: await loginUrlOrNull(buyerId, staff.id) };
 }
 
 export async function revealPassword(buyerId: string): Promise<CredResult> {
@@ -210,7 +220,48 @@ export async function shareCredentials(buyerId: string, channel: string): Promis
   }
   const { ip, userAgent } = reqMeta();
   await writeAuditEvent({ eventType: "credential_shared", buyerId, staffUserId: staff.id, ipAddress: ip, userAgent, notes: channel });
-  return { ok: true, password: plain };
+  return { ok: true, password: plain, loginUrl: await loginUrlOrNull(buyerId, staff.id) };
+}
+
+export interface LoginLinkResult {
+  ok: boolean;
+  url?: string;
+  error?: string;
+}
+
+/**
+ * The buyer's one-tap login link — the same one every time, so a message
+ * already sent keeps working. Handing it out is a credential share and is
+ * logged like one.
+ */
+export async function getLoginLink(buyerId: string, channel: "Copy" | "WhatsApp"): Promise<LoginLinkResult> {
+  let staff;
+  try {
+    staff = await requireAdmin();
+  } catch {
+    return { ok: false, error: "Not authorized." };
+  }
+  const r = await getOrCreateLoginToken(buyerId, staff.id);
+  if (!r.ok) return { ok: false, error: r.error };
+  const { ip, userAgent } = reqMeta();
+  await writeAuditEvent({ eventType: "credential_shared", buyerId, staffUserId: staff.id, ipAddress: ip, userAgent, notes: `login link · ${channel}` });
+  return { ok: true, url: loginUrlFor(r.token) };
+}
+
+/** Replace the buyer's link. Every link sent before stops working. */
+export async function resetLoginLink(buyerId: string): Promise<LoginLinkResult> {
+  let staff;
+  try {
+    staff = await requireAdmin();
+  } catch {
+    return { ok: false, error: "Not authorized." };
+  }
+  const r = await resetLoginToken(buyerId, staff.id);
+  if (!r.ok) return { ok: false, error: r.error };
+  const { ip, userAgent } = reqMeta();
+  await writeAuditEvent({ eventType: "login_link_reset", buyerId, staffUserId: staff.id, ipAddress: ip, userAgent });
+  revalidate(buyerId);
+  return { ok: true, url: loginUrlFor(r.token) };
 }
 
 export async function setBuyerStatus(buyerId: string, status: BuyerStatus, reason?: string): Promise<{ ok: boolean; error?: string }> {
@@ -537,27 +588,31 @@ export async function decideChangeRequest(
 }
 
 /**
- * Send portal credentials to several buyers over WhatsApp (Ansh, 21 Sep).
+ * Send the WhatsApp login message to several buyers (Ansh, 21 Sep; AiSensy
+ * since 30 Sep). The message is the Utility walkthrough template with the
+ * buyer's one-tap login button — Meta will not approve a template carrying a
+ * password, so none is sent.
  *
- * Deliberately honest about the three ways a buyer is NOT sent to:
- *   · no phone            — 7 of the imported brands have none
- *   · no credentials yet  — nothing to send
- *   · Interakt not wired  — sendTemplate logs and skips without an API key,
- *                           so this reports "skipped", never a false success.
+ * Deliberately honest about the ways a buyer is NOT sent to:
+ *   · no phone / not a mob  — 7 of the imported brands have none
+ *   · no credentials yet    — nothing to sign into
+ *   · AiSensy not wired     — without the key, campaign and video env the send
+ *                             is a logged no-op, reported as "skipped", never
+ *                             as a success.
  *
- * Capped low and run sequentially: each Interakt call has an 8s timeout, and
+ * Capped low and run sequentially: each AiSensy call has an 8s timeout, and
  * this runs inside a Vercel function that dies at 60. The buyers page feeds it
  * in chunks, the same shape the studio batches use.
  */
 // Kept in step with CRED_CHUNK in BuyersTable, which chunks the selection
-// client-side. Six sends x an 8s Interakt timeout still clears a 60s function.
+// client-side. Six sends x an 8s timeout still clears a 60s function.
 const CREDENTIAL_BATCH_CAP = 6;
 
 export interface CredentialBatchResult {
   ok: boolean;
   error?: string;
   sent?: number;
-  /** Interakt is not configured yet — the send was a logged no-op. */
+  /** AiSensy is not configured on this deployment — the send was a logged no-op. */
   skipped?: number;
   failed?: number;
   noPhone?: number;
@@ -571,37 +626,47 @@ export async function sendCredentialsBatch(buyerIds: string[]): Promise<Credenti
   try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
   if (!buyerIds.length) return { ok: false, error: "Nothing selected" };
 
-  const { sendBuyerCredentials } = await import("@/lib/interakt");
-  const { loginDisplay, PORTAL_URL } = await import("@/lib/share");
+  const { sendLaunchMessage, launchConfigured, preflightLoginLink, e164 } = await import("@/lib/aisensy");
+  const { launchNote } = await import("@/lib/launch-note");
+  const configured = launchConfigured("login");
+  // The template's button opens one fixed site (AISENSY_LINK_ORIGIN). Checked
+  // once per batch, on the first token: a dev deployment sending with prod's
+  // templates would otherwise hand buyers a button that says "doesn't work".
+  let preflighted = false;
   const admin = createAdminClient();
   const { data: rows } = await admin
     .from("buyers")
-    .select("id, business_name, phone, email, status, encrypted_password")
+    .select("id, business_name, phone, status, encrypted_password")
     .in("id", buyerIds.slice(0, CREDENTIAL_BATCH_CAP));
 
   let sent = 0, skipped = 0, failed = 0, noPhone = 0, noCreds = 0, notActive = 0;
   let firstError: string | undefined;
   for (const b of rows ?? []) {
     // A login that has not been granted yet, or has been taken away, must not
-    // be messaged out — the password on a pending or suspended row is either
+    // be messaged out — the account on a pending or suspended row is either
     // not theirs to use or deliberately dead.
     if (b.status !== "active") { notActive++; continue; }
-    if (!b.phone) { noPhone++; continue; }
+    if (!e164(b.phone)) { noPhone++; continue; }
     if (!b.encrypted_password) { noCreds++; continue; }
-    let password: string;
-    try { password = decryptPassword(b.encrypted_password); }
-    catch { failed++; if (!firstError) firstError = `${b.business_name}: stored password could not be read`; continue; }
-    // Buyers sign in with a bare username; loginDisplay is what the manual
-    // share already prints, so the template says the same thing the card does.
-    const loginId = loginDisplay(b.email ?? "").value;
-    const res = await sendBuyerCredentials(b.phone, b.business_name ?? "there", PORTAL_URL, loginId, password);
-    if (res.sent) {
-      sent++;
+    if (!configured) { skipped++; continue; }
+    const link = await getOrCreateLoginToken(b.id, staff.id);
+    if (!link.ok) { failed++; if (!firstError) firstError = `${b.business_name}: ${link.error}`; continue; }
+    if (!preflighted) {
+      const pre = await preflightLoginLink(link.token);
+      if (!pre.ok) return { ok: false, error: `Not sent — ${pre.error}` };
+      preflighted = true;
+    }
+    const res = await sendLaunchMessage("login", b.phone, b.business_name ?? "there", link.token);
+    if (res.sent || res.uncertain) {
+      if (res.sent) sent++;
+      else { failed++; if (!firstError) firstError = `${b.business_name}: may or may not have gone (${res.error}) — check WhatsApp before resending`; }
+      // Same note format scripts/send-launch.mjs reads back, so the launch
+      // never sends this buyer the login message a second time.
       await writeAuditEvent({
         eventType: "credential_shared",
         buyerId: b.id,
         staffUserId: staff.id,
-        notes: `credentials sent over WhatsApp to ${b.phone} by ${staff.email}`,
+        notes: launchNote("login", `sent over WhatsApp (AiSensy) to ${e164(b.phone)} by ${staff.email}`, { admin: true, unconfirmed: !res.sent }),
       });
     } else if (res.skipped) skipped++;
     else { failed++; if (!firstError) firstError = `${b.business_name}: ${res.error ?? "send failed"}`; }

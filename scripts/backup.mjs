@@ -29,6 +29,7 @@ const TABLES = [
   "buyer_contacts",
   "staff_users",
   "auth_audit_log",
+  "buyer_login_links",
   "vendors",
   "wholesale_products",
   "product_vendor_info",

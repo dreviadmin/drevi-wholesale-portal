@@ -40,7 +40,15 @@ type EnvKey =
   | "WALLET_SHOPIFY_CLIENT_SECRET"
   | "WALLET_STOREFRONT_SECRET"    // >=32 chars; same value as the shop metafield drevi.wallet_key the theme signs with
   | "WALLET_ALLOWED_ORIGINS"      // comma list; defaults to drevifashion.com + myshopify
-  | "AISENSY_API_KEY"             // wholesale launch messages (scripts/aisensy-send.mjs); not used by the wallet
+  | "AISENSY_API_KEY"             // wholesale WhatsApp sends (src/lib/aisensy.ts); not used by the wallet
+  // Wholesale login messages (src/lib/aisensy.ts, scripts/send-launch.mjs) — all
+  // optional; without them "Send login on WhatsApp" reports "not configured":
+  | "AISENSY_CAMPAIGN_LOGIN"      // Live API campaign, Utility walkthrough template
+  | "AISENSY_CAMPAIGN_GREETING"   // Live API campaign, Marketing greeting template (launch only)
+  | "AISENSY_LOGIN_VIDEO_URL"     // public URL of the walkthrough header video
+  | "AISENSY_GREETING_VIDEO_URL"  // public URL of Rakesh's greeting video
+  | "AISENSY_URL_BUTTON_INDEX"    // position of the /go/{{1}} button in both templates (0)
+  | "AISENSY_LINK_ORIGIN"         // https origin the approved templates' /go button opens (required to send)
   | "WALLET_WELCOME_PAISE"        // 100000
   | "WALLET_EARN_PERCENT"         // 10
   | "WALLET_MIN_ORDER_PAISE"      // 500000
