@@ -15,7 +15,7 @@ export interface AuditRowDTO {
 
 const EVENT_LABEL: Record<string, string> = {
   credential_created: "Credentials created", credential_viewed: "Password viewed", credential_regenerated: "Password regenerated",
-  credential_changed: "Password changed", credential_shared: "Credentials shared", login_success: "Login", login_failed: "Failed login",
+  credential_changed: "Password changed", credential_shared: "Credentials shared", login_link_reset: "Login link reset", login_success: "Login", login_failed: "Failed login",
   account_suspended: "Suspended", account_reactivated: "Reactivated", account_rejected: "Rejected",
 };
 const EVENTS = Object.keys(EVENT_LABEL) as AuditEventType[];

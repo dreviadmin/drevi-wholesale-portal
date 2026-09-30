@@ -30,7 +30,7 @@ export interface BuyerRowDTO {
   canSend?: boolean;
 }
 
-// Each send is one Interakt call with an 8s timeout, inside a 60s function —
+// Each send is one AiSensy call with an 8s timeout, inside a 60s function —
 // six per round trip leaves headroom. The server caps at the same number, so
 // a selection is chunked here rather than truncated there.
 const CRED_CHUNK = 6;
@@ -133,8 +133,8 @@ export function BuyersTable({
     if (!ids.length) return;
     const held = chosen.length - ids.length;
     if (!window.confirm(
-      `Send login details over WhatsApp to ${ids.length} buyer${ids.length > 1 ? "s" : ""}?` +
-      (held ? ` ${held} of the ${chosen.length} selected will be left out — not active, or no phone/password on file.` : "") +
+      `Send the WhatsApp login message (one-tap login button) to ${ids.length} buyer${ids.length > 1 ? "s" : ""}?` +
+      (held ? ` ${held} of the ${chosen.length} selected will be left out — not active, no mobile number, or no login set.` : "") +
       ` Sent in batches of ${CRED_CHUNK} — leave this tab open.`,
     )) return;
     start(async () => {
@@ -149,11 +149,11 @@ export function BuyersTable({
         if (!firstError && res.firstError) firstError = res.firstError;
         flash(`WhatsApp ${done}/${ids.length} · ${sent} sent${skipped ? ` · ${skipped} not configured` : ""}${failed ? ` · ${failed} failed` : ""}`);
       }
-      // `skipped` means INTERAKT_API_KEY is absent — the send is a logged
-      // no-op. Saying so plainly beats a silent "0 sent".
+      // `skipped` means the AiSensy key, campaign or video is not set — the
+      // send is a logged no-op. Saying so plainly beats a silent "0 sent".
       flash(
         skipped === done
-          ? `Nothing went out — WhatsApp (Interakt) is not configured yet on this deployment.`
+          ? `Nothing went out — WhatsApp (AiSensy) is not configured yet on this deployment.`
           : `Done: ${sent} sent${skipped ? ` · ${skipped} not configured` : ""}${failed ? ` · ${failed} failed` : ""}${firstError ? ` — ${firstError}` : ""}`,
       );
       if (sent > 0) setSelected(new Set());

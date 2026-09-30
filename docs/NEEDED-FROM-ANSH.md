@@ -7,38 +7,54 @@ Prod facts as of this morning: 248 buyers, all active, all with a login on
 the firstname+3digits scheme (rotated 26 Sep, audited); 242 reachable on
 WhatsApp, 6 without any phone.
 
-### A. AiSensy — the credential send
+### A. AiSensy — the launch send (rewritten 30 Sep: no passwords in templates)
 
-1. **Template 1 (Rakesh's greeting, Marketing).** Keep the Link / Username /
-   Password block — Ansh, 27 Sep: Rakesh says the login is below in the video,
-   so the message must carry it. It stays a Marketing template (video, "now
-   live", *Stop promotions*), which means Meta may drop it for buyers at their
-   per-user marketing cap (error 131049 arrives as a 200 with a message id).
-   That is fine ONLY because Template 2 carries the same credentials as a
-   Utility send: T2 is the guaranteed copy, T1 the friendly one. Both sends
-   must read the same stored password in the same run — never rotate between
-   them. Submit explicitly as **Marketing**.
-2. **Template 2 (walkthrough + login, Utility).** Change the number to `+91 86553 55958` (29 Sep: the new wholesale WhatsApp line, now used everywhere) —
-   the portal now shows the same number on forgot-password, the suspended
-   login message and the share text. Submit as **Utility** with
-   `hindi-private.mp4` as the header sample (prices visible; this goes 1:1).
-   Sample values on the new password scheme: `royal` / `royal482`. Optional
-   `{{1}}` shop-name greeting.
-3. **After approval:** one **Live API campaign** per template. Send me both
-   campaign names exactly as typed (case and spacing) — the API addresses
-   campaigns, not templates.
-4. **Rakesh's greeting video file** (H.264, under 16 MB). I host it the same
-   way as the walkthrough.
-5. **Stop promotions handling:** check AiSensy Manage → opt-out keywords
-   covers the quick-reply text; if not, I add a webhook and a
-   `marketing_opt_out` column so the button is not decorative.
-6. **Confirm the waves:** you first (both templates), then five buyers, then
-   the rest. T1, then T2 about fifteen minutes later. 242 recipients sits
-   under Meta's 250-unique-recipients/24h starting tier.
+Meta rejected the templates that carried Username / Password: a login code
+may only travel in its fixed-wording Authentication category (no video, no
+link). So neither template carries credentials any more. Each has a **URL
+button** that opens the buyer's account in one tap — `https://<portal>/go/{{1}}`,
+where `{{1}}` is that buyer's login token (built 30 Sep: table 0073, page
+`/go/<token>`, admin "Copy link" / "New link" on every buyer). Passwords still
+exist as the fallback on a new phone.
 
-Then it is mine: the AiSensy adapter replacing `src/lib/interakt.ts`
-(`success === "true"`, stored `submitted_message_id`, `credentials_sent_at`
-so a halfway failure cannot double-send, pacing, per-language media URL).
+1. **Settle the portal domain FIRST.** The button's base URL is fixed when Meta
+   approves the template. Today that is `https://drevi-wholesale-portal-swart.vercel.app`
+   because `wholesale.drevifashion.com` is dead (item 14). AiSensy advises the
+   business's own domain.
+2. **Template 1 — Rakesh's greeting (Marketing, Hindi).** Header: Rakesh's
+   video (`WhatsApp Video 2026-09-25 at 18.17.27.mp4`, 7 MB H.264, fits the
+   16 MB limit as is). Body: the current caption with the login block
+   (Link / Username / Password) replaced by
+   `नीचे *Catalog खोलें* button दबाइए, आपका account सीधे खुल जाएगा।`
+   No body variables. Buttons, **URL button first**: `Catalog खोलें` →
+   `https://<domain>/go/{{1}}` (sample value `qYRtI0BmROLMNtO9ffouAA`), then the
+   *Stop promotions* quick reply.
+3. **Template 2 — walkthrough (Utility, English).** Header: the walkthrough
+   video. Body:
+   > *Welcome to the Drevi Wholesale Portal.*
+   >
+   > Hello {{1}}, your wholesale account is ready. Tap *Open catalogue* below to browse our full catalogue at wholesale rates, add items to your cart and send an order request. This video walks you through each step.
+   >
+   > Save this message and use the same button whenever you want to order.
+   >
+   > For any help, call us on +91 86553 55958.
+   > Rakesh, Drevi Fashion
+
+   `{{1}}` = shop name (sample `Royal Collection`). Button: `Open catalogue` →
+   `https://<domain>/go/{{1}}`. Avoid "offer / sale / discount" wording or Meta
+   moves it to Marketing.
+4. **After approval:** one Live **API campaign** per template. Send me both
+   campaign names exactly as typed, and the AiSensy API key if it changed.
+5. **Check WhatsApp Manager for error 131037** (display name not approved) on
+   +91 86553 55958 — the wallet's sends died on it; nothing sends until it is
+   clear.
+6. **Then it is mine:** host both videos, set `AISENSY_CAMPAIGN_GREETING`,
+   `AISENSY_CAMPAIGN_LOGIN`, `AISENSY_GREETING_VIDEO_URL`,
+   `AISENSY_LOGIN_VIDEO_URL`, and run `scripts/send-launch.mjs` — dry run
+   first, then you, then 5 buyers, then the rest; greeting first, login
+   message ~15 min later. It skips anyone already sent (state file + audit
+   log). Prod dry run 30 Sep: **232 ready, 16 held** (3 on one shared number,
+   1 already sent over WhatsApp Web, 3 non-mobile numbers, 9 no phone).
 
 ### B. Data the new home navigation exposes
 

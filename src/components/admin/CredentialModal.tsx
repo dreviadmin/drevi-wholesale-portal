@@ -28,7 +28,7 @@ export function CredentialModal({
   const [showCustom, setShowCustom] = useState(false);
   const [openWa, setOpenWa] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activated, setActivated] = useState<{ password: string } | null>(null);
+  const [activated, setActivated] = useState<{ password: string; loginUrl?: string } | null>(null);
   const [isPending, start] = useTransition();
 
   const password = mode === "auto" ? generated : custom;
@@ -41,9 +41,9 @@ export function CredentialModal({
     start(async () => {
       const res = await setCredentials(buyerId, email, password);
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
-      setActivated({ password: res.password! });
+      setActivated({ password: res.password!, loginUrl: res.loginUrl });
       if (openWa) {
-        await shareWhatsApp(buildWhatsAppMessage(email, res.password!), buyer.phone);
+        await shareWhatsApp(buildWhatsAppMessage(email, res.password!, res.loginUrl), buyer.phone);
       }
     });
   }
@@ -74,7 +74,7 @@ export function CredentialModal({
               <button type="button" onClick={() => navigator.clipboard?.writeText(`${login.label}: ${login.value}\nPassword: ${activated.password}`)} className="flex items-center gap-1.5 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 10, letterSpacing: "0.15em", padding: "8px 14px" }}>
                 <Copy size={12} /> Copy
               </button>
-              <button type="button" onClick={() => shareWhatsApp(buildWhatsAppMessage(email, activated.password), buyer.phone)} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.15em", padding: "8px 14px" }}>
+              <button type="button" onClick={() => shareWhatsApp(buildWhatsAppMessage(email, activated.password, activated.loginUrl), buyer.phone)} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.15em", padding: "8px 14px" }}>
                 <MessageCircle size={12} /> Share via WhatsApp
               </button>
             </div>

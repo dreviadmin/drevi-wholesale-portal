@@ -23,6 +23,7 @@ export type AuditEventType =
   | "credential_regenerated"
   | "credential_changed"
   | "credential_shared"
+  | "login_link_reset"
   | "login_success"
   | "login_failed"
   | "account_suspended"

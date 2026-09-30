@@ -3,6 +3,7 @@ import { AutoRefresh } from "@/components/AutoRefresh";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { BuyersTable, type BuyerRowDTO } from "./BuyersTable";
 import type { Buyer } from "@/lib/types";
+import { e164 } from "@/lib/aisensy";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +48,8 @@ export default async function BuyersPage({
     lastOrder: stats.get(b.id)?.last ?? null,
     // Drives the "n of m can be sent" count on the bulk bar. Only the boolean
     // crosses to the client — the encrypted password never leaves the server.
-    canSend: b.status === "active" && !!b.phone && !!b.encrypted_password,
+    // Same test the send applies: a landline or a broken number is not sendable.
+    canSend: b.status === "active" && !!e164(b.phone) && !!b.encrypted_password,
     pendingIdentity: pendingIdentity.has(b.id),
   }));
 

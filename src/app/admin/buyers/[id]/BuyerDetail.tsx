@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, Copy, MessageCircle, RefreshCw, UserPlus, Pencil, ImageOff, Undo2, Clock3 } from "lucide-react";
+import { Eye, EyeOff, Copy, MessageCircle, RefreshCw, UserPlus, Pencil, ImageOff, Undo2, Clock3, Link2 } from "lucide-react";
 import { BackLink, withFrom } from "@/components/BackLink";
 import { DraftNotice } from "@/components/DraftNotice";
 import { StatusPill } from "@/components/admin/Pills";
@@ -13,6 +13,8 @@ import {
   setBuyerStatus,
   revealPassword,
   shareCredentials,
+  getLoginLink,
+  resetLoginLink,
   regeneratePassword,
   changePassword,
   addNote,
@@ -91,7 +93,7 @@ interface WalletEvent {
 
 const EVENT_LABEL: Record<string, string> = {
   credential_created: "Credentials created", credential_viewed: "Password viewed", credential_regenerated: "Password regenerated",
-  credential_changed: "Password changed", credential_shared: "Credentials shared", login_success: "Login", login_failed: "Failed login",
+  credential_changed: "Password changed", credential_shared: "Credentials shared", login_link_reset: "Login link reset", login_success: "Login", login_failed: "Failed login",
   account_suspended: "Suspended", account_reactivated: "Reactivated", account_rejected: "Rejected",
 };
 const SOURCE_LABEL: Record<BuyerSource, string> = { inquiry_form: "Inquiry", exhibition: "Exhibition", manual_admin: "Manual" };
@@ -230,11 +232,57 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet, changeRe
         }
         flash(ok ? "Copied" : "Copy failed — use Reveal and copy manually");
       }
-      else await shareWhatsApp(buildWhatsAppMessage(buyer.email!, r.password!), buyer.phone);
+      else await shareWhatsApp(buildWhatsAppMessage(buyer.email!, r.password!, r.loginUrl), buyer.phone);
+    });
+  }
+  // One-tap login link (0073). Shown once fetched, so staff can see what
+  // they are pasting; the same link comes back every time until "New link".
+  const [loginLink, setLoginLink] = useState<string | null>(null);
+  async function copyText(text: string): Promise<boolean> {
+    try { await navigator.clipboard.writeText(text); return true; } catch { /* fallback below */ }
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  }
+  function copyLoginLink() {
+    const pending = getLoginLink(buyer.id, "Copy");
+    // Safari only accepts a clipboard write that starts inside the tap, not
+    // one made after the server round trip — so hand it a promise of the text
+    // now. Browsers without ClipboardItem fall back to copyText afterwards.
+    let early: Promise<boolean> | null = null;
+    try {
+      if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+        const blob = pending.then((r) => {
+          if (!r.ok || !r.url) throw new Error(r.error ?? "no link");
+          return new Blob([r.url], { type: "text/plain" });
+        });
+        early = navigator.clipboard.write([new ClipboardItem({ "text/plain": blob })]).then(() => true, () => false);
+      }
+    } catch {
+      early = null;
+    }
+    start(async () => {
+      const r = await pending;
+      if (!r.ok || !r.url) { flash(r.error ?? "Failed"); return; }
+      setLoginLink(r.url);
+      const copied = (early ? await early : false) || (await copyText(r.url));
+      flash(copied ? "Login link copied" : "Copy failed — select the link below");
+    });
+  }
+  function newLoginLink() {
+    if (!window.confirm("Make a new login link? Every link already sent to this buyer stops working.")) return;
+    start(async () => {
+      const r = await resetLoginLink(buyer.id);
+      if (!r.ok || !r.url) { flash(r.error ?? "Failed"); return; }
+      setLoginLink(r.url);
+      flash("New login link made — the old one no longer works");
     });
   }
   function regenerate() {
-    if (!window.confirm("Generate a new password and invalidate the current one?")) return;
+    if (!window.confirm("Generate a new password and invalidate the current one? The one-tap login link keeps working — press New link to stop it too.")) return;
     start(async () => { const r = await regeneratePassword(buyer.id); if (r.ok) { setRevealed(r.password!); flash("New password generated"); } else flash(r.error ?? "Failed"); });
   }
   function submitChange() {
@@ -634,6 +682,19 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet, changeRe
             <button type="button" onClick={() => share("WhatsApp")} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}><MessageCircle size={12} /> Share via WhatsApp</button>
             <button type="button" onClick={regenerate} className="flex items-center gap-1.5 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}><RefreshCw size={12} /> Regenerate</button>
             <button type="button" onClick={() => setChanging((v) => !v)} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>Change</button>
+          </div>
+          <div className="mt-4 font-body" style={{ fontSize: 13, color: palette.black }}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span>One-tap login link</span>
+              <button type="button" onClick={copyLoginLink} disabled={isPending} className="flex items-center gap-1.5 font-body uppercase disabled:opacity-50" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "6px 10px" }}><Link2 size={12} /> Copy link</button>
+              <button type="button" onClick={newLoginLink} disabled={isPending} className="font-body uppercase disabled:opacity-50" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "6px 10px" }}>New link</button>
+            </div>
+            {loginLink && (
+              <div className="font-mono mt-1.5" style={{ fontSize: 11, color: palette.goldDeep, wordBreak: "break-all", userSelect: "all" }}>{loginLink}</div>
+            )}
+            <p className="mt-1.5" style={{ fontSize: 11, color: palette.mutedGreige, lineHeight: 1.5 }}>
+              Opens this buyer&apos;s account with no password. Share via WhatsApp includes it.
+            </p>
           </div>
           {changing && (
             <div className="flex items-center gap-2 mt-3">

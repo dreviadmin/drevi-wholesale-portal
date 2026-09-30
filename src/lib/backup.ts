@@ -22,6 +22,7 @@ export const BACKUP_TABLES = [
   "buyer_contacts",
   "staff_users",
   "auth_audit_log",
+  "buyer_login_links",
   "vendors",
   // Catalog and vocabulary
   "wholesale_products",
