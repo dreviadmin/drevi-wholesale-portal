@@ -56,11 +56,16 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus, designs }
   }
 
   async function doDelete() {
-    if (!window.confirm(`Delete receipt ${receipt.number}? Its lines are removed with it. This cannot be undone.`)) return;
+    if (!window.confirm(`Delete receipt ${receipt.number}? Its lines are removed with it, and any stock it added is taken back out. This cannot be undone.`)) return;
     setBusy(true);
     const res = await deleteReceipt(receipt.id);
     setBusy(false);
-    if (res.ok) { router.push("/admin/receipts"); router.refresh(); }
+    // undefined = the action never ran (expired session redirect)
+    if (!res) { window.alert("Your session has expired — sign in again, then delete."); return; }
+    if (res.ok) {
+      if (res.notes?.length) window.alert(`${receipt.number} deleted.\n\n${res.notes.join("\n")}`);
+      router.push("/admin/receipts"); router.refresh();
+    }
     else window.alert(res.error ?? "Delete failed");
   }
 
