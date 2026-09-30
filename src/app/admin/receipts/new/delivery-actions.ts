@@ -539,8 +539,13 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
       if (lErr) return fail(`${sku}: ${lErr.message}`);
 
       // An app-born design has no catalog row yet — create one so the garment
-      // exists as a product. It stays HIDDEN until Rakesh sets specs + price
-      // (§6.1: receipt-created designs land at "Awaiting specs").
+      // exists as a product. It is SELLABLE AT THE COUNTER from the moment it
+      // is counted in (Ansh, 30 Sep: a new SKU from Log delivery "shall be shown
+      // immediately" when modifying an order). Since 0062, wholesale_visible
+      // means "staff may bill this"; the BUYER catalog is a separate gate that
+      // only a Studio push opens, so buyers still see nothing until then. It
+      // used to be created hidden, which left 17 received, in-stock garments
+      // unbillable on prod and pushed staff into CUSTOM lines instead.
       const hsnValue = g.hsn?.trim() && /^[0-9]{2,8}$/.test(g.hsn.trim()) ? g.hsn.trim() : null;
       const { data: existingProduct } = await admin.from("wholesale_products").select("sku").eq("sku", sku).maybeSingle();
       if (!existingProduct) {
@@ -552,7 +557,7 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
           sub_category: null,
           color: design.color,
           wholesale_price: siblingPrice,
-          wholesale_visible: false,
+          wholesale_visible: true,
           current_qty: 0,
           restockable: true,
           // sheet sync must not flip visibility, nor overwrite an inherited price

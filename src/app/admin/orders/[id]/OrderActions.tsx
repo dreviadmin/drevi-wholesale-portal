@@ -95,7 +95,7 @@ export function OrderActions({
       const res = await sendInvoice(orderId);
       router.refresh();
       if (!res.ok) flash(res.error ?? "Failed");
-      else flash(res.sent ? "Invoice sent" : "PDF refreshed · Interakt not configured");
+      else flash(res.sent ? "Invoice sent" : "Invoice PDF ready — send it with Download, Share PDF or WhatsApp Buyer (each bill below has its own).");
     });
   }
 
@@ -155,7 +155,7 @@ export function OrderActions({
         await setOrderAgent(orderId, choice.agentId, choice.commissionPct, true);
       }
       setAgentOpen(false);
-      flash(res.invoiceSent ? "Confirmed · invoice sent" : "Confirmed");
+      flash(res.invoiceError ? `Confirmed — but the invoice PDF could not be made (${res.invoiceError}). Use Send Invoice to retry.` : res.invoiceSent ? "Confirmed · invoice sent" : "Confirmed");
       router.refresh();
     });
   }

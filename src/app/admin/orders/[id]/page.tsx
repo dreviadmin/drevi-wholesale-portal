@@ -26,8 +26,13 @@ import { loadOrderCredit, loadBuyerWallet } from "@/lib/credit-load";
 import { resolveDocumentParty } from "@/lib/buyer-snapshot";
 import type { Order, OrderBill } from "@/lib/types";
 import { productionMoqFlag, supplyAge, type SupplyInput } from "@/lib/availability";
+import { BillShareActions } from "./BillShareActions";
+import { BillResultNote } from "./BillResultNote";
+import { freshOrderPdfUrl } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
+// Bill + invoice PDFs render inside this page's server actions; give them room.
+export const maxDuration = 60;
 
 const SOURCE_LABEL: Record<string, string> = { portal_self_service: "Portal", exhibition: "Exhibition", in_store: "In-store" };
 
@@ -67,6 +72,15 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
     resolveDocumentParty(admin, o, o.buyer_id),
   ]);
   const bills = (billRows ?? []) as OrderBill[];
+  // Share links minted now and valid for a year (30 Sep) — the link saved on a
+  // row lives 30 days, so a bill shared from here used to stop opening for the
+  // buyer a month later. Falls back to the saved link if the file is missing.
+  const billLinks = new Map<string, string | null>(
+    await Promise.all(
+      bills.map(async (b) => [b.id, b.pdf_url ? (await freshOrderPdfUrl(o.id, b.bill_number)) ?? b.pdf_url : null] as [string, string | null]),
+    ),
+  );
+  const orderPdfLink = o.pdf_url ? (await freshOrderPdfUrl(o.id, o.order_number)) ?? o.pdf_url : null;
   const billNumberById = new Map(bills.map((b) => [b.id, b.bill_number]));
   // Two different questions, and conflating them WAS the bug. Line editing
   // stops at a terminal status (setLineState refuses those server-side), but
@@ -179,7 +193,9 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
       .from("wholesale_products")
       .select("sku, title, wholesale_price, image_urls")
       .eq("wholesale_visible", true)
-      .order("title", { nullsFirst: false });
+      .order("title", { nullsFirst: false })
+      // PostgREST's default cap is 1000 rows; the catalog is 322 and growing.
+      .range(0, 4999);
     pickerProducts = (prods ?? []).map((p) => ({
       sku: p.sku,
       title: p.title,
@@ -297,7 +313,7 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
         </div>
         {isAdminRole(staff.role) && (
           <div className="flex flex-col items-end gap-2">
-            <OrderActions orderId={o.id} status={o.status} pdfUrl={o.pdf_url} orderNumber={o.order_number} total={o.total_amount} buyerPhone={buyer?.phone ?? null} courier={o.courier} trackingNumber={o.tracking_number}
+            <OrderActions orderId={o.id} status={o.status} pdfUrl={orderPdfLink} orderNumber={o.order_number} total={o.total_amount} buyerPhone={buyer?.phone ?? null} courier={o.courier} trackingNumber={o.tracking_number}
               agents={agents} buyerAgentId={buyerAgent?.agent_id ?? null} buyerName={o.buyer_business_name ?? buyer?.business_name ?? null} />
             <OrderAgent
               orderId={o.id}
@@ -489,6 +505,7 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
       {bills.length > 0 && (
         <div className="mt-5">
           <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}>Bills against this order</div>
+          <BillResultNote orderId={o.id} />
           {bills.map((b) => (
             <div key={b.id} className="flex items-center justify-between gap-2 py-2.5" style={{ borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
               <div className="min-w-0">
@@ -521,11 +538,16 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
                   <CancelBillButton billId={b.id} billNumber={b.bill_number} />
                 )}
                 <span className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black, textDecoration: b.cancelled_at ? "line-through" : "none" }}>{formatINR(b.total)}</span>
-                {b.pdf_url && (
-                  <a href={b.pdf_url} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.goldDeep, textDecoration: "underline" }}>
-                    PDF
-                  </a>
-                )}
+                <BillShareActions
+                  billId={b.id}
+                  billNumber={b.bill_number}
+                  orderNumber={o.order_number}
+                  total={b.total}
+                  pdfUrl={billLinks.get(b.id) ?? null}
+                  buyerPhone={buyer?.phone ?? (b as { buyer_phone?: string | null }).buyer_phone ?? null}
+                  cancelled={!!b.cancelled_at || o.status === "cancelled"}
+                  canRegenerate={isAdminRole(staff.role)}
+                />
               </div>
             </div>
           ))}

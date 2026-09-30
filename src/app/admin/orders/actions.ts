@@ -8,13 +8,13 @@ import { postOrderMovements, applyMovement } from "@/lib/stock-ledger";
 import { getStockState } from "@/lib/stock";
 import { storeAuxPhoto } from "@/lib/design-image-store";
 import { refreshOrderFromCatalog } from "@/lib/order-catalog-sync";
-import { billableLines, pendingLines, computeBillTotals, validateBillDate, billDateToIso, effectiveLineState } from "@/lib/order-lines-core";
-import { renderOrderPdf } from "@/lib/order-pdf";
-import { uploadOrderPdf } from "@/lib/storage";
+import { billableLines, computeBillTotals, validateBillDate, billDateToIso, effectiveLineState, emptyBillReason } from "@/lib/order-lines-core";
+import { renderAndStoreBillPdf, type BillForPdf } from "@/lib/bill-pdf";
 import { writeAuditEvent } from "@/lib/audit";
 import { formatINR } from "@/lib/format";
 import { captureBuyerSnapshot, resolveDocumentParty, snapshotSourceForDate, type BuyerParty } from "@/lib/buyer-snapshot";
 import type { AuditEventType, DiscountType, Order, OrderBill, OrderItem, OrderStatus, TaxMode, WholesaleProduct } from "@/lib/types";
+import type { PickerProduct } from "@/app/admin/orders/[id]/OrderEditor";
 
 export interface StageDetails {
   courier?: string;
@@ -111,7 +111,7 @@ export async function setOrderStatus(
   orderId: string,
   status: OrderStatus,
   options?: { sendInvoice?: boolean; details?: StageDetails },
-): Promise<{ ok: boolean; error?: string; invoiceSent?: boolean }> {
+): Promise<{ ok: boolean; error?: string; invoiceSent?: boolean; invoiceError?: string }> {
   let staff;
   try {
     staff = await requireAdmin();
@@ -124,14 +124,18 @@ export async function setOrderStatus(
   if (!applied.ok) return applied;
 
   let invoiceSent = false;
+  let invoiceError: string | undefined;
   if (options?.sendInvoice) {
-    await finalizeOrder(orderId); // best-effort: PDF + Interakt confirmation
+    // Best-effort: the status change stands either way, but a PDF that could
+    // not be made is reported, not folded into a plain "Confirmed" (30 Sep).
+    const fin = await finalizeOrder(orderId);
+    if (!fin.pdfUrl) invoiceError = fin.error ?? "unknown error";
     const { data } = await admin.from("orders").select("pdf_sent_at").eq("id", orderId).maybeSingle();
     invoiceSent = !!data?.pdf_sent_at;
   }
   revalidatePath("/admin/orders");
   revalidatePath(`/admin/orders/${orderId}`);
-  return { ok: true, invoiceSent };
+  return { ok: true, invoiceSent, invoiceError };
 }
 
 /**
@@ -325,7 +329,8 @@ export async function updateOrderItems(
       subtotal += qty * unitPrice;
     } else {
       const p = bySku.get(line.sku);
-      if (!p || !p.wholesale_visible) return { ok: false, error: `${line.sku} is not orderable.` };
+      if (!p) return { ok: false, error: `${line.sku} is not in the catalog.` };
+      if (!p.wholesale_visible) return { ok: false, error: `${line.sku} is withdrawn from billing — make it sellable in Manage Catalog first.` };
       const state = getStockState(p);
       if (state === "sold_out") return { ok: false, error: `${line.sku} is sold out.` };
       const qty = norm.qty(line.qty);
@@ -526,10 +531,13 @@ export async function sendInvoice(orderId: string): Promise<{ ok: boolean; sent?
     if (!data) return { ok: false, error: "Order not found." };
     if (data.status === "cancelled") return { ok: false, error: "Cancelled orders are not invoiced." };
   }
-  await finalizeOrder(orderId);
-  const admin = createAdminClient();
-  const { data } = await admin.from("orders").select("pdf_sent_at, pdf_url").eq("id", orderId).maybeSingle();
+  const fin = await finalizeOrder(orderId);
   revalidatePath(`/admin/orders/${orderId}`);
+  // No stored file = nothing to share. This used to return ok and flash "PDF
+  // refreshed" over an upload that had failed (30 Sep).
+  if (!fin.pdfUrl) return { ok: false, error: `The invoice PDF could not be made: ${fin.error ?? "unknown error"}` };
+  const admin = createAdminClient();
+  const { data } = await admin.from("orders").select("pdf_sent_at").eq("id", orderId).maybeSingle();
   return { ok: true, sent: !!data?.pdf_sent_at };
 }
 
@@ -708,50 +716,6 @@ export async function setLineState(
   return { ok: true };
 }
 
-/** A bill as stored — everything renderOrderPdf needs, nothing recomputed. */
-type BillForPdf = Pick<
-  OrderBill,
-  "id" | "bill_number" | "seq" | "bill_date" | "items" | "discount_amount" | "tax_mode" | "tax_rate" | "tax_amount" | "total" | "advance_applied"
->;
-
-/**
- * Render + store one bill's PDF. Best-effort: the bill row already stands, so a
- * render failure is logged and never rolls anything back. Shared with
- * recaptureDocumentParty so a corrected party reaches the FILE the buyer was
- * sent, not only the columns.
- */
-async function renderAndStoreBillPdf(order: Order, bill: BillForPdf, party: BuyerParty): Promise<string | undefined> {
-  const admin = createAdminClient();
-  try {
-    const after = { ...order, items: (await admin.from("orders").select("items").eq("id", order.id).single()).data?.items ?? order.items };
-    const synthetic: Order = {
-      ...order,
-      order_number: bill.bill_number,
-      items: bill.items,
-      total_amount: bill.total,
-      discount_type: bill.discount_amount > 0 ? order.discount_type : null,
-      discount_value: bill.discount_amount > 0 ? order.discount_value : null,
-      discount_amount: bill.discount_amount,
-      tax_mode: bill.tax_mode,
-      tax_rate: bill.tax_rate,
-      tax_amount: bill.tax_amount,
-      advance_amount: bill.advance_applied,
-      submitted_at: billDateToIso(bill.bill_date),
-    };
-    const pdf = await renderOrderPdf(synthetic, party, {
-      seq: bill.seq,
-      orderNumber: order.order_number,
-      pendingCount: pendingLines(after as Order).length,
-    });
-    const pdfUrl = await uploadOrderPdf(order.id, bill.bill_number, pdf);
-    await admin.from("order_bills").update({ pdf_url: pdfUrl }).eq("id", bill.id);
-    return pdfUrl;
-  } catch (e) {
-    console.error("bill PDF failed (bill stands; regenerate from the order page):", (e as Error).message);
-    return undefined;
-  }
-}
-
 /**
  * Bill every confirmed-and-unbilled line as one new bill. `billDate` may be a
  * past date (never future). The order itself keeps its status — billing and
@@ -760,7 +724,7 @@ async function renderAndStoreBillPdf(order: Order, bill: BillForPdf, party: Buye
 export async function generateOrderBill(
   orderId: string,
   opts: { billDate?: string } = {},
-): Promise<{ ok: boolean; error?: string; billNumber?: string; pdfUrl?: string }> {
+): Promise<{ ok: boolean; error?: string; billNumber?: string; pdfUrl?: string; pdfError?: string; alreadyBilled?: boolean }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
   const admin = createAdminClient();
@@ -771,7 +735,29 @@ export async function generateOrderBill(
   if (o.status === "cancelled") return { ok: false, error: "Cancelled orders can't be billed." };
 
   const billable = billableLines(o);
-  if (billable.length === 0) return { ok: false, error: "No confirmed, unbilled lines — confirm something first." };
+  if (billable.length === 0) {
+    // Say which of the two it is. "Confirm something first" on an order whose
+    // lines were all just billed (a second press from a stale screen) sent the
+    // owner looking for a confirmation problem that did not exist (30 Sep).
+    const why = emptyBillReason(o);
+    if (why.kind === "already_billed") {
+      // Only a LIVE bill can answer "already billed". Lines still tied to a
+      // cancelled bill (a cancel whose line release lost a race) are stuck,
+      // not billed — say so instead of reporting success.
+      const { data: orderBills } = await admin.from("order_bills").select("id, bill_number, pdf_url, seq, cancelled_at").eq("order_id", orderId).order("seq", { ascending: false });
+      const live = (orderBills ?? []).filter((x) => !x.cancelled_at);
+      const liveIds = new Set(live.map((x) => x.id));
+      const stuck = (o.items ?? []).filter((it) => it.billed_in && !liveIds.has(it.billed_in)).length;
+      if (stuck > 0) {
+        const dead = (orderBills ?? []).find((x) => x.cancelled_at)?.bill_number;
+        return { ok: false, error: `${stuck} line${stuck === 1 ? " is" : "s are"} still tied to a cancelled bill${dead ? ` (${dead})` : ""} — reload the order; if it persists, cancel that bill again to release them.` };
+      }
+      revalidatePath(`/admin/orders/${orderId}`);
+      return { ok: true, alreadyBilled: true, billNumber: live[0]?.bill_number, pdfUrl: live[0]?.pdf_url ?? undefined };
+    }
+    const parts = [why.pending ? `${why.pending} pending` : "", why.held ? `${why.held} on hold` : "", why.billed ? `${why.billed} already billed` : ""].filter(Boolean);
+    return { ok: false, error: `Nothing is ready to bill${parts.length ? ` (${parts.join(", ")})` : ""} — confirm the lines first.` };
+  }
 
   const todayIst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   const billDate = opts.billDate ? validateBillDate(opts.billDate, todayIst) : todayIst;
@@ -839,7 +825,7 @@ export async function generateOrderBill(
 
   // Print what was just frozen, never a live buyers read — that read was the
   // whole bug: it rewrote every bill this party had ever been issued.
-  const pdfUrl = await renderAndStoreBillPdf(
+  const pdf = await renderAndStoreBillPdf(
     o,
     {
       id: bill.id, bill_number: bill.bill_number, seq: bill.seq, bill_date: billDate, items: lines,
@@ -852,7 +838,50 @@ export async function generateOrderBill(
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
   revalidatePath("/admin/dashboard");
-  return { ok: true, billNumber: bill.bill_number, pdfUrl };
+  return { ok: true, billNumber: bill.bill_number, pdfUrl: pdf.url, pdfError: pdf.error };
+}
+
+/**
+ * Make one bill's missing PDF from what the bill froze (30 Sep). The order page
+ * offers "Make PDF" only on a bill with NO file — the state a failed upload used
+ * to leave behind with no way out. It is not offered over an existing file: the
+ * "items awaiting availability" note is worked out at render time, so a remake
+ * could change a PDF the buyer already holds. Cancelled bills and bills of a
+ * cancelled order are not reissued.
+ */
+export async function regenerateBillPdf(billId: string): Promise<{ ok: boolean; error?: string; pdfUrl?: string }> {
+  try { await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
+  const admin = createAdminClient();
+  const { data: b } = await admin.from("order_bills").select("*").eq("id", billId).maybeSingle();
+  if (!b) return { ok: false, error: "Bill not found." };
+  if (b.cancelled_at) return { ok: false, error: "This bill is cancelled — it is not reissued." };
+  const { data: order } = await admin.from("orders").select("*").eq("id", b.order_id).maybeSingle();
+  if (!order) return { ok: false, error: "Order not found." };
+  const o = order as Order;
+  if (o.status === "cancelled") return { ok: false, error: "Cancelled orders are not invoiced." };
+  const r = await renderAndStoreBillPdf(o, b as OrderBill, await resolveDocumentParty(admin, b, o.buyer_id));
+  revalidatePath(`/admin/orders/${b.order_id}`);
+  return r.url ? { ok: true, pdfUrl: r.url } : { ok: false, error: `The PDF could not be made: ${r.error}` };
+}
+
+/**
+ * Look one SKU up live for the Modify Order picker (30 Sep: "a new SKU entered
+ * through Log delivery doesn't show when adding the item by modifying an
+ * order"). The picker list is loaded with the page, so an order opened before
+ * the delivery was logged would not know the SKU; typing or scanning it asks
+ * the server instead. Same rule as the save guard in updateOrderItems.
+ */
+export async function findOrderableSku(sku: string): Promise<{ ok: boolean; product?: PickerProduct; reason?: "withdrawn" | "sold_out" | "missing"; error?: string }> {
+  try { await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
+  const key = (sku ?? "").trim().toUpperCase();
+  if (!key) return { ok: false, reason: "missing" };
+  const admin = createAdminClient();
+  const { data: p } = await admin.from("wholesale_products").select("*").eq("sku", key).maybeSingle();
+  if (!p) return { ok: false, reason: "missing" };
+  const prod = p as WholesaleProduct;
+  if (!prod.wholesale_visible) return { ok: false, reason: "withdrawn" };
+  if (getStockState(prod) === "sold_out") return { ok: false, reason: "sold_out" };
+  return { ok: true, product: { sku: prod.sku, title: prod.title, wholesale_price: prod.wholesale_price, image_url: prod.image_urls?.[0] ?? null } };
 }
 
 // ---- Correcting a frozen party (13 Sep) ------------------------------------

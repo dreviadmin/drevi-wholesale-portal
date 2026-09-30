@@ -1,6 +1,7 @@
 import "server-only";
 
 import { Document, Page, Text, View, Image, StyleSheet, renderToBuffer } from "@react-pdf/renderer";
+import sharp from "sharp";
 import type { Order, OrderItem } from "@/lib/types";
 import type { CreditLineSnapshot } from "@/lib/credit-core";
 import type { CreditNoteRow } from "@/lib/credit-load";
@@ -20,6 +21,29 @@ function sniffFormat(buf: Buffer): "jpg" | "png" | null {
   return null; // webp/avif/etc — react-pdf can't embed these; skip
 }
 
+// Every photo is shrunk to a thumbnail BEFORE it is embedded (30 Sep). The
+// line photo prints at 34x42 pt, but a Studio front is a 2048 px PNG of up to
+// ~2 MB and was embedded whole: IS-20260930-001's 18 lines made a ~11 MB PDF,
+// the order-pdfs bucket refuses anything over 5 MB, and the upload failed
+// silently — no invoice file, so no Download / Share / WhatsApp buttons. A
+// 200 px JPEG is ~10 KB and still sharper than the print slot. Photos over the
+// old 2 MB cut-off, and WebP/AVIF sources react-pdf cannot read, now embed too.
+const MAX_SOURCE_BYTES = 25_000_000;
+
+async function thumbnail(buf: Buffer): Promise<{ data: Buffer; format: "jpg" } | null> {
+  try {
+    const data = await sharp(buf, { failOn: "none" })
+      .rotate()
+      .resize({ width: 200, height: 250, fit: "inside", withoutEnlargement: true })
+      .flatten({ background: "#ffffff" }) // PNG transparency would print black in a JPEG
+      .jpeg({ quality: 72 })
+      .toBuffer();
+    return { data, format: "jpg" };
+  } catch {
+    return null;
+  }
+}
+
 async function fetchItemImages(items: OrderItem[]): Promise<ImgMap> {
   const map: ImgMap = new Map();
   await Promise.all(
@@ -34,9 +58,16 @@ async function fetchItemImages(items: OrderItem[]): Promise<ImgMap> {
         const res = await fetch(url, { signal: AbortSignal.timeout(6000), cache: "no-store" });
         if (!res.ok) return;
         const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length > MAX_SOURCE_BYTES) {
+          console.warn(`[order-pdf] image too large to process (${Math.round(buf.length / 1024)}KB): ${it.image_url}`);
+          return;
+        }
+        const thumb = await thumbnail(buf);
+        if (thumb) { map.set(it.image_url, thumb); return; }
+        // sharp could not read it: embed the original only if it is small and
+        // a format react-pdf understands, so one odd file never bloats the PDF.
         const format = sniffFormat(buf);
-        if (format && buf.length < 2_000_000) map.set(it.image_url, { data: buf, format });
-        else if (buf.length >= 2_000_000) console.warn(`[order-pdf] image too large to embed (${Math.round(buf.length / 1024)}KB): ${it.image_url}`);
+        if (format && buf.length < 400_000) map.set(it.image_url, { data: buf, format });
       } catch {
         // unreachable/slow image — render without it
       }
