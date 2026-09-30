@@ -7,14 +7,17 @@ import { portalOrigin } from "@/lib/login-link-core";
 // API, from the wholesale number (+91 86553 55958). Each send names a Live
 // "API campaign" in the AiSensy dashboard, bound there to one Meta-approved
 // template. Two templates, neither carrying a password (Meta rejects those);
-// each has a URL button https://<portal>/go/{{1}} whose value is the buyer's
-// one-tap login token (0073):
+// each has a URL button whose {{1}} is the buyer's login token (0073):
 //
 //   AISENSY_CAMPAIGN_LOGIN     Utility — walkthrough video, {{1}} = shop name.
-//                              The guaranteed copy; also what "Send login on
-//                              WhatsApp" in admin sends to new buyers.
+//                              Button https://<portal>/go/{{1}}: one-tap
+//                              sign-in. The guaranteed copy; also what "Send
+//                              login on WhatsApp" in admin sends to new buyers.
 //   AISENSY_CAMPAIGN_GREETING  Marketing — Rakesh's greeting video, no body
-//                              variables. Launch only (scripts/send-launch.mjs).
+//                              variables. Button https://<portal>/id/{{1}}: a
+//                              page with their username and password (the
+//                              video says the login is below), plus the same
+//                              one-tap sign-in. Launch only (send-launch.mjs).
 //
 // AISENSY_LINK_ORIGIN is the https origin the approved buttons open. The token
 // only works on the site whose database minted it, so every sender checks that
@@ -103,7 +106,8 @@ export function launchPayload(kind: LaunchMessage, destination: string, business
     templateParams: c.params(business),
     media: { url: video, filename: video.split("/").pop()?.split("?")[0] || "video.mp4" },
     // Meta's component for a URL button with a variable suffix: the token is
-    // the {{1}} in https://<portal>/go/{{1}}. Same shape the wallet's
+    // the {{1}} in https://<portal>/go/{{1}} (login) or /id/{{1}} (greeting).
+    // Same shape the wallet's
     // copy-code button used through this endpoint.
     buttons: [{ type: "button", sub_type: "url", index, parameters: [{ type: "text", text: token }] }],
     tags: ["wholesale", `wholesale-${kind}`],
@@ -111,19 +115,36 @@ export function launchPayload(kind: LaunchMessage, destination: string, business
 }
 
 /**
- * Does the site the buttons open recognise this token? Fetches /go/<token>
- * the way a buyer's phone would, minus the tap: the page only signs in on its
- * form POST, so a GET changes nothing. A token minted in another database
- * (dev vs prod) renders "doesn't work any more" instead of the open prompt.
+ * Will the button work? Two GETs against the site the buttons open, neither
+ * of which signs anyone in or shows a password:
+ *  1. /go/<token> — the page only signs in on its form POST. A token minted in
+ *     another database (dev vs prod) renders "doesn't work any more" instead
+ *     of the open prompt.
+ *  2. greeting only: /id/<junk token> — proves the login-details page is
+ *     deployed and public there. A junk token is refused before any database
+ *     read, so no password is decrypted and no credential_viewed row written;
+ *     an older build without the page answers 307 → /login instead.
  */
-export async function preflightLoginLink(token: string): Promise<{ ok: boolean; error?: string }> {
+export async function preflightLoginLink(kind: LaunchMessage, token: string): Promise<{ ok: boolean; error?: string }> {
   const origin = linkOrigin();
   if (!origin) return { ok: false, error: "AISENSY_LINK_ORIGIN is not set" };
+  const get = async (path: string) => {
+    const res = await fetch(`${origin}${path}`, { cache: "no-store", redirect: "manual", signal: AbortSignal.timeout(10000) });
+    return { status: res.status, html: await res.text().catch(() => "") };
+  };
   try {
-    const res = await fetch(`${origin}/go/${token}`, { cache: "no-store", redirect: "manual", signal: AbortSignal.timeout(10000) });
-    const html = await res.text().catch(() => "");
-    if (res.status === 200 && html.includes("Opening the account for")) return { ok: true };
-    return { ok: false, error: `${origin} does not recognise this site's login links (HTTP ${res.status}) — check AISENSY_LINK_ORIGIN` };
+    const go = await get(`/go/${token}`);
+    if (go.status !== 200 || !go.html.includes("Opening the account for")) {
+      return { ok: false, error: `${origin} does not recognise this site's login links (HTTP ${go.status}) — check AISENSY_LINK_ORIGIN` };
+    }
+    if (kind === "greeting") {
+      const id = await get(`/id/${"x".repeat(22)}`);
+      // React escapes the apostrophe in "doesn't", so match past it.
+      if (id.status !== 200 || !id.html.includes("work any more")) {
+        return { ok: false, error: `${origin} has no login-details page yet (HTTP ${id.status}) — deploy before sending the greeting` };
+      }
+    }
+    return { ok: true };
   } catch (e) {
     return { ok: false, error: `could not reach ${origin}: ${(e as Error).message}` };
   }

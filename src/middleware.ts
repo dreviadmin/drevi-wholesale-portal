@@ -3,9 +3,10 @@ import { createServerClient } from "@supabase/ssr";
 
 // Public paths — no auth required. Everything else is gated.
 const PUBLIC_PATHS = ["/", "/login", "/forgot-password", "/wholesale", "/~offline"];
-// /go/<token> is the one-tap login link from WhatsApp: it is how a signed-out
-// buyer gets IN, so it cannot sit behind the gate (0073).
-const PUBLIC_PREFIXES = ["/api/cron", "/api/dev", "/api/health", "/go/"];
+// /go/<token> (one-tap sign-in) and /id/<token> (the buyer's username and
+// password) are the WhatsApp login buttons: they are how a signed-out buyer
+// gets IN, so they cannot sit behind the gate (0073).
+const PUBLIC_PREFIXES = ["/api/cron", "/api/dev", "/api/health", "/go/", "/id/"];
 
 function isPublic(pathname: string): boolean {
   if (PUBLIC_PATHS.includes(pathname)) return true;

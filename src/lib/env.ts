@@ -48,7 +48,7 @@ type EnvKey =
   | "AISENSY_CAMPAIGN_GREETING"   // Live API campaign, Marketing greeting template (launch only)
   | "AISENSY_LOGIN_VIDEO_URL"     // public URL of the walkthrough header video
   | "AISENSY_GREETING_VIDEO_URL"  // public URL of Rakesh's greeting video
-  | "AISENSY_URL_BUTTON_INDEX"    // position of the /go/{{1}} button in both templates (0)
+  | "AISENSY_URL_BUTTON_INDEX"    // position of the URL button (/go/{{1}} or /id/{{1}}) in both templates (0)
   | "AISENSY_LINK_ORIGIN"         // https origin the approved templates' /go button opens (required to send)
   | "WALLET_WELCOME_PAISE"        // 100000
   | "WALLET_EARN_PERCENT"         // 10

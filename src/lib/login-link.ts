@@ -152,6 +152,38 @@ export async function resolveLoginToken(token: string): Promise<ResolvedLink> {
   return { ok: true, linkId: link.id, buyer: { id: buyer!.id, email: buyer!.email!, business_name: buyer!.business_name } };
 }
 
+export type LoginDetails =
+  | {
+      ok: true;
+      buyer: { id: string; email: string; business_name: string | null };
+      /** null when the stored password can't be read — the page says to ask Rakesh. */
+      password: string | null;
+    }
+  | { ok: false; reason: LinkRefusal | "error" };
+
+/**
+ * What /id/<token> shows: the buyer's own username and password, for the
+ * greeting template whose video says the login is below it. Same refusals as
+ * a tap on /go — a link that could not sign in shows nothing either.
+ */
+export async function loginDetailsForToken(token: string): Promise<LoginDetails> {
+  const resolved = await resolveLoginToken(token);
+  if (!resolved.ok) return resolved;
+  const { data, error } = await createAdminClient()
+    .from("buyers")
+    .select("encrypted_password")
+    .eq("id", resolved.buyer.id)
+    .maybeSingle();
+  if (error) return { ok: false, reason: "error" };
+  let password: string | null = null;
+  try {
+    password = data?.encrypted_password ? decryptPassword(data.encrypted_password) : null;
+  } catch {
+    password = null;
+  }
+  return { ok: true, buyer: resolved.buyer, password };
+}
+
 export type SignInResult =
   | { ok: true; buyerId: string }
   | { ok: false; reason: LinkRefusal | "error" | "auth_failed"; detail?: string };
