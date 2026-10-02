@@ -25,7 +25,7 @@ import {
   deleteDiscount,
   fetchWalletOrder,
   getCustomer,
-  mintRedemptionCode,
+  createWalletAutomaticDiscount,
   removeCustomerTags,
   setCustomerNames,
   setCustomerPhone,
@@ -221,7 +221,7 @@ export async function reservedPaise(accountId: string): Promise<number> {
  */
 export async function createRedemption(input: { account: WalletAccount; subtotalPaise: number; requestedPaise?: number | null; cartToken?: string | null }): Promise<
   | { ok: true; code: string; amountPaise: number; expiresAt: string }
-  | { ok: false; reason: "below_minimum" | "no_balance" | "invalid"; minOrderPaise: number }
+  | { ok: false; reason: "below_minimum" | "no_balance" | "invalid" | "no_customer" | "busy"; minOrderPaise: number }
 > {
   const admin = createAdminClient();
   const c = cfg();
@@ -232,7 +232,16 @@ export async function createRedemption(input: { account: WalletAccount; subtotal
 
   const code = redemptionCodeFrom(randomBytes(8));
   const expiresAt = new Date(Date.now() + WALLET_DEFAULTS.redemptionTtlSeconds * 1000).toISOString();
-  const discountId = await mintRedemptionCode({ code, amountPaise: r.amount, minOrderPaise: c.minOrderPaise });
+  // The credit is a Shopify automatic discount for this one customer (see
+  // createWalletAutomaticDiscount): COD King strips discount codes, not these.
+  if (!input.account.shopify_customer_id) return { ok: false, reason: "no_customer", minOrderPaise: c.minOrderPaise };
+  let discountId: string;
+  try {
+    discountId = await createWalletAutomaticDiscount({ customerGid: input.account.shopify_customer_id, code, amountPaise: r.amount, minOrderPaise: c.minOrderPaise });
+  } catch (e) {
+    if ((e as { code?: string }).code === "AUTO_LIMIT") return { ok: false, reason: "busy", minOrderPaise: c.minOrderPaise };
+    throw e;
+  }
   const { error } = await admin.from("wallet_redemptions").insert({
     account_id: input.account.id, code, amount_paise: r.amount, shopify_discount_id: discountId, cart_token: input.cartToken ?? null, status: "open", expires_at: expiresAt,
   });
@@ -314,21 +323,41 @@ export async function onOrderCreated(orderId: string): Promise<string> {
   const order = await fetchWalletOrder(orderId);
   if (!order) return "order not found";
   const codes = Object.keys(order.codeAllocations).filter(isRedemptionCode);
-  if (!codes.length) {
+  if (!codes.length && order.walletAutoPaise <= 0) {
     // No wallet used — but a first-time buyer should still have a wallet to earn into.
     await ensureAccountForOrder(order);
-    return "no wallet code on order";
+    return "no wallet on order";
   }
   const admin = createAdminClient();
   const notes: string[] = [];
+
+  // Legacy WLT- codes (before 30 Sep).
   for (const code of codes) {
     const { data: red } = await admin.from("wallet_redemptions").select("*").eq("code", code).maybeSingle<Redemption>();
     if (!red) { notes.push(`${code}: unknown redemption`); continue; }
     const applied = Math.min(red.amount_paise, order.codeAllocations[code] ?? 0);
     if (applied <= 0) { notes.push(`${code}: nothing allocated`); continue; }
-    const row = await postMovement({ accountId: red.account_id, kind: "redeem", amountPaise: -applied, refType: "shopify_order", refId: order.id, note: `Used on ${order.name}` });
+    const row = await postMovement({ accountId: red.account_id, kind: "redeem", amountPaise: -applied, refType: "shopify_order", refId: order.id, note: `Used on ${order.name}`, clamp: true });
     await admin.from("wallet_redemptions").update({ status: "used", shopify_order_id: order.id, used_at: new Date().toISOString() }).eq("id", red.id);
     notes.push(`${code}: ${row ? `debited ${applied}` : "already debited"}`);
+  }
+
+  // The automatic "Drevi Wallet" discount: it belongs to the order's customer.
+  if (order.walletAutoPaise > 0) {
+    const account = await accountForOrder(order);
+    if (!account) return [...notes, "wallet discount on an order with no wallet"].join("; ");
+    const { data: red } = await admin.from("wallet_redemptions").select("*").eq("account_id", account.id)
+      .in("status", ["open", "expired"]).order("created_at", { ascending: false }).limit(1).maybeSingle<Redemption>();
+    // Debit what Shopify actually took off, never more than was reserved;
+    // clamp so a race (two orders before this runs) can't push it negative.
+    const applied = red ? Math.min(red.amount_paise, order.walletAutoPaise) : order.walletAutoPaise;
+    const row = await postMovement({ accountId: account.id, kind: "redeem", amountPaise: -applied, refType: "shopify_order", refId: order.id, note: `Used on ${order.name}`, clamp: true });
+    if (red) {
+      await admin.from("wallet_redemptions").update({ status: "used", shopify_order_id: order.id, used_at: new Date().toISOString() }).eq("id", red.id);
+      // Single use: the discount goes the moment the order exists.
+      if (red.shopify_discount_id) await deleteDiscount(red.shopify_discount_id).catch((e) => console.warn("[wallet] delete used discount:", (e as Error).message));
+    }
+    notes.push(row ? `debited ${applied}${red ? "" : " (no open redemption found)"}` : "already debited");
   }
   return notes.join("; ");
 }
