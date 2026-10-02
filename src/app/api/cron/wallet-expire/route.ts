@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getEnv } from "@/lib/env";
 import { postMovement } from "@/lib/wallet";
+import { deleteDiscount } from "@/lib/wallet-shopify";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,5 +31,21 @@ export async function GET(req: Request) {
     const row = await postMovement({ accountId: a.id, kind: "expire", amountPaise: -a.balance_paise, refType: "expiry", refId: a.expires_at, clamp: true, note: "Lapsed after 12 months without a credit" });
     if (row) expired++;
   }
-  return NextResponse.json({ ok: true, expired, at: new Date().toISOString() });
+  // Tidy Shopify: wallet discounts whose reservation has ended (Shopify has
+  // already stopped applying them at endsAt) and any a void left behind, so
+  // the Discounts list doesn't fill up with dead "Drevi Wallet" entries.
+  const now = new Date().toISOString();
+  const { data: stale } = await admin.from("wallet_redemptions").select("id, status, shopify_discount_id")
+    .in("status", ["open", "expired", "void"]).lt("expires_at", now).not("shopify_discount_id", "is", null).limit(200);
+  let tidied = 0;
+  for (const r of (stale ?? []) as Array<{ id: string; status: string; shopify_discount_id: string }>) {
+    try {
+      await deleteDiscount(r.shopify_discount_id);
+      await admin.from("wallet_redemptions").update({ shopify_discount_id: null, ...(r.status === "open" ? { status: "expired" } : {}) }).eq("id", r.id);
+      tidied++;
+    } catch (e) {
+      console.warn("[wallet-expire] discount cleanup:", (e as Error).message);
+    }
+  }
+  return NextResponse.json({ ok: true, expired, tidied, at: new Date().toISOString() });
 }

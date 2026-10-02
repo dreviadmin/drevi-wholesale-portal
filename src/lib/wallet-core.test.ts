@@ -23,6 +23,8 @@ import {
   refundRef,
   normalizeEmail,
   phoneClaimDecision,
+  isWalletApplication,
+  WALLET_DISCOUNT_TITLE,
 } from "./wallet-core";
 
 describe("normalizePhone", () => {
@@ -244,5 +246,18 @@ describe("who can take a wallet by phone", () => {
   });
   it("never takes a wallet from another signed-in account", () => {
     expect(phoneClaimDecision({ walletExists: true, walletCustomerId: "gid://shopify/Customer/2", me, otherHasEmail: true })).toBe("in_use");
+  });
+});
+
+describe("recognising the wallet on an order", () => {
+  it("knows the automatic discount by its title, and old WLT- codes", () => {
+    expect(isWalletApplication({ title: WALLET_DISCOUNT_TITLE })).toBe(true);
+    expect(isWalletApplication({ code: "WLT-ABCDEFGH", title: "Drevi Wallet" })).toBe(true);
+    expect(isWalletApplication({ code: "SAVE10", title: "Drevi Wallet" })).toBe(false); // a code titled like us is not us
+    expect(isWalletApplication({ title: "Prepaid discount" })).toBe(false);
+    expect(isWalletApplication(null)).toBe(false);
+  });
+  it("gives a checkout two hours", () => {
+    expect(WALLET_DEFAULTS.redemptionTtlSeconds).toBe(7200);
   });
 });

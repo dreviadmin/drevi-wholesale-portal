@@ -37,8 +37,10 @@ export async function POST(req: Request) {
   if (!r.ok) {
     const msg = r.reason === "below_minimum" ? `Wallet can be used on orders of ₹${Math.floor(r.minOrderPaise / 100).toLocaleString("en-IN")} and above.`
       : r.reason === "no_balance" ? "Nothing in the wallet to use."
+      : r.reason === "no_customer" ? "Please sign in again."
+      : r.reason === "busy" ? "Lots of shoppers are using their wallet right now. Try again in a minute."
       : "Couldn't work out an amount for this cart.";
-    return json(req, { ok: false, error: msg, reason: r.reason, min_order_paise: r.minOrderPaise }, 422);
+    return json(req, { ok: false, error: msg, reason: r.reason, min_order_paise: r.minOrderPaise }, r.reason === "busy" ? 503 : r.reason === "no_customer" ? 401 : 422);
   }
   return json(req, { ok: true, code: r.code, amount_paise: r.amountPaise, expires_at: r.expiresAt });
 }

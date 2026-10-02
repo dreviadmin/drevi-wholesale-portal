@@ -16,7 +16,7 @@ export const WALLET_DEFAULTS = {
   otpPerPhonePer10Min: 3,
   otpPerIpPer10Min: 12,
   sessionDays: 30,
-  redemptionTtlSeconds: 30 * 60,
+  redemptionTtlSeconds: 2 * 60 * 60, // a slow checkout must not lose the credit; Shopify ends the discount on time
 } as const;
 
 /**
@@ -295,4 +295,19 @@ export function phoneClaimDecision(input: { walletExists: boolean; walletCustome
   if (input.walletCustomerId === input.me) return "mine";
   if (!input.walletCustomerId) return "relink";
   return input.otherHasEmail ? "in_use" : "relink";
+}
+
+/**
+ * The wallet reaches checkout as a Shopify AUTOMATIC discount, titled this
+ * and limited to the one customer, rather than a discount code: COD King's
+ * payment window removes discount codes from the cart on its COD and
+ * part-payment options, but leaves automatic discounts alone (30 Sep 2026).
+ */
+export const WALLET_DISCOUNT_TITLE = "Drevi Wallet";
+
+/** Whether an order's discount allocation is the wallet's: a WLT- code (before 30 Sep) or the automatic discount. */
+export function isWalletApplication(app: { code?: string | null; title?: string | null } | null | undefined): boolean {
+  if (!app) return false;
+  if (isRedemptionCode(app.code)) return true;
+  return !app.code && (app.title ?? "").trim() === WALLET_DISCOUNT_TITLE;
 }

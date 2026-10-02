@@ -4,7 +4,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getEnv } from "@/lib/env";
-import { isRedemptionCode, linePaidPaise, paiseToDecimal, toPaise, WALLET_DEFAULTS } from "@/lib/wallet-core";
+import { isWalletApplication, linePaidPaise, paiseToDecimal, toPaise, WALLET_DEFAULTS, WALLET_DISCOUNT_TITLE } from "@/lib/wallet-core";
 
 // The wallet's Shopify client. It does NOT share the portal's app: "Drevi
 // Pipeline" holds product/inventory scopes only, and the wallet needs
@@ -178,22 +178,26 @@ export async function addCustomerTags(customerId: string, tags: string[]): Promi
  * The ₹5,000 minimum is repeated here as belt-and-braces: the route already
  * enforced it, but a code that reaches checkout should carry its own rule.
  */
-export async function mintRedemptionCode(input: { code: string; amountPaise: number; minOrderPaise: number; ttlSeconds?: number }): Promise<string> {
+/**
+ * The wallet's credit for ONE customer's checkout: a Shopify automatic
+ * discount, amount off the order, limited to that customer (context), with
+ * the ₹5,000 minimum and an end time. Automatic, not a code, because COD
+ * King's payment window strips discount codes on its COD and part-payment
+ * options. Deleted when the order is placed, when the customer removes it,
+ * or by the nightly sweep; Shopify also ends it at endsAt on its own.
+ * Shopify allows 25 ACTIVE automatic discounts at a time.
+ */
+export async function createWalletAutomaticDiscount(input: { customerGid: string; code: string; amountPaise: number; minOrderPaise: number; ttlSeconds?: number }): Promise<string> {
   const now = new Date();
   const ends = new Date(now.getTime() + (input.ttlSeconds ?? WALLET_DEFAULTS.redemptionTtlSeconds) * 1000);
-  const d = await walletGql<{ discountCodeBasicCreate: { codeDiscountNode: { id: string } | null; userErrors: UserError[] } }>(
-    `mutation($d: DiscountCodeBasicInput!){ discountCodeBasicCreate(basicCodeDiscount:$d){ codeDiscountNode{ id } userErrors{ field message } } }`,
+  const d = await walletGql<{ discountAutomaticBasicCreate: { automaticDiscountNode: { id: string } | null; userErrors: UserError[] } }>(
+    `mutation($d: DiscountAutomaticBasicInput!){ discountAutomaticBasicCreate(automaticBasicDiscount:$d){ automaticDiscountNode{ id } userErrors{ field message code } } }`,
     {
       d: {
-        title: "Drevi Wallet",
-        code: input.code,
+        title: WALLET_DISCOUNT_TITLE,
         startsAt: now.toISOString(),
         endsAt: ends.toISOString(),
-        usageLimit: 1,
-        appliesOncePerCustomer: false,
-        // Required from 2026-01: who the code is for. Everyone — the code
-        // itself is the secret, and it dies after one use anyway.
-        context: { all: "ALL" },
+        context: { customers: { add: [input.customerGid] } },
         combinesWith: { productDiscounts: true, orderDiscounts: false, shippingDiscounts: true },
         minimumRequirement: { subtotal: { greaterThanOrEqualToSubtotal: paiseToDecimal(input.minOrderPaise) } },
         customerGets: {
@@ -203,15 +207,23 @@ export async function mintRedemptionCode(input: { code: string; amountPaise: num
       },
     },
   );
-  throwUserErrors("discountCodeBasicCreate", d.discountCodeBasicCreate.userErrors);
-  if (!d.discountCodeBasicCreate.codeDiscountNode) throw new Error("discountCodeBasicCreate returned no node");
-  return d.discountCodeBasicCreate.codeDiscountNode.id;
+  const errs = d.discountAutomaticBasicCreate.userErrors;
+  if (errs?.some((e) => /maximum|limit|25/i.test(e.message))) throw Object.assign(new Error("automatic discount limit reached"), { code: "AUTO_LIMIT" });
+  throwUserErrors("discountAutomaticBasicCreate", errs);
+  if (!d.discountAutomaticBasicCreate.automaticDiscountNode) throw new Error("discountAutomaticBasicCreate returned no node");
+  return d.discountAutomaticBasicCreate.automaticDiscountNode.id;
 }
 
+/** Delete the wallet's discount, automatic (since 30 Sep) or a legacy WLT- code. Already gone is fine. */
 export async function deleteDiscount(nodeId: string): Promise<void> {
+  if (nodeId.includes("DiscountAutomaticNode")) {
+    const d = await walletGql<{ discountAutomaticDelete: { userErrors: UserError[] } }>(
+      `mutation($id:ID!){ discountAutomaticDelete(id:$id){ userErrors{ field message } } }`, { id: nodeId });
+    if (d.discountAutomaticDelete.userErrors?.some((e) => !/not found|does not exist/i.test(e.message))) throwUserErrors("discountAutomaticDelete", d.discountAutomaticDelete.userErrors);
+    return;
+  }
   const d = await walletGql<{ discountCodeDelete: { userErrors: UserError[] } }>(
     `mutation($id:ID!){ discountCodeDelete(id:$id){ userErrors{ field message } } }`, { id: nodeId });
-  // A code Shopify already expired or a customer already used is fine to be gone.
   if (d.discountCodeDelete.userErrors?.some((e) => !/not found|does not exist/i.test(e.message))) throwUserErrors("discountCodeDelete", d.discountCodeDelete.userErrors);
 }
 
@@ -229,6 +241,8 @@ export interface WalletOrder {
   lines: Array<{ productType: string | null; quantity: number; currentQuantity: number; paidPaise: number; walletAllocPaise: number }>;
   /** paise allocated to each discount code on this order, by code */
   codeAllocations: Record<string, number>;
+  /** paise the wallet's automatic discount ("Drevi Wallet") took off this order */
+  walletAutoPaise: number;
   refundedMerchandisePaise: number;
 }
 
@@ -240,7 +254,7 @@ export async function fetchWalletOrder(orderId: string): Promise<WalletOrder | n
     shippingAddress: { phone: string | null } | null; billingAddress: { phone: string | null } | null;
     lineItems: { nodes: Array<{ quantity: number; currentQuantity: number; product: { productType: string | null } | null;
       originalTotalSet: { shopMoney: { amount: string } };
-      discountAllocations: Array<{ allocatedAmountSet: { shopMoney: { amount: string } }; discountApplication: { code?: string } }> }> };
+      discountAllocations: Array<{ allocatedAmountSet: { shopMoney: { amount: string } }; discountApplication: { code?: string; title?: string } }> }> };
     refunds: Array<{ refundLineItems: { nodes: Array<{ subtotalSet: { shopMoney: { amount: string } }; lineItem: { product: { productType: string | null } | null } }> } }>;
   } }>(
     `query($id:ID!){ order(id:$id){
@@ -248,17 +262,22 @@ export async function fetchWalletOrder(orderId: string): Promise<WalletOrder | n
       customer{ id phone } shippingAddress{ phone } billingAddress{ phone }
       lineItems(first:100){ nodes{ quantity currentQuantity product{ productType }
         originalTotalSet{ shopMoney{ amount } }
-        discountAllocations{ allocatedAmountSet{ shopMoney{ amount } } discountApplication{ ... on DiscountCodeApplication { code } } } } }
+        discountAllocations{ allocatedAmountSet{ shopMoney{ amount } } discountApplication{ ... on DiscountCodeApplication { code } ... on AutomaticDiscountApplication { title } } } } }
       refunds{ refundLineItems(first:100){ nodes{ subtotalSet{ shopMoney{ amount } } lineItem{ product{ productType } } } } }
     } }`, { id: gid });
   const o = d.order;
   if (!o) return null;
   const codeAllocations: Record<string, number> = {};
+  let walletAutoPaise = 0;
   for (const li of o.lineItems.nodes) {
     for (const a of li.discountAllocations) {
       const code = (a.discountApplication?.code ?? "").toUpperCase();
-      if (!code) continue;
-      codeAllocations[code] = (codeAllocations[code] ?? 0) + toPaise(a.allocatedAmountSet.shopMoney.amount);
+      const amt = toPaise(a.allocatedAmountSet.shopMoney.amount);
+      if (!code) {
+        if ((a.discountApplication?.title ?? "").trim() === WALLET_DISCOUNT_TITLE) walletAutoPaise += amt;
+        continue;
+      }
+      codeAllocations[code] = (codeAllocations[code] ?? 0) + amt;
     }
   }
   let refundedMerch = 0;
@@ -277,7 +296,7 @@ export async function fetchWalletOrder(orderId: string): Promise<WalletOrder | n
     lines: o.lineItems.nodes.map((li) => {
       const allocs = li.discountAllocations.map((a) => toPaise(a.allocatedAmountSet.shopMoney.amount));
       const walletAlloc = li.discountAllocations
-        .filter((a) => isRedemptionCode(a.discountApplication?.code))
+        .filter((a) => isWalletApplication(a.discountApplication))
         .reduce((s, a) => s + toPaise(a.allocatedAmountSet.shopMoney.amount), 0);
       return {
         productType: li.product?.productType ?? null,
@@ -288,6 +307,7 @@ export async function fetchWalletOrder(orderId: string): Promise<WalletOrder | n
       };
     }),
     codeAllocations,
+    walletAutoPaise,
     refundedMerchandisePaise: refundedMerch,
   };
 }
