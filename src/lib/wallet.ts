@@ -18,6 +18,7 @@ import {
   refundRef,
   walletReturnOwedPaise,
   WALLET_DEFAULTS,
+  cartGidFromToken,
   type OrderMovement,
 } from "@/lib/wallet-core";
 import {
@@ -31,6 +32,7 @@ import {
   setCustomerPhone,
   type ShopifyCustomerFull,
   type WalletOrder,
+  identifyCart,
 } from "@/lib/wallet-shopify";
 
 // The wallet's server side: accounts, the ledger, redemptions, and what each
@@ -200,18 +202,43 @@ export async function statement(accountId: string, limit = 50): Promise<Array<Le
 
 interface Redemption { id: string; code: string; amount_paise: number; shopify_discount_id: string | null; status: string; expires_at: string; account_id: string }
 
-/** Open, unexpired reservations against the balance. Expires the stale ones on the way. */
-export async function reservedPaise(accountId: string): Promise<number> {
+export interface OpenRedemption { code: string; amount_paise: number; expires_at: string }
+
+/** Open, unexpired reservations against the balance (at most one since 0070). Expires the stale ones on the way. */
+export async function liveOpenRedemptions(accountId: string): Promise<OpenRedemption[]> {
   const admin = createAdminClient();
-  const { data } = await admin.from("wallet_redemptions").select("id, amount_paise, expires_at").eq("account_id", accountId).eq("status", "open");
-  let reserved = 0;
+  const { data } = await admin.from("wallet_redemptions").select("id, code, amount_paise, expires_at").eq("account_id", accountId).eq("status", "open");
+  const live: OpenRedemption[] = [];
   const stale: string[] = [];
-  for (const r of (data ?? []) as Array<{ id: string; amount_paise: number; expires_at: string }>) {
+  for (const r of (data ?? []) as Array<{ id: string; code: string; amount_paise: number; expires_at: string }>) {
     if (new Date(r.expires_at).getTime() < Date.now()) stale.push(r.id);
-    else reserved += r.amount_paise;
+    else live.push({ code: r.code, amount_paise: r.amount_paise, expires_at: r.expires_at });
   }
   if (stale.length) await admin.from("wallet_redemptions").update({ status: "expired" }).in("id", stale);
-  return reserved;
+  return live;
+}
+
+export async function reservedPaise(accountId: string): Promise<number> {
+  return (await liveOpenRedemptions(accountId)).reduce((s, r) => s + r.amount_paise, 0);
+}
+
+/**
+ * Give the cart the customer's identity, so Shopify applies the wallet's
+ * customer-limited discount to it (see identifyCart). Never fatal: at
+ * checkout the discount applies either way; a cart that isn't identified
+ * just can't show it, and the bag says so.
+ */
+export async function identifyCartForAccount(account: WalletAccount, cartToken: string | null | undefined): Promise<boolean> {
+  const gid = cartGidFromToken(cartToken);
+  if (!gid || !account.shopify_customer_id) return false;
+  try {
+    const c = await getCustomer(account.shopify_customer_id);
+    if (!c?.email) return false;
+    return (await identifyCart(gid, c.email)).identified;
+  } catch (e) {
+    console.warn("[wallet] identify cart:", (e as Error).message);
+    return false;
+  }
 }
 
 /**
@@ -220,7 +247,7 @@ export async function reservedPaise(accountId: string): Promise<number> {
  * carry two reservations. Nothing is debited yet.
  */
 export async function createRedemption(input: { account: WalletAccount; subtotalPaise: number; requestedPaise?: number | null; cartToken?: string | null }): Promise<
-  | { ok: true; code: string; amountPaise: number; expiresAt: string }
+  | { ok: true; code: string; amountPaise: number; expiresAt: string; identified: boolean }
   | { ok: false; reason: "below_minimum" | "no_balance" | "invalid" | "no_customer" | "busy"; minOrderPaise: number }
 > {
   const admin = createAdminClient();
@@ -260,11 +287,13 @@ export async function createRedemption(input: { account: WalletAccount; subtotal
     if (error.code === "23505") {
       const { data: open } = await admin.from("wallet_redemptions").select("code, amount_paise, expires_at")
         .eq("account_id", input.account.id).eq("status", "open").maybeSingle<{ code: string; amount_paise: number; expires_at: string }>();
-      if (open) return { ok: true, code: open.code, amountPaise: open.amount_paise, expiresAt: open.expires_at };
+      if (open) return { ok: true, code: open.code, amountPaise: open.amount_paise, expiresAt: open.expires_at, identified: await identifyCartForAccount(input.account, input.cartToken) };
     }
     throw new Error(`wallet_redemptions insert: ${error.message}`);
   }
-  return { ok: true, code: codeUsed, amountPaise: r.amount, expiresAt };
+  // The discount exists for this customer; now make this cart show it.
+  const identified = await identifyCartForAccount(input.account, input.cartToken);
+  return { ok: true, code: codeUsed, amountPaise: r.amount, expiresAt, identified };
 }
 
 export async function voidOpenRedemptions(accountId: string): Promise<void> {

@@ -303,6 +303,18 @@ export function phoneClaimDecision(input: { walletExists: boolean; walletCustome
  * payment window removes discount codes from the cart on its COD and
  * part-payment options, but leaves automatic discounts alone (30 Sep 2026).
  */
+/**
+ * The Online Store's cart token (what /cart.js returns, "…?key=…", or the
+ * older 32-hex form) as the Storefront API's cart id. Anything that isn't a
+ * real token — a test label, nothing — is null, so no call is made for it.
+ */
+export function cartGidFromToken(token: string | null | undefined): string | null {
+  const t = (token ?? "").trim();
+  if (t.startsWith("gid://shopify/Cart/")) return t;
+  if (!/^[A-Za-z0-9_-]{16,}(\?key=[0-9a-f]{16,})?$/.test(t)) return null;
+  return `gid://shopify/Cart/${t}`;
+}
+
 export const WALLET_DISCOUNT_TITLE = "Drevi Wallet";
 
 /**

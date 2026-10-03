@@ -6,12 +6,13 @@ import { fail, json, preflight, readJson } from "@/lib/wallet-http";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// "Use ₹X from your wallet", from the cart. Mints a single-use discount code
-// for this cart and hands it back; the theme applies it. Nothing is debited
-// here — the debit happens on orders/create for what Shopify actually
-// allocated, and a code that is never used lapses in 30 minutes.
+// "Use ₹X from your wallet", from the cart. Creates the customer-limited
+// automatic discount, gives the cart the customer's identity so it shows
+// (identified: true), and hands the amount back. Nothing is debited here —
+// the debit happens on orders/create for what Shopify actually allocated,
+// and a discount that is never used lapses in two hours.
 //
-// DELETE releases the reservation (the customer unticked the box).
+// DELETE releases the reservation (the customer tapped Remove).
 
 export function OPTIONS(req: Request) {
   return preflight(req);
@@ -43,7 +44,7 @@ async function postHandler(req: Request) {
       : "Couldn't work out an amount for this cart.";
     return json(req, { ok: false, error: msg, reason: r.reason, min_order_paise: r.minOrderPaise }, r.reason === "busy" ? 503 : r.reason === "no_customer" ? 401 : 422);
   }
-  return json(req, { ok: true, code: r.code, amount_paise: r.amountPaise, expires_at: r.expiresAt });
+  return json(req, { ok: true, code: r.code, amount_paise: r.amountPaise, expires_at: r.expiresAt, identified: r.identified });
 }
 
 async function deleteHandler(req: Request) {
