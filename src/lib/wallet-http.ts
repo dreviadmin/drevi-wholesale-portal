@@ -67,3 +67,21 @@ export function bearer(req: Request): string | null {
   const m = h.match(/^Bearer\s+(.+)$/i);
   return m ? m[1].trim() : null;
 }
+
+/**
+ * Wrap a route handler so an unexpected error still answers WITH the CORS
+ * headers. Without them the browser never sees our response at all and shows
+ * "Failed to fetch" / "Load failed" (3 Oct 2026: a Shopify userError in the
+ * redeem route reached shoppers as "Load failed"). The cause goes to the log;
+ * the shopper gets a sentence.
+ */
+export function guarded(handler: (req: Request) => Promise<Response>): (req: Request) => Promise<Response> {
+  return async (req: Request) => {
+    try {
+      return await handler(req);
+    } catch (e) {
+      console.error(`[wallet] ${new URL(req.url).pathname} ${req.method}:`, (e as Error).message);
+      return fail(req, "Something went wrong on our side. Please try again in a moment.", 500);
+    }
+  };
+}

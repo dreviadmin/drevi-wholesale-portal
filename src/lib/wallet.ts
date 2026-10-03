@@ -235,15 +235,22 @@ export async function createRedemption(input: { account: WalletAccount; subtotal
   // The credit is a Shopify automatic discount for this one customer (see
   // createWalletAutomaticDiscount): COD King strips discount codes, not these.
   if (!input.account.shopify_customer_id) return { ok: false, reason: "no_customer", minOrderPaise: c.minOrderPaise };
-  let discountId: string;
-  try {
-    discountId = await createWalletAutomaticDiscount({ customerGid: input.account.shopify_customer_id, code, amountPaise: r.amount, minOrderPaise: c.minOrderPaise });
-  } catch (e) {
-    if ((e as { code?: string }).code === "AUTO_LIMIT") return { ok: false, reason: "busy", minOrderPaise: c.minOrderPaise };
-    throw e;
+  let discountId: string | null = null;
+  let codeUsed = code;
+  for (let attempt = 0; attempt < 2 && !discountId; attempt++) {
+    try {
+      discountId = await createWalletAutomaticDiscount({ customerGid: input.account.shopify_customer_id, code: codeUsed, amountPaise: r.amount, minOrderPaise: c.minOrderPaise });
+    } catch (e) {
+      const ec = (e as { code?: string }).code;
+      if (ec === "AUTO_LIMIT") return { ok: false, reason: "busy", minOrderPaise: c.minOrderPaise };
+      // A title clash means a code collided (or a stale node carries it): mint a fresh code once.
+      if (ec === "TITLE_TAKEN" && attempt === 0) { codeUsed = redemptionCodeFrom(randomBytes(8)); continue; }
+      throw e;
+    }
   }
+  if (!discountId) return { ok: false, reason: "busy", minOrderPaise: c.minOrderPaise };
   const { error } = await admin.from("wallet_redemptions").insert({
-    account_id: input.account.id, code, amount_paise: r.amount, shopify_discount_id: discountId, cart_token: input.cartToken ?? null, status: "open", expires_at: expiresAt,
+    account_id: input.account.id, code: codeUsed, amount_paise: r.amount, shopify_discount_id: discountId, cart_token: input.cartToken ?? null, status: "open", expires_at: expiresAt,
   });
   if (error) {
     await deleteDiscount(discountId).catch(() => {});
@@ -257,15 +264,18 @@ export async function createRedemption(input: { account: WalletAccount; subtotal
     }
     throw new Error(`wallet_redemptions insert: ${error.message}`);
   }
-  return { ok: true, code, amountPaise: r.amount, expiresAt };
+  return { ok: true, code: codeUsed, amountPaise: r.amount, expiresAt };
 }
 
 export async function voidOpenRedemptions(accountId: string): Promise<void> {
   const admin = createAdminClient();
-  const { data } = await admin.from("wallet_redemptions").select("id, shopify_discount_id").eq("account_id", accountId).eq("status", "open");
-  for (const r of (data ?? []) as Array<{ id: string; shopify_discount_id: string | null }>) {
-    if (r.shopify_discount_id) await deleteDiscount(r.shopify_discount_id).catch(() => {});
-    await admin.from("wallet_redemptions").update({ status: "void" }).eq("id", r.id);
+  // Open ones, and expired ones whose Shopify discount is still around: both
+  // must go before a new one is made, so the shop never fills with dead nodes.
+  const { data } = await admin.from("wallet_redemptions").select("id, status, shopify_discount_id").eq("account_id", accountId)
+    .or("status.eq.open,and(status.eq.expired,shopify_discount_id.not.is.null)");
+  for (const r of (data ?? []) as Array<{ id: string; status: string; shopify_discount_id: string | null }>) {
+    if (r.shopify_discount_id) await deleteDiscount(r.shopify_discount_id).catch((e) => console.warn("[wallet] delete discount:", (e as Error).message));
+    await admin.from("wallet_redemptions").update({ status: r.status === "open" ? "void" : "expired", shopify_discount_id: null }).eq("id", r.id);
   }
 }
 

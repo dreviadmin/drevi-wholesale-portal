@@ -24,6 +24,8 @@ import {
   normalizeEmail,
   phoneClaimDecision,
   isWalletApplication,
+  isWalletTitle,
+  walletDiscountTitle,
   WALLET_DISCOUNT_TITLE,
 } from "./wallet-core";
 
@@ -250,8 +252,18 @@ describe("who can take a wallet by phone", () => {
 });
 
 describe("recognising the wallet on an order", () => {
+  it("gives every redemption its own title, because Shopify wants them unique", () => {
+    expect(walletDiscountTitle("WLT-ABCDEFGH")).toBe("Drevi Wallet · WLT-ABCDEFGH");
+    expect(walletDiscountTitle("wlt-abcdefgh ")).toBe("Drevi Wallet · WLT-ABCDEFGH");
+    expect(walletDiscountTitle("WLT-A")).not.toBe(walletDiscountTitle("WLT-B"));
+    expect(isWalletTitle(walletDiscountTitle("WLT-ABCDEFGH"))).toBe(true);
+    expect(isWalletTitle("Drevi Wallet")).toBe(true);
+    expect(isWalletTitle("Drevi Walletx")).toBe(false);
+    expect(isWalletTitle("Prepaid200")).toBe(false);
+  });
   it("knows the automatic discount by its title, and old WLT- codes", () => {
     expect(isWalletApplication({ title: WALLET_DISCOUNT_TITLE })).toBe(true);
+    expect(isWalletApplication({ title: walletDiscountTitle("WLT-ABCDEFGH") })).toBe(true);
     expect(isWalletApplication({ code: "WLT-ABCDEFGH", title: "Drevi Wallet" })).toBe(true);
     expect(isWalletApplication({ code: "SAVE10", title: "Drevi Wallet" })).toBe(false); // a code titled like us is not us
     expect(isWalletApplication({ title: "Prepaid discount" })).toBe(false);

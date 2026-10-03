@@ -1,3 +1,4 @@
+import { guarded } from "@/lib/wallet-http";
 import { normalizeEmail, normalizePhone } from "@/lib/wallet-core";
 import { recordSignup, signupBudgetOk, WALLET_TAGS } from "@/lib/wallet";
 import { createCustomerWithEmail, customerWithPhone, findCustomerByEmail } from "@/lib/wallet-shopify";
@@ -21,7 +22,7 @@ export function OPTIONS(req: Request) {
   return preflight(req);
 }
 
-export async function POST(req: Request) {
+async function postHandler(req: Request) {
   const body = await readJson<{ name?: string; email?: string; phone?: string; consent?: boolean; website?: string }>(req);
   if (body?.website) return json(req, { ok: true }); // honeypot
 
@@ -62,3 +63,4 @@ export async function POST(req: Request) {
   await recordSignup({ email, name, phone, consent, ip, shopifyCustomerId: customerId });
   return json(req, { ok: true });
 }
+export const POST = guarded(postHandler);

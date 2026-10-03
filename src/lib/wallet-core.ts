@@ -305,9 +305,25 @@ export function phoneClaimDecision(input: { walletExists: boolean; walletCustome
  */
 export const WALLET_DISCOUNT_TITLE = "Drevi Wallet";
 
+/**
+ * Shopify insists every automatic discount's title is unique across the shop,
+ * so the title carries the redemption code: "Drevi Wallet · WLT-XXXXXXXX".
+ * Two shoppers can then hold wallet discounts at once (3 Oct 2026: a shared
+ * title failed every second shopper with "Title must be unique").
+ */
+export function walletDiscountTitle(code: string): string {
+  return `${WALLET_DISCOUNT_TITLE} · ${code.trim().toUpperCase()}`;
+}
+
+/** Whether a discount title (cart, order or Shopify node) is the wallet's. */
+export function isWalletTitle(title: string | null | undefined): boolean {
+  const t = (title ?? "").trim();
+  return t === WALLET_DISCOUNT_TITLE || t.startsWith(WALLET_DISCOUNT_TITLE + " ");
+}
+
 /** Whether an order's discount allocation is the wallet's: a WLT- code (before 30 Sep) or the automatic discount. */
 export function isWalletApplication(app: { code?: string | null; title?: string | null } | null | undefined): boolean {
   if (!app) return false;
   if (isRedemptionCode(app.code)) return true;
-  return !app.code && (app.title ?? "").trim() === WALLET_DISCOUNT_TITLE;
+  return !app.code && isWalletTitle(app.title);
 }

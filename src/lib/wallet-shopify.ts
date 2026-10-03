@@ -4,7 +4,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getEnv } from "@/lib/env";
-import { isWalletApplication, linePaidPaise, paiseToDecimal, toPaise, WALLET_DEFAULTS, WALLET_DISCOUNT_TITLE } from "@/lib/wallet-core";
+import { isWalletApplication, isWalletTitle, linePaidPaise, paiseToDecimal, toPaise, WALLET_DEFAULTS, walletDiscountTitle } from "@/lib/wallet-core";
 
 // The wallet's Shopify client. It does NOT share the portal's app: "Drevi
 // Pipeline" holds product/inventory scopes only, and the wallet needs
@@ -194,7 +194,7 @@ export async function createWalletAutomaticDiscount(input: { customerGid: string
     `mutation($d: DiscountAutomaticBasicInput!){ discountAutomaticBasicCreate(automaticBasicDiscount:$d){ automaticDiscountNode{ id } userErrors{ field message code } } }`,
     {
       d: {
-        title: WALLET_DISCOUNT_TITLE,
+        title: walletDiscountTitle(input.code),
         startsAt: now.toISOString(),
         endsAt: ends.toISOString(),
         context: { customers: { add: [input.customerGid] } },
@@ -209,6 +209,7 @@ export async function createWalletAutomaticDiscount(input: { customerGid: string
   );
   const errs = d.discountAutomaticBasicCreate.userErrors;
   if (errs?.some((e) => /maximum|limit|25/i.test(e.message))) throw Object.assign(new Error("automatic discount limit reached"), { code: "AUTO_LIMIT" });
+  if (errs?.some((e) => /unique/i.test(e.message))) throw Object.assign(new Error("automatic discount title taken"), { code: "TITLE_TAKEN" });
   throwUserErrors("discountAutomaticBasicCreate", errs);
   if (!d.discountAutomaticBasicCreate.automaticDiscountNode) throw new Error("discountAutomaticBasicCreate returned no node");
   return d.discountAutomaticBasicCreate.automaticDiscountNode.id;
@@ -274,7 +275,7 @@ export async function fetchWalletOrder(orderId: string): Promise<WalletOrder | n
       const code = (a.discountApplication?.code ?? "").toUpperCase();
       const amt = toPaise(a.allocatedAmountSet.shopMoney.amount);
       if (!code) {
-        if ((a.discountApplication?.title ?? "").trim() === WALLET_DISCOUNT_TITLE) walletAutoPaise += amt;
+        if (isWalletTitle(a.discountApplication?.title)) walletAutoPaise += amt;
         continue;
       }
       codeAllocations[code] = (codeAllocations[code] ?? 0) + amt;

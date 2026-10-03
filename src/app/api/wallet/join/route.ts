@@ -1,3 +1,4 @@
+import { guarded } from "@/lib/wallet-http";
 import { formatPhone } from "@/lib/wallet-core";
 import { openWalletForCustomer, sweepExpiry } from "@/lib/wallet";
 import { customerFromRequest } from "@/lib/wallet-identity";
@@ -13,7 +14,7 @@ export function OPTIONS(req: Request) {
   return preflight(req);
 }
 
-export async function POST(req: Request) {
+async function postHandler(req: Request) {
   const customerGid = customerFromRequest(req);
   if (!customerGid) return fail(req, "Please sign in again.", 401);
   const body = await readJson<{ name?: string; phone?: string; consent?: boolean }>(req);
@@ -32,3 +33,4 @@ export async function POST(req: Request) {
     wallet: { phone: formatPhone(account.phone), name: account.name, balance_paise: account.balance_paise, expires_at: account.expires_at },
   });
 }
+export const POST = guarded(postHandler);
