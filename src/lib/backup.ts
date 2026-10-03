@@ -46,6 +46,7 @@ export const BACKUP_TABLES = [
   "goods_receipt_lines",
   "stock_movements",
   // Studio
+  "studio_buckets",
   "designs",
   "design_angles",
   "design_images",

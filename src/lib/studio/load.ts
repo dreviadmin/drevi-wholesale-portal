@@ -42,7 +42,51 @@ export interface BoardRow {
   discontinuedAt: string | null;
   discontinuedBy: string | null;
   discontinuedNote: string | null;
+  /** Studio bucket key (0074) — a staff work queue; null = Not set. */
+  bucket: string | null;
+  bucketSetAt: string | null;
+  bucketSetBy: string | null;
   createdAt: string; // ISO from designs.created_at ('' if null)
+}
+
+interface DesignBoardRow {
+  id: string; base_sku: string; color: string; title: string | null; category: string | null;
+  tier: "standard" | "hero"; specs_verified: boolean; created_at: string | null;
+  // Read for the Missing chips (22 Sep). They ride along on the query
+  // the board already runs rather than costing a second pass.
+  origin: string | null; fabric: string | null; handwork: string | null;
+  color_name: string | null; sub_category: string | null;
+  mrp_override: number | null; auto_mrp: number | null;
+  discontinued_at: string | null; discontinued_by: string | null; discontinued_note: string | null;
+  studio_bucket: string | null; studio_bucket_set_at: string | null; studio_bucket_set_by: string | null;
+}
+
+const DESIGN_BOARD_COLS =
+  "id, base_sku, color, title, category, sub_category, tier, specs_verified, created_at, " +
+  "origin, fabric, handwork, color_name, mrp_override, auto_mrp, " +
+  "discontinued_at, discontinued_by, discontinued_note";
+const DESIGN_BUCKET_COLS = ", studio_bucket, studio_bucket_set_at, studio_bucket_set_by";
+
+/**
+ * The designs read behind the board. If 0074 has not reached this database
+ * yet, the bucket columns are left out and read as Not set rather than taking
+ * the board, the Workbench and both publish pushes (all on loadBoard) down
+ * with "column does not exist". Any other error still throws.
+ */
+async function readDesigns(admin: ReturnType<typeof createAdminClient>): Promise<DesignBoardRow[]> {
+  // Board default: newest design first (§7.4 / Item 4). nullsFirst:false —
+  // the column is nullable and Postgres floats NULLs to the top on DESC.
+  // id desc is the stable tiebreak so paging never reshuffles equal stamps.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- PostgREST filter builder passthrough
+  const order = (q: any) => q.order("created_at", { ascending: false, nullsFirst: false }).order("id", { ascending: false });
+  try {
+    return await fetchAll<DesignBoardRow>(admin, "designs", DESIGN_BOARD_COLS + DESIGN_BUCKET_COLS, order);
+  } catch (e) {
+    if (!/studio_bucket/.test((e as Error).message)) throw e;
+    console.error("[studio] 0074 not applied here — reading designs without buckets");
+    const rows = await fetchAll<Omit<DesignBoardRow, "studio_bucket" | "studio_bucket_set_at" | "studio_bucket_set_by">>(admin, "designs", DESIGN_BOARD_COLS, order);
+    return rows.map((r) => ({ ...r, studio_bucket: null, studio_bucket_set_at: null, studio_bucket_set_by: null }));
+  }
 }
 
 /**
@@ -63,24 +107,7 @@ export async function loadBoard(opts?: { includeDiscontinued?: boolean }): Promi
   await sweepStaleJobs(createAdminClient());
   const admin = createAdminClient();
   const [designs, angles, activeImages, copies, targets, products, notifies, publishedFronts, vocab] = await Promise.all([
-    fetchAll<{
-      id: string; base_sku: string; color: string; title: string | null; category: string | null;
-      tier: "standard" | "hero"; specs_verified: boolean; created_at: string | null;
-      // Read for the Missing chips (22 Sep). They ride along on the query
-      // the board already runs rather than costing a second pass.
-      origin: string | null; fabric: string | null; handwork: string | null;
-      color_name: string | null; sub_category: string | null;
-      mrp_override: number | null; auto_mrp: number | null;
-      discontinued_at: string | null; discontinued_by: string | null; discontinued_note: string | null;
-    }>(
-      admin, "designs",
-      "id, base_sku, color, title, category, sub_category, tier, specs_verified, created_at, " +
-      "origin, fabric, handwork, color_name, mrp_override, auto_mrp, " +
-      "discontinued_at, discontinued_by, discontinued_note",
-      // Board default: newest design first (§7.4 / Item 4). nullsFirst:false —
-      // the column is nullable and Postgres floats NULLs to the top on DESC.
-      // id desc is the stable tiebreak so paging never reshuffles equal stamps.
-      (q) => q.order("created_at", { ascending: false, nullsFirst: false }).order("id", { ascending: false })),
+    readDesigns(admin),
     fetchAll<{ id: string; design_id: string; angle: Angle; approved_image_id: string | null; source_ref: string | null }>(
       admin, "design_angles", "id, design_id, angle, approved_image_id, source_ref"),
     // id + file_ref so a board tile can fall back to the design's own front
@@ -242,6 +269,9 @@ export async function loadBoard(opts?: { includeDiscontinued?: boolean }): Promi
       discontinuedAt: d.discontinued_at,
       discontinuedBy: d.discontinued_by,
       discontinuedNote: d.discontinued_note,
+      bucket: d.studio_bucket,
+      bucketSetAt: d.studio_bucket_set_at,
+      bucketSetBy: d.studio_bucket_set_by,
       createdAt: d.created_at ?? "",
     };
   });
