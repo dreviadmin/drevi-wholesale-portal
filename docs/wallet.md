@@ -46,8 +46,8 @@ honeypot field.
 
 | Event | What happens |
 |---|---|
-| "Use ₹X from your wallet" ticked in the cart | A `WLT-XXXXXXXX` discount code is minted for that amount (30-min life, one use, ₹5,000 minimum baked in) and applied to the cart. **Nothing is debited yet.** One open code per wallet (unique index, 0070). |
-| `orders/create` with a `WLT-` code | The amount Shopify actually allocated to the code is debited; the redemption is marked used |
+| "Use ₹X" tapped in the bag | A Shopify **automatic discount** for that amount is created for this one customer (`Drevi Wallet · WLT-XXXXXXXX`, two-hour life, ₹5,000 minimum baked in; COD King strips discount *codes* on its COD options, not these). **Nothing is debited yet.** One open reservation per wallet (unique index, 0070). |
+| `orders/create` carrying a wallet discount | The amount Shopify actually allocated to it is debited; the reservation is marked used and the discount deleted |
 | `orders/paid` + `orders/fulfilled`, both true | 10% of what was paid for the merchandise (original line total less every allocated discount, wallet included; fee-helper lines excluded) credited, whole rupees, once per order |
 | `orders/cancelled` | Spend returned; earning reversed, net of anything a refund already did |
 | `refunds/create` | Wallet share of refunded pieces returned; earning reversed in proportion. Filed as `shopify_refund` / `<order>#<refund>` so cancels and later refunds see it |
@@ -57,6 +57,25 @@ Every movement is a `wallet_ledger` row with `balance_after`, posted through
 the `wallet_post_movement` RPC, which locks the account and is idempotent on
 `(kind, reference)`. A retried webhook or a re-run seed is a no-op.
 
+### Showing it on the cart
+
+Shopify applies a customer-limited automatic discount only to a cart that
+knows who is buying. The Online Store's cart doesn't — a signed-in customer's
+`/cart.js` never shows the line on its own (measured 3 Oct 2026) — so right
+after creating the discount, `/api/wallet/redeem` gives the cart the
+customer's identity through the Storefront API (`cartBuyerIdentityUpdate`
+with the token the theme reads from `/cart.js`, which carries its `?key=`).
+From then on `/cart.js`, the cart page and COD King's order summary all show
+the line, and checkout keeps it. The bag's script changes a hidden cart
+attribute and reads the cart back until it agrees, because the cart re-works
+its discounts only when it is updated, never on a plain read.
+
+`GET /api/wallet/me` also returns the open `redemption`, and `POST
+/api/wallet/cart` identifies another cart for it (a second device). A cart
+that can't be identified still gets the discount at checkout; the bag then
+draws the deduction from the reservation and says "comes off at checkout".
+It never releases a reservation it merely can't see.
+
 ## Files
 
 - `supabase/migrations/0068_wallet.sql` (tables + RPC), `0070` (one open code), `0071` (`wallet_signups`; drops the old OTP table)
@@ -65,7 +84,7 @@ the `wallet_post_movement` RPC, which locks the account and is idempotent on
 - `src/lib/wallet-identity.ts`: token from a request
 - `src/lib/wallet.ts`: accounts, sign-ups, joining, ledger, redemptions, webhooks
 - `src/lib/wallet-shopify.ts`: customers, discount codes, order reads, webhook HMAC (uses the **Drevi Admin Automation** app)
-- `src/app/api/wallet/{signup,join,me,redeem}`: the storefront's API
+- `src/app/api/wallet/{signup,join,me,redeem,cart}`: the storefront's API
 - `src/app/api/wallet/webhooks/shopify`, `src/app/api/cron/wallet-expire`
 - `scripts/wallet-status.mjs` (read-only), `scripts/wallet-seed.mjs`, `scripts/wallet-register-webhooks.mjs`
 - Theme: `snippets/drevi-wallet-store.liquid` (renders the token), `sections/drevi-wallet.liquid` (My Account), `sections/drevi-popup.liquid` (mode `phone` = wallet sign-up), the cart block, header chip and PDP nudge
@@ -77,6 +96,7 @@ the `wallet_post_movement` RPC, which locks the account and is idempotent on
 | `WALLET_SHOPIFY_CLIENT_ID` / `_SECRET` | the **Drevi Admin Automation** app |
 | `WALLET_STOREFRONT_SECRET` | 32+ random characters; **must equal** the shop metafield `drevi.wallet_key`. Rotating it means updating both, and signs every shopper out of the wallet (not out of Shopify) until their next page load |
 | `WALLET_ALLOWED_ORIGINS` | optional; defaults to the storefront origins |
+| `SHOPIFY_STOREFRONT_TOKEN` | a public Storefront access token of the Drevi Admin Automation app ("Drevi Wallet — cart identity"); without it the bag can't show the discount, checkout still applies it |
 
 Theme setting: **Theme settings → Drevi — Integrations → Wallet API base URL**
 = `https://drevi-wholesale-portal-swart.vercel.app`, no trailing slash. Blank
@@ -86,7 +106,8 @@ switches every wallet surface off.
 
 - Sign up signed out → land back signed in → wallet shows ₹1,000, customer has the phone and `drevi-wallet` tag.
 - Sign in with an account that has no phone → popup or My Account asks for it once.
-- One real COD order with a wallet code applied, end to end: code applies → order created → debit → paid + fulfilled → 10% credits → cancel → both reverse.
+- "Use ₹1,000" in the bag: the summary shows the Drevi Wallet line within a second or two, the total drops, Remove puts it back; the same on a phone.
+- One real COD order with the wallet applied, end to end: COD King's summary shows the deduction → order created → debit → paid + fulfilled → 10% credits → cancel → both reverse.
 - A cart at ₹4,999 must refuse; ₹5,000 must accept.
 
 ## Known limits

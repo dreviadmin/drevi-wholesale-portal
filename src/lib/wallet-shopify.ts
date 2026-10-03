@@ -228,6 +228,46 @@ export async function deleteDiscount(nodeId: string): Promise<void> {
   if (d.discountCodeDelete.userErrors?.some((e) => !/not found|does not exist/i.test(e.message))) throwUserErrors("discountCodeDelete", d.discountCodeDelete.userErrors);
 }
 
+// ---- The cart (Storefront API) --------------------------------------------
+
+/**
+ * Shopify applies a customer-limited automatic discount only to a cart that
+ * knows who is buying. The Online Store's cart doesn't — a signed-in
+ * customer's /cart.js never showed the wallet line (measured 3 Oct) — until
+ * it is given a buyer identity through the Storefront API, by the same token
+ * the theme reads from /cart.js. From then on /cart.js, the cart page and
+ * COD King's order summary all carry the line, and checkout keeps it.
+ *
+ * SHOPIFY_STOREFRONT_TOKEN is a public Storefront access token of the Drevi
+ * Admin Automation app. Without it the discount still applies at checkout;
+ * the bag just can't show it (it says so instead).
+ */
+export async function identifyCart(cartGid: string, email: string): Promise<{ identified: boolean; walletPaise: number }> {
+  const token = process.env.SHOPIFY_STOREFRONT_TOKEN;
+  if (!token) return { identified: false, walletPaise: 0 };
+  const res = await fetch(`https://${creds().domain}/api/${WALLET_API_VERSION}/graphql.json`, {
+    method: "POST",
+    headers: { "X-Shopify-Storefront-Access-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      query: `mutation($id:ID!,$b:CartBuyerIdentityInput!){ cartBuyerIdentityUpdate(cartId:$id, buyerIdentity:$b){ cart{ id discountAllocations{ discountedAmount{ amount } ... on CartAutomaticDiscountAllocation{ title } } } userErrors{ field message } } }`,
+      variables: { id: cartGid, b: { email } },
+    }),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`storefront cartBuyerIdentityUpdate ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const body = (await res.json()) as {
+    errors?: Array<{ message: string }>;
+    data?: { cartBuyerIdentityUpdate: { cart: { id: string; discountAllocations: Array<{ discountedAmount: { amount: string }; title?: string }> } | null; userErrors: UserError[] } };
+  };
+  if (body.errors?.length) throw new Error(`storefront: ${JSON.stringify(body.errors).slice(0, 300)}`);
+  const r = body.data?.cartBuyerIdentityUpdate;
+  // A cart Shopify no longer knows (emptied and recreated, or simply old) is
+  // not an error worth a retry: the next page load sends the current token.
+  if (!r?.cart) { console.warn("[wallet] identify cart:", r?.userErrors?.map((e) => e.message).join("; ") || "no cart"); return { identified: false, walletPaise: 0 }; }
+  const walletPaise = r.cart.discountAllocations.filter((a) => isWalletTitle(a.title)).reduce((s, a) => s + toPaise(a.discountedAmount.amount), 0);
+  return { identified: true, walletPaise };
+}
+
 // ---- Orders (what the webhooks act on) ------------------------------------
 
 export interface WalletOrder {

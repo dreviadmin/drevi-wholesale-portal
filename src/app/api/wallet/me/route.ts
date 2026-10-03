@@ -1,6 +1,6 @@
 import { guarded } from "@/lib/wallet-http";
 import { formatPhone } from "@/lib/wallet-core";
-import { reservedPaise, statement, sweepExpiry, walletConfig, walletForSignedIn } from "@/lib/wallet";
+import { liveOpenRedemptions, statement, sweepExpiry, walletConfig, walletForSignedIn } from "@/lib/wallet";
 import { customerFromRequest } from "@/lib/wallet-identity";
 import { fetchCustomerOrders } from "@/lib/wallet-shopify";
 import { fail, json, preflight } from "@/lib/wallet-http";
@@ -38,12 +38,13 @@ async function getHandler(req: Request) {
 
   const url = new URL(req.url);
   const wantOrders = url.searchParams.get("orders") !== "0";
-  const [rows, reserved, orders] = await Promise.all([
+  const [rows, open, orders] = await Promise.all([
     statement(account.id, 50),
-    reservedPaise(account.id),
+    liveOpenRedemptions(account.id),
     wantOrders && account.shopify_customer_id ? fetchCustomerOrders(account.shopify_customer_id, 10).catch(() => []) : Promise.resolve([]),
   ]);
   const cfg = walletConfig();
+  const reserved = open.reduce((s, r) => s + r.amount_paise, 0);
   return json(req, {
     ok: true,
     joined: true,
@@ -56,6 +57,9 @@ async function getHandler(req: Request) {
       min_order_paise: cfg.minOrderPaise,
       earn_percent: cfg.earnPercent,
     },
+    // The open reservation, if any: the bag shows it even on a cart Shopify
+    // hasn't been told about yet (another device), and asks /api/wallet/cart.
+    redemption: open[0] ?? null,
     statement: rows.map((r) => ({
       id: r.id, kind: r.kind, label: r.label, amount_paise: r.amount_paise, balance_after_paise: r.balance_after_paise, at: r.created_at,
     })),

@@ -39,6 +39,7 @@ type EnvKey =
   | "WALLET_SHOPIFY_CLIENT_ID"
   | "WALLET_SHOPIFY_CLIENT_SECRET"
   | "WALLET_STOREFRONT_SECRET"    // >=32 chars; same value as the shop metafield drevi.wallet_key the theme signs with
+  | "SHOPIFY_STOREFRONT_TOKEN"     // public Storefront access token (Drevi Admin Automation); lets the bag show the wallet discount
   | "WALLET_ALLOWED_ORIGINS"      // comma list; defaults to drevifashion.com + myshopify
   | "AISENSY_API_KEY"             // wholesale WhatsApp sends (src/lib/aisensy.ts); not used by the wallet
   // Wholesale login messages (src/lib/aisensy.ts, scripts/send-launch.mjs) — all

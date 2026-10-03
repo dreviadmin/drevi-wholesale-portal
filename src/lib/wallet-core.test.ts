@@ -26,8 +26,7 @@ import {
   isWalletApplication,
   isWalletTitle,
   walletDiscountTitle,
-  WALLET_DISCOUNT_TITLE,
-} from "./wallet-core";
+  WALLET_DISCOUNT_TITLE, cartGidFromToken } from "./wallet-core";
 
 describe("normalizePhone", () => {
   it("assumes India for a bare 10-digit mobile", () => {
@@ -271,5 +270,18 @@ describe("recognising the wallet on an order", () => {
   });
   it("gives a checkout two hours", () => {
     expect(WALLET_DEFAULTS.redemptionTtlSeconds).toBe(7200);
+  });
+});
+
+describe("cartGidFromToken", () => {
+  it("turns the /cart.js token (with its key) into the Storefront cart id", () => {
+    expect(cartGidFromToken("hWNHWzzWPXxvscBPhaJF4JaG?key=cf0f37d3b9d84c5a58107c254c237e53")).toBe("gid://shopify/Cart/hWNHWzzWPXxvscBPhaJF4JaG?key=cf0f37d3b9d84c5a58107c254c237e53");
+  });
+  it("accepts the older 32-hex token and an id that already is one", () => {
+    expect(cartGidFromToken("0123456789abcdef0123456789abcdef")).toBe("gid://shopify/Cart/0123456789abcdef0123456789abcdef");
+    expect(cartGidFromToken("gid://shopify/Cart/abc?key=1")).toBe("gid://shopify/Cart/abc?key=1");
+  });
+  it("makes no cart id out of a label, nothing, or junk", () => {
+    for (const t of ["auto-e2e", "two-a", "", "  ", null, undefined, "x".repeat(16) + "?key=nothex!", "<script>"]) expect(cartGidFromToken(t)).toBeNull();
   });
 });
