@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireAdminOrRedirect } from "@/lib/staff";
 import { loadDesignDetail } from "@/lib/studio/load";
+import { loadStudioBuckets } from "@/lib/studio/buckets-db";
 import { captureEnabled, captureDestinationNote } from "@/lib/design-image-store";
 import { listBrandModels, fashnEnabled } from "@/lib/pipeline/engines";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -35,11 +36,15 @@ export default async function WorkbenchPage({ params }: { params: { designId: st
   // Drive round-trip is pure latency on every Workbench load. The call comes
   // back the moment FASHN_ENABLED does.
   const brandModels = fashnEnabled() ? await listBrandModels() : [];
-  const { data: designRow } = await createAdminClient().from("designs").select("brand_model, bg_style, base_sku, color").eq("id", params.designId).maybeSingle();
+  const [{ data: designRow }, buckets] = await Promise.all([
+    createAdminClient().from("designs").select("brand_model, bg_style, base_sku, color").eq("id", params.designId).maybeSingle(),
+    loadStudioBuckets(),
+  ]);
 
   return (
     <Workbench
       board={detail.board}
+      buckets={buckets}
       angles={detail.angles}
       copy={detail.copy}
       pool={detail.pool}

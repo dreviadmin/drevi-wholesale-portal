@@ -18,6 +18,9 @@ import { JobsTicker } from "../JobsTicker";
 // while fashn is parked (see the angle card). The action itself still exists.
 import { setBgStyle, setCopyPrompt as setCopyPromptAction, setCopyModel, setAnglePrompt, setAngleEngine, regenAngle, cancelAngleJob, generateCopy, saveCopyEdit, pushWholesale, pushShopify } from "./actions";
 import { unpublishDesign, setDiscontinued } from "../actions";
+import { setDesignBucket } from "../bucket-actions";
+import { BucketSelect, useBuckets } from "../BucketSelect";
+import { bucketLabel, type StudioBucket } from "@/lib/studio/buckets";
 import { BG_COLOURS, BG_MODE_DEFAULT, BG_MODE_LABEL, BG_MODE_SWATCH, resolveBackground, type BgMode, type BgSwatch } from "@/lib/studio/backgrounds";
 import { useToast } from "@/lib/use-toast";
 import { uploadSource, importFinished, applyImageDirectly, approveImage, rejectImage, saveCrop, setAngleSource, syncDrivePhotos } from "./image-actions";
@@ -96,8 +99,9 @@ const drivePhoto = (id: string, s = 600) => `/api/drive-photo?id=${encodeURIComp
 // page.tsx, but are not destructured: the only UI that read them was the
 // fashn brand-model picker, parked on 19 Sep, and an unused binding is a lint
 // error here. Restoring the picker means adding both names back to this list.
-export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnabled, bgStyle, bgSeed, driveFolderId, uploadsOk, uploadsMessage }: {
+export function Workbench({ board, buckets: serverBuckets, angles, copy, pool, activeJobs, enginesEnabled, bgStyle, bgSeed, driveFolderId, uploadsOk, uploadsMessage }: {
   board: BoardRow;
+  buckets: StudioBucket[];
   angles: AngleDetail[];
   copy: CopyDetail;
   pool: DesignImage[];
@@ -238,6 +242,41 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [copy.prompt]);
+
+  // Studio bucket (0074). Held locally so the pick shows before the refresh;
+  // a refreshed board row replaces it.
+  const { buckets, promptAndAdd } = useBuckets(serverBuckets);
+  const [bucket, setBucket] = useState<{ key: string | null; setAt: string | null; setBy: string | null }>({ key: board.bucket, setAt: board.bucketSetAt, setBy: board.bucketSetBy });
+  useEffect(() => { setBucket({ key: board.bucket, setAt: board.bucketSetAt, setBy: board.bucketSetBy }); }, [board.bucket, board.bucketSetAt, board.bucketSetBy]);
+  // Closing the tab mid-save asks first (the board's open-a-row guard has no
+  // equivalent here; the back link is a plain link).
+  const bucketSaving = useRef(0);
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => { if (bucketSaving.current > 0) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, []);
+  async function pickBucket(key: string | null, knownLabel?: string) {
+    setBucket({ key, setAt: null, setBy: null });
+    bucketSaving.current++;
+    let r: Awaited<ReturnType<typeof setDesignBucket>> | undefined;
+    try { r = await setDesignBucket([board.id], key); } catch { r = undefined; } finally { bucketSaving.current--; }
+    if (!r?.ok) {
+      // Back to what the server last said, not a snapshot that may be stale.
+      setBucket({ key: board.bucket, setAt: board.bucketSetAt, setBy: board.bucketSetBy });
+      flash(r?.error ?? "Could not save the bucket — check the connection");
+      router.refresh();
+      return;
+    }
+    setBucket({ key, setAt: r.setAt ?? null, setBy: r.setBy ?? null });
+    flash(`Bucket → ${knownLabel ?? bucketLabel(key, buckets)}`);
+  }
+  async function addBucketAndPick() {
+    const r = await promptAndAdd();
+    if (!r) return;
+    if (!r.bucket) { flash(r.error ?? "Could not add the bucket"); return; }
+    await pickBucket(r.bucket.key, r.bucket.label);
+  }
 
   function run(fn: () => Promise<{ ok: boolean; error?: string }>, done: string, onOk?: () => void) {
     startTransition(async () => {
@@ -547,11 +586,30 @@ export function Workbench({ board, angles, copy, pool, activeJobs, enginesEnable
       <BackLink fallback="/admin/studio" fallbackLabel="Studio" />
 
       <div className="mt-4 flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <h1 className="font-mono" style={{ fontSize: 19, fontWeight: 700, color: palette.black }}>{board.baseSku} · {board.color}</h1>
           <div className="font-body mt-1" style={{ fontSize: 12.5, color: palette.softBlack }}>{board.title ?? "—"}</div>
           <div className="font-body uppercase inline-block mt-2 px-2 py-1" style={{ fontSize: 9, letterSpacing: "0.12em", fontWeight: 600, background: palette.ivoryDeep, color: palette.softBlack }}>
             {board.badgeLabel}
+          </div>
+
+          {/* Studio bucket (0074) — the team's own queue label, separate from
+              the derived state above and from Rakesh's spec confirmation. */}
+          <div className="flex items-center gap-2 flex-wrap mt-2">
+            <span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.mutedGreige }}>Bucket</span>
+            <BucketSelect
+              value={bucket.key}
+              buckets={buckets}
+              ariaLabel="Studio bucket"
+              onPick={(k) => { void pickBucket(k); }}
+              onAdd={() => { void addBucketAndPick(); }}
+            />
+            {bucket.key && bucket.setAt && (
+              <span className="font-body" style={{ fontSize: 10.5, color: palette.mutedGreige }}>
+                {bucket.setBy ? `by ${bucket.setBy} · ` : ""}
+                {new Date(bucket.setAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })}
+              </span>
+            )}
           </div>
 
           {/* Discontinued (0063). The banner carries who and when, because a

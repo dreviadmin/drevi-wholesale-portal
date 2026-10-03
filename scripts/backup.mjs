@@ -49,6 +49,7 @@ const TABLES = [
   "goods_receipts",
   "goods_receipt_lines",
   "stock_movements",
+  "studio_buckets",
   "designs",
   "design_angles",
   "design_images",

@@ -15,6 +15,9 @@ import { BatchProgress, type BatchProgressState } from "@/components/admin/Batch
 import { BADGE_LABEL, type DesignBadge } from "@/lib/studio/state";
 import type { BoardRow } from "@/lib/studio/load";
 import { setTierBatch, togglePortalBatch, runFashnBatch, approveAllPreflight, approveAllBatch, generateCopyBatch, pushWholesaleBatch, pushShopifyBatch, traySkusForDesigns, setDiscontinuedBatch } from "./actions";
+import { setDesignBucket, removeStudioBucket } from "./bucket-actions";
+import { BucketSelect, useBuckets } from "./BucketSelect";
+import { BUCKET_NONE, bucketLabel, filterBuckets, type StudioBucket } from "@/lib/studio/buckets";
 import { JobsTicker } from "./JobsTicker";
 
 // Studio board (§7.4): derived-state chips with live counts, rows with
@@ -44,8 +47,51 @@ const BADGE_STYLE: Record<DesignBadge, { bg: string; fg: string }> = {
 
 const fmtAdded = (iso: string) => (iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }) : "—");
 
-export function StudioBoard({ rows }: { rows: BoardRow[] }) {
+export function StudioBoard({ rows: serverRows, buckets: serverBuckets }: { rows: BoardRow[]; buckets: StudioBucket[] }) {
   const router = useRouter();
+  // Buckets (0074). A pick shows at once — the row moves between filter chips
+  // before the server answers — via a per-design override over the server
+  // rows. Entries drop out once a refresh brings the same value back.
+  const { buckets, remember, promptAndAdd } = useBuckets(serverBuckets);
+  // Each entry is owned by the pick that wrote it (seq). A failed pick only
+  // removes entries it still owns — never writes an old value back over a
+  // newer pick — and removing the entry lets the server value show through.
+  // An entry also drops once the server reports the same value, or once its
+  // pick has settled and a later refresh has arrived.
+  const [bucketOverride, setBucketOverride] = useState<Map<string, { key: string | null; seq: number; settled?: boolean }>>(new Map());
+  const pickSeq = useRef(0);
+  useEffect(() => {
+    setBucketOverride((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Map(prev);
+      for (const r of serverRows) {
+        const o = next.get(r.id);
+        if (o && (o.key === r.bucket || o.settled)) next.delete(r.id);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [serverRows]);
+  const rows = useMemo(
+    () => (bucketOverride.size === 0 ? serverRows : serverRows.map((r) => {
+      const o = bucketOverride.get(r.id);
+      return o ? { ...r, bucket: o.key } : r;
+    })),
+    [serverRows, bucketOverride],
+  );
+  // Server actions run one at a time, and opening a design discards any that
+  // have not been sent yet — so a quick run of picks followed by a tap on a
+  // row could lose the last one. Navigation waits for these, and closing the
+  // tab asks first.
+  const bucketWrites = useRef<Promise<unknown>>(Promise.resolve());
+  const pendingWrites = useRef(0);
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => { if (pendingWrites.current > 0) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, []);
+  // MULTI-select and OR'd like Photos and Missing; BUCKET_NONE is "Not set".
+  const [bucketFilter, setBucketFilter] = useState<Set<string>>(new Set());
+  const [editBuckets, setEditBuckets] = useState(false);
   const [chip, setChip] = useState<DesignBadge | "all">("all");
   // Rakesh's confirmation is a SEPARATE axis from the badge, not another chip:
   // deriveBadge reports "Live" before it looks at specs, so a live design whose
@@ -100,6 +146,11 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
       const picked = ph.split(",").map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
       if (picked.length) setPhotoCounts(new Set(picked));
     }
+    const bk = params.get("bucket");
+    if (bk) {
+      const picked = bk.split(",").filter((k) => k === BUCKET_NONE || /^[a-z0-9_]{1,48}$/.test(k));
+      if (picked.length) setBucketFilter(new Set(picked));
+    }
   }, []);
 
   // Every chip count below is over `live`, not `rows`: a board showing 287
@@ -131,6 +182,14 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
     return c;
   }, [live]);
 
+  // Keyed by bucket, BUCKET_NONE for Not set — over `live`, like every chip.
+  const bucketTotals = useMemo(() => {
+    const c = new Map<string, number>();
+    for (const r of live) { const k = r.bucket ?? BUCKET_NONE; c.set(k, (c.get(k) ?? 0) + 1); }
+    return c;
+  }, [live]);
+  const bucketChips = useMemo(() => filterBuckets(buckets, bucketTotals, bucketFilter), [buckets, bucketTotals, bucketFilter]);
+
   const photoCountTotals = useMemo(() => {
     const c = new Array(7).fill(0) as number[];
     for (const r of live) if (r.filledCount >= 0 && r.filledCount <= 6) c[r.filledCount] += 1;
@@ -145,10 +204,11 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
       if (specsFilter === "awaiting" && r.specsVerified) return false;
       if (photoCounts.size > 0 && !photoCounts.has(r.filledCount)) return false;
       if (missingFilter.size > 0 && !(r.missing ?? []).some((k) => missingFilter.has(k))) return false;
+      if (bucketFilter.size > 0 && !bucketFilter.has(r.bucket ?? BUCKET_NONE)) return false;
       if (!q) return true;
       return [r.baseSku, r.color, r.title ?? "", r.category ?? ""].some((v) => v.toUpperCase().includes(q));
     });
-  }, [live, chip, specsFilter, photoCounts, missingFilter, query]);
+  }, [live, chip, specsFilter, photoCounts, missingFilter, bucketFilter, query]);
 
   const { sorted, sort, toggle } = useSort(filtered, {
     sku: (r) => `${r.baseSku}-${r.color}`,
@@ -156,6 +216,8 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
     badge: (r) => r.badgeLabel,
     photos: (r) => r.filledCount,
     tier: (r) => r.tier,
+    // Not set sorts last whichever way the column runs.
+    bucket: (r) => (r.bucket ? bucketLabel(r.bucket, buckets) : null),
     // Numeric on purpose: useSort compares strings with localeCompare({numeric:true}),
     // which mis-orders ISO fractional seconds of unequal length.
     added: (r) => (r.createdAt ? Date.parse(r.createdAt) : null),
@@ -252,6 +314,55 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
   const retiredSelected = useMemo(() => rows.filter((r) => selected.has(r.id) && r.discontinuedAt).map((r) => r.id), [rows, selected]);
   const liveSelected = useMemo(() => rows.filter((r) => selected.has(r.id) && !r.discontinuedAt).map((r) => r.id), [rows, selected]);
   const dot = (on: boolean) => (on ? "✓" : "○");
+
+  // Set a bucket on one design (row dropdown) or many (batch bar). Not a
+  // transition: classifying is rapid-fire down a list, and a transition would
+  // grey out every other control on the board while each one saves.
+  async function pickBucket(targetIds: string[], key: string | null, fromBatch = false, knownLabel?: string) {
+    if (targetIds.length === 0) return;
+    const seq = ++pickSeq.current;
+    setBucketOverride((prev) => { const n = new Map(prev); for (const id of targetIds) n.set(id, { key, seq }); return n; });
+    const label = knownLabel ?? bucketLabel(key, buckets);
+    pendingWrites.current++;
+    const write = setDesignBucket(targetIds, key).catch(() => undefined);
+    bucketWrites.current = bucketWrites.current.then(() => write);
+    let res: Awaited<typeof write>;
+    try { res = await write; } finally { pendingWrites.current--; }
+    if (!res?.ok) {
+      setBucketOverride((prev) => {
+        const n = new Map(prev);
+        for (const id of targetIds) if (n.get(id)?.seq === seq) n.delete(id);
+        return n;
+      });
+      flash(res?.error ?? "Could not save the bucket — check the connection");
+      router.refresh();
+      return;
+    }
+    setBucketOverride((prev) => {
+      const n = new Map(prev);
+      for (const id of targetIds) { const o = n.get(id); if (o?.seq === seq) n.set(id, { ...o, settled: true }); }
+      return n;
+    });
+    if (fromBatch) setSelected(new Set());
+    const one = targetIds.length === 1 ? rows.find((r) => r.id === targetIds[0]) : null;
+    flash(one ? `${one.baseSku} · ${one.color} → ${label}` : `${res.updated ?? targetIds.length} designs → ${label}`);
+  }
+  // "+ Add custom…": create (or reuse) the bucket, then put the design(s) in it.
+  async function addBucketAndPick(targetIds: string[], fromBatch = false) {
+    const r = await promptAndAdd();
+    if (!r) return;
+    if (!r.bucket) { flash(r.error ?? "Could not add the bucket"); return; }
+    if (r.existed) flash(`"${r.bucket.label}" already exists — using it`);
+    await pickBucket(targetIds, r.bucket.key, fromBatch, r.bucket.label);
+  }
+  async function retireBucket(b: StudioBucket) {
+    const n = bucketTotals.get(b.key) ?? 0;
+    if (!window.confirm(`Remove "${b.label}" from the dropdown?${n === 1 ? " The 1 design in it keeps it until you move it." : n > 1 ? ` The ${n} designs in it keep it until you move them.` : ""}`)) return;
+    const res = await removeStudioBucket(b.key);
+    if (!res.ok) { flash(res.error ?? "Could not remove it"); return; }
+    remember({ ...b, active: false });
+    flash(`Removed "${b.label}"`);
+  }
   // Carry the active filters so the workbench's back link lands on the same
   // list — Grishma works down her filtered set one design at a time.
   const boardHref = (() => {
@@ -260,13 +371,18 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
     if (specsFilter !== "any") p.set("specs", specsFilter);
     if (photoCounts.size > 0) p.set("photos", [...photoCounts].sort((a, b) => a - b).join(","));
     if (missingFilter.size > 0) p.set("missing", MISSING_FIELDS.filter((f) => missingFilter.has(f.key)).map((f) => f.key).join(","));
+    if (bucketFilter.size > 0) p.set("bucket", [...bucketFilter].sort().join(","));
     const q = p.toString();
     return q ? `/admin/studio?${q}` : "/admin/studio";
   })();
-  const openRow = (id: string) => router.push(withFrom(`/admin/studio/${id}`, boardHref));
+  const openRow = async (id: string) => {
+    if (pendingWrites.current > 0) { flash("Saving buckets…"); await bucketWrites.current; }
+    router.push(withFrom(`/admin/studio/${id}`, boardHref));
+  };
 
   const rowCard = (r: BoardRow) => (
-    <div key={r.id} className="flex items-center gap-3 p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
+    <div key={r.id} className="p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
+    <div className="flex items-center gap-3">
       <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleRow(r.id)} aria-label={`Select ${r.baseSku}`} style={{ accentColor: palette.goldDeep }} />
       <button type="button" onClick={() => openRow(r.id)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
         {r.thumb ? (
@@ -295,6 +411,19 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
           {r.badgeLabel}
         </span>
       </button>
+    </div>
+      {/* Outside the row's button: a control inside a button is invalid HTML
+          and the tap would open the workbench instead. */}
+      <div className="flex items-center gap-2 mt-2" style={{ paddingLeft: 26 }}>
+        <span className="font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.14em", color: palette.mutedGreige }}>Bucket</span>
+        <BucketSelect
+          value={r.bucket}
+          buckets={buckets}
+          ariaLabel={`Bucket for ${r.baseSku} · ${r.color}`}
+          onPick={(k) => pickBucket([r.id], k)}
+          onAdd={() => addBucketAndPick([r.id])}
+        />
+      </div>
     </div>
   );
 
@@ -546,6 +675,69 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
         </div>
       )}
 
+      {/* Buckets (0074) — staff work queues. MULTI-select and OR'd like the
+          rows above. Every active bucket keeps its chip at zero, so a custom
+          bucket appears here the moment it is added; "Not set" is last. */}
+      <div className="flex items-center gap-1.5 mt-2 overflow-x-auto no-scrollbar">
+        <span className="font-body uppercase whitespace-nowrap" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.mutedGreige }}>Bucket</span>
+        {[...bucketChips.map((b) => ({ key: b.key, label: b.active ? b.label : `${b.label} (removed)` })), { key: BUCKET_NONE, label: "Not set" }].map((c) => {
+          const n = bucketTotals.get(c.key) ?? 0;
+          const active = bucketFilter.has(c.key);
+          return (
+            <button
+              key={c.key}
+              type="button"
+              aria-pressed={active}
+              onClick={() =>
+                setBucketFilter((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(c.key)) next.delete(c.key); else next.add(c.key);
+                  return next;
+                })
+              }
+              className="font-body uppercase whitespace-nowrap"
+              style={{
+                fontSize: 9.5, letterSpacing: "0.1em", padding: "7px 10px",
+                background: active ? palette.black : palette.ivory,
+                color: active ? palette.ivory : n === 0 ? palette.mutedGreige : palette.softBlack,
+                border: "1px solid rgba(26,26,26,0.12)",
+              }}
+            >
+              {c.label} · {n}
+            </button>
+          );
+        })}
+        {bucketFilter.size > 0 && (
+          <button type="button" onClick={() => setBucketFilter(new Set())} aria-label="Clear bucket filter" className="font-body uppercase whitespace-nowrap" style={{ fontSize: 9, letterSpacing: "0.1em", padding: "7px 8px", color: palette.mutedGreige, background: "transparent", border: "none" }}>
+            Clear
+          </button>
+        )}
+        <button type="button" onClick={() => setEditBuckets((v) => !v)} aria-expanded={editBuckets} className="font-body uppercase whitespace-nowrap" style={{ fontSize: 9, letterSpacing: "0.1em", padding: "7px 8px", color: palette.goldDeep, background: "transparent", border: "none" }}>
+          {editBuckets ? "Done" : "Edit list"}
+        </button>
+      </div>
+      {editBuckets && (
+        <div className="mt-2 p-3 flex flex-col gap-2" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
+          <div className="font-body" style={{ fontSize: 11, color: palette.softBlack, lineHeight: 1.5 }}>
+            Add a bucket from any bucket dropdown (&ldquo;+ Add custom…&rdquo;). Removing one takes it out of the dropdown; designs already in it keep it. The four standard buckets stay.
+          </div>
+          {buckets.filter((b) => !b.preset && b.active).length === 0 ? (
+            <div className="font-body" style={{ fontSize: 11, color: palette.mutedGreige }}>No custom buckets yet.</div>
+          ) : (
+            buckets.filter((b) => !b.preset && b.active).map((b) => (
+              <div key={b.key} className="flex items-center justify-between gap-3">
+                <span className="font-body" style={{ fontSize: 12, color: palette.black }}>
+                  {b.label} <span style={{ color: palette.mutedGreige }}>· {bucketTotals.get(b.key) ?? 0}</span>
+                </span>
+                <button type="button" onClick={() => retireBucket(b)} aria-label={`Remove bucket ${b.label}`} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.1em", padding: "5px 9px", color: "#9C3A31", border: "1px solid #9C3A31", background: "transparent" }}>
+                  Remove
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
       {/* Mobile cards */}
       <div className="md:hidden mt-3 flex flex-col gap-1.5 pb-24">
         {sorted.map(rowCard)}
@@ -564,6 +756,7 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
               <SortTh label="State" k="badge" sort={sort} onToggle={toggle} />
               <SortTh label="Photos" k="photos" sort={sort} onToggle={toggle} right defaultDir="desc" />
               <SortTh label="Tier" k="tier" sort={sort} onToggle={toggle} />
+              <SortTh label="Bucket" k="bucket" sort={sort} onToggle={toggle} />
               <SortTh label="Added" k="added" sort={sort} onToggle={toggle} right defaultDir="desc" />
             </tr>
           </thead>
@@ -601,6 +794,15 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
                 </td>
                 <td className="font-mono text-right" style={{ fontSize: 11.5, color: palette.softBlack, padding: "8px 6px" }}>{r.filledCount}/6</td>
                 <td className="font-body uppercase" style={{ fontSize: 10, color: r.tier === "hero" ? palette.goldDeep : palette.mutedGreige, padding: "8px 6px" }}>{r.tier}</td>
+                <td onClick={(e) => e.stopPropagation()} style={{ padding: "8px 6px", maxWidth: 190 }}>
+                  <BucketSelect
+                    value={r.bucket}
+                    buckets={buckets}
+                    ariaLabel={`Bucket for ${r.baseSku} · ${r.color}`}
+                    onPick={(k) => pickBucket([r.id], k)}
+                    onAdd={() => addBucketAndPick([r.id])}
+                  />
+                </td>
                 <td className="font-mono text-right" style={{ fontSize: 10.5, color: palette.mutedGreige, padding: "8px 6px", whiteSpace: "nowrap" }}>{fmtAdded(r.createdAt)}</td>
               </tr>
             ))}
@@ -635,6 +837,15 @@ export function StudioBoard({ rows }: { rows: BoardRow[] }) {
           <div className="flex items-center gap-2 flex-wrap p-3 pointer-events-auto" style={{ background: palette.black, boxShadow: "0 6px 24px rgba(0,0,0,0.35)" }}>
             <span className="font-body" style={{ fontSize: 11, color: palette.champagne }}>{selected.size} selected</span>
             <span className="flex-1" />
+            <BucketSelect
+              variant="batch"
+              value={null}
+              buckets={buckets}
+              ariaLabel="Set bucket for the selected designs"
+              disabled={pending}
+              onPick={(k) => pickBucket(ids, k, true)}
+              onAdd={() => addBucketAndPick(ids, true)}
+            />
             <button type="button" disabled={pending} onClick={() => runBatch(() => setTierBatch(ids, "hero"), "Tier set to hero")} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.black, background: palette.gold, padding: "8px 10px" }}>Set hero</button>
             <button type="button" disabled={pending} onClick={() => runBatch(() => setTierBatch(ids, "standard"), "Tier set to standard")} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}>Set standard</button>
             <button type="button" disabled={pending} onClick={() => runBatch(() => togglePortalBatch(ids, "shopify", false), "Shopify disabled")} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}>SH off</button>
