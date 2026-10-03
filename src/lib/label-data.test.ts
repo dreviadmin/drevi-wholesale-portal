@@ -20,7 +20,7 @@ describe("kf / v2 — the coded vendor line (unchanged behaviour)", () => {
 });
 
 describe("resolveLabelDatum — what a Studio-printed tag says", () => {
-  it("a sheet-era SKU prints exactly what it printed before", () => {
+  it("a sheet-era SKU keeps its vendor code, but the Specs MRP beats the sheet's", () => {
     const d = resolveLabelDatum({
       sku: "DD-LEH-FLR-002-XL-IVR",
       vendorInfo: { vendor_name: "Anand Creations", vendor_sku: "AC-77", last_cost: 3400, retail_price: 8599 },
@@ -28,7 +28,7 @@ describe("resolveLabelDatum — what a Studio-printed tag says", () => {
       design: { mrp_override: 10699, vendor_id: "uuid-sp", vendor_sku: "X" },
       vendorNameById: vendors,
     });
-    expect(d).toEqual({ sku: "DD-LEH-FLR-002-XL-IVR", found: true, vendorCode: "AN-AC-77-03.4-05.2", mrp: "8,599" });
+    expect(d).toEqual({ sku: "DD-LEH-FLR-002-XL-IVR", found: true, vendorCode: "AN-AC-77-03.4-05.2", mrp: "10,699" });
   });
 
   it("a Log-delivery garment: vendor from vendor_id, MRP from the design", () => {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getStaff, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { effectiveRetailPrice } from "@/lib/retail-price-core";
 
 export const dynamic = "force-dynamic";
 
@@ -68,7 +69,7 @@ export async function GET(request: Request) {
       .maybeSingle(),
     admin.from("product_vendor_info").select("sku, retail_price").eq("sku", sku).maybeSingle(),
     designKey
-      ? admin.from("designs").select("id").eq("base_sku", designKey.base).eq("color", designKey.color).maybeSingle()
+      ? admin.from("designs").select("id, mrp_override, auto_mrp").eq("base_sku", designKey.base).eq("color", designKey.color).maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
 
@@ -102,7 +103,8 @@ export async function GET(request: Request) {
     known: true,
     title: product?.title ?? null,
     thumb: (product?.image_urls as string[] | null)?.[0] ?? null,
-    retail_price_set: (vendorInfo?.retail_price ?? 0) > 0,
+    // Same rule as the tag and the till: Specs MRP, else the sheet's.
+    retail_price_set: (effectiveRetailPrice(design, vendorInfo?.retail_price) ?? 0) > 0,
     actions,
   });
 }

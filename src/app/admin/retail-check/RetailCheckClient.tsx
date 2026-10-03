@@ -159,7 +159,7 @@ export function RetailCheckClient({ products, retail, pricesAsOf, drivePhotos }:
       </div>
     ) : (
       <div className="font-body mt-3" style={{ fontSize: 13, color: palette.goldDeep, fontWeight: 600 }}>
-        Retail price not set — add Final MRP in the sheet, then tap Sync Prices
+        Retail price not set — ask an admin to set the MRP in Studio → Product details (or add Final MRP in the sheet, then tap Sync Prices)
       </div>
     );
   };
@@ -292,7 +292,7 @@ export function RetailCheckClient({ products, retail, pricesAsOf, drivePhotos }:
             {priceBlock(current.sku)}
             {!current.product && !retailBySku.has(current.sku.trim().toUpperCase()) && (
               <p className="font-body mt-2" style={{ fontSize: 11, color: palette.mutedGreige, lineHeight: 1.5 }}>
-                Not in the sheet — check the SKU or add the row, then tap Sync Prices.
+                Unknown SKU — check it, or add it to the sheet and tap Sync Prices.
               </p>
             )}
           </div>

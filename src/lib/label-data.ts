@@ -10,7 +10,13 @@
 // printed "--" for the vendor and 124 printed "Rs -".
 //
 // Rule: every field keeps its current source first — nothing that prints
-// today changes — and a blank falls back to the portal's own record.
+// today changes — and a blank falls back to the portal's own record. The one
+// exception is the MRP (3 Oct): the Specs MRP now wins over the sheet's, by
+// the shared rule in retail-price-core.ts, so the tag, the counter bill and
+// the price check can never quote different prices.
+
+import { effectiveRetailPrice } from "./retail-price-core";
+export { designKeyOf } from "./retail-price-core";
 
 export interface VendorInfoRow {
   vendor_name?: string | null;
@@ -77,11 +83,9 @@ export function resolveLabelDatum(input: {
   const vendorSku = v?.vendor_sku?.trim() || d?.vendor_sku?.trim() || "-";
   const cost = positive(v?.last_cost);
   const wholesale = positive(input.wholesalePrice) ?? positive(d?.wholesale_override ?? d?.auto_wholesale);
-  // The sheet's retail price first: it is what the counter bills today
-  // (retail-bill reads the same column), so a tag never disagrees with the
-  // till. The design's MRP fills the blank — for a Studio-priced design that
-  // is the only price there is.
-  const mrpNum = positive(v?.retail_price) ?? positive(d?.mrp_override ?? d?.auto_mrp);
+  // Specs MRP first, the sheet's Final MRP only as the fallback — the same
+  // rule the counter bill and the price check use (retail-price-core.ts).
+  const mrpNum = effectiveRetailPrice(d, v?.retail_price);
 
   return {
     sku,
@@ -91,9 +95,3 @@ export function resolveLabelDatum(input: {
   };
 }
 
-/** (base, colour) key of a variant SKU — DD-CAT-SUB-NNN-<size…>-COLOR. */
-export function designKeyOf(sku: string): string | null {
-  const parts = sku.trim().toUpperCase().split("-");
-  if (parts.length < 5) return null;
-  return `${parts.slice(0, 4).join("-")}|${parts[parts.length - 1]}`;
-}

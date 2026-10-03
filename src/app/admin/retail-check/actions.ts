@@ -2,10 +2,12 @@
 
 import { requireStaff } from "@/lib/staff";
 import { syncRetailPrices } from "@/lib/sync";
+import { counterSkus, loadRetailPrices } from "@/lib/retail-price";
 import { findSkuImage } from "@/lib/drive";
 
-// "Sync Prices" — pulls Final MRP for every sheet row (~2s) and returns the
-// fresh list so the page updates in place (the current scan stays on screen).
+// "Sync Prices" — pulls Final MRP for every sheet row (~2s), then returns the
+// prices the counter actually quotes (Specs MRP first, the sheet's as the
+// fallback — retail-price-core.ts) so the page updates in place.
 // Open to every staff role: the person filling prices into the sheet on
 // Saturday is the same person quoting them at the rack.
 export async function refreshRetailPrices(): Promise<{
@@ -21,7 +23,9 @@ export async function refreshRetailPrices(): Promise<{
   }
   try {
     const res = await syncRetailPrices();
-    return { ok: true, prices: res.prices, asOf: res.asOf };
+    const prices = await loadRetailPrices();
+    const known = await counterSkus(prices);
+    return { ok: true, prices: known.map((sku) => ({ sku, retail_price: prices.priceOf(sku) })), asOf: res.asOf };
   } catch (err) {
     return { ok: false, error: (err as Error).message };
   }

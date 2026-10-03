@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { loadRetailPrices } from "@/lib/retail-price";
 import { requireStaffOrRedirect } from "@/lib/staff";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -8,8 +9,9 @@ import type { RetailBill } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-// Retail billing (Ansh, 31 Aug) — sell at the retail price (Final MRP) to
-// walk-in customers. Every sheet row is billable, including garments hidden
+// Retail billing (Ansh, 31 Aug) — sell at the retail price to walk-in
+// customers: the Specs MRP, else the sheet's Final MRP (retail-price-core.ts,
+// 3 Oct — the same price the tag prints). Every sheet row is billable, including garments hidden
 // from the wholesale portal (they still hang in the shop, same rule as the
 // retail price check). Past-dated bills carry the chosen day in their number.
 export default async function RetailBillPage({ searchParams }: { searchParams?: { edit?: string } }) {
@@ -22,15 +24,16 @@ export default async function RetailBillPage({ searchParams }: { searchParams?: 
     const { data } = await admin.from("retail_bills").select("*").eq("id", searchParams.edit).maybeSingle();
     if (data && !data.voided_at) editBill = data as RetailBill;
   }
-  const [{ data: products }, { data: retail }, { data: bills }] = await Promise.all([
+  const [{ data: products }, prices, { data: bills }] = await Promise.all([
     admin
       .from("wholesale_products")
       .select("sku, title, category, color, current_qty, image_urls")
       .order("title", { nullsFirst: false }),
-    admin.from("product_vendor_info").select("sku, retail_price"),
+    // A failed price read must not blank the till: lines then open at ₹0 and
+    // the form asks for a price, which is what an unpriced garment does today.
+    loadRetailPrices().catch((e) => { console.error("[retail-bill] prices:", (e as Error).message); return null; }),
     admin.from("retail_bills").select("*").order("created_at", { ascending: false }).limit(15),
   ]);
-  const retailBySku = new Map((retail ?? []).map((r) => [String(r.sku).toUpperCase(), Number(r.retail_price) || 0]));
   const catalog = (products ?? []).map((p) => ({
     sku: p.sku as string,
     title: (p.title as string | null) ?? p.sku,
@@ -38,7 +41,7 @@ export default async function RetailBillPage({ searchParams }: { searchParams?: 
     color: (p.color as string | null) ?? null,
     stock: Number(p.current_qty) || 0,
     image: (p.image_urls as string[] | null)?.[0] ?? null,
-    retailPrice: retailBySku.get(String(p.sku).toUpperCase()) ?? 0,
+    retailPrice: prices?.priceOf(String(p.sku)) ?? 0,
   }));
 
   const recent = (bills ?? []) as RetailBill[];

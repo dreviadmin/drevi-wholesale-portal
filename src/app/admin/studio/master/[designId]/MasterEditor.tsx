@@ -10,6 +10,7 @@ import { useDraft } from "@/lib/useDraft";
 import { withFrom } from "@/components/BackLink";
 import { supplyAge } from "@/lib/availability";
 import { autoMrpFrom, autoWholesaleFrom, clampMultiplier, DEFAULT_MARKUP_MULTIPLIER, DEFAULT_WHOLESALE_MULTIPLIER } from "@/lib/pricing";
+import { specsMrp } from "@/lib/retail-price-core";
 import { ORIGIN_OPTIONS, STYLE_OPTIONS } from "@/lib/studio/copy-prompt";
 import type { BoardRow } from "@/lib/studio/load";
 import { useToast } from "@/lib/use-toast";
@@ -138,6 +139,13 @@ export function MasterEditor({ board, design, variants, lastCost, lastCostLocked
   // it is typed here, which locks it against that sync.
   const previewAutoMrp = autoMrpFrom(previewCost, clampMultiplier(Number(pricing.markupMultiplier), DEFAULT_MARKUP_MULTIPLIER));
   const effectiveMrp = pricing.mrpOverride ? Number(pricing.mrpOverride) : previewAutoMrp ?? design.autoMrp;
+  // What tags, the counter bill, the price check and Shopify charge RIGHT NOW:
+  // the SAVED override / auto-MRP (retail-price-core.ts), else the sheet's.
+  // effectiveMrp above is a preview — a typed change, or a cost that moved
+  // since the last save — and only becomes the price on "Save pricing".
+  const savedMrp = specsMrp({ mrp_override: design.mrpOverride, auto_mrp: design.autoMrp });
+  const inUseMrp = savedMrp ?? (sheetMrp > 0 ? sheetMrp : null);
+  const pendingMrp = effectiveMrp && Math.round(Number(effectiveMrp)) !== Math.round(savedMrp ?? 0) ? Number(effectiveMrp) : null;
   const previewAutoWholesale = autoWholesaleFrom(previewCost, clampMultiplier(Number(pricing.wholesaleMultiplier), DEFAULT_WHOLESALE_MULTIPLIER));
   const effectiveWholesale = pricing.wholesaleOverride ? Number(pricing.wholesaleOverride) : previewAutoWholesale ?? design.autoWholesale;
   // Mirrors the server rule in savePricing: an auto price is only pushed onto
@@ -303,9 +311,15 @@ export function MasterEditor({ board, design, variants, lastCost, lastCostLocked
             <input type="number" min="0" value={pricing.mrpOverride} placeholder="—" onChange={(e) => setPricing((s) => ({ ...s, mrpOverride: e.target.value }))} className="w-full mt-1 font-body" style={inputStyle} />
           </label>
         </div>
-        <div className="font-body mt-2" style={{ fontSize: 11, color: palette.softBlack }}>
-          Effective MRP: <b style={{ color: palette.black }}>{effectiveMrp ? formatINR(Number(effectiveMrp)) : "—"}</b>
-          {sheetMrp > 0 && <span style={{ color: palette.mutedGreige }}> · sheet says {formatINR(sheetMrp)} (live until cutover)</span>}
+        <div className="font-body mt-2" style={{ fontSize: 11, color: palette.softBlack, lineHeight: 1.6 }}>
+          MRP on tags, the counter &amp; Shopify: <b style={{ color: palette.black }}>{inUseMrp ? formatINR(inUseMrp) : "—"}</b>
+          {savedMrp == null && sheetMrp > 0 && <span style={{ color: palette.mutedGreige }}> (from the sheet — nothing saved here yet)</span>}
+          {savedMrp != null && sheetMrp > 0 && Math.round(sheetMrp) !== Math.round(savedMrp) && <span style={{ color: palette.mutedGreige }}> · sheet had {formatINR(sheetMrp)} (not used)</span>}
+          {pendingMrp && (
+            <div style={{ color: palette.goldDeep }}>
+              Becomes <b>{formatINR(pendingMrp)}</b> when you save pricing.
+            </div>
+          )}
         </div>
 
         {/* The buyer-facing price, next to the MRP — one place for both, and

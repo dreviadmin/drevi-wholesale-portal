@@ -9,10 +9,11 @@ import { renderOrderPdf } from "@/lib/order-pdf";
 import { uploadOrderPdf } from "@/lib/storage";
 import { DEFAULT_HSN } from "@/lib/hsn-default";
 import { syncCustomToCatalog } from "@/lib/custom-catalog";
+import { loadRetailPrices } from "@/lib/retail-price";
 import type { DiscountType, Order, OrderItem, TaxMode } from "@/lib/types";
 
-// Retail billing (Ansh, 31 Aug) — sell at the RETAIL price (sheet Final MRP)
-// to a walk-in customer. Own RB-YYYYMMDD-NNN numbering (the number carries the
+// Retail billing (Ansh, 31 Aug) — sell at the RETAIL price (Specs MRP, else the
+// sheet's Final MRP — retail-price-core.ts) to a walk-in customer. Own RB-YYYYMMDD-NNN numbering (the number carries the
 // BILL date's day, so past-dated bills file under the right day), own table,
 // out of the wholesale dashboards. Stock leaves at save; voiding returns it.
 // Money math reuses computeBillTotals with zero priors — same rounding and
@@ -44,14 +45,21 @@ async function buildRetailItems(
 ): Promise<{ ok: boolean; error?: string; items?: OrderItem[] }> {
   const admin = createAdminClient();
   const skus = [...new Set(lines.filter((l) => !l.customTitle && l.sku).map((l) => l.sku!.trim().toUpperCase()))];
-  const [{ data: prods }, { data: retail }] = skus.length
-    ? await Promise.all([
+  let prods: { sku: string; title: string | null; hsn: string | null; image_urls: unknown }[] | null = [];
+  let prices: Awaited<ReturnType<typeof loadRetailPrices>> | null = null;
+  if (skus.length) {
+    try {
+      const [p, r] = await Promise.all([
         admin.from("wholesale_products").select("sku, title, hsn, image_urls").in("sku", skus),
-        admin.from("product_vendor_info").select("sku, retail_price").in("sku", skus),
-      ])
-    : [{ data: [] }, { data: [] }];
+        loadRetailPrices(skus),
+      ]);
+      prods = p.data;
+      prices = r;
+    } catch {
+      return { ok: false, error: "Could not read retail prices — try again." };
+    }
+  }
   const prodBySku = new Map((prods ?? []).map((p) => [p.sku.toUpperCase(), p]));
-  const retailBySku = new Map((retail ?? []).map((r) => [r.sku.toUpperCase(), Number(r.retail_price) || 0]));
 
   const items: OrderItem[] = [];
   for (const line of lines) {
@@ -79,7 +87,7 @@ async function buildRetailItems(
     const sku = (line.sku ?? "").trim().toUpperCase();
     const p = prodBySku.get(sku);
     if (!p) return { ok: false, error: `${sku || "(blank)"} is not in the catalog.` };
-    const listPrice = retailBySku.get(sku) ?? 0;
+    const listPrice = prices?.priceOf(sku) ?? 0;
     const unitPrice =
       line.unitPrice != null && Number.isFinite(line.unitPrice)
         ? Math.max(0, Math.round(Number(line.unitPrice) * 100) / 100)
