@@ -1,3 +1,4 @@
+import { guarded } from "@/lib/wallet-http";
 import { createRedemption, getAccountByCustomer, sweepExpiry, voidOpenRedemptions } from "@/lib/wallet";
 import { customerFromRequest } from "@/lib/wallet-identity";
 import { fail, json, preflight, readJson } from "@/lib/wallet-http";
@@ -16,7 +17,7 @@ export function OPTIONS(req: Request) {
   return preflight(req);
 }
 
-export async function POST(req: Request) {
+async function postHandler(req: Request) {
   const customerGid = customerFromRequest(req);
   if (!customerGid) return fail(req, "Please sign in again.", 401);
 
@@ -45,10 +46,12 @@ export async function POST(req: Request) {
   return json(req, { ok: true, code: r.code, amount_paise: r.amountPaise, expires_at: r.expiresAt });
 }
 
-export async function DELETE(req: Request) {
+async function deleteHandler(req: Request) {
   const customerGid = customerFromRequest(req);
   if (!customerGid) return fail(req, "Please sign in again.", 401);
   const account = await getAccountByCustomer(customerGid);
   if (account) await voidOpenRedemptions(account.id);
   return json(req, { ok: true });
 }
+export const POST = guarded(postHandler);
+export const DELETE = guarded(deleteHandler);

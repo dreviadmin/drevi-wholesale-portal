@@ -1,3 +1,4 @@
+import { guarded } from "@/lib/wallet-http";
 import { formatPhone } from "@/lib/wallet-core";
 import { reservedPaise, statement, sweepExpiry, walletConfig, walletForSignedIn } from "@/lib/wallet";
 import { customerFromRequest } from "@/lib/wallet-identity";
@@ -16,7 +17,7 @@ export function OPTIONS(req: Request) {
   return preflight(req);
 }
 
-export async function GET(req: Request) {
+async function getHandler(req: Request) {
   const customerGid = customerFromRequest(req);
   if (!customerGid) return fail(req, "Please sign in again.", 401);
 
@@ -61,3 +62,4 @@ export async function GET(req: Request) {
     orders,
   });
 }
+export const GET = guarded(getHandler);
