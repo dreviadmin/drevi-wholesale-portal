@@ -11,11 +11,6 @@ export const WALLET_DEFAULTS = {
   earnPercent: 10,              // of the amount actually paid
   minOrderPaise: 500_000,       // ₹5,000 subtotal to redeem
   expiryMonths: 12,             // rolling, from the latest credit
-  otpTtlSeconds: 10 * 60,
-  otpMaxAttempts: 5,
-  otpPerPhonePer10Min: 3,
-  otpPerIpPer10Min: 12,
-  sessionDays: 30,
   redemptionTtlSeconds: 2 * 60 * 60, // a slow checkout must not lose the credit; Shopify ends the discount on time
 } as const;
 
@@ -253,9 +248,13 @@ export function isRedemptionCode(code: string | null | undefined): boolean {
 
 /** A plain-words line for the statement. */
 export function describeLedgerKind(kind: string, refType: string | null, refId: string | null, note: string | null): string {
-  const order = refType === "shopify_order" && refId ? ` on order ${orderLabel(refId)}` : "";
+  // The webhooks write the order's name into the note ("Used on #1091"). That
+  // is the number the customer sees on their orders, so it wins over the tail
+  // of the order id, which is kept only for rows without a name.
+  const named = note?.match(/#[A-Za-z0-9-]+/)?.[0];
+  const order = refType === "shopify_order" && refId ? ` on order ${named ?? orderLabel(refId)}` : "";
   if (refType === "shopify_refund" && refId) {
-    const label = orderLabel(refId.split("#")[0]);
+    const label = named ?? orderLabel(refId.split("#")[0]);
     if (kind === "reverse_redeem") return `Returned to wallet — refund on order ${label}`;
     if (kind === "reverse_earn") return `10% back reversed — refund on order ${label}`;
   }

@@ -303,13 +303,32 @@ export async function voidOpenRedemptions(accountId: string): Promise<void> {
   const { data } = await admin.from("wallet_redemptions").select("id, status, shopify_discount_id").eq("account_id", accountId)
     .or("status.eq.open,and(status.eq.expired,shopify_discount_id.not.is.null)");
   for (const r of (data ?? []) as Array<{ id: string; status: string; shopify_discount_id: string | null }>) {
-    if (r.shopify_discount_id) await deleteDiscount(r.shopify_discount_id).catch((e) => console.warn("[wallet] delete discount:", (e as Error).message));
-    await admin.from("wallet_redemptions").update({ status: r.status === "open" ? "void" : "expired", shopify_discount_id: null }).eq("id", r.id);
+    // Forget the Shopify id only once the discount is really gone. If the
+    // delete failed (a throttle), the row keeps it, so the nightly sweep or
+    // the next void deletes it instead of a live discount being orphaned.
+    const gone = !r.shopify_discount_id || await deleteDiscount(r.shopify_discount_id).then(
+      () => true,
+      (e) => { console.warn("[wallet] delete discount:", (e as Error).message); return false; },
+    );
+    await admin.from("wallet_redemptions").update({ status: r.status === "open" ? "void" : "expired", ...(gone ? { shopify_discount_id: null } : {}) }).eq("id", r.id);
   }
 }
 
 // ---- Webhooks: what an order event means for a wallet ---------------------
 
+/** Whether this Shopify delivery id has already been handled to the end. */
+export async function webhookHandled(id: string): Promise<boolean> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.from("wallet_webhook_events").select("id").eq("id", id).maybeSingle();
+  if (error) throw new Error(`wallet_webhook_events: ${error.message}`);
+  return !!data;
+}
+
+/**
+ * Mark a delivery done. Called only after its handler succeeded, so a failed
+ * one stays unrecorded and Shopify's retry runs it again. False when an
+ * overlapping redelivery recorded it first.
+ */
 export async function recordWebhookOnce(id: string, topic: string, orderId: string | null): Promise<boolean> {
   const admin = createAdminClient();
   const { error } = await admin.from("wallet_webhook_events").insert({ id, topic, shopify_order_id: orderId });
@@ -367,6 +386,10 @@ export async function onOrderCreated(orderId: string): Promise<string> {
     await ensureAccountForOrder(order);
     return "no wallet on order";
   }
+  // A cancelled order spends nothing. Shopify retries a failed orders/create
+  // for hours, so it can land after orders/cancelled already found nothing to
+  // return; debiting then would keep the customer's credit for good.
+  if (order.cancelledAt) return "cancelled, nothing debited";
   const admin = createAdminClient();
   const notes: string[] = [];
 
@@ -378,7 +401,7 @@ export async function onOrderCreated(orderId: string): Promise<string> {
     if (applied <= 0) { notes.push(`${code}: nothing allocated`); continue; }
     const row = await postMovement({ accountId: red.account_id, kind: "redeem", amountPaise: -applied, refType: "shopify_order", refId: order.id, note: `Used on ${order.name}`, clamp: true });
     await admin.from("wallet_redemptions").update({ status: "used", shopify_order_id: order.id, used_at: new Date().toISOString() }).eq("id", red.id);
-    notes.push(`${code}: ${row ? `debited ${applied}` : "already debited"}`);
+    notes.push(`${code}: ${row ? debitNote(order.name, applied, row) : "already debited"}`);
   }
 
   // The automatic "Drevi Wallet" discount: it belongs to the order's customer.
@@ -396,9 +419,22 @@ export async function onOrderCreated(orderId: string): Promise<string> {
       // Single use: the discount goes the moment the order exists.
       if (red.shopify_discount_id) await deleteDiscount(red.shopify_discount_id).catch((e) => console.warn("[wallet] delete used discount:", (e as Error).message));
     }
-    notes.push(row ? `debited ${applied}${red ? "" : " (no open redemption found)"}` : "already debited");
+    notes.push(row ? `${debitNote(order.name, applied, row)}${red ? "" : " (no open redemption found)"}` : "already debited");
   }
   return notes.join("; ");
+}
+
+/**
+ * The clamp above stops a debit going below zero, so when Shopify took off
+ * more than the wallet still held (two checkouts on one credit, or a balance
+ * that lapsed meanwhile) the ledger takes less. That gap is money lost: say
+ * it loudly in the log instead of letting the clamp hide it.
+ */
+function debitNote(orderName: string, appliedPaise: number, row: LedgerRow): string {
+  const took = -row.amount_paise;
+  if (took >= appliedPaise) return `debited ${appliedPaise}`;
+  console.error("[wallet] SHORTFALL", orderName, { requested: appliedPaise, debited: took });
+  return `debited ${took} of ${appliedPaise} (SHORTFALL ${appliedPaise - took})`;
 }
 
 async function ensureAccountForOrder(order: WalletOrder): Promise<WalletAccount | null> {
