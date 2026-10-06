@@ -161,6 +161,15 @@ describe("codes and words", () => {
     expect(describeLedgerKind("redeem", "shopify_order", "#1091", null)).toBe("Used on order #1091");
     expect(describeLedgerKind("expire", null, null, null)).toMatch(/Expired/);
   });
+  it("names the order the way the customer knows it, from the note", () => {
+    const gid = "gid://shopify/Order/7725351305457";
+    expect(describeLedgerKind("earn", "shopify_order", gid, "10% back on #1091")).toBe("10% back on order #1091");
+    expect(describeLedgerKind("redeem", "shopify_order", gid, "Used on #1091")).toBe("Used on order #1091");
+    expect(describeLedgerKind("reverse_redeem", "shopify_order", gid, "#1091 cancelled")).toBe("Returned to wallet — order #1091 cancelled");
+    expect(describeLedgerKind("reverse_earn", "shopify_refund", `${gid}#gid://shopify/Refund/9`, "Refund on #1091")).toBe("10% back reversed — refund on order #1091");
+    // A note without a name keeps the id-based label.
+    expect(describeLedgerKind("earn", "shopify_order", gid, "Seeded by hand")).toBe("10% back on order #5457");
+  });
   it("carries the decided defaults", () => {
     expect(WALLET_DEFAULTS.welcomePaise).toBe(100_000);
     expect(WALLET_DEFAULTS.minOrderPaise).toBe(500_000);

@@ -170,14 +170,8 @@ export async function addCustomerTags(customerId: string, tags: string[]): Promi
   throwUserErrors("tagsAdd", d.tagsAdd.userErrors);
 }
 
-// ---- Discount codes (the settlement instrument) ---------------------------
+// ---- The wallet discount (the settlement instrument) ----------------------
 
-/**
- * A single-use, fixed-amount code for exactly this cart's redemption. Expires
- * in 30 minutes; whichever comes first — the order, or the clock — ends it.
- * The ₹5,000 minimum is repeated here as belt-and-braces: the route already
- * enforced it, but a code that reaches checkout should carry its own rule.
- */
 /**
  * The wallet's credit for ONE customer's checkout: a Shopify automatic
  * discount, amount off the order, limited to that customer (context), with
