@@ -4,6 +4,7 @@ import Image from "next/image";
 import { SignOutButton } from "@/components/SignOutButton";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { currentCatalogImages, lineImage } from "@/lib/catalog-images";
 import { ORDER_STATUS_LABEL } from "@/lib/order-status";
 import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -94,16 +95,9 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
     .filter((i) => i.stock_state === "made_to_order")
     .reduce((m, i) => Math.max(m, i.restock_days ?? 0), 0);
 
-  // Older orders predate image snapshots — backfill thumbs by SKU.
-  const missingImg = items.filter((i) => !i.image_url).map((i) => i.sku);
-  const imgBySku = new Map<string, string>();
-  if (missingImg.length > 0) {
-    const { data: prods } = await admin.from("wholesale_products").select("sku, image_urls").in("sku", missingImg);
-    for (const p of prods ?? []) {
-      const first = Array.isArray(p.image_urls) ? (p.image_urls as string[])[0] : undefined;
-      if (first) imgBySku.set(p.sku, first);
-    }
-  }
+  // Each catalog line shows the catalog's CURRENT photo (7 Oct), which also
+  // covers older orders that predate image snapshots.
+  const currentImg = await currentCatalogImages(items.filter((i) => !i.custom).map((i) => i.sku));
 
   return (
     <div className="min-h-screen" style={{ background: palette.ivory }}>
@@ -133,7 +127,7 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
 
         <div className="mt-8" style={{ borderTop: "1px solid rgba(26,26,26,0.1)" }}>
           {items.map((it, idx) => {
-            const img = it.image_url ?? imgBySku.get(it.sku) ?? null;
+            const img = lineImage(it, currentImg);
             return (
               <div key={`${it.sku}-${idx}`} className="flex items-start gap-3 py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
                 <div className="relative flex-shrink-0" style={{ width: 56, height: 100, background: palette.ivoryDeep }}>

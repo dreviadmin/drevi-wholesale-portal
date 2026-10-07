@@ -8,6 +8,7 @@ import { writeAuditEvent } from "@/lib/audit";
 import { DETAIL_ANGLES } from "@/lib/studio/state";
 import { storeDesignImage, archiveImageFile, isStorageRef } from "@/lib/design-image-store";
 import { ensureDesignImagery } from "@/lib/design-imagery";
+import { syncCatalogFrontQuietly } from "@/lib/studio/catalog-front";
 
 // Retrofit R5 (§7) — four input modes per angle.
 //
@@ -84,6 +85,7 @@ export async function uploadSource(angleId: string, formData: FormData): Promise
   await admin.from("design_angles").update({ source_image_id: row.id, source_ref: up.fileRef, updated_at: new Date().toISOString() }).eq("id", angleId);
   // A photo has landed — the design's identifier and front must not be blank.
   await ensureDesignImagery(admin, angle.design_id);
+  await syncCatalogFrontQuietly(angle.design_id);
   revalidatePath(`/admin/studio/${angle.design_id}`);
   return { ok: true, imageId: row.id };
 }
@@ -116,6 +118,7 @@ export async function importFinished(angleId: string, formData: FormData): Promi
   const promoted = await approveImage(angleId, row.id);
   if (!promoted.ok) return fail(promoted.error ?? "Imported, but could not make it the production image");
   await ensureDesignImagery(admin, angle.design_id);
+  await syncCatalogFrontQuietly(angle.design_id);
   revalidatePath(`/admin/studio/${angle.design_id}`);
   return { ok: true, imageId: row.id };
 }
@@ -152,6 +155,7 @@ export async function applyImageDirectly(angleId: string, imageId: string): Prom
   }
   await flipLive(angle.design_id);
   await ensureDesignImagery(admin, angle.design_id);
+  await syncCatalogFrontQuietly(angle.design_id);
   await writeAuditEvent({ eventType: "studio_candidate_approved", staffUserId: staff.id, notes: `mode B use-directly image ${imageId} on angle ${angleId}` });
   revalidatePath(`/admin/studio/${angle.design_id}`);
   revalidatePath("/admin/studio");
@@ -183,6 +187,7 @@ export async function approveImage(angleId: string, imageId: string): Promise<Re
   const { error } = await admin.from("design_angles").update({ approved_image_id: imageId, updated_at: new Date().toISOString() }).eq("id", angleId);
   if (error) return fail(error.message);
   await flipLive(angle.design_id);
+  await syncCatalogFrontQuietly(angle.design_id);
   await writeAuditEvent({ eventType: "studio_candidate_approved", staffUserId: staff.id, notes: `image ${imageId} approved on angle ${angleId}` });
   revalidatePath(`/admin/studio/${angle.design_id}`);
   revalidatePath("/admin/studio");
@@ -208,6 +213,7 @@ export async function rejectImage(imageId: string): Promise<Res> {
   if (angle?.approved_image_id === imageId) {
     await admin.from("design_angles").update({ approved_image_id: null }).eq("id", angle.id);
     await flipLive(angle.design_id);
+    await syncCatalogFrontQuietly(angle.design_id);
   }
   const { data: design } = await admin.from("designs").select("drive_folder_id").eq("id", img.design_id!).maybeSingle();
   if (img.file_ref && (isStorageRef(img.file_ref) || design?.drive_folder_id)) {
@@ -260,6 +266,7 @@ export async function saveCrop(
     .single();
   if (error) return fail(error.message);
   await ensureDesignImagery(admin, designId);
+  await syncCatalogFrontQuietly(designId);
   revalidatePath(`/admin/studio/${designId}`);
   return { ok: true, imageId: row.id };
 }
@@ -290,6 +297,7 @@ export async function setAngleSource(angleId: string, imageId: string): Promise<
   const { error } = await admin.from("design_angles").update({ source_image_id: imageId, source_ref: img.file_ref, updated_at: new Date().toISOString() }).eq("id", angleId);
   if (error) return fail(error.message);
   await ensureDesignImagery(admin, angle.design_id);
+  await syncCatalogFrontQuietly(angle.design_id);
   revalidatePath(`/admin/studio/${angle.design_id}`);
   return { ok: true };
 }
@@ -300,6 +308,7 @@ export async function syncDrivePhotos(designId: string): Promise<Res & { added?:
   const { ingestDriveFolder } = await import("@/lib/design-image-store");
   const res = await ingestDriveFolder(designId);
   if (!res.ok) return fail(res.error ?? "Sync failed");
+  await syncCatalogFrontQuietly(designId);
   revalidatePath(`/admin/studio/${designId}`);
   return { ok: true, added: res.added };
 }
