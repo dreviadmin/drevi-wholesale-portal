@@ -5,3 +5,18 @@
 node_modules
 .git
 *.tsbuildinfo
+
+# Never upload secrets or plaintext logins with a CLI deploy (audit round 2).
+# `npx vercel` uploads the working tree and reads only THIS file plus its own
+# short default list (which covers .env.local and .env.*.local, nothing
+# else) — .gitignore does not apply. So the secret ignores are repeated here.
+# backups/ holds buyer exports and import plans with plaintext passwords; the
+# env files and service-account JSON hold server secrets (Vercel has its own
+# env vars, so the build never needs them). Mirrors .gitignore.
+backups/
+.env*
+*sa*.json
+*service-account*.json
+*-credentials.json
+pipeline/.env
+pipeline/.venv/
