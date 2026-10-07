@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin, requireStaff } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { syncCatalogFrontQuietly } from "@/lib/studio/catalog-front";
 import { writeAuditEvent } from "@/lib/audit";
 import { DETAIL_ANGLES } from "@/lib/studio/state";
 import { loadVocab } from "@/lib/sku/vocab-live";
@@ -181,7 +182,7 @@ export async function approveAllBatch(candidateIds: string[]): Promise<{ ok: boo
   }
   // D3 once per design touched.
   for (const designId of flippedDesigns) {
-    await admin.from("publish_targets").update({ state: "changes_pending" }).eq("design_id", designId).eq("state", "live");
+    await admin.from("publish_targets").update({ state: "changes_pending" }).eq("design_id", designId).eq("state", "live");    await syncCatalogFrontQuietly(designId);
   }
   await writeAuditEvent({ eventType: "studio_candidate_approved", staffUserId: staff.id, notes: `batch use-candidates: ${approved} promoted to production` });
   revalidatePath("/admin/studio");

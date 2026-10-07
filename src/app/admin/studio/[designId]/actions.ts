@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { syncCatalogFrontQuietly } from "@/lib/studio/catalog-front";
 import { sweepStaleJobs, cancelJobsForAngle } from "@/lib/pipeline/sweep";
 import { writeAuditEvent } from "@/lib/audit";
 import { defaultAnglePrompt } from "@/lib/studio/prompts";
@@ -66,6 +67,7 @@ export async function approveCandidate(candidateId: string): Promise<Res> {
 
   await flipLiveTargets(angle.design_id);
   await writeAuditEvent({ eventType: "studio_candidate_approved", staffUserId: staff.id, notes: `candidate ${candidateId} on angle ${angle.id}` });
+  await syncCatalogFrontQuietly(angle.design_id);
   revalidatePath(`/admin/studio/${angle.design_id}`);
   revalidatePath("/admin/studio");
   return { ok: true };
@@ -95,6 +97,7 @@ export async function rejectCandidate(candidateId: string): Promise<Res> {
     await flipLiveTargets(angle.design_id); // the live set just lost a photo
   }
   await writeAuditEvent({ eventType: "studio_candidate_rejected", staffUserId: staff.id, notes: `candidate ${candidateId} on angle ${angle.id}` });
+  await syncCatalogFrontQuietly(angle.design_id);
   revalidatePath(`/admin/studio/${angle.design_id}`);
   revalidatePath("/admin/studio");
   return { ok: true };
@@ -123,6 +126,7 @@ export async function approveAsIs(angleId: string): Promise<Res> {
     await admin.from("design_angles").update({ approved_image_id: angle.source_image_id, updated_at: new Date().toISOString() }).eq("id", angleId);
     await admin.from("publish_targets").update({ state: "changes_pending" }).eq("design_id", angle.design_id).eq("state", "live");
     await writeAuditEvent({ eventType: "studio_candidate_approved", staffUserId: staff.id, notes: `approve-as-is angle ${angleId}` });
+    await syncCatalogFrontQuietly(angle.design_id);
     revalidatePath(`/admin/studio/${angle.design_id}`);
     revalidatePath("/admin/studio");
     return { ok: true };
@@ -140,6 +144,7 @@ export async function approveAsIs(angleId: string): Promise<Res> {
   await admin.from("design_angles").update({ approved_image_id: cand.id, updated_at: new Date().toISOString() }).eq("id", angleId);
   await flipLiveTargets(angle.design_id);
   await writeAuditEvent({ eventType: "studio_candidate_approved", staffUserId: staff.id, notes: `approve-as-is on angle ${angleId}` });
+  await syncCatalogFrontQuietly(angle.design_id);
   revalidatePath(`/admin/studio/${angle.design_id}`);
   return { ok: true };
 }

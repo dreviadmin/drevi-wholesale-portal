@@ -12,6 +12,8 @@ import { storeDesignImage } from "@/lib/design-image-store";
 import { ensureDesignImagery } from "@/lib/design-imagery";
 import { exGstCost } from "@/lib/gst";
 import { isOriginValue } from "@/lib/studio/copy-prompt";
+import { ensureCatalogRow } from "@/lib/catalog-row";
+import { syncCatalogFrontQuietly } from "@/lib/studio/catalog-front";
 
 // Retrofit R3 (§5) — "Log delivery": one screen, one motion per garment.
 //
@@ -255,6 +257,8 @@ export async function uploadIdentPhoto(
   // something to work from instead of an empty card, and the board shows the
   // garment. One shared rule now, so a Drive or Studio photo seeds it too.
   await ensureDesignImagery(admin, designId);
+  // ...and the catalog thumbnail of the sizes minted with it (7 Oct).
+  await syncCatalogFrontQuietly(designId);
   return { ok: true, imageId: row.id, fileRef: up.fileRef };
 }
 
@@ -285,12 +289,31 @@ async function ensureDesignGroup(opts: {
   return { ok: true, designId: design.id };
 }
 
+type GarmentDesignInput = Parameters<typeof mintGarmentDesign>[0];
+type GarmentDesignResult = Awaited<ReturnType<typeof mintGarmentDesign>>;
+
 /**
  * Mint (or resolve) the design group for one garment so the capture sheet can
  * bind a photo to a real SKU before the delivery is saved (§5.3a/b).
  * Sizes drive minting: the first size mints the base, the rest are variants.
+ *
+ * Every minted size gets its catalog row at once (7 Oct, src/lib/catalog-row.ts),
+ * so the garment can be billed or added to an order before the delivery is
+ * saved. A failed row never fails the mint: Modify Order creates it on demand.
  */
-export async function resolveGarmentDesign(input: {
+export async function resolveGarmentDesign(input: GarmentDesignInput): Promise<GarmentDesignResult> {
+  const res = await mintGarmentDesign(input);
+  if (res.ok && res.variantSkus?.length) {
+    const admin = createAdminClient();
+    for (const sku of res.variantSkus) {
+      const row = await ensureCatalogRow(admin, sku, { title: input.description });
+      if (!row.ok) console.warn(`[log-delivery] catalog row for ${sku} not created: ${row.reason}${row.error ? ` (${row.error})` : ""}`);
+    }
+  }
+  return res;
+}
+
+async function mintGarmentDesign(input: {
   designId?: string;
   cat?: string;
   sub?: string;

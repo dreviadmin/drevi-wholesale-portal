@@ -4,6 +4,7 @@ import { BackLink } from "@/components/BackLink";
 import { ZoomImage } from "@/components/Lightbox";
 import { requireAdminOrRedirect, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { currentCatalogImages, lineImage } from "@/lib/catalog-images";
 import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { NotesPanel } from "@/components/admin/NotesPanel";
@@ -207,6 +208,9 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   // R7 §9.3 — production-MOQ flags. Admin only, decision support only: it
   // never blocks confirmation, and none of this reaches the buyer's copy.
   const lineSkus = (o.items ?? []).map((it) => it.sku).filter(Boolean);
+  // Each catalog line shows the catalog's CURRENT photo (7 Oct), the same
+  // one its bills and PDFs now carry.
+  const currentImg = await currentCatalogImages((o.items ?? []).filter((it) => !it.custom).map((it) => it.sku));
   const moqFlags = new Map<string, { message: string; age: string | null }>();
   if (lineSkus.length) {
     const bases = [...new Set(lineSkus.map((sku) => sku.split("-").slice(0, 4).join("-")))];
@@ -381,8 +385,8 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
           const returnedQty = mapped ? returnedOf(mapped.bill.id, mapped.billIndex) : 0;
           return (
           <div key={`${it.sku}-${i}`} className="flex items-start gap-3 py-3" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
-            {it.image_url ? (
-              <ZoomImage src={it.image_url} alt={it.title} width={56} height={70} />
+            {lineImage(it, currentImg) ? (
+              <ZoomImage src={lineImage(it, currentImg)!} alt={it.title} width={56} height={70} />
             ) : (
               <div className="relative flex-shrink-0" style={{ width: 56, height: 70, background: palette.ivoryDeep }} />
             )}

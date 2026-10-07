@@ -3,6 +3,7 @@ import "server-only";
 import { Document, Page, Text, View, Image, StyleSheet, renderToBuffer } from "@react-pdf/renderer";
 import sharp from "sharp";
 import type { Order, OrderItem } from "@/lib/types";
+import { withCurrentImages } from "@/lib/catalog-images";
 import type { CreditLineSnapshot } from "@/lib/credit-core";
 import type { CreditNoteRow } from "@/lib/credit-load";
 import { billDateToIso } from "@/lib/order-lines-core";
@@ -388,8 +389,12 @@ function OrderDoc({ order, buyer, images, billMeta, variant }: { order: Order; b
 }
 
 export async function renderOrderPdf(order: Order, buyer: PdfBuyer, billMeta?: BillMeta, variant?: DocVariant): Promise<Buffer> {
-  const images = await fetchItemImages(order.items ?? []);
-  return renderToBuffer(<OrderDoc order={order} buyer={buyer} images={images} billMeta={billMeta} variant={variant} />);
+  // Every document (order, bill, retail bill) shows each catalog line's
+  // CURRENT photo, not the one snapshotted when the line was added (7 Oct).
+  const items = await withCurrentImages(order.items ?? []);
+  const doc = { ...order, items };
+  const images = await fetchItemImages(items);
+  return renderToBuffer(<OrderDoc order={doc} buyer={buyer} images={images} billMeta={billMeta} variant={variant} />);
 }
 
 // The customer-facing wording for a credit: this document does not move money,

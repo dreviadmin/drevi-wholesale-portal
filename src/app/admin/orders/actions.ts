@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ensureCatalogRow } from "@/lib/catalog-row";
 import { requireAdmin } from "@/lib/staff";
 import { finalizeOrder } from "@/lib/order-finalize";
 import { postOrderMovements, applyMovement } from "@/lib/stock-ledger";
@@ -264,6 +265,11 @@ export async function updateOrderItems(
       .map((l) => order.items[l.index]?.sku)
       .filter(Boolean),
   ];
+  // A garment minted in Log delivery before its catalog row existed (7 Oct)
+  // gets the row now, so adding it never falls back to a custom line.
+  for (const l of lines) {
+    if (l.kind === "add") await ensureCatalogRow(admin, l.sku);
+  }
   const { data: prods } = await admin.from("wholesale_products").select("*").in("sku", skus);
   const bySku = new Map<string, WholesaleProduct>((prods ?? []).map((p) => [p.sku, p as WholesaleProduct]));
 
@@ -876,7 +882,11 @@ export async function findOrderableSku(sku: string): Promise<{ ok: boolean; prod
   const key = (sku ?? "").trim().toUpperCase();
   if (!key) return { ok: false, reason: "missing" };
   const admin = createAdminClient();
-  const { data: p } = await admin.from("wholesale_products").select("*").eq("sku", key).maybeSingle();
+  let { data: p } = await admin.from("wholesale_products").select("*").eq("sku", key).maybeSingle();
+  // Minted but never given its catalog row (before 7 Oct): create it now.
+  if (!p && (await ensureCatalogRow(admin, key)).ok) {
+    ({ data: p } = await admin.from("wholesale_products").select("*").eq("sku", key).maybeSingle());
+  }
   if (!p) return { ok: false, reason: "missing" };
   const prod = p as WholesaleProduct;
   if (!prod.wholesale_visible) return { ok: false, reason: "withdrawn" };
