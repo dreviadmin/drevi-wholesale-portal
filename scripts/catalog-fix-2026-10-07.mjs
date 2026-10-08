@@ -81,12 +81,22 @@ for (const r of registry) {
 }
 
 // ---- 2. Catalog fronts ----------------------------------------------------
-let drive = null;
+let drive = null, driveAuth = null;
+// Like src/lib/drive.ts fetchDriveImage(ref, size): Drive's own resized JPEG
+// first. iPhone HEIC originals trip sharp's HEIF security limits.
 async function driveBytes(fileId) {
   if (!drive) {
     const raw = (process.env.GOOGLE_SERVICE_ACCOUNT_JSON ?? "").trim();
     const creds = JSON.parse(raw.startsWith("{") ? raw : readFileSync(raw, "utf8"));
-    drive = google.drive({ version: "v3", auth: new google.auth.GoogleAuth({ credentials: creds, scopes: ["https://www.googleapis.com/auth/drive.readonly"] }) });
+    driveAuth = new google.auth.GoogleAuth({ credentials: creds, scopes: ["https://www.googleapis.com/auth/drive.readonly"] });
+    drive = google.drive({ version: "v3", auth: driveAuth });
+  }
+  const meta = await drive.files.get({ fileId, fields: "thumbnailLink", supportsAllDrives: true });
+  const thumb = meta.data.thumbnailLink;
+  if (thumb) {
+    const token = await driveAuth.getAccessToken();
+    const r = await fetch(thumb.replace(/=s\d+$/, "=s1600"), { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (r.ok) return Buffer.from(await r.arrayBuffer());
   }
   const r = await drive.files.get({ fileId, alt: "media", supportsAllDrives: true }, { responseType: "arraybuffer" });
   return Buffer.from(r.data);
