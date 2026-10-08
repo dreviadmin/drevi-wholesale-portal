@@ -179,7 +179,12 @@ export async function postMovement(input: {
     p_expiry_months: cfg().expiryMonths,
   });
   if (error) throw new Error(`wallet_post_movement(${input.kind}): ${error.message}`);
-  return (data as LedgerRow | null) ?? null;
+  // The RPC answers NULL for a movement it already posted, but Postgres hands
+  // a NULL row back through PostgREST as an object with every field null. A
+  // real ledger row always has an id, so no id means "already posted" — else
+  // a retried webhook reads as a fresh debit of 0 (a false SHORTFALL).
+  const row = data as LedgerRow | null;
+  return row?.id ? row : null;
 }
 
 /** Lazy expiry: if the clock has run out, post the lapse before anyone reads the balance. */
@@ -304,8 +309,9 @@ export async function voidOpenRedemptions(accountId: string): Promise<void> {
     .or("status.eq.open,and(status.eq.expired,shopify_discount_id.not.is.null)");
   for (const r of (data ?? []) as Array<{ id: string; status: string; shopify_discount_id: string | null }>) {
     // Forget the Shopify id only once the discount is really gone. If the
-    // delete failed (a throttle), the row keeps it, so the nightly sweep or
-    // the next void deletes it instead of a live discount being orphaned.
+    // delete failed (a throttle), the row keeps it, so the nightly sweep (or,
+    // for an expired row, the next void) deletes it instead of a live
+    // discount being orphaned.
     const gone = !r.shopify_discount_id || await deleteDiscount(r.shopify_discount_id).then(
       () => true,
       (e) => { console.warn("[wallet] delete discount:", (e as Error).message); return false; },
