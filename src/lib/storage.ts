@@ -82,9 +82,9 @@ export async function uploadOrderPdf(orderId: string, orderNumber: string, pdf: 
  * every Share / WhatsApp / Copy link working for the buyer. Returns null when
  * the file is not there (callers fall back to the saved link).
  */
-export async function freshOrderPdfUrl(orderId: string, number: string): Promise<string | null> {
+export async function freshOrderPdfUrl(orderId: string, number: string, expiresSec = 60 * 60 * 24 * 365): Promise<string | null> {
   const admin = createAdminClient();
-  const { data, error } = await admin.storage.from(PDF_BUCKET).createSignedUrl(`${orderId}/${number}.pdf`, 60 * 60 * 24 * 365);
+  const { data, error } = await admin.storage.from(PDF_BUCKET).createSignedUrl(`${orderId}/${number}.pdf`, expiresSec);
   return error || !data ? null : data.signedUrl;
 }
 

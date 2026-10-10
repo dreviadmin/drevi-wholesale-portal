@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { regenerateBillPdf } from "@/app/admin/orders/actions";
 import { sharePdfFile, downloadPdfFile, invoiceFileName, waPhone } from "@/lib/share";
+import { invoiceLink } from "@/lib/invoice-link";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 
@@ -58,7 +59,7 @@ export function BillShareActions({
     );
   }
 
-  const text = `Drevi Fashion invoice ${billNumber} (order ${orderNumber}) — ${formatINR(total)}.\nPDF: ${pdfUrl}`;
+  const text = `Drevi Fashion invoice ${billNumber} (order ${orderNumber}) — ${formatINR(total)}.\nPDF: ${invoiceLink(billId)}`;
   const filename = invoiceFileName(billNumber);
 
   function whatsapp() {
@@ -83,7 +84,7 @@ export function BillShareActions({
   }
 
   async function copy() {
-    try { await navigator.clipboard.writeText(pdfUrl!); flash("Invoice link copied"); } catch { flash("Could not copy — use Share"); }
+    try { await navigator.clipboard.writeText(invoiceLink(billId)); flash("Invoice link copied"); } catch { flash("Could not copy — use Share"); }
   }
 
   return (

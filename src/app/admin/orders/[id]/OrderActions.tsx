@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setOrderStatus, sendInvoice, uploadTrackingSheet, syncOrderFromCatalog, type StageDetails } from "@/app/admin/orders/actions";
 import { sharePdfFile, downloadPdfFile, invoiceFileName, waPhone } from "@/lib/share";
+import { invoiceLink } from "@/lib/invoice-link";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { downscalePhoto } from "@/lib/downscale-photo";
@@ -106,7 +107,7 @@ export function OrderActions({
   }
 
   function shareText() {
-    return `Drevi order ${orderNumber ?? ""} — total ${total != null ? formatINR(total) : ""}. Invoice PDF: ${pdfUrl}`;
+    return `Drevi order ${orderNumber ?? ""} — total ${total != null ? formatINR(total) : ""}. Invoice PDF: ${invoiceLink(orderId)}`;
   }
 
   // Share the actual PDF file (named Drevi-Invoice-…) — buyers distrust bare

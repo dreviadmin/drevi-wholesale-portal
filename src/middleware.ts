@@ -6,7 +6,7 @@ const PUBLIC_PATHS = ["/", "/login", "/forgot-password", "/wholesale", "/~offlin
 // /go/<token> (one-tap sign-in) and /id/<token> (the buyer's username and
 // password) are the WhatsApp login buttons: they are how a signed-out buyer
 // gets IN, so they cannot sit behind the gate (0073).
-const PUBLIC_PREFIXES = ["/api/cron", "/api/dev", "/api/health", "/go/", "/id/"];
+const PUBLIC_PREFIXES = ["/api/cron", "/api/dev", "/api/health", "/go/", "/id/", "/i/"];
 
 function isPublic(pathname: string): boolean {
   if (PUBLIC_PATHS.includes(pathname)) return true;

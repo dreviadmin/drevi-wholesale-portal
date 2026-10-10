@@ -13,6 +13,7 @@ import { groupByBase } from "@/lib/variants";
 import { captureBuyer, submitExhibitionOrder, endSession, updateBuyerContact, uploadCustomItemPhoto } from "../actions";
 import { uploadBuyerCard } from "@/app/admin/buyers/actions";
 import { buildVCard, downloadVCard, sharePdfFile, invoiceFileName, waPhone } from "@/lib/share";
+import { invoiceLink } from "@/lib/invoice-link";
 import { cacheProducts, enqueue, updateQueuedCaptureForm } from "@/lib/offline";
 import { uuid } from "@/lib/uuid";
 import { getStockState, qtyCap } from "@/lib/stock";
@@ -626,7 +627,7 @@ export function ExhibitionWizard({
   }
 
   function invoiceShareText() {
-    return `Drevi order ${confirmInfo?.orderNumber} — total ${formatINR(grandTotal)}. Invoice PDF: ${confirmInfo?.pdfUrl}`;
+    return `Drevi order ${confirmInfo?.orderNumber} — total ${formatINR(grandTotal)}. Invoice PDF: ${confirmInfo?.orderId ? invoiceLink(confirmInfo.orderId) : confirmInfo?.pdfUrl}`;
   }
 
   // Generic share sheet (AirDrop, mail, any app); falls back to copying.
