@@ -9,6 +9,7 @@ import { loadVocab } from "@/lib/sku/vocab-live";
 import { SIZES } from "@/lib/sku/vocab";
 import { ORIGIN_OPTIONS, originLabel } from "@/lib/studio/copy-prompt";
 import { to99 } from "@/lib/pricing";
+import { effectiveCompareAt } from "@/lib/retail-price-core";
 import { shopifyTagsFrom, splitOccasions } from "@/lib/shopify-tags";
 import { loadDesignDetail } from "./studio/load";
 import { colorNameFor, describeDesignFacts } from "./studio/facts";
@@ -212,6 +213,18 @@ export async function publishShopify(designId: string, staffId: string, staffEma
     if (!(retail > 0)) {
       throw new Error("Retail price (MRP) not set — set it in Product Master before pushing to Shopify");
     }
+    // Retail compare-at (Ansh, 22 Oct 2026): the "was" price Shopify shows
+    // struck through. Read on its own so a push still works before 0076 is
+    // applied; shown only while above the price (retail-price-core.ts).
+    const { data: compareRow } = await admin.from("designs").select("compare_at_price").eq("id", designId).maybeSingle();
+    const compareBase = effectiveCompareAt({ compare_at_price: (compareRow as { compare_at_price?: number | null } | null)?.compare_at_price }, retail);
+    // A derived size scales it by the same multiplier and ₹…99 rounding as its
+    // price; null whenever it would not sit above that size's price.
+    const comparedFor = (mult: number, price: number): number | null => {
+      if (compareBase == null) return null;
+      const c = mult === 1 ? compareBase : to99(compareBase * mult);
+      return c > price ? c : null;
+    };
 
     const { data: variantRows } = await admin
       .from("wholesale_products")
@@ -283,7 +296,7 @@ export async function publishShopify(designId: string, staffId: string, staffEma
     const priced = (mult: number) => (mult === 1 ? retail : to99(retail * mult));
 
     const ladder = origin === "drevi_original" ? ORIGINAL_SIZES : CURATED_SIZES.map((x) => ({ ...x, mult: 1 }));
-    const sized: { sku: string; qty: number; size: string; label: string; price: number }[] = offersAlterationSizes
+    const sized: { sku: string; qty: number; size: string; label: string; price: number; compareAt: number | null }[] = offersAlterationSizes
       ? ladder.map((sz) => ({
           sku: skuFor(sz.token),
           // A size the portal actually holds keeps its own count; the rest ride
@@ -292,8 +305,9 @@ export async function publishShopify(designId: string, staffId: string, staffEma
           size: sz.token,
           label: sz.label,
           price: priced(sz.mult),
+          compareAt: comparedFor(sz.mult, priced(sz.mult)),
         }))
-      : stocked.map((v) => ({ ...v, label: vocab.sizes[v.size] ?? v.size, price: retail }));
+      : stocked.map((v) => ({ ...v, label: vocab.sizes[v.size] ?? v.size, price: retail, compareAt: comparedFor(1, retail) }));
 
     const facts = describeDesignFacts(
       { category: designRow.category, subCategory: designRow.sub_category, color: designRow.color, colorName: designRow.color_name },
@@ -419,6 +433,8 @@ export async function publishShopify(designId: string, staffId: string, staffEma
       variants: sized.map((v) => ({
         optionValues: [{ optionName: SIZE_OPTION_NAME, name: v.label }],
         price: v.price.toFixed(2),
+        // Always sent: null clears a compare-at price that was removed in Studio.
+        compareAtPrice: v.compareAt != null ? v.compareAt.toFixed(2) : null,
         // Both carry the complete Drevi SKU, size and colour included (Ansh,
         // 19 Sep) — the barcode is what a scanner in the shop reads.
         sku: v.sku,
@@ -478,7 +494,8 @@ export async function publishShopify(designId: string, staffId: string, staffEma
       notes:
         `shopify draft push ${board.baseSku}·${board.color} → ${remoteId} by ${staffEmail} — ` +
         `₹${retail}${offersAlterationSizes ? ` (${originLabel(origin)} size set)` : ""} on ${sized.length} size(s) ` +
-        `[${sized.map((v) => `${v.label}:${v.qty}${v.price === retail ? "" : `@₹${v.price}`}`).join(" ")}], ` +
+        `[${sized.map((v) => `${v.label}:${v.qty}${v.price === retail ? "" : `@₹${v.price}`}`).join(" ")}]` +
+        `${compareBase != null ? ` compare-at ₹${compareBase}` : ""}, ` +
         `${mediaUnchanged ? "media unchanged" : `${ordered.length} image(s)`}`,
     });
     return { ok: true, remoteId, variants: sized.length, price: retail };

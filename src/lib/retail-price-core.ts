@@ -13,6 +13,8 @@
 export interface DesignMrpRow {
   mrp_override?: number | string | null;
   auto_mrp?: number | string | null;
+  /** Retail compare-at ("was") price (0076). */
+  compare_at_price?: number | string | null;
 }
 
 const positive = (v: unknown): number | null => {
@@ -36,4 +38,18 @@ export function designKeyOf(sku: string): string | null {
   const parts = sku.trim().toUpperCase().split("-");
   if (parts.length < 5) return null;
   return `${parts.slice(0, 4).join("-")}|${parts[parts.length - 1]}`;
+}
+
+// The retail compare-at ("was") price (Ansh, 22 Oct 2026): printed struck
+// through above the MRP on the tag and sent to Shopify as compareAtPrice. It
+// only counts while it is ABOVE the price it is compared with, so an MRP
+// raised past it later stops showing it instead of printing a "was" price
+// lower than the price.
+
+/** The compare-at price to show beside `price`, or null when there is none to show. */
+export function effectiveCompareAt(design: DesignMrpRow | null | undefined, price: number | null | undefined): number | null {
+  const cmp = positive(design?.compare_at_price);
+  const p = positive(price);
+  if (cmp == null || p == null) return null;
+  return Math.round(cmp) > Math.round(p) ? cmp : null;
 }

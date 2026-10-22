@@ -28,7 +28,7 @@ describe("resolveLabelDatum — what a Studio-printed tag says", () => {
       design: { mrp_override: 10699, vendor_id: "uuid-sp", vendor_sku: "X" },
       vendorNameById: vendors,
     });
-    expect(d).toEqual({ sku: "DD-LEH-FLR-002-XL-IVR", found: true, vendorCode: "AN-AC-77-03.4-05.2", mrp: "10,699" });
+    expect(d).toEqual({ sku: "DD-LEH-FLR-002-XL-IVR", found: true, vendorCode: "AN-AC-77-03.4-05.2", mrp: "10,699", compareAt: "" });
   });
 
   it("a Log-delivery garment: vendor from vendor_id, MRP from the design", () => {
@@ -49,7 +49,7 @@ describe("resolveLabelDatum — what a Studio-printed tag says", () => {
       design: { vendor_id: "uuid-sp", mrp_override: 7999, auto_wholesale: 3600 },
       vendorNameById: vendors,
     });
-    expect(d).toEqual({ sku: "DD-SAR-PRD-031-L-PNK", found: true, vendorCode: "SH-----.--03.6", mrp: "7,999" });
+    expect(d).toEqual({ sku: "DD-SAR-PRD-031-L-PNK", found: true, vendorCode: "SH-----.--03.6", mrp: "7,999", compareAt: "" });
   });
 
   it("the design's vendor fills in only when the vendor-info row has none", () => {
@@ -62,7 +62,7 @@ describe("resolveLabelDatum — what a Studio-printed tag says", () => {
 
   it("nothing anywhere → the old not-found tag", () => {
     expect(resolveLabelDatum({ sku: "DD-A-B-001-M-RED", vendorInfo: null, wholesalePrice: null, inCatalog: false, design: null, vendorNameById: vendors }))
-      .toEqual({ sku: "DD-A-B-001-M-RED", found: false, vendorCode: "---------", mrp: "" });
+      .toEqual({ sku: "DD-A-B-001-M-RED", found: false, vendorCode: "---------", mrp: "", compareAt: "" });
   });
 
   it("an unpriced design stays honest: Rs - rather than an invented price", () => {
@@ -70,6 +70,19 @@ describe("resolveLabelDatum — what a Studio-printed tag says", () => {
     expect(d.mrp).toBe("");
     // Same shape the old route printed for an empty row: "--"-"-"-"--.-"-"--.-".
     expect(d.vendorCode).toBe("-------.----.-");
+  });
+});
+
+describe("compare-at price on the tag (22 Oct 2026)", () => {
+  const base = { vendorInfo: null, wholesalePrice: null, inCatalog: true, vendorNameById: new Map<string, string>() };
+  it("prints the compare-at price above the MRP when it is higher", () => {
+    const d = resolveLabelDatum({ ...base, sku: "DD-LEH-FLR-101-L-RST", design: { mrp_override: 14399, compare_at_price: 18999 } });
+    expect(d.mrp).toBe("14,399");
+    expect(d.compareAt).toBe("18,999");
+  });
+  it("prints none when it is not above the MRP, or not set", () => {
+    expect(resolveLabelDatum({ ...base, sku: "DD-LEH-FLR-101-L-RST", design: { mrp_override: 14399, compare_at_price: 14399 } }).compareAt).toBe("");
+    expect(resolveLabelDatum({ ...base, sku: "DD-LEH-FLR-101-L-RST", design: { mrp_override: 14399 } }).compareAt).toBe("");
   });
 });
 

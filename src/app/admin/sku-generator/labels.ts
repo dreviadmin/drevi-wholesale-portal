@@ -18,7 +18,7 @@ export const CAL_KEY = "drevi_sheet_cal_v1";
 export const TRAY_KEY = "drevi_print_tray_v1";
 
 export interface TrayItem { sku: string; copies: number }
-export interface PrintDatum { sku: string; found: boolean; vendorCode: string; mrp: string }
+export interface PrintDatum { sku: string; found: boolean; vendorCode: string; mrp: string; compareAt?: string }
 
 /**
  * Stage SKUs on this device's print tray (the handoff SkuGeneratorClient reads
@@ -87,7 +87,11 @@ function drawLabelAt(
     const lineH = 2.05;
     const codeH = 2.0;
     const priceH = 3.2;
-    const blockH = skuLines.length * lineH + codeLines.length * codeH + priceH + 1.2;
+    // The retail compare-at ("was") price, struck through on its own line
+    // above the MRP (Ansh, 22 Oct 2026). Only drawn when there is one.
+    const compareText = datum?.compareAt ? `Rs ${datum.compareAt}` : "";
+    const compareH = compareText ? 2.5 : 0;
+    const blockH = skuLines.length * lineH + codeLines.length * codeH + compareH + priceH + 1.2;
     let y = Math.max(2.6, (H - blockH) / 2 + 1.8);
     for (const line of skuLines) {
       doc.text(line, textX0, y);
@@ -99,6 +103,24 @@ function drawLabelAt(
       if (i < codeLines.length - 1) y += codeH;
     });
     y += codeH + 0.9;
+    if (compareText) {
+      doc.setFont("helvetica", "normal");
+      let cSize = 6;
+      doc.setFontSize(cSize);
+      while (cSize > 4.5 && doc.getTextWidth(compareText) > textW) {
+        cSize -= 0.25;
+        doc.setFontSize(cSize);
+      }
+      doc.setTextColor(90, 90, 90);
+      const cy = y + 0.9;
+      doc.text(compareText, textX0, cy);
+      // The strike: a hairline through the middle of the digits.
+      doc.setDrawColor(70, 70, 70);
+      doc.setLineWidth(0.18);
+      doc.line(textX0 - 0.2, cy - cSize * 0.12, textX0 + doc.getTextWidth(compareText) + 0.2, cy - cSize * 0.12);
+      doc.setTextColor(20, 20, 20);
+      y += compareH;
+    }
     const mrpText = datum?.mrp ? `Rs ${datum.mrp}` : "Rs -";
     doc.setFont("helvetica", "bold");
     let size = 8;

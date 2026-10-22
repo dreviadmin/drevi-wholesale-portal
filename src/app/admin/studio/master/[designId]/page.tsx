@@ -26,6 +26,11 @@ export default async function MasterPage({ params }: { params: { designId: strin
     .select("vendor_id, fabric, handwork, origin, style, color_name, specs_verified, tier, markup_multiplier, auto_mrp, mrp_override, wholesale_multiplier, auto_wholesale, wholesale_override, supply_mode, vendor_stock_qty, making_days, making_moq, delivery_days, supply_note, supply_updated_at, vendor_sku, ident_image_id, updated_at")
     .eq("id", params.designId)
     .single();
+  // Read on its own: compare_at_price arrives with 0076, and a deploy that
+  // lands before the migration must still open the page (the box just reads empty).
+  const { data: compareRow } = await admin.from("designs").select("compare_at_price").eq("id", params.designId).maybeSingle();
+  const compareAtPrice = compareRow && (compareRow as { compare_at_price?: number | null }).compare_at_price != null
+    ? Number((compareRow as { compare_at_price: number }).compare_at_price) : null;
   const { data: allVariants } = await admin
     .from("wholesale_products")
     .select("sku, current_qty, wholesale_price, wholesale_visible, hsn, location")
@@ -101,6 +106,7 @@ export default async function MasterPage({ params }: { params: { designId: strin
         markupMultiplier: Number(design?.markup_multiplier ?? 2.5),
         autoMrp: design?.auto_mrp != null ? Number(design.auto_mrp) : null,
         mrpOverride: design?.mrp_override != null ? Number(design.mrp_override) : null,
+        compareAtPrice,
         wholesaleMultiplier: Number(design?.wholesale_multiplier ?? DEFAULT_WHOLESALE_MULTIPLIER),
         autoWholesale: design?.auto_wholesale != null ? Number(design.auto_wholesale) : null,
         wholesaleOverride: design?.wholesale_override != null ? Number(design.wholesale_override) : null,

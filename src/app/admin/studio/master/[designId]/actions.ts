@@ -164,7 +164,7 @@ export async function saveSpecs(
  */
 export async function savePricing(
   designId: string,
-  patch: { markupMultiplier: number; mrpOverride: number | null; wholesaleMultiplier: number; wholesaleOverride: number | null; lastCost?: number | null },
+  patch: { markupMultiplier: number; mrpOverride: number | null; wholesaleMultiplier: number; wholesaleOverride: number | null; lastCost?: number | null; compareAtPrice?: number | null },
 ): Promise<Res & { autoMrp?: number; autoWholesale?: number; count?: number }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
@@ -220,6 +220,18 @@ export async function savePricing(
   const mrpOverride = patch.mrpOverride && patch.mrpOverride > 0 ? patch.mrpOverride : null;
   const wsOverride = patch.wholesaleOverride && patch.wholesaleOverride > 0 ? patch.wholesaleOverride : null;
   const effectiveWholesale = wsOverride ?? autoWholesale;
+  // Retail compare-at (22 Oct 2026). undefined = an older client that does not
+  // send it: leave the stored value alone. It must sit above the MRP this save
+  // sets, checked BEFORE anything is written, so a refused compare-at never
+  // half-saves the pricing card.
+  const compareAt = patch.compareAtPrice === undefined ? undefined
+    : patch.compareAtPrice && patch.compareAtPrice > 0 ? Math.round(patch.compareAtPrice * 100) / 100 : null;
+  const mrpAfterSave = mrpOverride ?? autoMrp;
+  if (compareAt != null && !(mrpAfterSave && Math.round(compareAt) > Math.round(mrpAfterSave))) {
+    return fail(mrpAfterSave
+      ? `Compare-at price must be higher than the MRP (₹${Math.round(mrpAfterSave).toLocaleString("en-IN")}). Nothing was saved.`
+      : "Set the MRP before a compare-at price. Nothing was saved.");
+  }
 
   // The cost lands BEFORE the design row, so a design never carries autos
   // computed from a cost that failed to save.
@@ -228,18 +240,19 @@ export async function savePricing(
     if (!res.ok) return res;
   }
 
-  const { error } = await admin
-    .from("designs")
-    .update({
-      markup_multiplier: mult,
-      auto_mrp: autoMrp,
-      mrp_override: mrpOverride,
-      wholesale_multiplier: wsMult,
-      auto_wholesale: autoWholesale,
-      wholesale_override: wsOverride,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", designId);
+  const designPatch: Record<string, unknown> = {
+    markup_multiplier: mult,
+    auto_mrp: autoMrp,
+    mrp_override: mrpOverride,
+    wholesale_multiplier: wsMult,
+    auto_wholesale: autoWholesale,
+    wholesale_override: wsOverride,
+    updated_at: new Date().toISOString(),
+  };
+  if (compareAt !== undefined) designPatch.compare_at_price = compareAt;
+  const { error } = await admin.from("designs").update(designPatch).eq("id", designId);
+  // 42703: 0076 not applied yet. Say so plainly rather than a column error.
+  if (error?.code === "42703" && compareAt !== undefined) return fail("The compare-at price needs database update 0076 first. Nothing was saved.");
   if (error) return fail(error.message);
 
   // A design whose sizes are deliberately priced apart is NOT flattened by a
@@ -263,7 +276,8 @@ export async function savePricing(
       // The cost is named first because it moves both autos — a later reader
       // asking "why did this design reprice?" should see it without digging.
       `master pricing ${designId} — cost ${typedCost != null ? `₹${typedCost} set by hand + locked on ${rows.length} size(s)` : `₹${cost || "—"} (unchanged)`}; ` +
-      `mrp mult=${mult} override=${mrpOverride ?? "—"} auto=${autoMrp ?? "—"}; ` +
+      `mrp mult=${mult} override=${mrpOverride ?? "—"} auto=${autoMrp ?? "—"}` +
+      `${compareAt !== undefined ? ` compare-at=${compareAt ?? "—"}` : ""}; ` +
       `wholesale mult=${wsMult} override=${wsOverride ?? "—"} auto=${autoWholesale ?? "—"} → ₹${effectiveWholesale ?? "—"} on ${count} variant(s)`,
   });
   revalidatePath(`/admin/studio/master/${designId}`);

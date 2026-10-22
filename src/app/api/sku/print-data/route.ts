@@ -5,6 +5,17 @@ import { designKeyOf, resolveLabelDatum, type DesignPriceRow, type VendorInfoRow
 
 export const dynamic = "force-dynamic";
 
+const DESIGN_COLS = "base_sku, color, vendor_id, vendor_sku, mrp_override, auto_mrp, wholesale_override, auto_wholesale";
+
+// compare_at_price arrives with migration 0076. Until it is applied a deploy
+// must still print tags (just without the "was" price), so a missing column
+// (42703) retries without it rather than failing the whole roll.
+async function readDesignPrices(admin: ReturnType<typeof createAdminClient>, bases: string[]) {
+  const withCompare = await admin.from("designs").select(`${DESIGN_COLS}, compare_at_price`).in("base_sku", bases);
+  if (withCompare.error?.code === "42703") return admin.from("designs").select(DESIGN_COLS).in("base_sku", bases);
+  return withCompare;
+}
+
 // Label print data. Staff can print labels, so this endpoint returns ONLY the
 // derived, deliberately-obfuscated strings — never raw cost or wholesale
 // numbers. The rule for each field lives in src/lib/label-data.ts: the
@@ -33,9 +44,7 @@ export async function POST(request: Request) {
   const [vendRes, prodRes, designRes] = await Promise.all([
     admin.from("product_vendor_info").select("sku, vendor_name, vendor_id, vendor_sku, last_cost, retail_price").in("sku", skus),
     admin.from("wholesale_products").select("sku, wholesale_price").in("sku", skus),
-    bases.length
-      ? admin.from("designs").select("base_sku, color, vendor_id, vendor_sku, mrp_override, auto_mrp, wholesale_override, auto_wholesale").in("base_sku", bases)
-      : Promise.resolve({ data: [], error: null }),
+    bases.length ? readDesignPrices(admin, bases) : Promise.resolve({ data: [], error: null }),
   ]);
   // A failed read must not print a roll of dashes that looks like real tags.
   const failed = [vendRes, prodRes, designRes].find((r) => r.error);

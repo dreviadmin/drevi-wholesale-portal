@@ -10,7 +10,7 @@ import { useDraft } from "@/lib/useDraft";
 import { withFrom } from "@/components/BackLink";
 import { supplyAge } from "@/lib/availability";
 import { autoMrpFrom, autoWholesaleFrom, clampMultiplier, DEFAULT_MARKUP_MULTIPLIER, DEFAULT_WHOLESALE_MULTIPLIER } from "@/lib/pricing";
-import { specsMrp } from "@/lib/retail-price-core";
+import { effectiveCompareAt, specsMrp } from "@/lib/retail-price-core";
 import { ORIGIN_OPTIONS, STYLE_OPTIONS } from "@/lib/studio/copy-prompt";
 import type { BoardRow } from "@/lib/studio/load";
 import { useToast } from "@/lib/use-toast";
@@ -29,6 +29,8 @@ import type { LastVendor } from "@/lib/last-vendor";
 interface DesignFields {
   fabric: string; handwork: string; origin: string; style?: string; colorName?: string | null; specsVerified: boolean;
   tier: string; markupMultiplier: number; autoMrp: number | null; mrpOverride: number | null;
+  /** Retail compare-at ("was") price (0076); null = none. */
+  compareAtPrice?: number | null;
   wholesaleMultiplier: number; autoWholesale: number | null; wholesaleOverride: number | null;
   vendorSku?: string | null;
   supply?: SupplyBlock;
@@ -79,6 +81,7 @@ export function MasterEditor({ board, design, variants, lastCost, lastCostLocked
   const pricingSeed = {
     markupMultiplier: design.markupMultiplier,
     mrpOverride: design.mrpOverride?.toString() ?? "",
+    compareAt: design.compareAtPrice?.toString() ?? "",
     wholesaleMultiplier: design.wholesaleMultiplier,
     wholesaleOverride: design.wholesaleOverride?.toString() ?? "",
     lastCost: costSeed,
@@ -146,6 +149,15 @@ export function MasterEditor({ board, design, variants, lastCost, lastCostLocked
   const savedMrp = specsMrp({ mrp_override: design.mrpOverride, auto_mrp: design.autoMrp });
   const inUseMrp = savedMrp ?? (sheetMrp > 0 ? sheetMrp : null);
   const pendingMrp = effectiveMrp && Math.round(Number(effectiveMrp)) !== Math.round(savedMrp ?? 0) ? Number(effectiveMrp) : null;
+  // Retail compare-at (Ansh, 22 Oct 2026): the "was" price printed struck
+  // through above the MRP on tags and sent to Shopify as compareAtPrice. The
+  // preview uses the MRP this save will set, the same rule savePricing checks.
+  const compareTyped = (pricing.compareAt ?? "").trim();
+  const compareNum = compareTyped !== "" ? Number(compareTyped) : null;
+  // The MRP this save sets (override, else the auto-MRP) — what savePricing checks against.
+  const priceAfterSave = effectiveMrp ? Number(effectiveMrp) : null;
+  const compareShown = compareNum != null ? effectiveCompareAt({ compare_at_price: compareNum }, priceAfterSave) : null;
+  const compareTooLow = compareNum != null && compareNum > 0 && compareShown == null && priceAfterSave != null;
   const previewAutoWholesale = autoWholesaleFrom(previewCost, clampMultiplier(Number(pricing.wholesaleMultiplier), DEFAULT_WHOLESALE_MULTIPLIER));
   const effectiveWholesale = pricing.wholesaleOverride ? Number(pricing.wholesaleOverride) : previewAutoWholesale ?? design.autoWholesale;
   // Mirrors the server rule in savePricing: an auto price is only pushed onto
@@ -311,6 +323,24 @@ export function MasterEditor({ board, design, variants, lastCost, lastCostLocked
             <input type="number" min="0" value={pricing.mrpOverride} placeholder="—" onChange={(e) => setPricing((s) => ({ ...s, mrpOverride: e.target.value }))} className="w-full mt-1 font-body" style={inputStyle} />
           </label>
         </div>
+        <label className="font-body block mt-3" style={{ fontSize: 10, color: palette.mutedGreige }}>
+          <span className="uppercase" style={{ letterSpacing: "0.14em" }}>Compare-at price ₹ (retail)</span>
+          <input
+            type="number" inputMode="numeric" min="0" step="1"
+            value={pricing.compareAt ?? ""}
+            placeholder="none"
+            onChange={(e) => setPricing((s) => ({ ...s, compareAt: e.target.value }))}
+            className="w-full mt-1 font-body"
+            style={inputStyle}
+          />
+          <div className="mt-1" style={{ fontSize: 9.5, lineHeight: 1.5 }}>
+            {compareTooLow
+              ? <span style={{ color: palette.crimsonText }}>Must be higher than the MRP ({formatINR(priceAfterSave!)}) to show. Saving will refuse it.</span>
+              : compareShown != null
+                ? <span style={{ color: palette.goldDeep }}>Tag and website show <s>{formatINR(compareShown)}</s> above <b>{formatINR(priceAfterSave!)}</b>.</span>
+                : <span>The &ldquo;was&rdquo; price, struck through above the MRP on price tags and on the website. Leave blank for none.</span>}
+          </div>
+        </label>
         <div className="font-body mt-2" style={{ fontSize: 11, color: palette.softBlack, lineHeight: 1.6 }}>
           MRP on tags, the counter &amp; Shopify: <b style={{ color: palette.black }}>{inUseMrp ? formatINR(inUseMrp) : "—"}</b>
           {savedMrp == null && sheetMrp > 0 && <span style={{ color: palette.mutedGreige }}> (from the sheet — nothing saved here yet)</span>}
@@ -358,6 +388,7 @@ export function MasterEditor({ board, design, variants, lastCost, lastCostLocked
           onClick={() => run(() => savePricing(board.id, {
             markupMultiplier: Number(pricing.markupMultiplier),
             mrpOverride: pricing.mrpOverride ? Number(pricing.mrpOverride) : null,
+            compareAtPrice: compareNum && compareNum > 0 ? compareNum : null,
             wholesaleMultiplier: Number(pricing.wholesaleMultiplier),
             wholesaleOverride: pricing.wholesaleOverride ? Number(pricing.wholesaleOverride) : null,
             // null = leave the stored cost alone. Only a box that was actually

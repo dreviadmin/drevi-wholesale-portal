@@ -15,7 +15,7 @@
 // the shared rule in retail-price-core.ts, so the tag, the counter bill and
 // the price check can never quote different prices.
 
-import { effectiveRetailPrice } from "./retail-price-core";
+import { effectiveCompareAt, effectiveRetailPrice } from "./retail-price-core";
 export { designKeyOf } from "./retail-price-core";
 
 export interface VendorInfoRow {
@@ -33,6 +33,8 @@ export interface DesignPriceRow {
   auto_mrp?: number | string | null;
   wholesale_override?: number | string | null;
   auto_wholesale?: number | string | null;
+  /** Retail compare-at ("was") price (0076); printed struck through above the MRP. */
+  compare_at_price?: number | string | null;
 }
 
 export interface LabelDatum {
@@ -40,6 +42,8 @@ export interface LabelDatum {
   found: boolean;
   vendorCode: string;
   mrp: string;
+  /** The struck-through "was" price above the MRP; "" when there is none to show. */
+  compareAt: string;
 }
 
 const positive = (v: unknown): number | null => {
@@ -73,7 +77,7 @@ export function resolveLabelDatum(input: {
 }): LabelDatum {
   const { sku, vendorInfo: v, design: d, vendorNameById } = input;
   const found = !!(v || input.inCatalog || d);
-  if (!found) return { sku, found: false, vendorCode: "---------", mrp: "" };
+  if (!found) return { sku, found: false, vendorCode: "---------", mrp: "", compareAt: "" };
 
   const vendorName =
     v?.vendor_name?.trim() ||
@@ -86,12 +90,15 @@ export function resolveLabelDatum(input: {
   // Specs MRP first, the sheet's Final MRP only as the fallback — the same
   // rule the counter bill and the price check use (retail-price-core.ts).
   const mrpNum = effectiveRetailPrice(d, v?.retail_price);
+  // Shown only while it is above the MRP (22 Oct 2026, retail-price-core.ts).
+  const compareNum = effectiveCompareAt(d, mrpNum);
 
   return {
     sku,
     found: true,
     vendorCode: `${v2(vendorName)}-${vendorSku}-${kf(cost)}-${kf(wholesale)}`,
     mrp: mrpNum != null ? Math.round(mrpNum).toLocaleString("en-IN") : "",
+    compareAt: compareNum != null ? Math.round(compareNum).toLocaleString("en-IN") : "",
   };
 }
 
