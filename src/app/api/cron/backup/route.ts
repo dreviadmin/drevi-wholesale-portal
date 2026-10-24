@@ -18,13 +18,19 @@ export async function GET(request: Request) {
 
   try {
     const payload = await exportAllTables();
-    // Storage (visiting cards, custom-item photos, vendor bills) rides along
-    // once daily — the 03:00 IST hourly run, or on demand via ?storage=1 —
-    // keeping free-tier egress modest while tables stay hourly.
+    // Storage is NOT exported automatically any more (24 Oct 2026). The
+    // 03:00 IST run downloaded every object in the STORAGE_BUCKETS list
+    // (about 170 MB, mostly visiting cards) through this one 60 s function
+    // every night: about 5 GB of egress a month, the Free plan's whole
+    // allowance on its own, for a backup that cannot fit in one response
+    // anyway. With egress and storage over quota, Supabase restricted the
+    // project on 23 Oct and the portal went down until the Pro upgrade.
+    // Tables stay hourly; ?storage=1 still runs it by hand.
+    // A real file backup belongs outside this route (an incremental copy from
+    // a GitHub Action), not here.
     const url = new URL(request.url);
-    const istHour = Number(new Date().toLocaleString("en-GB", { hour: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }));
     let storageMeta: Record<string, unknown> = {};
-    if (url.searchParams.get("storage") === "1" || istHour === 3) {
+    if (url.searchParams.get("storage") === "1") {
       const storage = await exportStorage();
       storageMeta = { storage_files: storage.files, storage_warnings: storage.warnings };
     }
