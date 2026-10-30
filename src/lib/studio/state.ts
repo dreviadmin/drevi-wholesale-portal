@@ -51,6 +51,41 @@ export interface DesignStateInput {
 // design as `blocked` instead of pushing it, and covers whatever calls it next.
 const DISCONTINUED_BLOCKER = "Discontinued — restore it first";
 
+/**
+ * Where a Shopify take-down leaves the product. A discontinued garment goes to
+ * ARCHIVED, a plain unpublish to DRAFT (Ansh, 31 Oct). `archive` is for
+ * setDiscontinued, whose Shopify call comes before it writes the stamp. The
+ * stamp is for the retry: if that call failed, the Unpublish button has to
+ * finish the job as an archive, not leave the product in DRAFT.
+ */
+export function takedownStatus(opts: { archive?: boolean; discontinuedAt?: string | null }): "ARCHIVED" | "DRAFT" {
+  return opts.archive || opts.discontinuedAt ? "ARCHIVED" : "DRAFT";
+}
+
+/**
+ * A discontinued design whose last Shopify archive attempt failed. A take-down
+ * that works clears the target's error, and a discontinued design cannot be
+ * pushed, so the error stays until a retry works. The Shopify panel marks it and
+ * offers that retry from here, because the mirrored state can read anything by
+ * then. It says the ATTEMPT failed, not that the product is unarchived: a dropped
+ * response or a hand archive in Shopify admin looks the same from this side, and
+ * the retry is harmless on a product that is already archived.
+ */
+export function archiveFailed(opts: { discontinuedAt: string | null; hasProduct?: boolean; error?: string | null }): boolean {
+  return !!opts.discontinuedAt && !!opts.hasProduct && !!opts.error;
+}
+
+/**
+ * What Restore moves a Shopify product to, or null to leave it alone. Only
+ * ARCHIVED moves: one already DRAFT stays put, one set ACTIVE by hand is not
+ * pulled off sale, and one deleted in Shopify admin (no status) is left for the
+ * next push to recreate. DRAFT, never ACTIVE: going live stays a human act
+ * inside Shopify admin.
+ */
+export function restoreStatus(current: string | null | undefined): "DRAFT" | null {
+  return current === "ARCHIVED" ? "DRAFT" : null;
+}
+
 export type DesignBadge =
   | "awaiting_specs"
   | "needs_photos"

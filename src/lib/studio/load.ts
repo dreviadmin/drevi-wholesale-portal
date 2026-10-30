@@ -30,7 +30,8 @@ export interface BoardRow {
   filledCount: number; // of all 6 angles — effective image present (approved candidate, else source)
   copyStatus: "none" | "draft" | "approved";
   copyPresent: boolean; // non-empty title AND description — draft is enough now
-  targets: { portal: PortalKey; enabled: boolean; state: TargetState }[];
+  /** hasProduct: a Shopify product exists, whatever the mirrored state says. */
+  targets: { portal: PortalKey; enabled: boolean; state: TargetState; hasProduct: boolean; error: string | null }[];
   gates: Record<PortalKey, { ready: boolean; blockers: string[] }>;
   thumb: string | null;
   wholesalePriceSet: boolean;
@@ -117,8 +118,8 @@ export async function loadBoard(opts?: { includeDiscontinued?: boolean }): Promi
       admin, "design_images", "id, angle_id, file_ref, role", (q) => q.eq("status", "active")),
     fetchAll<{ design_id: string; status: "none" | "draft" | "approved"; title: string | null; description: string | null }>(
       admin, "design_copy", "design_id, status, title, description"),
-    fetchAll<{ design_id: string; portal: PortalKey; enabled: boolean; state: TargetState }>(
-      admin, "publish_targets", "design_id, portal, enabled, state"),
+    fetchAll<{ design_id: string; portal: PortalKey; enabled: boolean; state: TargetState; remote_id: string | null; error: string | null }>(
+      admin, "publish_targets", "design_id, portal, enabled, state, remote_id, error"),
     fetchAll<{ sku: string; wholesale_price: number; image_urls: string[] | null }>(
       admin, "wholesale_products", "sku, wholesale_price, image_urls"),
     fetchAll<{ sku_base: string; color: string }>(admin, "notify_me", "sku_base, color", (q) => q.is("fulfilled_at", null)),
@@ -169,7 +170,7 @@ export async function loadBoard(opts?: { includeDiscontinued?: boolean }): Promi
   const targetsByDesign = new Map<string, BoardRow["targets"]>();
   for (const t of targets) {
     const list = targetsByDesign.get(t.design_id) ?? [];
-    list.push({ portal: t.portal, enabled: t.enabled, state: t.state });
+    list.push({ portal: t.portal, enabled: t.enabled, state: t.state, hasProduct: !!t.remote_id, error: t.error });
     targetsByDesign.set(t.design_id, list);
   }
   // Per (base|color) group: any variant priced → price set; first photo → thumb.
@@ -203,13 +204,14 @@ export async function loadBoard(opts?: { includeDiscontinued?: boolean }): Promi
       }
     }
     const copyRow = copyByDesign.get(d.id);
+    const rowTargets = targetsByDesign.get(d.id) ?? [];
     const input: DesignStateInput = {
       specsVerified: d.specs_verified,
       filledAngles,
       reviewAngles: review,
       copyStatus: copyRow?.status ?? "none",
       copyPresent: (copyRow?.status ?? "none") !== "none" && !!copyRow?.title?.trim() && !!copyRow?.description?.trim(),
-      targets: targetsByDesign.get(d.id) ?? [],
+      targets: rowTargets,
       wholesalePriceSet: priceSet.has(key),
       tier: d.tier,
       origin: d.origin,
@@ -237,7 +239,7 @@ export async function loadBoard(opts?: { includeDiscontinued?: boolean }): Promi
       filledCount: (Object.keys(filledAngles) as Angle[]).filter((a) => filledAngles[a]).length,
       copyStatus: input.copyStatus,
       copyPresent: input.copyPresent,
-      targets: input.targets,
+      targets: rowTargets,
       gates: {
         wholesale: gateFor("wholesale", input),
         shopify: gateFor("shopify", input),

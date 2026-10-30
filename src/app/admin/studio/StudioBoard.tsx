@@ -242,9 +242,9 @@ export function StudioBoard({ rows: serverRows, buckets: serverBuckets }: { rows
     const label = discontinued ? "Discontinuing" : "Restoring";
     startTransition(async () => {
       startRun();
-      let done = 0, skipped = 0, failed = 0, drafted = 0, stuck = 0, seen = 0;
+      let done = 0, skipped = 0, failed = 0, archived = 0, unarchived = 0, stuck = 0, seen = 0;
       let firstError: string | undefined;
-      runProgress(label, 0, targetIds.length, discontinued ? "each one live on Shopify is set to DRAFT" : undefined);
+      runProgress(label, 0, targetIds.length, discontinued ? "each one on Shopify is archived" : "archived Shopify products go back to draft");
       for (let i = 0; i < targetIds.length; i += RETIRE_CHUNK) {
         if (stopRef.current) {
           endProgress(label, targetIds.length, `stopped at ${seen} of ${targetIds.length} · ${done} done`, seen);
@@ -260,19 +260,23 @@ export function StudioBoard({ rows: serverRows, buckets: serverBuckets }: { rows
           return;
         }
         done += r.done ?? 0; skipped += r.skipped ?? 0; failed += r.failed ?? 0;
-        drafted += r.shopifyDrafted ?? 0; stuck += r.shopifyStuck ?? 0;
+        archived += r.shopifyArchived ?? 0; unarchived += r.shopifyUnarchived ?? 0; stuck += r.shopifyStuck ?? 0;
         if (!firstError && r.firstError) firstError = r.firstError;
         seen += chunk.length;
         const tally = `${done} done${skipped ? ` · ${skipped} already` : ""}${failed ? ` · ${failed} failed` : ""}`;
         runProgress(label, seen, targetIds.length, tally);
         flash(`${label} ${seen}/${targetIds.length} · ${tally}`);
       }
-      // Shopify still being up is the one outcome worth leading with.
+      // A product left outside the archive is the one outcome worth leading with.
       const tail = stuck
-        ? ` · ${stuck} STILL ACTIVE IN SHOPIFY${firstError ? ` — ${firstError}` : ""}`
-        : drafted ? ` · ${drafted} set to DRAFT in Shopify` : "";
-      endProgress(label, targetIds.length, `${done} done${skipped ? ` · ${skipped} already` : ""}${failed ? ` · ${failed} failed` : ""}${tail}`);
-      flash(`${discontinued ? "Discontinued" : "Restored"} ${done}${skipped ? ` · ${skipped} already` : ""}${failed ? ` · ${failed} failed` : ""}${tail}`);
+        ? ` · ${stuck} NOT ARCHIVED IN SHOPIFY${firstError ? ` — ${firstError}` : ""}`
+        : archived ? ` · ${archived} archived in Shopify`
+        : unarchived ? ` · ${unarchived} back to draft in Shopify` : "";
+      // "3 failed" alone leaves nothing to act on, so the reason sits beside that
+      // count: after the Shopify tally it would read as a verdict on the whole run.
+      const reason = !stuck && firstError ? ` (${firstError})` : "";
+      endProgress(label, targetIds.length, `${done} done${skipped ? ` · ${skipped} already` : ""}${failed ? ` · ${failed} failed${reason}` : ""}${tail}`);
+      flash(`${discontinued ? "Discontinued" : "Restored"} ${done}${skipped ? ` · ${skipped} already` : ""}${failed ? ` · ${failed} failed${reason}` : ""}${tail}`);
       setSelected(new Set());
       router.refresh();
     });
@@ -1077,14 +1081,13 @@ export function StudioBoard({ rows: serverRows, buckets: serverBuckets }: { rows
                 type="button"
                 disabled={pending}
                 onClick={() => {
-                  const onShopify = liveSelected.filter((id) => {
-                    const r = rows.find((x) => x.id === id);
-                    const s = r?.targets.find((tg) => tg.portal === "shopify")?.state;
-                    return s === "live" || s === "changes_pending";
-                  }).length;
+                  // Same rule as setDiscontinued: a product existing, not the mirrored state.
+                  const onShopify = liveSelected.filter((id) =>
+                    rows.find((x) => x.id === id)?.targets.find((tg) => tg.portal === "shopify")?.hasProduct,
+                  ).length;
                   if (!window.confirm(
                     `Discontinue ${liveSelected.length} product(s)?\n\n` +
-                    `They leave this board, come out of the buyer catalog, and ${onShopify} of them will be set to DRAFT in Shopify.\n\n` +
+                    `They leave this board, come out of the buyer catalog, and ${onShopify} of them will be archived in Shopify.\n\n` +
                     `They stay sellable at the counter and every past order keeps working. "Show discontinued" brings them back, and each one can be restored.`,
                   )) return;
                   runRetire(true, liveSelected);

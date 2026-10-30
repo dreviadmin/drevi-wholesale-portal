@@ -13,7 +13,7 @@ import { effectiveCompareAt } from "@/lib/retail-price-core";
 import { shopifyTagsFrom, splitOccasions } from "@/lib/shopify-tags";
 import { loadDesignDetail } from "./studio/load";
 import { colorNameFor, describeDesignFacts } from "./studio/facts";
-import { ALL_ANGLES } from "./studio/state";
+import { ALL_ANGLES, restoreStatus } from "./studio/state";
 import { publishImageSet, publishedSetIsStale } from "@/lib/studio/publish";
 
 // Stage 7b — Shopify push (build guide §11.3). Creates/updates a DRAFT
@@ -98,9 +98,17 @@ async function gql<T>(query: string, variables: Record<string, unknown>): Promis
   // a token cached just under the refresh margin must not fail a push.
   let res = await call(await getShopifyAccessToken());
   if (res.status === 401) res = await call(await getShopifyAccessToken(true));
-  if (!res.ok) throw new Error(`Shopify GraphQL ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) {
+    // The body can be a whole HTML error page, and the thrown text reaches staff.
+    console.error(`Shopify GraphQL ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    throw new Error(`Shopify request failed (HTTP ${res.status})`);
+  }
   const body = await res.json();
-  if (body.errors?.length) throw new Error(`Shopify: ${JSON.stringify(body.errors).slice(0, 200)}`);
+  // Messages only: this text reaches staff, and the raw JSON means nothing to them.
+  if (body.errors?.length) {
+    const messages = Array.isArray(body.errors) ? body.errors.map((e: { message?: string }) => e.message).join("; ") : String(body.errors);
+    throw new Error(`Shopify: ${messages.slice(0, 200)}`);
+  }
   return body.data as T;
 }
 
@@ -507,16 +515,17 @@ export async function publishShopify(designId: string, staffId: string, staffEma
 }
 
 /**
- * Set a product's status. Used by the studio's Unpublish (Ansh, 22 Sep).
+ * Set a product's status. Used by the studio's Unpublish (Ansh, 22 Sep), which
+ * sends DRAFT, and by Discontinue, which sends ARCHIVED (Ansh, 31 Oct).
  *
- * DRAFT rather than delete, deliberately: the product owns its handle, its URL
- * and anything a customer has bookmarked, and publish_targets keeps remote_id
- * so a later push reconciles the same product instead of minting a second one.
- * It is also the only lever Shopify gives — a published product cannot be
- * un-created, which is what the owner meant by "even though you may not be
- * able to delete draft on shopify".
+ * A status rather than a delete, deliberately: the product owns its handle, its
+ * URL and anything a customer has bookmarked, and publish_targets keeps
+ * remote_id so a later push reconciles the same product instead of minting a
+ * second one. It is also the only lever Shopify gives — a published product
+ * cannot be un-created, which is what the owner meant by "even though you may
+ * not be able to delete draft on shopify".
  */
-export async function setShopifyStatus(productId: string, status: "ACTIVE" | "DRAFT"): Promise<void> {
+export async function setShopifyStatus(productId: string, status: "ACTIVE" | "DRAFT" | "ARCHIVED"): Promise<void> {
   if (!shopifyEnabled()) throw new Error("Shopify is not enabled on this deployment");
   const res = await gql<{ productUpdate: { product: { id: string; status: string } | null; userErrors: UserError[] } }>(
     `mutation($input: ProductInput!) {
@@ -526,4 +535,29 @@ export async function setShopifyStatus(productId: string, status: "ACTIVE" | "DR
   );
   throwUserErrors("productUpdate", res.productUpdate.userErrors);
   if (!res.productUpdate.product) throw new Error("productUpdate returned no product");
+}
+
+/** A product's status, or null once it has been deleted in Shopify admin. */
+export async function shopifyProductStatus(productId: string): Promise<string | null> {
+  if (!shopifyEnabled()) throw new Error("Shopify is not enabled on this deployment");
+  const got = await gql<{ product: { status: string } | null }>(
+    `query($id: ID!) { product(id: $id) { status } }`,
+    { id: productId },
+  );
+  return got.product?.status ?? null;
+}
+
+/**
+ * Bring an archived product back to DRAFT, for Restore. True when it moved.
+ *
+ * A push cannot do this: status is only sent when a product is created, so an
+ * archived product stays archived through every later push. It reads first
+ * because only ARCHIVED should move (restoreStatus).
+ */
+export async function unarchiveShopifyProduct(productId: string): Promise<boolean> {
+  if (!shopifyEnabled()) return false;
+  const next = restoreStatus(await shopifyProductStatus(productId));
+  if (!next) return false;
+  await setShopifyStatus(productId, next);
+  return true;
 }

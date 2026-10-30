@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveBadge, shopifyGate, wholesaleGate, type DesignStateInput } from "./state";
+import { archiveFailed, deriveBadge, restoreStatus, shopifyGate, takedownStatus, wholesaleGate, type DesignStateInput } from "./state";
 
 // Gates are the contract Stage 7 pushes call — pin them down (guide §7.2).
 // 17 Sep semantics: a slot counts once it holds an EFFECTIVE image (approved
@@ -119,5 +119,48 @@ describe("deriveBadge", () => {
   it("ignores disabled portals", () => {
     const disabledLive = { ...base, targets: [{ portal: "shopify" as const, enabled: false, state: "live" as const }] };
     expect(deriveBadge(disabledLive).badge).toBe("awaiting_specs");
+  });
+});
+
+describe("takedownStatus", () => {
+  it("a plain unpublish stays a draft", () => {
+    expect(takedownStatus({ discontinuedAt: null })).toBe("DRAFT");
+  });
+  it("discontinuing archives, before the stamp has been written", () => {
+    expect(takedownStatus({ archive: true, discontinuedAt: null })).toBe("ARCHIVED");
+  });
+  it("the Unpublish retry on an already discontinued design still archives", () => {
+    expect(takedownStatus({ discontinuedAt: "2026-10-31T10:00:00Z" })).toBe("ARCHIVED");
+  });
+});
+
+describe("archiveFailed", () => {
+  const stamp = "2026-10-31T00:00:00Z";
+  it("marks a discontinued design whose product kept an error", () => {
+    expect(archiveFailed({ discontinuedAt: stamp, hasProduct: true, error: "Shopify 503" })).toBe(true);
+  });
+  it("stays quiet once the archive went through", () => {
+    expect(archiveFailed({ discontinuedAt: stamp, hasProduct: true, error: null })).toBe(false);
+  });
+  it("ignores a failed push on a design still in use", () => {
+    expect(archiveFailed({ discontinuedAt: null, hasProduct: true, error: "Shopify 503" })).toBe(false);
+  });
+  it("ignores a design with no Shopify product", () => {
+    expect(archiveFailed({ discontinuedAt: stamp, hasProduct: false, error: "old error" })).toBe(false);
+    expect(archiveFailed({ discontinuedAt: stamp })).toBe(false);
+  });
+});
+
+describe("restoreStatus", () => {
+  it("an archived product comes back as a draft, never live", () => {
+    expect(restoreStatus("ARCHIVED")).toBe("DRAFT");
+  });
+  it("leaves every other status alone", () => {
+    expect(restoreStatus("ACTIVE")).toBeNull();
+    expect(restoreStatus("DRAFT")).toBeNull();
+  });
+  it("leaves a product deleted in Shopify for the next push to recreate", () => {
+    expect(restoreStatus(null)).toBeNull();
+    expect(restoreStatus(undefined)).toBeNull();
   });
 });

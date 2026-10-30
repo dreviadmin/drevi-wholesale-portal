@@ -7,7 +7,7 @@ import { writeAuditEvent } from "@/lib/audit";
 import { loadDesignDetail } from "./load";
 import { loadVocab } from "@/lib/sku/vocab-live";
 import { categoryNamesForDesign } from "./category-from-sku";
-import { ALL_ANGLES } from "./state";
+import { ALL_ANGLES, takedownStatus } from "./state";
 
 // Stage 7a — wholesale publish (build guide §11.2). Idempotent: Re-push runs
 // the exact same routine over the same deterministic storage paths.
@@ -28,6 +28,7 @@ export interface PublishResult {
   blockers?: string[];
   published?: number; // images published
   variants?: number; // wholesale_products rows updated
+  gone?: boolean; // the Shopify product had already been deleted there
 }
 
 /**
@@ -274,7 +275,8 @@ export async function publishWholesale(designId: string, staffId: string, staffE
  * same state a fresh push creates and the same one Shopify's own Unpublish
  * button produces. The product, its variants and its metafields survive, and a
  * later push reconciles them rather than minting a duplicate: publish_targets
- * keeps remote_id for exactly that reason.
+ * keeps remote_id for exactly that reason. Discontinuing goes one step further,
+ * to ARCHIVED (takedownStatus).
  *
  * Wholesale has a real off switch now — buyer_visible (0062) — and turning it
  * off is the whole of the job: the images and description the push wrote stay
@@ -289,7 +291,7 @@ export async function unpublish(
   portal: "wholesale" | "shopify",
   staffId: string,
   staffEmail: string,
-  opts?: { force?: boolean },
+  opts?: { force?: boolean; archive?: boolean },
 ): Promise<PublishResult> {
   const admin = createAdminClient();
   const detail = await loadDesignDetail(designId);
@@ -309,14 +311,18 @@ export async function unpublish(
   // target can read 'ready' while the product is on sale — on prod today all
   // 115 shopify targets say 'live' and 12 of those products are DRAFT, so the
   // disagreement is routine. A retirement must not skip the take-down because
-  // of a stale local row; productUpdate(status: DRAFT) is idempotent, so the
-  // cost of being wrong is one round trip.
-  if (!opts?.force && target.state !== "live" && target.state !== "changes_pending") {
+  // of a stale local row; setting a status is idempotent, so the cost of being
+  // wrong is one round trip.
+  // A discontinued design is forced for the same reason: its Archive retry has
+  // to work from whatever state the first attempt left behind.
+  const force = opts?.force || (portal === "shopify" && !!board.discontinuedAt);
+  if (!force && target.state !== "live" && target.state !== "changes_pending") {
     return { ok: false, error: `Not live on ${portal} — nothing to take down` };
   }
 
   try {
     let detailNote: string;
+    let gone = false;
 
     if (portal === "wholesale") {
       // Every size variant of the (base, colour) group, matched the way the
@@ -338,9 +344,18 @@ export async function unpublish(
       if (!target.remote_id) throw new Error("No Shopify product recorded for this design");
       // Dynamic import: shopify.ts imports publishImageSet from this file, so
       // a static import here would close the cycle.
-      const { setShopifyStatus } = await import("@/lib/shopify");
-      await setShopifyStatus(target.remote_id, "DRAFT");
-      detailNote = `${target.remote_id} set to DRAFT`;
+      const { setShopifyStatus, shopifyProductStatus } = await import("@/lib/shopify");
+      const status = takedownStatus({ archive: opts?.archive, discontinuedAt: board.discontinuedAt });
+      // A product deleted in Shopify admin is off sale for good, so there is
+      // nothing left to archive. Without this read it would count as a failed
+      // archive, an alarm that no retry could ever clear.
+      if (status === "ARCHIVED" && (await shopifyProductStatus(target.remote_id)) === null) {
+        gone = true;
+        detailNote = `${target.remote_id} already deleted in Shopify`;
+      } else {
+        await setShopifyStatus(target.remote_id, status);
+        detailNote = `${target.remote_id} set to ${status}`;
+      }
     }
 
     await admin
@@ -354,7 +369,7 @@ export async function unpublish(
       staffUserId: staffId,
       notes: `${portal} UNPUBLISH ${board.baseSku}·${board.color}: ${detailNote} by ${staffEmail}`,
     });
-    return { ok: true };
+    return { ok: true, ...(gone ? { gone } : {}) };
   } catch (err) {
     const message = (err as Error).message;
     await admin.from("publish_targets").update({ error: message }).eq("design_id", designId).eq("portal", portal);

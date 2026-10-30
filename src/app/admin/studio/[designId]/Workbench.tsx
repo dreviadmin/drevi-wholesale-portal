@@ -12,7 +12,7 @@ import { tooLargeMessage } from "@/lib/downscale-photo";
 import { useDraft } from "@/lib/useDraft";
 import { COPY_MODELS, estimateLabel } from "@/lib/studio/copy-models";
 import type { BoardRow, AngleDetail, CopyDetail, DesignImage } from "@/lib/studio/load";
-import { AI_ANGLES } from "@/lib/studio/state";
+import { AI_ANGLES, archiveFailed } from "@/lib/studio/state";
 import { JobsTicker } from "../JobsTicker";
 // setBrandModel is deliberately absent: the picker it drove is not rendered
 // while fashn is parked (see the angle card). The action itself still exists.
@@ -634,7 +634,7 @@ export function Workbench({ board, buckets: serverBuckets, angles, copy, pool, a
                 Restore this product
               </button>
               <div className="font-body mt-1.5" style={{ fontSize: 9.5, color: palette.mutedGreige, lineHeight: 1.5 }}>
-                Restoring brings it back to the board. It does not put it back in the buyer catalog — push wholesale for that.
+                Restoring brings it back to the board, and an archived Shopify product back to draft. It does not put it back in the buyer catalog — push wholesale for that.
               </div>
             </div>
           )}
@@ -679,16 +679,22 @@ export function Workbench({ board, buckets: serverBuckets, angles, copy, pool, a
         {(["wholesale", "shopify"] as const).map((portal) => {
           const g = board.gates[portal];
           const t = board.targets.find((x) => x.portal === portal);
+          const archiveStuck = portal === "shopify" && archiveFailed({ discontinuedAt: board.discontinuedAt, hasProduct: t?.hasProduct, error: t?.error });
           return (
             <details key={portal} className="p-3" style={{ background: palette.ivory, border: `1px solid ${g.ready ? "#1F6B45" : "rgba(26,26,26,0.1)"}` }}>
               <summary className="flex items-center justify-between cursor-pointer list-none">
                 <span className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.14em", color: palette.black, fontWeight: 600 }}>
                   {portal === "wholesale" ? "Wholesale" : "Shopify"}
                 </span>
-                <span className="font-body" style={{ fontSize: 9, color: t?.enabled === false ? palette.mutedGreige : g.ready ? "#1F6B45" : "#8a6d1a" }}>
-                  {t?.enabled === false ? "disabled" : t?.state === "live" ? "live" : t?.state === "changes_pending" ? "changes pending" : g.ready ? "ready" : `${g.blockers.length} blocker${g.blockers.length === 1 ? "" : "s"}`}
+                <span className="font-body" style={{ fontSize: 9, color: archiveStuck ? "#9C3A31" : t?.enabled === false ? palette.mutedGreige : g.ready ? "#1F6B45" : "#8a6d1a" }}>
+                  {archiveStuck ? "archive failed" : t?.enabled === false ? "disabled" : t?.state === "live" ? "live" : t?.state === "changes_pending" ? "changes pending" : g.ready ? "ready" : `${g.blockers.length} blocker${g.blockers.length === 1 ? "" : "s"}`}
                 </span>
               </summary>
+              {archiveStuck && (
+                <p className="mt-1.5 font-body" style={{ fontSize: 10, color: "#9C3A31", lineHeight: 1.5, overflowWrap: "anywhere" }}>
+                  Archive failed: {t?.error}. Press Archive in Shopify to try again. It is safe if the product is already archived.
+                </p>
+              )}
               {!g.ready && t?.enabled !== false && (
                 <ul className="mt-1.5">
                   {g.blockers.map((b) => (
@@ -722,8 +728,11 @@ export function Workbench({ board, buckets: serverBuckets, angles, copy, pool, a
                   product to DRAFT, because a published product cannot be
                   un-created and deleting it would throw away the handle, the
                   URL and anything a customer has bookmarked. Either way the
-                  work survives and a later push reconciles the same product. */}
-              {(t?.state === "live" || t?.state === "changes_pending") && (
+                  work survives and a later push reconciles the same product.
+                  On a discontinued design this is the retry for an archive
+                  that failed, so it says Archive and does that (unpublish()
+                  reads the same stamp), from any state the failure left. */}
+              {(t?.state === "live" || t?.state === "changes_pending" || archiveStuck) && (
                 <button
                   type="button"
                   disabled={pending}
@@ -731,14 +740,16 @@ export function Workbench({ board, buckets: serverBuckets, angles, copy, pool, a
                     if (!window.confirm(
                       portal === "wholesale"
                         ? "Take this out of the buyer catalog? Staff can still bill it at the counter, and its photos and description stay — pushing again puts it straight back."
-                        : "Set this Shopify product back to DRAFT? It disappears from the storefront but keeps its URL, variants and metafields, and pushing again updates the same product.",
+                        : board.discontinuedAt
+                          ? "Archive this Shopify product? It disappears from the storefront but keeps its URL, variants and metafields. Restoring the design brings it back as a draft."
+                          : "Set this Shopify product back to DRAFT? It disappears from the storefront but keeps its URL, variants and metafields, and pushing again updates the same product.",
                     )) return;
-                    run(() => unpublishDesign(board.id, portal), portal === "wholesale" ? "Taken out of the catalog" : "Set to draft in Shopify");
+                    run(() => unpublishDesign(board.id, portal), portal === "wholesale" ? "Taken out of the catalog" : board.discontinuedAt ? "Archived in Shopify" : "Set to draft in Shopify");
                   }}
                   className="mt-1.5 w-full font-body uppercase disabled:opacity-40"
                   style={{ fontSize: 8.5, letterSpacing: "0.12em", background: "transparent", color: "#9C3A31", border: "1px solid #9C3A31", padding: "7px 0" }}
                 >
-                  {portal === "wholesale" ? "Unpublish from catalog" : "Unpublish (set to draft)"}
+                  {portal === "wholesale" ? "Unpublish from catalog" : board.discontinuedAt ? "Archive in Shopify" : "Unpublish (set to draft)"}
                 </button>
               )}
             </details>
@@ -757,14 +768,14 @@ export function Workbench({ board, buckets: serverBuckets, angles, copy, pool, a
             disabled={pending}
             onClick={() => {
               const note = window.prompt(
-                "Discontinue this product?\n\nIt leaves the studio board (a Show discontinued switch brings it back), comes out of the buyer catalog, and its Shopify product is set to DRAFT. It stays sellable at the counter and every past order keeps working.\n\nReason (optional):",
+                "Discontinue this product?\n\nIt leaves the studio board (a Show discontinued switch brings it back), comes out of the buyer catalog, and its Shopify product is archived. It stays sellable at the counter and every past order keeps working.\n\nReason (optional):",
                 "",
               );
               // prompt returns null on Cancel and "" on OK with nothing typed —
               // only the first is a refusal.
               if (note === null) return;
               // Not run(): its success message is fixed, and the one thing
-              // worth saying here varies — a product still ACTIVE in Shopify
+              // worth saying here varies — a product not archived in Shopify
               // is half-retired, and silence would let that pass.
               startTransition(async () => {
                 const res = await setDiscontinued(board.id, true, note);
@@ -773,8 +784,8 @@ export function Workbench({ board, buckets: serverBuckets, angles, copy, pool, a
                 // be the thing the message leads with.
                 flash(
                   res.shopifyError
-                    ? `Discontinued, but SHOPIFY IS STILL ACTIVE — ${res.shopifyError}. Use Unpublish.`
-                    : `Discontinued${res.hiddenSkus ? ` · ${res.hiddenSkus} variant(s) out of the catalog` : ""}${res.shopifyDrafted ? " · Shopify set to DRAFT" : ""}`,
+                    ? `Discontinued, but NOT ARCHIVED IN SHOPIFY — ${res.shopifyError}. Use Archive in Shopify on the Shopify panel.`
+                    : `Discontinued${res.hiddenSkus ? ` · ${res.hiddenSkus} variant(s) out of the catalog` : ""}${res.shopifyArchived ? " · Archived in Shopify" : ""}`,
                 );
                 router.refresh();
               });
