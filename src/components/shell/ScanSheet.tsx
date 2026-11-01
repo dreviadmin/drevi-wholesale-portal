@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { X, QrCode, Printer, Tag, PackageCheck, SlidersHorizontal, PlusCircle, ShoppingBag, Palette as PaletteIcon } from "lucide-react";
+import { X, QrCode, Printer, Tag, PackageCheck, SlidersHorizontal, PlusCircle, ShoppingBag, Palette as PaletteIcon, BarChart3 } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { palette } from "@/lib/palette";
 import { t } from "@/lib/strings";
@@ -28,6 +28,7 @@ interface Resolved {
 const ACTION_ICONS: Record<string, typeof Tag> = {
   retail_check: Tag,
   add_to_bill: ShoppingBag,
+  sales: BarChart3,
   log_receipt: PackageCheck,
   open_studio: PaletteIcon,
   edit_master: SlidersHorizontal,

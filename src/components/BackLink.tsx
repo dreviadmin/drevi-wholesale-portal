@@ -59,6 +59,7 @@ const LABELS: [string, StringKey][] = [
   ["/admin/buyers", "nav.buyers"],
   ["/admin/orders/", "back.order"],
   ["/admin/orders", "nav.orders"],
+  ["/admin/reorder", "nav.reorder"],
   ["/admin/dashboard", "nav.dashboard"],
   ["/admin/home", "nav.home"],
 ];

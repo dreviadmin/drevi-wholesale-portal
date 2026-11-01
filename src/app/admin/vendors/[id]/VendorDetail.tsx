@@ -41,6 +41,7 @@ export function VendorDetail({ vendor, receipts }: { vendor: VendorRow; receipts
           {vendor.gstin && <div className="font-body mt-0.5" style={{ fontSize: 11.5, color: palette.mutedGreige }}>GSTIN {vendor.gstin}</div>}
           {vendor.contactName && <div className="font-body mt-0.5" style={{ fontSize: 11.5, color: palette.softBlack }}>Contact · {vendor.contactName}{vendor.email ? ` · ${vendor.email}` : ""}</div>}
           {vendor.address && <div className="font-body mt-0.5" style={{ fontSize: 11.5, color: palette.mutedGreige }}>{vendor.address}</div>}
+          <Link href={`/admin/dashboard?view=products&f=${encodeURIComponent(`vendor:${vendor.id}`)}`} className="font-body uppercase inline-block mt-1.5" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.goldDeep, textDecoration: "underline" }}>See sales</Link>
           </div>
         </div>
         <button type="button" onClick={() => setEditing(true)} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
