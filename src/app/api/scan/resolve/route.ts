@@ -3,6 +3,7 @@ import { getStaff, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { effectiveRetailPrice } from "@/lib/retail-price-core";
+import { designOf } from "@/lib/dashboard/lines";
 
 export const dynamic = "force-dynamic";
 
@@ -92,6 +93,7 @@ export async function GET(request: Request) {
     // add_to_bill is appended CLIENT-side when a wizard draft exists.
   ];
   if (isAdmin) {
+    actions.push({ key: "sales", label: "Sales and reorder", href: `/admin/dashboard?view=customers&f=${encodeURIComponent(`design:${designOf(sku)}`)}` });
     actions.push({ key: "log_receipt", label: "Log into a receipt", href: `/admin/receipts/new?sku=${encodeURIComponent(sku)}` });
     if (design?.id) actions.push({ key: "open_studio", label: "Open in studio", href: `/admin/studio/${design.id}` });
     actions.push({ key: "edit_master", label: "Edit product master", href: `/admin/manage-catalog?sku=${encodeURIComponent(sku)}` });

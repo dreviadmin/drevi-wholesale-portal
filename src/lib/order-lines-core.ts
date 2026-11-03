@@ -13,7 +13,7 @@ export type LineState = "confirmed" | "hold" | "pending" | "billed";
 
 const POST_SUBMIT: OrderStatus[] = ["confirmed", "packed", "out_for_delivery", "delivered", "fulfilled"];
 
-export function effectiveLineState(item: OrderItem, orderStatus: OrderStatus): LineState {
+export function effectiveLineState(item: { billed_in?: string | null; line_state?: OrderItem["line_state"] }, orderStatus: OrderStatus): LineState {
   if (item.billed_in) return "billed";
   if (item.line_state === "confirmed") return "confirmed";
   if (item.line_state === "hold") return "hold";

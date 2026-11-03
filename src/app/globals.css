@@ -42,3 +42,6 @@ body {
     scrollbar-width: none;
   }
 }
+
+/* Dashboard rows open what they name. */
+.dash-row:hover { background: rgba(196, 163, 90, 0.08); }

@@ -18,8 +18,11 @@ export function useSort<T>(
   rows: T[],
   accessors: Record<string, SortAccessor<T>>,
   initial?: SortState,
+  // A table whose sort lives elsewhere (the dashboard keeps it in the URL).
+  controlled?: { sort: SortState; onSort: (next: SortState) => void },
 ) {
-  const [sort, setSort] = useState<SortState | null>(initial ?? null);
+  const [own, setOwn] = useState<SortState | null>(initial ?? null);
+  const sort = controlled ? controlled.sort : own;
   const sorted = useMemo(() => {
     if (!sort) return rows;
     const acc = accessors[sort.key];
@@ -34,12 +37,14 @@ export function useSort<T>(
       if (aBlank) return 1;
       if (bBlank) return -1;
       if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
-      return String(va).localeCompare(String(vb), undefined, { numeric: true, sensitivity: "base" }) * dir;
+      return String(va).localeCompare(String(vb), "en", { numeric: true, sensitivity: "base" }) * dir;
     });
   }, [rows, sort, accessors]);
 
   function toggle(key: string, defaultDir: SortDir = "asc") {
-    setSort((s) => (s?.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: defaultDir }));
+    const flip = (s: SortState | null): SortState => (s?.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: defaultDir });
+    if (controlled) controlled.onSort(flip(controlled.sort));
+    else setOwn(flip);
   }
   return { sorted, sort, toggle };
 }
@@ -61,7 +66,7 @@ export function SortTh({
 }) {
   const active = sort?.key === k;
   return (
-    <th style={{ padding: 0, textAlign: right ? "right" : "left" }}>
+    <th aria-sort={active ? (sort!.dir === "asc" ? "ascending" : "descending") : undefined} style={{ padding: 0, textAlign: right ? "right" : "left" }}>
       <button
         type="button"
         onClick={() => onToggle(k, defaultDir)}

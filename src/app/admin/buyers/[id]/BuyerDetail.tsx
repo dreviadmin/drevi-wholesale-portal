@@ -293,7 +293,7 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet, changeRe
   }
   function sendLoginLink() { share("WhatsApp"); }
 
-  const totalSpend = orders.reduce((s, o) => s + o.total_amount, 0);
+  const totalSpend = orders.filter((o) => o.status !== "cancelled").reduce((s, o) => s + o.total_amount, 0);
 
   // ---- Identity change requests --------------------------------------------
   // business_name and gstin print on every GST tax invoice, so the buyer may
@@ -406,6 +406,7 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet, changeRe
           <div className="font-body mt-0.5" style={{ fontSize: 12, color: palette.mutedGreige }}>
             {buyer.email ?? "—"}{buyer.gstin ? ` · GSTIN ${buyer.gstin}` : ""}
           </div>
+          <Link href={`/admin/dashboard?view=orders&f=${encodeURIComponent(`customer:${buyer.id}`)}`} className="font-body uppercase inline-block mt-1" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.goldDeep, textDecoration: "underline" }}>Sales and balance</Link>
           <div className="font-body mt-1.5" style={{ fontSize: 10.5, color: palette.mutedGreige, letterSpacing: "0.04em" }}>
             Source: {SOURCE_LABEL[buyer.source]}{buyer.approved_at ? ` · Approved ${fmt(buyer.approved_at)}${buyer.approvedByName ? ` by ${buyer.approvedByName}` : ""}` : ""}
           </div>
