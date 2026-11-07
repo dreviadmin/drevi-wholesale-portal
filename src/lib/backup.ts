@@ -47,6 +47,7 @@ export const BACKUP_TABLES = [
   "stock_movements",
   // Studio
   "studio_buckets",
+  "design_buckets",
   "designs",
   "design_angles",
   "design_images",

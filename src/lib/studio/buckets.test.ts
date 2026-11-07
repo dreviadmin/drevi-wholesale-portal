@@ -4,13 +4,22 @@ import { join } from "node:path";
 import {
   BUCKET_NONE,
   PRESET_BUCKETS,
+  applyBucketChange,
+  bucketChanges,
   bucketKeyFor,
   bucketLabel,
+  bucketMarks,
+  bucketSummary,
   cleanBucketLabel,
-  dropdownBuckets,
+  countBuckets,
   filterBuckets,
+  inBucketFilter,
   mergeBuckets,
+  orderedBucketKeys,
+  pickerBuckets,
+  sameBucketKeys,
   sameBucketLabel,
+  type BucketMark,
   type StudioBucket,
 } from "./buckets";
 
@@ -65,16 +74,75 @@ describe("bucketKeyFor", () => {
   });
 });
 
-describe("dropdownBuckets", () => {
+describe("pickerBuckets", () => {
   const all = [...PRESET_BUCKETS, custom("c_old", "Old", false), custom("c_new", "New")];
   it("offers active buckets in order", () => {
-    expect(dropdownBuckets(all, null).map((b) => b.key)).toEqual(["needs_shoot", "needs_reshoot", "copy_regen", "verified", "c_new"]);
+    expect(pickerBuckets(all).map((b) => b.key)).toEqual(["needs_shoot", "needs_reshoot", "copy_regen", "verified", "c_new"]);
   });
-  it("keeps a removed bucket only for the design that holds it", () => {
-    expect(dropdownBuckets(all, "c_old").map((b) => b.key)).toContain("c_old");
+  it("keeps a removed bucket only for the design that holds it, so it can be taken off", () => {
+    expect(pickerBuckets(all, ["c_old", "verified"]).map((b) => b.key)).toContain("c_old");
+    expect(pickerBuckets(all, ["verified"]).map((b) => b.key)).not.toContain("c_old");
   });
-  it("shows a key missing from the list instead of pretending it is Not set", () => {
-    expect(dropdownBuckets(PRESET_BUCKETS, "c_hold").map((b) => b.key)).toContain("c_hold");
+  it("shows a key missing from the list instead of hiding it", () => {
+    expect(pickerBuckets(PRESET_BUCKETS, ["c_hold"]).map((b) => b.key)).toContain("c_hold");
+  });
+});
+
+describe("several buckets per design (0078)", () => {
+  const all = [...PRESET_BUCKETS, custom("c_steam", "Steam")];
+  it("lists and names a design's buckets in picker order, whatever order they were added", () => {
+    expect(orderedBucketKeys(["c_steam", "verified", "needs_shoot"], all)).toEqual(["needs_shoot", "verified", "c_steam"]);
+    expect(bucketSummary(["c_steam", "needs_shoot"], all)).toBe("Needs Shoot, Steam");
+    expect(bucketSummary([], all)).toBe("Not set");
+  });
+  it("filters OR'd across buckets, with Not set meaning in none", () => {
+    expect(inBucketFilter(["needs_shoot", "copy_regen"], new Set())).toBe(true);
+    expect(inBucketFilter(["needs_shoot", "copy_regen"], new Set(["copy_regen"]))).toBe(true);
+    expect(inBucketFilter(["needs_shoot"], new Set(["copy_regen", "verified"]))).toBe(false);
+    expect(inBucketFilter([], new Set([BUCKET_NONE]))).toBe(true);
+    expect(inBucketFilter(["needs_shoot"], new Set([BUCKET_NONE]))).toBe(false);
+    expect(inBucketFilter([], new Set(["needs_shoot"]))).toBe(false);
+  });
+  it("counts a design under every bucket it is in, and Not set only when in none", () => {
+    const c = countBuckets([{ buckets: ["needs_shoot", "copy_regen"] }, { buckets: ["copy_regen"] }, { buckets: [] }, { buckets: ["copy_regen", "copy_regen"] }]);
+    expect(c.get("needs_shoot")).toBe(1);
+    expect(c.get("copy_regen")).toBe(3);
+    expect(c.get(BUCKET_NONE)).toBe(1);
+  });
+  it("compares bucket lists as sets", () => {
+    expect(sameBucketKeys(["a", "b"], ["b", "a"])).toBe(true);
+    expect(sameBucketKeys(["a"], ["a", "b"])).toBe(false);
+    expect(sameBucketKeys([], [])).toBe(true);
+  });
+  it("applies a change the way the server does", () => {
+    expect(applyBucketChange(["needs_shoot"], { add: ["copy_regen"] })).toEqual(["needs_shoot", "copy_regen"]);
+    expect(applyBucketChange(["needs_shoot", "copy_regen"], { remove: ["needs_shoot"] })).toEqual(["copy_regen"]);
+    expect(applyBucketChange(["needs_shoot"], { add: ["needs_shoot"] })).toEqual(["needs_shoot"]);
+    expect(applyBucketChange(["needs_shoot", "verified"], { clear: true })).toEqual([]);
+    expect(applyBucketChange(["needs_shoot"], { clear: true, add: ["verified"] })).toEqual(["verified"]);
+  });
+});
+
+describe("batch picker marks and Apply", () => {
+  const selected = [{ buckets: ["needs_shoot", "copy_regen"] }, { buckets: ["needs_shoot"] }, { buckets: [] }];
+  it("marks each bucket all, some or none across the selection", () => {
+    const m = bucketMarks(selected, ["needs_shoot", "copy_regen", "verified"]);
+    expect(m.get("needs_shoot")).toBe("some");
+    expect(m.get("copy_regen")).toBe("some");
+    expect(m.get("verified")).toBe("none");
+    expect(bucketMarks([{ buckets: ["verified"] }, { buckets: ["verified"] }], ["verified"]).get("verified")).toBe("all");
+  });
+  it("adds and removes only what staff changed, leaving mixed buckets alone", () => {
+    const initial = new Map<string, BucketMark>([["needs_shoot", "some"], ["copy_regen", "some"], ["verified", "none"], ["c_steam", "all"]]);
+    const chosen = new Map<string, BucketMark>([["needs_shoot", "all"], ["copy_regen", "some"], ["verified", "all"], ["c_steam", "none"]]);
+    expect(bucketChanges(initial, chosen)).toEqual({ add: ["needs_shoot", "verified"], remove: ["c_steam"] });
+    expect(bucketChanges(initial, initial)).toEqual({ add: [], remove: [] });
+  });
+  it("treats a bucket created in the picker as new to every design", () => {
+    expect(bucketChanges(new Map(), new Map([["c_new", "all" as BucketMark]]))).toEqual({ add: ["c_new"], remove: [] });
+  });
+  it("can take every design out of a mixed bucket", () => {
+    expect(bucketChanges(new Map([["needs_shoot", "some" as BucketMark]]), new Map([["needs_shoot", "none" as BucketMark]]))).toEqual({ add: [], remove: ["needs_shoot"] });
   });
 });
 
@@ -108,6 +176,22 @@ describe("bucketLabel / mergeBuckets", () => {
     const merged = mergeBuckets(PRESET_BUCKETS, [custom("c_new", "New"), { ...PRESET_BUCKETS[0], active: false }]);
     expect(merged.find((b) => b.key === "c_new")).toBeTruthy();
     expect(merged.find((b) => b.key === "needs_shoot")?.active).toBe(false);
+  });
+});
+
+describe("0078 carries 0074's buckets across once", () => {
+  const sql = readFileSync(join(__dirname, "..", "..", "..", "supabase", "migrations", "0078_design_buckets.sql"), "utf8");
+  it("copies only in the run that creates the table, so a replay cannot put back buckets staff took off", () => {
+    const block = sql.slice(sql.indexOf("do $$"), sql.indexOf("end $$;"));
+    expect(block).toContain("if to_regclass('public.design_buckets') is null then");
+    expect(block).toContain("create table design_buckets");
+    expect(block).toContain("insert into design_buckets");
+    expect(sql).not.toMatch(/not exists \(select 1 from design_buckets\)/);
+    expect(sql.match(/insert into design_buckets/g)).toHaveLength(1);
+  });
+  it("keeps RLS on with no policies", () => {
+    expect(sql).toContain("alter table design_buckets enable row level security");
+    expect(sql).not.toMatch(/create policy/i);
   });
 });
 

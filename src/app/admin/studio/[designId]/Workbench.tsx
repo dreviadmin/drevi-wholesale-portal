@@ -18,9 +18,9 @@ import { JobsTicker } from "../JobsTicker";
 // while fashn is parked (see the angle card). The action itself still exists.
 import { setBgStyle, setCopyPrompt as setCopyPromptAction, setCopyModel, setAnglePrompt, setAngleEngine, regenAngle, cancelAngleJob, generateCopy, saveCopyEdit, pushWholesale, pushShopify } from "./actions";
 import { unpublishDesign, setDiscontinued } from "../actions";
-import { setDesignBucket } from "../bucket-actions";
-import { BucketSelect, useBuckets } from "../BucketSelect";
-import { bucketLabel, type StudioBucket } from "@/lib/studio/buckets";
+import { changeDesignBuckets } from "../bucket-actions";
+import { BucketPicker, useBuckets } from "../BucketPicker";
+import { applyBucketChange, bucketLabel, describeBucketChange, sameBucketKeys, type BucketChange, type StudioBucket } from "@/lib/studio/buckets";
 import { BG_COLOURS, BG_MODE_DEFAULT, BG_MODE_LABEL, BG_MODE_SWATCH, resolveBackground, type BgMode, type BgSwatch } from "@/lib/studio/backgrounds";
 import { useToast } from "@/lib/use-toast";
 import { uploadSource, importFinished, applyImageDirectly, approveImage, rejectImage, saveCrop, setAngleSource, syncDrivePhotos } from "./image-actions";
@@ -243,11 +243,20 @@ export function Workbench({ board, buckets: serverBuckets, angles, copy, pool, a
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [copy.prompt]);
 
-  // Studio bucket (0074). Held locally so the pick shows before the refresh;
-  // a refreshed board row replaces it.
+  // Studio buckets (0074, several since 0078). A tick shows at once through an
+  // override owned by that tick (seq), the same scheme as the board: a failed
+  // save drops only its own override, so the latest server value shows
+  // through rather than a copy taken before an earlier tick landed, and a
+  // refresh from an earlier tick never undoes a later one still saving.
   const { buckets, promptAndAdd } = useBuckets(serverBuckets);
-  const [bucket, setBucket] = useState<{ key: string | null; setAt: string | null; setBy: string | null }>({ key: board.bucket, setAt: board.bucketSetAt, setBy: board.bucketSetBy });
-  useEffect(() => { setBucket({ key: board.bucket, setAt: board.bucketSetAt, setBy: board.bucketSetBy }); }, [board.bucket, board.bucketSetAt, board.bucketSetBy]);
+  const [bucketOverride, setBucketOverride] = useState<{ keys: string[]; seq: number; settled?: boolean } | null>(null);
+  const bucketSeq = useRef(0);
+  const serverKeys = board.buckets.join(",");
+  useEffect(() => {
+    setBucketOverride((o) => (o && (o.settled || sameBucketKeys(o.keys, board.buckets)) ? null : o));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the list's contents, not a new array each render
+  }, [serverKeys, board.bucketSetAt]);
+  const bucketKeys = bucketOverride?.keys ?? board.buckets;
   // Closing the tab mid-save asks first (the board's open-a-row guard has no
   // equivalent here; the back link is a plain link).
   const bucketSaving = useRef(0);
@@ -256,26 +265,30 @@ export function Workbench({ board, buckets: serverBuckets, angles, copy, pool, a
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, []);
-  async function pickBucket(key: string | null, knownLabel?: string) {
-    setBucket({ key, setAt: null, setBy: null });
+  // Resolves to the error text when the save failed, so the open picker can
+  // show it: on a phone its sheet covers the toast.
+  async function changeBuckets(change: BucketChange, knownLabel?: string): Promise<string | null> {
+    const seq = ++bucketSeq.current;
+    setBucketOverride((o) => ({ keys: applyBucketChange(o?.keys ?? board.buckets, change), seq }));
     bucketSaving.current++;
-    let r: Awaited<ReturnType<typeof setDesignBucket>> | undefined;
-    try { r = await setDesignBucket([board.id], key); } catch { r = undefined; } finally { bucketSaving.current--; }
+    let r: Awaited<ReturnType<typeof changeDesignBuckets>> | undefined;
+    try { r = await changeDesignBuckets([board.id], change); } catch { r = undefined; } finally { bucketSaving.current--; }
     if (!r?.ok) {
-      // Back to what the server last said, not a snapshot that may be stale.
-      setBucket({ key: board.bucket, setAt: board.bucketSetAt, setBy: board.bucketSetBy });
-      flash(r?.error ?? "Could not save the bucket — check the connection");
+      setBucketOverride((o) => (o?.seq === seq ? null : o));
+      const error = r?.error ?? "Could not save the buckets — check the connection";
+      flash(error);
       router.refresh();
-      return;
+      return error;
     }
-    setBucket({ key, setAt: r.setAt ?? null, setBy: r.setBy ?? null });
-    flash(`Bucket → ${knownLabel ?? bucketLabel(key, buckets)}`);
+    setBucketOverride((o) => (o?.seq === seq ? { ...o, settled: true } : o));
+    flash(describeBucketChange(change, (k) => knownLabel ?? bucketLabel(k, buckets)));
+    return null;
   }
-  async function addBucketAndPick() {
+  async function addBucketAndPick(): Promise<string | null> {
     const r = await promptAndAdd();
-    if (!r) return;
-    if (!r.bucket) { flash(r.error ?? "Could not add the bucket"); return; }
-    await pickBucket(r.bucket.key, r.bucket.label);
+    if (!r) return null;
+    if (!r.bucket) { const error = r.error ?? "Could not add the bucket"; flash(error); return error; }
+    return changeBuckets({ add: [r.bucket.key] }, r.bucket.label);
   }
 
   function run(fn: () => Promise<{ ok: boolean; error?: string }>, done: string, onOk?: () => void) {
@@ -593,21 +606,23 @@ export function Workbench({ board, buckets: serverBuckets, angles, copy, pool, a
             {board.badgeLabel}
           </div>
 
-          {/* Studio bucket (0074) — the team's own queue label, separate from
+          {/* Studio buckets (0074) — the team's own queue labels, separate from
               the derived state above and from Rakesh's spec confirmation. */}
           <div className="flex items-center gap-2 flex-wrap mt-2">
-            <span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.mutedGreige }}>Bucket</span>
-            <BucketSelect
-              value={bucket.key}
+            <span className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.16em", color: palette.mutedGreige }}>Buckets</span>
+            <BucketPicker
+              value={bucketKeys}
               buckets={buckets}
-              ariaLabel="Studio bucket"
-              onPick={(k) => { void pickBucket(k); }}
-              onAdd={() => { void addBucketAndPick(); }}
+              ariaLabel="Studio buckets"
+              onToggle={(k, on) => changeBuckets(on ? { add: [k] } : { remove: [k] })}
+              onClear={() => changeBuckets({ clear: true })}
+              onAdd={() => addBucketAndPick()}
             />
-            {bucket.key && bucket.setAt && (
+            {bucketKeys.length > 0 && board.bucketSetAt && (
               <span className="font-body" style={{ fontSize: 10.5, color: palette.mutedGreige }}>
-                {bucket.setBy ? `by ${bucket.setBy} · ` : ""}
-                {new Date(bucket.setAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })}
+                {/* The newest add across all its buckets, so it says "last added". */}
+                last added{board.bucketSetBy ? ` by ${board.bucketSetBy}` : ""} ·{" "}
+                {new Date(board.bucketSetAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })}
               </span>
             )}
           </div>

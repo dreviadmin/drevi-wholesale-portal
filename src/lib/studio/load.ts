@@ -43,8 +43,9 @@ export interface BoardRow {
   discontinuedAt: string | null;
   discontinuedBy: string | null;
   discontinuedNote: string | null;
-  /** Studio bucket key (0074) — a staff work queue; null = Not set. */
-  bucket: string | null;
+  /** Studio buckets the design is in (0074, several since 0078); empty = Not set. */
+  buckets: string[];
+  /** Who added a bucket last, and when. */
   bucketSetAt: string | null;
   bucketSetBy: string | null;
   createdAt: string; // ISO from designs.created_at ('' if null)
@@ -67,6 +68,32 @@ const DESIGN_BOARD_COLS =
   "origin, fabric, handwork, color_name, mrp_override, auto_mrp, " +
   "discontinued_at, discontinued_by, discontinued_note";
 const DESIGN_BUCKET_COLS = ", studio_bucket, studio_bucket_set_at, studio_bucket_set_by";
+
+interface BucketMembership { keys: string[]; setAt: string | null; setBy: string | null }
+
+/**
+ * Every design's buckets (0078). Until 0078 reaches this database the table is
+ * missing, and the board falls back to 0074's one-bucket column rather than
+ * showing every design as Not set. Any other error throws.
+ */
+async function readBucketMemberships(admin: ReturnType<typeof createAdminClient>): Promise<Map<string, BucketMembership> | null> {
+  let rows: { design_id: string; bucket_key: string; set_at: string | null; set_by: string | null }[];
+  try {
+    rows = await fetchAll(admin, "design_buckets", "design_id, bucket_key, set_at, set_by", (q) => q.order("design_id").order("bucket_key"));
+  } catch (e) {
+    if (!/schema cache|does not exist/i.test((e as Error).message)) throw e;
+    console.error("[studio] 0078 not applied here — reading the one-bucket column");
+    return null;
+  }
+  const out = new Map<string, BucketMembership>();
+  for (const r of rows) {
+    const m = out.get(r.design_id) ?? { keys: [], setAt: null, setBy: null };
+    m.keys.push(r.bucket_key);
+    if (r.set_at && (!m.setAt || r.set_at > m.setAt)) { m.setAt = r.set_at; m.setBy = r.set_by; }
+    out.set(r.design_id, m);
+  }
+  return out;
+}
 
 /**
  * The designs read behind the board. If 0074 has not reached this database
@@ -107,8 +134,9 @@ export async function loadBoard(opts?: { includeDiscontinued?: boolean }): Promi
   // away. Opening the studio now clears anything that has outlived its budget.
   await sweepStaleJobs(createAdminClient());
   const admin = createAdminClient();
-  const [designs, angles, activeImages, copies, targets, products, notifies, publishedFronts, vocab] = await Promise.all([
+  const [designs, memberships, angles, activeImages, copies, targets, products, notifies, publishedFronts, vocab] = await Promise.all([
     readDesigns(admin),
+    readBucketMemberships(admin),
     fetchAll<{ id: string; design_id: string; angle: Angle; approved_image_id: string | null; source_ref: string | null }>(
       admin, "design_angles", "id, design_id, angle, approved_image_id, source_ref"),
     // id + file_ref so a board tile can fall back to the design's own front
@@ -271,9 +299,9 @@ export async function loadBoard(opts?: { includeDiscontinued?: boolean }): Promi
       discontinuedAt: d.discontinued_at,
       discontinuedBy: d.discontinued_by,
       discontinuedNote: d.discontinued_note,
-      bucket: d.studio_bucket,
-      bucketSetAt: d.studio_bucket_set_at,
-      bucketSetBy: d.studio_bucket_set_by,
+      ...(memberships
+        ? { buckets: memberships.get(d.id)?.keys ?? [], bucketSetAt: memberships.get(d.id)?.setAt ?? null, bucketSetBy: memberships.get(d.id)?.setBy ?? null }
+        : { buckets: d.studio_bucket ? [d.studio_bucket] : [], bucketSetAt: d.studio_bucket_set_at, bucketSetBy: d.studio_bucket_set_by }),
       createdAt: d.created_at ?? "",
     };
   });

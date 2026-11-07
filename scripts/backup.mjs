@@ -50,6 +50,7 @@ const TABLES = [
   "goods_receipt_lines",
   "stock_movements",
   "studio_buckets",
+  "design_buckets",
   "designs",
   "design_angles",
   "design_images",
