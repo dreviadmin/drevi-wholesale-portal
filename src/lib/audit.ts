@@ -3,6 +3,10 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { AuditEventType } from "@/lib/types";
 
+// auth_audit_log is the portal's audit log for every business event (logins,
+// catalog, receipts, orders, Studio, payments, agents), not just auth; the
+// name is historical and the table is kept.
+
 // Writes one row to auth_audit_log. NEVER pass the password value — only the
 // event. Uses the service role (no client write policy exists on the table).
 export async function writeAuditEvent(params: {
