@@ -1,3 +1,4 @@
+import { requireStaffOrRedirect } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PriceCheckClient } from "./PriceCheckClient";
 import { drivePhotosEnabled } from "@/lib/drive";
@@ -9,6 +10,7 @@ export const dynamic = "force-dynamic";
 // wholesale price, so staff scan — or type — and quote on the spot. Open to
 // every staff role; buyers never reach /admin/*.
 export default async function PriceCheckPage() {
+  await requireStaffOrRedirect();
   const admin = createAdminClient();
   const { data: products } = await admin
     .from("wholesale_products")

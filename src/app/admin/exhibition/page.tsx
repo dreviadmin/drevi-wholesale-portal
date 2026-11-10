@@ -1,4 +1,4 @@
-import { requireStaff } from "@/lib/staff";
+import { requireStaffOrRedirect } from "@/lib/staff";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { SessionHome } from "@/components/admin/SessionHome";
@@ -6,7 +6,7 @@ import { SessionHome } from "@/components/admin/SessionHome";
 export const dynamic = "force-dynamic";
 
 export default async function ExhibitionPage() {
-  await requireStaff();
+  await requireStaffOrRedirect();
   const admin = createAdminClient();
   // null session_type = rows that predate the in-store split — all exhibitions.
   const { data: sessions } = await admin

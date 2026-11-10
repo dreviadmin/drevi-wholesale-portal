@@ -1,4 +1,4 @@
-import { requireStaff } from "@/lib/staff";
+import { requireStaffOrRedirect } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { StaffCatalogView } from "./StaffCatalogView";
 import type { WholesaleProduct } from "@/lib/types";
@@ -10,7 +10,7 @@ export const maxDuration = 60;
 // Browse-only catalog for staff/admins — see and search every product at a
 // glance without starting a billing session. Open to every staff role.
 export default async function StaffCatalogPage() {
-  await requireStaff();
+  await requireStaffOrRedirect();
   const admin = createAdminClient();
   const { data: products } = await admin
     .from("wholesale_products")

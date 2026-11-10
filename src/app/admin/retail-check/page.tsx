@@ -1,3 +1,4 @@
+import { requireStaffOrRedirect } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { counterSkus, loadRetailPrices } from "@/lib/retail-price";
 import { drivePhotosEnabled } from "@/lib/drive";
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 // Wholesale prices are deliberately never rendered on this page — the screen
 // faces retail customers.
 export default async function RetailCheckPage() {
+  await requireStaffOrRedirect();
   const admin = createAdminClient();
   const [{ data: products }, prices] = await Promise.all([
     // No wholesale_visible filter: a garment hidden from the wholesale portal

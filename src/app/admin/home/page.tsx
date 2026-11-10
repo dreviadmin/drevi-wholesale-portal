@@ -1,7 +1,6 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { ReceiptText, QrCode, PackageCheck, Tag, ChevronRight, Store, Boxes, Briefcase, Palette } from "lucide-react";
-import { getStaff, isAdminRole } from "@/lib/staff";
+import { requireStaffOrRedirect, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { computeAttention, computeToday } from "@/lib/attention";
 import { describeSync } from "@/lib/sync-stamp";
@@ -26,8 +25,7 @@ function greeting(): string {
 const SEVERITY_COLOR = { high: "#B4423A", medium: palette.goldDeep, low: palette.mutedGreige } as const;
 
 export default async function HomePage() {
-  const staff = await getStaff();
-  if (!staff) redirect("/login");
+  const staff = await requireStaffOrRedirect();
   const isAdmin = isAdminRole(staff.role);
 
   const admin = createAdminClient();

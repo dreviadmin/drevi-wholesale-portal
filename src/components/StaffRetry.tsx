@@ -7,7 +7,8 @@ import { palette } from "@/lib/palette";
 // What the admin layout shows when it could not check who is signed in (a
 // failed staff_users read or an unreachable auth server). It used to send the
 // person to /login, which signed nobody out but looked exactly as if it had.
-// No shell and no page: nothing under /admin renders until the check works.
+// No shell: the page's own gate throws on the same failed lookup, so nothing
+// under /admin shows until the check works.
 export function StaffRetry() {
   const router = useRouter();
   const [pending, start] = useTransition();

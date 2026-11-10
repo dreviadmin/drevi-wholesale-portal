@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { requireStaff } from "@/lib/staff";
+import { requireStaffOrRedirect } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ExhibitionWizard } from "./ExhibitionWizard";
 import type { WholesaleProduct, Buyer } from "@/lib/types";
@@ -7,7 +7,7 @@ import type { WholesaleProduct, Buyer } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 export default async function ExhibitionSessionPage({ params }: { params: { id: string } }) {
-  const me = await requireStaff();
+  const me = await requireStaffOrRedirect();
   const admin = createAdminClient();
 
   const { data: session } = await admin.from("exhibition_sessions").select("id, event_name, ended_at, session_type").eq("id", params.id).maybeSingle();

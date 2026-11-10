@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { requireStaff } from "@/lib/staff";
+import { requireStaffOrRedirect } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 // this page just drops staff straight into it. Exhibitions keep real sessions
 // — those are genuine multi-day events with a start and an end.
 export default async function InStorePage() {
-  await requireStaff();
+  await requireStaffOrRedirect();
   const admin = createAdminClient();
 
   const { data: open } = await admin

@@ -13,9 +13,11 @@ export const dynamic = "force-dynamic";
 //
 // A failed lookup is not "signed out": middleware fails open on the same blip,
 // and redirecting here is what used to bounce staff to /login. The layout
-// shows a retry screen in place of the page. On in-app navigation this layout
-// does not re-run, so the page gates (requireStaffOrRedirect and
-// requireAdminOrRedirect) throw for the same case and admin/error.tsx shows it.
+// shows a retry screen in place of the shell. Next renders the page beside
+// the layout, not through it, so the page gates (requireStaffOrRedirect,
+// requireAdminOrRedirect) throw on the same failed lookup and the page's
+// content is never produced. On in-app navigation this layout does not
+// re-run, and admin/error.tsx shows the gate's error inside the shell.
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const res = await lookupStaff();
   if (res.kind === "error") return <StaffRetry />;

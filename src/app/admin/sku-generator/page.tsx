@@ -1,4 +1,4 @@
-import { requireStaff, isAdminRole } from "@/lib/staff";
+import { requireStaffOrRedirect, isAdminRole } from "@/lib/staff";
 import { SkuGeneratorClient } from "./SkuGeneratorClient";
 import { loadVocab } from "@/lib/sku/vocab-live";
 
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 // for admins only (receipts are admin-only). `?tab=print` is the Log delivery
 // hand-off — read on the server so the Print tab renders without a flash.
 export default async function SkuGeneratorPage({ searchParams }: { searchParams?: { tab?: string } }) {
-  const staff = await requireStaff();
+  const staff = await requireStaffOrRedirect();
   const initialTab = searchParams?.tab === "print" ? "print" : "generate";
   return <SkuGeneratorClient isAdmin={isAdminRole(staff.role)} vocab={await loadVocab()} initialTab={initialTab} />;
 }
