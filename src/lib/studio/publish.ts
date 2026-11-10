@@ -82,7 +82,11 @@ export async function publishImageSet(designId: string): Promise<{
     // angle-2048.jpg alongside whatever is already there rather than over it.
     const webUp = await uploadPublishedImage(board.baseSku, board.color, item.angle, 2048, Buffer.from(web.body), web.contentType);
     await uploadPublishedImage(board.baseSku, board.color, item.angle, 800, Buffer.from(thumb.body), thumb.contentType);
-    webUrls.push(webUp.url);
+    // `?v=` is the published stamp, exactly as the board builds it (load.ts):
+    // the storage path is deterministic, so a reshoot overwrites the same URL
+    // and the service worker (CacheFirst, 7 days) and next/image kept serving
+    // buyers the old photograph. The bare path still lands in product_images.
+    webUrls.push(`${webUp.url}?v=${Date.parse(nowIso)}`);
     const { error } = await admin.from("product_images").upsert(
       {
         sku_base: board.baseSku,
@@ -96,6 +100,17 @@ export async function publishImageSet(designId: string): Promise<{
     );
     if (error) return { ok: false, error: `product_images upsert: ${error.message}` };
   }
+  // The registry is the published set, so an angle that has dropped OUT of the
+  // effective set (an imported lifestyle with no source, later rejected) must
+  // leave it too. Upsert-only left that row behind: the wholesale push dropped
+  // the photo, the Shopify push (which reads every row here) kept sending it.
+  const { error: pruneErr } = await admin
+    .from("product_images")
+    .delete()
+    .eq("sku_base", board.baseSku)
+    .eq("color", board.color)
+    .not("angle", "in", `(${publishSet.map((p) => p.angle).join(",")})`);
+  if (pruneErr) return { ok: false, error: `product_images prune: ${pruneErr.message}` };
   return { ok: true, webUrls, count: publishSet.length };
 }
 
@@ -135,6 +150,9 @@ export async function publishedSetIsStale(designId: string): Promise<boolean> {
     if (!published.has(angle)) return true;
     if (published.get(angle) !== imageId) return true;
   }
+  // And the other direction: a registered angle the design no longer has an
+  // image for (rejected, nothing behind it) is a photo Shopify should not show.
+  for (const angle of published.keys()) if (!effective.has(angle)) return true;
   return false;
 }
 

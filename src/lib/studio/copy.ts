@@ -4,14 +4,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchImageByRef } from "@/lib/design-image-store";
 import { loadVocab } from "@/lib/sku/vocab-live";
 import { defaultCopyModel } from "./copy-models";
-import { defaultCopyPrompt } from "./copy-prompt";
+import { copyImageRefs, defaultCopyPrompt } from "./copy-prompt";
 import { promptDesignFrom, type VocabLike } from "./facts";
 
 export { BUILT_IN_TEMPLATE, defaultCopyPrompt, type PromptFacts } from "./copy-prompt";
 
 // Copy track (build guide §10). ONE implementation — the workbench single
 // generate and the board batch both call generateCopyForDesign. Inputs are
-// the design's approved images (fallback: angle sources), its spec-mirror
+// each angle's effective image (approved, else its source), its spec-mirror
 // fields and tier. STRICT_SPEC_MODE (default on): an unverified-spec design
 // is refused — "Awaiting Rakesh's specs" — through every path.
 // The template and prompt builder live in copy-prompt.ts (pure, tested).
@@ -51,22 +51,24 @@ export async function generateCopyForDesign(designId: string, requestedBy: strin
     return { ok: false, skipped: true, error: "Awaiting Rakesh's specs (STRICT_SPEC_MODE)" };
   }
 
-  // Approved candidates first; angle sources as fallback. At most 3 images.
+  // One effective image per angle (approved, else source), front first. At
+  // most 3 images — see copyImageRefs for why it is no longer approved-only.
   const { data: angles } = await admin
     .from("design_angles")
     .select("angle, source_ref, approved_image_id, design_images!angle_id(id, file_ref, status)")
     .eq("design_id", designId);
-  const refs: string[] = [];
-  for (const a of angles ?? []) {
-    const cands = (a.design_images as { id: string; file_ref: string; status: string }[] | null) ?? [];
-    const approved = cands.find((c) => c.id === a.approved_image_id);
-    if (approved) refs.push(approved.file_ref);
-  }
-  if (refs.length === 0) for (const a of angles ?? []) if (a.source_ref) refs.push(a.source_ref);
+  const refs = copyImageRefs(
+    (angles ?? []).map((a) => ({
+      angle: a.angle as string,
+      source_ref: a.source_ref as string | null,
+      approved_image_id: a.approved_image_id as string | null,
+      design_images: (a.design_images as { id: string; file_ref: string; status: string }[] | null) ?? [],
+    })),
+  );
   if (refs.length === 0) return { ok: false, error: "No images to describe — add sources first" };
 
   const images: { type: "image"; source: { type: "base64"; media_type: string; data: string } }[] = [];
-  for (const ref of refs.slice(0, 3)) {
+  for (const ref of refs) {
     // fetchImageByRef handles Drive ids AND portal-storage sb: refs — a
     // backfilled sb: front used to kill copy generation here.
     const img = await fetchImageByRef(ref, 800);
@@ -157,6 +159,10 @@ export async function generateCopyForDesign(designId: string, requestedBy: strin
     { onConflict: "design_id" },
   );
   if (error) return { ok: false, error: error.message };
+  // D3: the push is the only thing that writes copy to buyers and Shopify, so
+  // a regenerated title/description on a live design must ask for a Re-push
+  // rather than leave the board saying Live over the old words.
+  await admin.from("publish_targets").update({ state: "changes_pending" }).eq("design_id", designId).eq("state", "live");
   void requestedBy;
   return { ok: true, copy };
 }

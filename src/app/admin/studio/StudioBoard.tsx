@@ -50,7 +50,16 @@ const BADGE_STYLE: Record<DesignBadge, { bg: string; fg: string }> = {
 
 const fmtAdded = (iso: string) => (iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }) : "—");
 
-export function StudioBoard({ rows: serverRows, buckets: serverBuckets }: { rows: BoardRow[]; buckets: StudioBucket[] }) {
+export function StudioBoard({
+  rows: serverRows,
+  buckets: serverBuckets,
+  fashnOn = false,
+}: {
+  rows: BoardRow[];
+  buckets: StudioBucket[];
+  /** fashnEnabled() on the server — model swap is parked unless FASHN_ENABLED=true. */
+  fashnOn?: boolean;
+}) {
   const router = useRouter();
   // Buckets (0074). A pick shows at once — the row moves between filter chips
   // before the server answers — via a per-design override over the server
@@ -489,7 +498,7 @@ export function StudioBoard({ rows: serverRows, buckets: serverBuckets }: { rows
         <div>
           <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>Studio</h1>
           <p className="font-body mt-1" style={{ fontSize: 11.5, color: palette.mutedGreige }}>
-            {rows.length} designs · photos, copy and publishing converge here.
+            {live.length} designs · photos, copy and publishing converge here.
           </p>
         </div>
         <button
@@ -534,7 +543,9 @@ export function StudioBoard({ rows: serverRows, buckets: serverBuckets }: { rows
       {/* Derived-state chips with live counts */}
       <div className="flex gap-1.5 mt-3 overflow-x-auto no-scrollbar">
         {CHIP_ORDER.map((c) => {
-          const n = c === "all" ? rows.length : counts.get(c) ?? 0;
+          // live, like every other chip — rows would count retired designs the
+          // list is hiding ("All · 300" over 287 cards).
+          const n = c === "all" ? live.length : counts.get(c) ?? 0;
           const active = chip === c;
           return (
             <button
@@ -910,9 +921,15 @@ export function StudioBoard({ rows: serverRows, buckets: serverBuckets }: { rows
             <button type="button" disabled={pending} onClick={() => runBatch(() => setTierBatch(ids, "standard"), "Tier set to standard")} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}>Set standard</button>
             <button type="button" disabled={pending} onClick={() => runBatch(() => togglePortalBatch(ids, "shopify", false), "Shopify disabled")} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}>SH off</button>
             <button type="button" disabled={pending} onClick={() => runBatch(() => togglePortalBatch(ids, "shopify", true), "Shopify enabled")} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}>SH on</button>
+            {/* Model swap is PARKED (FASHN_ENABLED, 19 Sep) and 0053 moved
+                every angle off the fashn engine, so while parked this gold
+                button could only ever answer "No pending AI angles". It stays
+                drawn, disabled and saying why, rather than silently vanishing;
+                the engine code is untouched for the day the flag comes back. */}
             <button
               type="button"
-              disabled={pending}
+              disabled={pending || !fashnOn}
+              title={fashnOn ? undefined : "Model swap is parked — set FASHN_ENABLED=true to bring it back"}
               onClick={() => {
                 startTransition(async () => {
                   const pre = await runFashnBatch(ids, true);
@@ -921,9 +938,13 @@ export function StudioBoard({ rows: serverRows, buckets: serverBuckets }: { rows
                 });
               }}
               className="font-body uppercase disabled:opacity-50"
-              style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.black, background: palette.gold, padding: "8px 10px" }}
+              style={
+                fashnOn
+                  ? { fontSize: 9, letterSpacing: "0.1em", color: palette.black, background: palette.gold, padding: "8px 10px" }
+                  : { fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }
+              }
             >
-              Run FASHN
+              {fashnOn ? "Run FASHN" : "FASHN parked"}
             </button>
             <button
               type="button"
@@ -954,6 +975,10 @@ export function StudioBoard({ rows: serverRows, buckets: serverBuckets }: { rows
                   // chunks so one click means one click. (Ansh, 21 Sep.)
                   let gen = 0, skip = 0, fail = 0, done = 0;
                   startRun();
+                  // Shadows the outer `ids`, as the push handlers do: the
+                  // confirm counted liveSelected, so the loop must too, or a
+                  // mixed selection spends Opus calls on retired products.
+                  const ids = liveSelected;
                   runProgress("Generating copy", 0, ids.length, "one vision call per design");
                   for (let i = 0; i < ids.length; i += COPY_CHUNK) {
                     if (stopRef.current) {

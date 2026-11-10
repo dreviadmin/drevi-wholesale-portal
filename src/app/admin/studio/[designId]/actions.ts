@@ -336,8 +336,10 @@ export async function generateCopy(designId: string): Promise<Res> {
   return { ok: true };
 }
 
-// Inline edit saves an edited DRAFT; editing after approval reverts to draft
-// and (D3) flips live portals to changes_pending.
+// Inline edit saves an edited DRAFT and (D3) flips live portals to
+// changes_pending. That flip used to wait for a previously APPROVED row, but
+// Approve-copy was retired on 17 Sep, so status is always 'draft' and a fixed
+// description on a live product never asked for the Re-push that ships it.
 export async function saveCopyEdit(
   designId: string,
   patch: { title: string; description: string; tags: Record<string, string> },
@@ -345,8 +347,6 @@ export async function saveCopyEdit(
   let staff;
   try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
   const admin = createAdminClient();
-  const { data: existing } = await admin.from("design_copy").select("status").eq("design_id", designId).maybeSingle();
-  const wasApproved = existing?.status === "approved";
   const { error } = await admin.from("design_copy").upsert(
     {
       design_id: designId,
@@ -361,9 +361,7 @@ export async function saveCopyEdit(
     { onConflict: "design_id" },
   );
   if (error) return fail(error.message);
-  if (wasApproved) {
-    await admin.from("publish_targets").update({ state: "changes_pending" }).eq("design_id", designId).eq("state", "live");
-  }
+  await flipLiveTargets(designId);
   revalidatePath(`/admin/studio/${designId}`);
   revalidatePath("/admin/studio");
   return { ok: true };

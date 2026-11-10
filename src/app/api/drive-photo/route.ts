@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getStaff } from "@/lib/staff";
 import { fetchImageByRef, downloadNameForRef } from "@/lib/design-image-store";
-import { attachmentHeader } from "@/lib/attachment-name";
+import { attachmentHeader, isInlineImageType } from "@/lib/attachment-name";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,8 +35,21 @@ export async function GET(req: Request) {
   const img = await fetchImageByRef(id, download ? undefined : size);
   if (!img) return new NextResponse("Not found", { status: 404 });
 
+  // Only a raster IMAGE is served as itself. Every legitimate ref here is a
+  // photo, but a Drive id without `s` falls back to the file's own stored MIME
+  // type — so an HTML or SVG file the service account can read would render
+  // from the portal origin with the viewer's staff session. Anything else goes
+  // out as an opaque download instead: an <img> still decodes a mislabelled
+  // photo, a navigation saves rather than renders. SVG counts as unsafe, it
+  // can carry script. nosniff stops the browser second-guessing either way.
+  const servable = isInlineImageType(img.contentType);
+
   const headers: Record<string, string> = {
-    "Content-Type": img.contentType,
+    "Content-Type": servable ? img.contentType : "application/octet-stream",
+    "X-Content-Type-Options": "nosniff",
+    // Opened directly in a tab, the response is its own document: sandboxed,
+    // it has no origin and runs nothing, whatever the bytes turn out to be.
+    "Content-Security-Policy": "sandbox",
     // no-store, not "private, max-age=3600" (13 Sep). These are private
     // vendor, visiting-card and note photos behind a staff session, and the
     // response carries no Vary: Cookie — so the browser's own disk cache had
@@ -47,7 +60,7 @@ export async function GET(req: Request) {
     // theirs, the cached copy would be the next operator's.
     "Cache-Control": "private, no-store",
   };
-  if (download) {
+  if (download || !servable) {
     // The name comes from the database, not the query string — see
     // downloadNameForRef. attachmentHeader sanitises it anyway: base_sku and
     // colour are operator-typed columns on their way into a header.

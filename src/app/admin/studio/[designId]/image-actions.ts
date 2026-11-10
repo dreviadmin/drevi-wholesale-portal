@@ -66,7 +66,7 @@ export async function uploadSource(angleId: string, formData: FormData): Promise
   if (!(file instanceof File) || file.size === 0) return fail("No image");
 
   const admin = createAdminClient();
-  const { data: angle } = await admin.from("design_angles").select("id, design_id, angle").eq("id", angleId).maybeSingle();
+  const { data: angle } = await admin.from("design_angles").select("id, design_id, angle, approved_image_id").eq("id", angleId).maybeSingle();
   if (!angle) return fail("Angle not found");
   const meta = await designMeta(angle.design_id);
   if (!meta.ok) return fail(meta.error ?? "Design not found");
@@ -83,6 +83,10 @@ export async function uploadSource(angleId: string, formData: FormData): Promise
   // source_ref is what the Workbench renders and generators read — keep it in
   // lockstep with source_image_id (historically only the sheet sync wrote it).
   await admin.from("design_angles").update({ source_image_id: row.id, source_ref: up.fileRef, updated_at: new Date().toISOString() }).eq("id", angleId);
+  // D3: with no approved image the source IS what the angle publishes (17 Sep
+  // effective semantics), so a reshoot of a live design's front changed the
+  // published set — the board kept saying Live and nothing asked for a Re-push.
+  if (!angle.approved_image_id) await flipLive(angle.design_id);
   // A photo has landed — the design's identifier and front must not be blank.
   await ensureDesignImagery(admin, angle.design_id);
   await syncCatalogFrontQuietly(angle.design_id);
@@ -289,13 +293,15 @@ export async function assertGenerable(angleId: string): Promise<Res> {
 export async function setAngleSource(angleId: string, imageId: string): Promise<Res> {
   try { await requireAdmin(); } catch { return fail("Not authorized"); }
   const admin = createAdminClient();
-  const { data: angle } = await admin.from("design_angles").select("design_id").eq("id", angleId).maybeSingle();
+  const { data: angle } = await admin.from("design_angles").select("design_id, approved_image_id").eq("id", angleId).maybeSingle();
   if (!angle) return fail("Angle not found");
   const { data: img } = await admin.from("design_images").select("file_ref").eq("id", imageId).maybeSingle();
   if (!img) return fail("Image not found");
   await admin.from("design_images").update({ angle_id: angleId }).eq("id", imageId);
   const { error } = await admin.from("design_angles").update({ source_image_id: imageId, source_ref: img.file_ref, updated_at: new Date().toISOString() }).eq("id", angleId);
   if (error) return fail(error.message);
+  // D3, as in uploadSource: an unapproved angle publishes its source.
+  if (!angle.approved_image_id) await flipLive(angle.design_id);
   await ensureDesignImagery(admin, angle.design_id);
   await syncCatalogFrontQuietly(angle.design_id);
   revalidatePath(`/admin/studio/${angle.design_id}`);

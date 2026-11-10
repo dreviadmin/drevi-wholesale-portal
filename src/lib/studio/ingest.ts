@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 import { ALL_ANGLES } from "./state";
 
 // Studio ingest (build guide §7.3): for every synced product row, parse
@@ -41,8 +42,18 @@ export async function ingestDesigns(
   if (unparseable > 0) warnings.push(`Studio ingest: ${unparseable} SKU(s) not in DD-CAT-SUB-NNN-… form, skipped.`);
   if (groups.size === 0) return { designs: 0, created: 0 };
 
-  const { data: before, error: beforeErr } = await admin.from("designs").select("id");
-  if (beforeErr) { warnings.push(`Studio ingest skipped — designs read failed: ${beforeErr.message}`); return { designs: 0, created: 0 }; }
+  // Every read here is PAGED: PostgREST silently caps an un-ranged select at
+  // 1000 rows, and ~281 designs x 6 angles is already ~1,700 design_angles. A
+  // truncated haveAngle re-listed ~700 existing pairs every run, each 500-row
+  // insert batch died whole on unique(design_id, angle), and a new sheet-born
+  // design's angles sat in those batches and were never created.
+  let before: { id: string }[];
+  try {
+    before = await fetchAll<{ id: string }>(admin, "designs", "id", (q) => q.order("id"));
+  } catch (err) {
+    warnings.push(`Studio ingest skipped — designs read failed: ${(err as Error).message}`);
+    return { designs: 0, created: 0 };
+  }
 
   // Upsert mirror fields only — absent columns are untouched on conflict.
   const payload = [...groups.values()].map(({ base, color, row }) => ({
@@ -59,15 +70,22 @@ export async function ingestDesigns(
   }
 
   // Ensure angle + target scaffolding for every design.
-  const { data: designs, error: dErr } = await admin.from("designs").select("id");
-  if (dErr || !designs) { warnings.push(`Studio ingest: post-upsert read failed: ${dErr?.message}`); return { designs: 0, created: 0 }; }
-
-  const [{ data: angleRows }, { data: targetRows }] = await Promise.all([
-    admin.from("design_angles").select("design_id, angle"),
-    admin.from("publish_targets").select("design_id, portal"),
-  ]);
-  const haveAngle = new Set((angleRows ?? []).map((a) => `${a.design_id}|${a.angle}`));
-  const haveTarget = new Set((targetRows ?? []).map((t) => `${t.design_id}|${t.portal}`));
+  let designs: { id: string }[];
+  let angleRows: { design_id: string; angle: string }[];
+  let targetRows: { design_id: string; portal: string }[];
+  try {
+    [designs, angleRows, targetRows] = await Promise.all([
+      fetchAll<{ id: string }>(admin, "designs", "id", (q) => q.order("id")),
+      fetchAll<{ design_id: string; angle: string }>(admin, "design_angles", "design_id, angle", (q) => q.order("id")),
+      fetchAll<{ design_id: string; portal: string }>(admin, "publish_targets", "design_id, portal",
+        (q) => q.order("design_id").order("portal")),
+    ]);
+  } catch (err) {
+    warnings.push(`Studio ingest: post-upsert read failed: ${(err as Error).message}`);
+    return { designs: 0, created: 0 };
+  }
+  const haveAngle = new Set(angleRows.map((a) => `${a.design_id}|${a.angle}`));
+  const haveTarget = new Set(targetRows.map((t) => `${t.design_id}|${t.portal}`));
 
   const newAngles: { design_id: string; angle: string }[] = [];
   const newTargets: { design_id: string; portal: string }[] = [];
@@ -75,14 +93,19 @@ export async function ingestDesigns(
     for (const angle of ALL_ANGLES) if (!haveAngle.has(`${d.id}|${angle}`)) newAngles.push({ design_id: d.id, angle });
     for (const portal of ["wholesale", "shopify"]) if (!haveTarget.has(`${d.id}|${portal}`)) newTargets.push({ design_id: d.id, portal });
   }
+  // ON CONFLICT DO NOTHING, so a row that appeared between the read and the
+  // write (or any other stale read) skips quietly instead of failing the
+  // whole batch — existing rows are never touched.
   for (let i = 0; i < newAngles.length; i += 500) {
-    const { error } = await admin.from("design_angles").insert(newAngles.slice(i, i + 500));
+    const { error } = await admin.from("design_angles")
+      .upsert(newAngles.slice(i, i + 500), { onConflict: "design_id,angle", ignoreDuplicates: true });
     if (error) warnings.push(`Studio ingest angles insert: ${error.message}`);
   }
   for (let i = 0; i < newTargets.length; i += 500) {
-    const { error } = await admin.from("publish_targets").insert(newTargets.slice(i, i + 500));
+    const { error } = await admin.from("publish_targets")
+      .upsert(newTargets.slice(i, i + 500), { onConflict: "design_id,portal", ignoreDuplicates: true });
     if (error) warnings.push(`Studio ingest targets insert: ${error.message}`);
   }
 
-  return { designs: designs.length, created: designs.length - (before?.length ?? 0) };
+  return { designs: designs.length, created: designs.length - before.length };
 }

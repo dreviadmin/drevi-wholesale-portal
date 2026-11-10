@@ -7,6 +7,7 @@ import { syncCatalogFrontQuietly } from "@/lib/studio/catalog-front";
 import { writeAuditEvent } from "@/lib/audit";
 import { DETAIL_ANGLES } from "@/lib/studio/state";
 import { loadVocab } from "@/lib/sku/vocab-live";
+import { fashnEnabled } from "@/lib/pipeline/engines";
 
 // Stage 3's two LIVE batch actions (§7.4). Spend/push actions arrive with
 // Stages 4–7 — their buttons render disabled until then.
@@ -75,6 +76,9 @@ export async function runFashnBatch(
     return { ok: false, error: "Not authorized" };
   }
   if (designIds.length === 0) return { ok: false, error: "Nothing selected" };
+  // Parked (FASHN_ENABLED, default off) — the board draws this button disabled,
+  // and the action refuses too rather than queue tryon jobs nothing will run.
+  if (!fashnEnabled()) return { ok: false, error: "Model swap is parked — set FASHN_ENABLED=true to bring it back" };
   const admin = createAdminClient();
   const [{ data: angles }, { data: activeJobs }] = await Promise.all([
     admin
@@ -379,7 +383,10 @@ export async function traySkusForDesigns(
  * meant to make. It does NOT touch wholesale_visible: a retired garment still
  * hanging in the showroom stays sellable at the counter, the same separation
  * 0062 drew. Restoring does not put it back in the catalog either — that is a
- * Studio push, and it should be a decision rather than a side effect.
+ * Studio push, and it should be a decision rather than a side effect. The
+ * wholesale target says so: a live or changes-pending target goes to 'ready',
+ * so after Restore the Wholesale card offers Push wholesale instead of
+ * claiming the product is still out there.
  *
  * SHOPIFY IS TAKEN DOWN TOO (Ansh, 23 Sep, answering exactly that question),
  * and since 31 Oct it goes to ARCHIVED rather than DRAFT: "send the product to
@@ -484,6 +491,36 @@ export async function setDiscontinued(
     if (skus.length) {
       await admin.from("wholesale_products").update({ buyer_visible: false }).in("sku", skus);
       hiddenSkus = skus.length;
+    }
+    // And say so on the target, the way unpublish() does: left at 'live', the
+    // board read "Live · WS" for a garment buyers cannot see, and after Restore
+    // nobody pushed it back because the badge claimed it was already out there.
+    await admin
+      .from("publish_targets")
+      .update({ state: "ready", error: null })
+      .eq("design_id", designId)
+      .eq("portal", "wholesale")
+      .in("state", ["live", "changes_pending"]);
+  } else {
+    // Restore never puts the product back in the catalog, so the Wholesale
+    // card must not say Live over hidden rows. A product retired before the
+    // reset above existed still carries 'live' from then; it is corrected here,
+    // and only when no size of it is in the buyer catalog (a size shown again
+    // by hand in Manage Catalog keeps the target as it is). An unreadable
+    // catalog changes nothing.
+    const { data: shown, error: shownErr } = await admin
+      .from("wholesale_products")
+      .select("sku")
+      .like("sku", `${design.base_sku}-%`)
+      .eq("buyer_visible", true);
+    const anyShown = (shown ?? []).some((v) => v.sku.toUpperCase().endsWith(`-${design.color.toUpperCase()}`));
+    if (!shownErr && !anyShown) {
+      await admin
+        .from("publish_targets")
+        .update({ state: "ready", error: null })
+        .eq("design_id", designId)
+        .eq("portal", "wholesale")
+        .in("state", ["live", "changes_pending"]);
     }
   }
 

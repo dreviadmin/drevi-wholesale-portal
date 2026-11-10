@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachmentHeader, safeStem } from "./attachment-name";
+import { attachmentHeader, isInlineImageType, safeStem } from "./attachment-name";
 
 // A filename is a header value — these cases are the reason this module exists.
 describe("safeStem", () => {
@@ -34,5 +34,18 @@ describe("attachmentHeader", () => {
     expect(attachmentHeader("front-source", "image/heic")).toBe('attachment; filename="front-source.heic"');
     expect(attachmentHeader("front-source", "IMAGE/HEIF")).toBe('attachment; filename="front-source.heic"');
     expect(attachmentHeader("front-production", "image/webp")).toBe('attachment; filename="front-production.webp"');
+  });
+});
+
+describe("isInlineImageType", () => {
+  it("serves every photo type the portal actually stores", () => {
+    for (const t of ["image/jpeg", "image/png", "image/webp", "image/heif", "image/jpeg; charset=binary", "IMAGE/PNG"]) {
+      expect(isInlineImageType(t)).toBe(true);
+    }
+  });
+  it("refuses anything that could render as a document from the portal origin", () => {
+    for (const t of ["text/html", "image/svg+xml", "application/xhtml+xml", "application/pdf", "application/octet-stream", ""]) {
+      expect(isInlineImageType(t)).toBe(false);
+    }
   });
 });

@@ -22,6 +22,8 @@
 // neither used an edited prompt, so the only thing that could have stopped it
 // was the instruction itself.
 
+import { ALL_ANGLES } from "./state";
+
 export const BUILT_IN_TEMPLATE = `You write product copy for Drevi, an Indian occasion-wear fashion house (lehengas, sarees, sharara sets, gowns). Voice: refined, confident, tactile — never salesy. No exclamation marks. Sentences end with periods.
 
 From the photos and the facts below, return STRICT JSON only (no markdown fence). All three keys are required; "tags" must never be empty:
@@ -90,4 +92,35 @@ export function defaultCopyPrompt(d: PromptFacts): string {
     d.tier && `Tier: ${d.tier}`,
   ].filter(Boolean).join("\n");
   return `${BUILT_IN_TEMPLATE}\n\nFACTS:\n${facts}`;
+}
+
+export interface CopyAngleRow {
+  angle: string;
+  source_ref: string | null;
+  approved_image_id: string | null;
+  design_images?: { id: string; file_ref: string }[] | null;
+}
+
+/**
+ * The photos the copy call sees: ONE effective image per angle, in display
+ * order (front first), capped at `max` — the approved image where the angle
+ * has one, else its source, which is what the push publishes (17 Sep).
+ *
+ * It used to take APPROVED images only, in whatever order the rows came back,
+ * and fall back to sources only when no angle at all had an approval. Since
+ * approval stopped being a gate, approvals come mostly from Import and Use
+ * directly — often on a detail angle — so a design whose one approval was a
+ * detail_1 macro had its title, silhouette and colour tags written from an
+ * embroidery crop while its front sat ignored.
+ */
+export function copyImageRefs(angles: CopyAngleRow[], max = 3): string[] {
+  const refs: string[] = [];
+  for (const name of ALL_ANGLES) {
+    const a = angles.find((x) => x.angle === name);
+    if (!a) continue;
+    const approved = (a.design_images ?? []).find((c) => c.id === a.approved_image_id);
+    const ref = approved?.file_ref ?? a.source_ref;
+    if (ref) refs.push(ref);
+  }
+  return refs.slice(0, max);
 }

@@ -42,3 +42,14 @@ export function attachmentHeader(stem: string, contentType: string): string {
   const ext = EXT[contentType.split(";")[0].trim().toLowerCase()] ?? "jpg";
   return `attachment; filename="${safeStem(stem)}.${ext}"`;
 }
+
+/**
+ * May /api/drive-photo serve these bytes as themselves? Raster images only.
+ * A Drive id falls back to the file's stored MIME type, so text/html or
+ * image/svg+xml (which can carry script) would otherwise render from the
+ * portal origin; the route sends anything this rejects as an opaque download.
+ */
+export function isInlineImageType(contentType: string): boolean {
+  const type = contentType.split(";")[0].trim().toLowerCase();
+  return type.startsWith("image/") && !type.includes("svg");
+}

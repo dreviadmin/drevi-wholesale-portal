@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { CATEGORIES, COLOR_GROUPS } from "../sku/vocab";
-import { BUILT_IN_TEMPLATE, defaultCopyPrompt } from "./copy-prompt";
+import { BUILT_IN_TEMPLATE, copyImageRefs, defaultCopyPrompt } from "./copy-prompt";
 import { promptDesignFrom, type VocabLike } from "./facts";
 
 const vocab: VocabLike = {
@@ -71,5 +71,42 @@ describe("defaultCopyPrompt — FACTS name the garment, codes in brackets", () =
     expect(p).not.toContain("Category:");
     expect(p).not.toContain("Colour");
     expect(lines(p)).toContain("Working name: Bare");
+  });
+});
+
+describe("copyImageRefs — one effective image per angle, front first", () => {
+  const angle = (name: string, source: string | null, approved?: string) => ({
+    angle: name,
+    source_ref: source,
+    approved_image_id: approved ? `img-${approved}` : null,
+    design_images: approved ? [{ id: `img-${approved}`, file_ref: approved }] : [],
+  });
+
+  it("does not let a lone detail approval crowd out the front and back sources", () => {
+    const refs = copyImageRefs([
+      angle("detail_1", "src-d1", "macro"),
+      angle("back", "src-back"),
+      angle("front", "src-front"),
+    ]);
+    expect(refs).toEqual(["src-front", "src-back", "macro"]);
+  });
+
+  it("prefers the approved image over the source on the same angle", () => {
+    expect(copyImageRefs([angle("front", "src-front", "studio-front")])).toEqual(["studio-front"]);
+  });
+
+  it("orders by display angle, not row order, and caps at three", () => {
+    const refs = copyImageRefs([
+      angle("detail_2", "d2", "d2-ok"),
+      angle("detail_1", "d1", "d1-ok"),
+      angle("lifestyle", null, "life"),
+      angle("side", "side"),
+      angle("front", "front", "front-ok"),
+    ]);
+    expect(refs).toEqual(["front-ok", "side", "life"]);
+  });
+
+  it("skips empty angles and returns nothing when no angle has an image", () => {
+    expect(copyImageRefs([angle("front", null), angle("back", null)])).toEqual([]);
   });
 });
