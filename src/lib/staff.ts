@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { StaffRole } from "@/lib/types";
+import { classifyStaffLookup } from "@/lib/staff-core";
 
 export interface StaffCtx {
   id: string;
@@ -12,23 +13,48 @@ export interface StaffCtx {
   role: StaffRole;
 }
 
-// The currently authenticated active staff user, or null. Looked up by email
-// (the link between auth.users and staff_users).
-export async function getStaff(): Promise<StaffCtx | null> {
+export type StaffLookup = { kind: "staff"; staff: StaffCtx } | { kind: "none" } | { kind: "error" };
+
+// Who is signed in, keeping "not staff" apart from "could not find out": a
+// failed staff_users read used to look like no row, and the admin layout sent
+// a signed-in person to /login on a database blip (staff-core.ts). Looked up
+// by email (the link between auth.users and staff_users).
+export async function lookupStaff(): Promise<StaffLookup> {
   const supabase = createServerSupabase();
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser();
-  if (!user?.email) return null;
 
-  const admin = createAdminClient();
-  const { data } = await admin
-    .from("staff_users")
-    .select("id, email, name, role, active")
-    .eq("email", user.email)
-    .maybeSingle();
-  if (!data || !data.active) return null;
-  return { id: data.id, email: data.email, name: data.name, role: data.role as StaffRole };
+  let row: { id: string; email: string; name: string | null; role: string; active: boolean | null } | null = null;
+  let rowError: unknown = null;
+  if (user?.email) {
+    const admin = createAdminClient();
+    const res = await admin
+      .from("staff_users")
+      .select("id, email, name, role, active")
+      .eq("email", user.email)
+      .maybeSingle();
+    row = res.data;
+    rowError = res.error;
+  }
+
+  const kind = classifyStaffLookup({ hasUser: !!user?.email, authError, rowError, row });
+  if (kind !== "staff" || !row) return { kind: kind === "error" ? "error" : "none" };
+  return { kind: "staff", staff: { id: row.id, email: row.email, name: row.name, role: row.role as StaffRole } };
+}
+
+// The currently authenticated active staff user, or null (including when the
+// lookup failed). API routes and server actions use this.
+export async function getStaff(): Promise<StaffCtx | null> {
+  const res = await lookupStaff();
+  return res.kind === "staff" ? res.staff : null;
+}
+
+// Thrown by the page gates when the lookup failed: admin/error.tsx shows a
+// retry card instead of the gate redirecting a signed-in person to /login.
+function lookupFailed(): never {
+  throw new Error("Could not check your sign-in. You are still signed in.");
 }
 
 export async function requireStaff(): Promise<StaffCtx> {
@@ -52,16 +78,18 @@ export function isAdminRole(role: StaffRole): boolean {
 
 // Page-level gate: any active staff (retail billing, price checks).
 export async function requireStaffOrRedirect(): Promise<StaffCtx> {
-  const staff = await getStaff();
-  if (!staff) redirect("/login");
-  return staff;
+  const res = await lookupStaff();
+  if (res.kind === "error") lookupFailed();
+  if (res.kind === "none") redirect("/login");
+  return res.staff;
 }
 
 // Page-level gate: admin/super_admin only (spec §5 — Buyers/Orders/Audit tabs).
 // Non-admin staff are sent to the staff home (price check).
 export async function requireAdminOrRedirect(): Promise<StaffCtx> {
-  const staff = await getStaff();
-  if (!staff) redirect("/login");
-  if (!isAdminRole(staff.role)) redirect("/admin/price-check");
-  return staff;
+  const res = await lookupStaff();
+  if (res.kind === "error") lookupFailed();
+  if (res.kind === "none") redirect("/login");
+  if (!isAdminRole(res.staff.role)) redirect("/admin/price-check");
+  return res.staff;
 }
