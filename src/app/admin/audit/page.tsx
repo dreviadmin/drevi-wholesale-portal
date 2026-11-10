@@ -1,14 +1,11 @@
-import { redirect } from "next/navigation";
-import { getStaff, isAdminRole } from "@/lib/staff";
+import { requireAdminOrRedirect } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { AuditTable, type AuditRowDTO } from "./AuditTable";
 
 export const dynamic = "force-dynamic";
 
 export default async function AuditPage() {
-  const staff = await getStaff();
-  if (!staff) redirect("/login");
-  if (!isAdminRole(staff.role)) redirect("/admin/buyers"); // admin / super_admin only (spec §5)
+  await requireAdminOrRedirect(); // admin / super_admin only (spec §5)
 
   const admin = createAdminClient();
   const { data: events } = await admin

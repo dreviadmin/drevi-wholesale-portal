@@ -92,11 +92,11 @@ export async function requireStaffOrRedirect(): Promise<StaffCtx> {
 }
 
 // Page-level gate: admin/super_admin only (spec §5 — Buyers/Orders/Audit tabs).
-// Non-admin staff are sent to the staff home (price check).
+// Non-admin staff are sent to the staff home (Home, where everyone lands).
 export async function requireAdminOrRedirect(): Promise<StaffCtx> {
   const res = await lookupStaff();
   if (res.kind === "error") lookupFailed();
   if (res.kind === "none") redirect("/login");
-  if (!isAdminRole(res.staff.role)) redirect("/admin/price-check");
+  if (!isAdminRole(res.staff.role)) redirect("/admin/home");
   return res.staff;
 }
