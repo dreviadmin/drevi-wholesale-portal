@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  debitShortfallPaise,
   describeLedgerKind,
   earnAmountPaise,
   earnBasePaise,
@@ -13,20 +14,25 @@ import {
   normalizePhone,
   orderWalletTotals,
   phoneClaimDecision,
+  reconcileOrderMovements,
   redeemablePaise,
   redemptionCodeFrom,
   refundRef,
+  walletAllocatedPaise,
   walletReturnOwedPaise,
   WALLET_DEFAULTS,
   cartGidFromToken,
   type OrderMovement,
+  type WalletMismatch,
 } from "@/lib/wallet-core";
 import {
   addCustomerTags,
+  addOrderTags,
   deleteDiscount,
   fetchWalletOrder,
   getCustomer,
   createWalletAutomaticDiscount,
+  listOrdersUpdatedBetween,
   removeCustomerTags,
   setCustomerNames,
   setCustomerPhone,
@@ -348,19 +354,25 @@ export async function recordWebhookOnce(id: string, topic: string, orderId: stri
  * and those filed under its refunds ("<order>#<refund>"). Cancels and refunds
  * both read this, so neither can undo what the other already did.
  */
-async function orderMovements(accountId: string, orderId: string): Promise<OrderMovement[]> {
+async function orderMovements(accountId: string | null, orderId: string): Promise<OrderMovement[]> {
   const admin = createAdminClient();
+  // accountId null: the order's rows on any wallet (the reconciliation asks
+  // "was it posted at all", not "was it posted to the wallet we'd pick now").
+  const rowsFor = (refType: string) => {
+    const q = admin.from("wallet_ledger").select("kind, amount_paise").eq("ref_type", refType);
+    return accountId ? q.eq("account_id", accountId) : q;
+  };
   const [direct, viaRefund] = await Promise.all([
-    admin.from("wallet_ledger").select("kind, amount_paise").eq("account_id", accountId).eq("ref_type", "shopify_order").eq("ref_id", orderId),
-    admin.from("wallet_ledger").select("kind, amount_paise").eq("account_id", accountId).eq("ref_type", "shopify_refund").like("ref_id", `${orderId}#%`),
+    rowsFor("shopify_order").eq("ref_id", orderId),
+    rowsFor("shopify_refund").like("ref_id", `${orderId}#%`),
   ]);
   if (direct.error) throw new Error(`wallet_ledger read: ${direct.error.message}`);
   if (viaRefund.error) throw new Error(`wallet_ledger read: ${viaRefund.error.message}`);
   return [...(direct.data ?? []), ...(viaRefund.data ?? [])] as OrderMovement[];
 }
 
-async function accountForOrder(order: WalletOrder): Promise<WalletAccount | null> {
-  const { normalizePhone } = await import("@/lib/wallet-core");
+/** The wallet an order belongs to, by customer id, then by each phone on it. Reads only. */
+async function findAccountForOrder(order: WalletOrder): Promise<WalletAccount | null> {
   const admin = createAdminClient();
   if (order.customerId) {
     const { data } = await admin.from("wallet_accounts").select("*").eq("shopify_customer_id", order.customerId).maybeSingle<WalletAccount>();
@@ -370,12 +382,39 @@ async function accountForOrder(order: WalletOrder): Promise<WalletAccount | null
     const p = normalizePhone(raw);
     if (!p) continue;
     const a = await getAccountByPhone(p);
-    if (a) {
-      if (!a.shopify_customer_id && order.customerId) await admin.from("wallet_accounts").update({ shopify_customer_id: order.customerId }).eq("id", a.id);
-      return a;
-    }
+    if (a) return a;
   }
   return null;
+}
+
+/** findAccountForOrder, and a wallet found by phone that has no customer yet is linked to the buyer. */
+async function accountForOrder(order: WalletOrder): Promise<WalletAccount | null> {
+  const a = await findAccountForOrder(order);
+  if (a && !a.shopify_customer_id && order.customerId) {
+    const admin = createAdminClient();
+    await admin.from("wallet_accounts").update({ shopify_customer_id: order.customerId }).eq("id", a.id);
+  }
+  return a;
+}
+
+/**
+ * Flag an order for a person to look at (Shopify admin → Orders, filter by
+ * tag). Production only: dev and local runs share the live store, so they
+ * just log what they would have tagged. Never throws, so a flag can never
+ * fail a webhook or the nightly cron.
+ */
+async function flagOrder(order: { id: string; name: string }, tag: "wallet-shortfall" | "wallet-check"): Promise<"tagged" | "would_tag" | "failed"> {
+  if (process.env.VERCEL_ENV !== "production") {
+    console.info(`[wallet] would tag ${order.name} ${tag} (not production)`);
+    return "would_tag";
+  }
+  try {
+    await addOrderTags(order.id, [tag]);
+    return "tagged";
+  } catch (e) {
+    console.warn(`[wallet] tag ${order.name} ${tag}:`, (e as Error).message);
+    return "failed";
+  }
 }
 
 /**
@@ -398,6 +437,7 @@ export async function onOrderCreated(orderId: string): Promise<string> {
   if (order.cancelledAt) return "cancelled, nothing debited";
   const admin = createAdminClient();
   const notes: string[] = [];
+  let shortfall = false;
 
   // Legacy WLT- codes (before 30 Sep).
   for (const code of codes) {
@@ -407,13 +447,22 @@ export async function onOrderCreated(orderId: string): Promise<string> {
     if (applied <= 0) { notes.push(`${code}: nothing allocated`); continue; }
     const row = await postMovement({ accountId: red.account_id, kind: "redeem", amountPaise: -applied, refType: "shopify_order", refId: order.id, note: `Used on ${order.name}`, clamp: true });
     await admin.from("wallet_redemptions").update({ status: "used", shopify_order_id: order.id, used_at: new Date().toISOString() }).eq("id", red.id);
-    notes.push(`${code}: ${row ? debitNote(order.name, applied, row) : "already debited"}`);
+    const d = row ? debitNote(order.name, applied, row) : null;
+    if (d?.shortfallPaise) shortfall = true;
+    notes.push(`${code}: ${d ? d.note : "already debited"}`);
   }
 
   // The automatic "Drevi Wallet" discount: it belongs to the order's customer.
   if (order.walletAutoPaise > 0) {
     const account = await accountForOrder(order);
-    if (!account) return [...notes, "wallet discount on an order with no wallet"].join("; ");
+    if (!account) {
+      // Shopify gave the credit away and there is no wallet to debit (the
+      // customer id changed between Use and checkout, say). Same loss as a
+      // clamped debit, so it is reported the same way.
+      console.error("[wallet] SHORTFALL", order.name, { requested: order.walletAutoPaise, debited: 0, reason: "no wallet" });
+      await flagOrder(order, "wallet-shortfall");
+      return [...notes, `wallet discount on an order with no wallet (SHORTFALL ${order.walletAutoPaise})`].join("; ");
+    }
     const { data: red } = await admin.from("wallet_redemptions").select("*").eq("account_id", account.id)
       .in("status", ["open", "expired"]).order("created_at", { ascending: false }).limit(1).maybeSingle<Redemption>();
     // Debit what Shopify actually took off, never more than was reserved;
@@ -425,8 +474,11 @@ export async function onOrderCreated(orderId: string): Promise<string> {
       // Single use: the discount goes the moment the order exists.
       if (red.shopify_discount_id) await deleteDiscount(red.shopify_discount_id).catch((e) => console.warn("[wallet] delete used discount:", (e as Error).message));
     }
-    notes.push(row ? `${debitNote(order.name, applied, row)}${red ? "" : " (no open redemption found)"}` : "already debited");
+    const d = row ? debitNote(order.name, applied, row) : null;
+    if (d?.shortfallPaise) shortfall = true;
+    notes.push(d ? `${d.note}${red ? "" : " (no open redemption found)"}` : "already debited");
   }
+  if (shortfall) await flagOrder(order, "wallet-shortfall");
   return notes.join("; ");
 }
 
@@ -434,13 +486,15 @@ export async function onOrderCreated(orderId: string): Promise<string> {
  * The clamp above stops a debit going below zero, so when Shopify took off
  * more than the wallet still held (two checkouts on one credit, or a balance
  * that lapsed meanwhile) the ledger takes less. That gap is money lost: say
- * it loudly in the log instead of letting the clamp hide it.
+ * it loudly in the log instead of letting the clamp hide it. The caller tags
+ * the order wallet-shortfall.
  */
-function debitNote(orderName: string, appliedPaise: number, row: LedgerRow): string {
+function debitNote(orderName: string, appliedPaise: number, row: LedgerRow): { note: string; shortfallPaise: number } {
   const took = -row.amount_paise;
-  if (took >= appliedPaise) return `debited ${appliedPaise}`;
+  const shortfallPaise = debitShortfallPaise(appliedPaise, took);
+  if (!shortfallPaise) return { note: `debited ${appliedPaise}`, shortfallPaise };
   console.error("[wallet] SHORTFALL", orderName, { requested: appliedPaise, debited: took });
-  return `debited ${took} of ${appliedPaise} (SHORTFALL ${appliedPaise - took})`;
+  return { note: `debited ${took} of ${appliedPaise} (SHORTFALL ${shortfallPaise})`, shortfallPaise };
 }
 
 async function ensureAccountForOrder(order: WalletOrder): Promise<WalletAccount | null> {
@@ -519,6 +573,79 @@ export async function onRefund(orderId: string, refundId: string): Promise<strin
     }
   }
   return notes.join("; ") || "nothing to change";
+}
+
+// ---- Reconciliation: orders against the ledger ----------------------------
+
+export interface ReconcileReport {
+  ok: true;
+  from: string;
+  to: string;
+  checked: number;
+  mismatched: number;
+  tagged: number;
+  would_tag: number;
+  failed: number;
+  truncated: boolean;
+  mismatches: Array<{ order: string } & WalletMismatch>;
+}
+
+/**
+ * The nightly check that every recent order did to the ledger what its
+ * webhooks should have (reconcileOrderMovements says what that is). It reads
+ * Shopify and the ledger and only reports: each disagreement is logged as
+ * "[wallet-reconcile] MISMATCH <order> <kind> expected X got Y" and the order
+ * is tagged wallet-check (production only). It never posts a movement; a
+ * person replays the webhook or posts by hand (docs/wallet.md).
+ *
+ * Window: orders updated in the last `hours`, except the last `graceMinutes`,
+ * whose webhooks may still be on their way. Stops early, and says so, when
+ * `budgetMs` runs out, so the cron answers inside its time limit.
+ */
+export async function reconcileRecent(opts: { hours?: number; graceMinutes?: number; budgetMs?: number; maxOrders?: number; now?: Date } = {}): Promise<ReconcileReport> {
+  const started = Date.now();
+  const now = opts.now ?? new Date();
+  const from = new Date(now.getTime() - (opts.hours ?? 72) * 3600_000).toISOString();
+  const to = new Date(now.getTime() - (opts.graceMinutes ?? 60) * 60_000).toISOString();
+  const budget = opts.budgetMs ?? 40_000;
+  const { orders, more } = await listOrdersUpdatedBetween(from, to, opts.maxOrders ?? 250);
+  const report: ReconcileReport = { ok: true, from, to, checked: 0, mismatched: 0, tagged: 0, would_tag: 0, failed: 0, truncated: more, mismatches: [] };
+  const earnPercent = cfg().earnPercent;
+
+  for (const o of orders) {
+    if (Date.now() - started > budget) { report.truncated = true; break; }
+    try {
+      const order = await fetchWalletOrder(o.id);
+      if (!order) continue;
+      const account = await findAccountForOrder(order);
+      const rows = await orderMovements(null, order.id);
+      const base = earnBasePaise(order.lines.map((l) => ({ productType: l.productType, discountedTotalPaise: l.paidPaise, quantity: l.quantity, refundedQuantity: l.quantity - l.currentQuantity })));
+      const found = reconcileOrderMovements({
+        cancelled: !!order.cancelledAt,
+        paid: order.financialStatus === "PAID",
+        fulfilled: order.fulfillmentStatus === "FULFILLED",
+        walletAllocatedPaise: walletAllocatedPaise(order.codeAllocations, order.walletAutoPaise),
+        expectedEarnPaise: earnAmountPaise(base, earnPercent),
+        walletReachable: !!account || order.phones.some((p) => !!normalizePhone(p)),
+      }, rows);
+      if (found.length) {
+        report.mismatched++;
+        for (const m of found) {
+          console.error(`[wallet-reconcile] MISMATCH ${order.name} ${m.kind} expected ${m.expectedPaise} got ${m.gotPaise}`);
+          if (report.mismatches.length < 50) report.mismatches.push({ order: order.name, ...m });
+        }
+        const t = await flagOrder(order, "wallet-check");
+        if (t === "tagged") report.tagged++;
+        else if (t === "would_tag") report.would_tag++;
+      }
+      report.checked++;
+    } catch (e) {
+      // One order that can't be read (a Shopify throttle, say) is counted and skipped.
+      report.failed++;
+      console.warn(`[wallet-reconcile] ${o.name}:`, (e as Error).message);
+    }
+  }
+  return report;
 }
 
 // ---- Signing up and joining (email sign-in) ------------------------------

@@ -347,6 +347,34 @@ export async function fetchWalletOrder(orderId: string): Promise<WalletOrder | n
   };
 }
 
+/**
+ * Tag an order (tagsAdd works on orders as on customers; the app holds
+ * write_orders). The wallet uses it only to flag an order for a person to
+ * look at: wallet-shortfall, wallet-check. Callers decide when it may run.
+ */
+export async function addOrderTags(orderGid: string, tags: string[]): Promise<void> {
+  const d = await walletGql<{ tagsAdd: { userErrors: UserError[] } }>(
+    `mutation($id:ID!, $tags:[String!]!){ tagsAdd(id:$id, tags:$tags){ userErrors{ field message } } }`, { id: orderGid, tags });
+  throwUserErrors("tagsAdd(order)", d.tagsAdd.userErrors);
+}
+
+/** Orders whose updated_at falls in [sinceIso, untilIso], oldest change first, at most `max`. */
+export async function listOrdersUpdatedBetween(sinceIso: string, untilIso: string, max = 250): Promise<{ orders: Array<{ id: string; name: string }>; more: boolean }> {
+  const orders: Array<{ id: string; name: string }> = [];
+  let after: string | null = null;
+  for (;;) {
+    const d: { orders: { nodes: Array<{ id: string; name: string }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await walletGql(
+      `query($q:String!, $after:String){ orders(first:50, after:$after, sortKey:UPDATED_AT, query:$q){ nodes{ id name } pageInfo{ hasNextPage endCursor } } }`,
+      { q: `updated_at:>='${sinceIso}' AND updated_at:<='${untilIso}'`, after });
+    for (const o of d.orders.nodes) {
+      if (orders.length >= max) return { orders, more: true };
+      orders.push(o);
+    }
+    if (!d.orders.pageInfo.hasNextPage || !d.orders.pageInfo.endCursor) return { orders, more: false };
+    after = d.orders.pageInfo.endCursor;
+  }
+}
+
 /** Recent orders for the wallet page, by customer id. */
 export async function fetchCustomerOrders(customerId: string, limit = 10): Promise<Array<{ id: string; name: string; createdAt: string; totalPaise: number; financialStatus: string | null; fulfillmentStatus: string | null; statusUrl: string | null }>> {
   const d = await walletGql<{ customer: null | { orders: { nodes: Array<{ id: string; name: string; createdAt: string; statusPageUrl: string | null;
