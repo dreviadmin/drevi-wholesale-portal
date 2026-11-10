@@ -10,6 +10,7 @@ import { encryptPassword, decryptPassword } from "@/lib/crypto";
 import { generateBuyerPassword } from "@/lib/password";
 import { getOrCreateLoginToken, resetLoginToken, loginUrlFor } from "@/lib/login-link";
 import { uploadBuyerCardImage } from "@/lib/storage";
+import { BUYER_LOGIN_DOMAIN } from "@/lib/share";
 import type { BuyerStatus } from "@/lib/types";
 
 function reqMeta() {
@@ -108,6 +109,19 @@ export async function setCredentials(
     return { ok: false, error: `${email} is a staff login — use a different email for this buyer.` };
   }
 
+  // A bare username resolves to the staff domain first (login/actions.ts), so
+  // a buyer username that matches a staff member's ("sakshi" vs
+  // sakshi@drevifashion.com) could never be typed in — refuse it, as
+  // setup-buyer-logins.mjs does in bulk.
+  const buyerSuffix = `@${BUYER_LOGIN_DOMAIN}`;
+  if (email.endsWith(buyerSuffix)) {
+    const username = email.slice(0, -buyerSuffix.length);
+    const { data: staffUsername } = await admin.from("staff_users").select("id").eq("email", `${username}@drevifashion.com`).limit(1);
+    if (staffUsername && staffUsername.length > 0) {
+      return { ok: false, error: `"${username}" is a staff username — use a different username for this buyer.` };
+    }
+  }
+
   try {
     await setAuthPassword(admin, email, password);
   } catch (e) {
@@ -154,6 +168,9 @@ export async function revealPassword(buyerId: string): Promise<CredResult> {
   return { ok: true, password: plain };
 }
 
+const STORED_COPY_FAILED =
+  "The login password changed but the stored copy did not save — press Regenerate again so Share sends the right one.";
+
 export async function regeneratePassword(buyerId: string): Promise<CredResult> {
   let staff;
   try {
@@ -170,7 +187,10 @@ export async function regeneratePassword(buyerId: string): Promise<CredResult> {
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
-  await admin.from("buyers").update({ encrypted_password: encryptPassword(password) }).eq("id", buyerId);
+  // Golden rule 4: the hash just changed, so a failed ciphertext write would
+  // leave Reveal / Share handing out the old, now-dead password.
+  const { error: encErr } = await admin.from("buyers").update({ encrypted_password: encryptPassword(password) }).eq("id", buyerId);
+  if (encErr) return { ok: false, error: STORED_COPY_FAILED };
   const { ip, userAgent } = reqMeta();
   await writeAuditEvent({ eventType: "credential_regenerated", buyerId, staffUserId: staff.id, ipAddress: ip, userAgent });
   revalidate(buyerId);
@@ -193,7 +213,8 @@ export async function changePassword(buyerId: string, newPassword: string): Prom
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
-  await admin.from("buyers").update({ encrypted_password: encryptPassword(newPassword) }).eq("id", buyerId);
+  const { error: encErr } = await admin.from("buyers").update({ encrypted_password: encryptPassword(newPassword) }).eq("id", buyerId);
+  if (encErr) return { ok: false, error: STORED_COPY_FAILED };
   const { ip, userAgent } = reqMeta();
   await writeAuditEvent({ eventType: "credential_changed", buyerId, staffUserId: staff.id, ipAddress: ip, userAgent });
   revalidate(buyerId);
@@ -274,9 +295,21 @@ export async function setBuyerStatus(buyerId: string, status: BuyerStatus, reaso
   const admin = createAdminClient();
   const patch: Record<string, unknown> = { status };
   let event: "account_suspended" | "account_reactivated" | "account_rejected" | null = null;
+  let notes = reason ?? null;
   if (status === "suspended") event = "account_suspended";
-  else if (status === "active") event = "account_reactivated";
-  else if (status === "rejected") {
+  else if (status === "active") {
+    event = "account_reactivated";
+    // Pending → Active from the dropdown is an APPROVAL, not a reactivation:
+    // stamp who approved (the header's "Approved … by …" line reads these) and
+    // say so in the audit note. There is no account_approved event without an
+    // enum migration, so the event itself stays account_reactivated.
+    const { data: current } = await admin.from("buyers").select("status, encrypted_password").eq("id", buyerId).maybeSingle();
+    if (current?.status === "pending") {
+      patch.approved_by = staff.id;
+      patch.approved_at = new Date().toISOString();
+      notes = current.encrypted_password ? "approved from pending" : "approved from pending (no login yet)";
+    }
+  } else if (status === "rejected") {
     event = "account_rejected";
     patch.rejected_by = staff.id;
     patch.rejected_at = new Date().toISOString();
@@ -286,7 +319,7 @@ export async function setBuyerStatus(buyerId: string, status: BuyerStatus, reaso
   if (error) return { ok: false, error: error.message };
   if (event) {
     const { ip, userAgent } = reqMeta();
-    await writeAuditEvent({ eventType: event, buyerId, staffUserId: staff.id, ipAddress: ip, userAgent, notes: reason ?? null });
+    await writeAuditEvent({ eventType: event, buyerId, staffUserId: staff.id, ipAddress: ip, userAgent, notes });
   }
   revalidate(buyerId);
   return { ok: true };
@@ -471,15 +504,19 @@ export async function uploadBuyerCard(buyerId: string, formData: FormData): Prom
   }
 }
 
-export async function addNote(buyerId: string, note: string): Promise<void> {
+// Returns a result (was void) so the page only clears the autosaved draft and
+// says "Notes saved" when the write actually landed.
+export async function addNote(buyerId: string, note: string): Promise<{ ok: boolean; error?: string }> {
   try {
     await requireAdmin();
   } catch {
-    return;
+    return { ok: false, error: "Not authorized." };
   }
   const admin = createAdminClient();
-  await admin.from("buyers").update({ notes: note }).eq("id", buyerId);
+  const { error } = await admin.from("buyers").update({ notes: note }).eq("id", buyerId);
+  if (error) return { ok: false, error: error.message };
   revalidate(buyerId);
+  return { ok: true };
 }
 
 // ── Buyer-requested identity changes (13 Sep) ───────────────────────────────

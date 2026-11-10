@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import { requireAdmin, type StaffCtx } from "@/lib/staff";
 import { generateMemorablePassword } from "@/lib/password";
+import { BUYER_LOGIN_DOMAIN } from "@/lib/share";
 import type { AuditEventType, StaffRole } from "@/lib/types";
 
 // Hierarchy (Ansh 4 Aug, superseding 2026-05-29): user management is
@@ -65,6 +66,24 @@ export async function addStaffUser(form: {
   const { data: buyerClash } = await admin.from("buyers").select("id").eq("email", email).not("encrypted_password", "is", null).limit(1);
   if (buyerClash && buyerClash.length > 0) {
     return { ok: false, error: `${email} is already a buyer login — use a different email for staff.` };
+  }
+
+  // A bare username resolves to the STAFF domain first (login/actions.ts), so
+  // staff sakshi@drevifashion.com would silently take over the buyer who types
+  // "sakshi" (sakshi@buyers.drevifashion.com) — their right password would
+  // start failing. setup-buyer-logins.mjs refuses this clash from the buyer
+  // side; refuse it from this side too.
+  const [local, domain] = email.split("@");
+  if (domain === "drevifashion.com") {
+    const { data: usernameClash } = await admin
+      .from("buyers")
+      .select("business_name")
+      .eq("email", `${local}@${BUYER_LOGIN_DOMAIN}`)
+      .not("encrypted_password", "is", null)
+      .limit(1);
+    if (usernameClash && usernameClash.length > 0) {
+      return { ok: false, error: `${usernameClash[0].business_name ?? "A buyer"} already signs in as "${local}" — use a different staff email.` };
+    }
   }
 
   const password = generateMemorablePassword();

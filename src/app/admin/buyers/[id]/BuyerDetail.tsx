@@ -675,7 +675,9 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet, changeRe
             <div>{buyer.email ? `${loginDisplay(buyer.email).label}: ${loginDisplay(buyer.email).value}` : "No login yet"}</div>
             <div className="flex items-center gap-2 mt-1.5">
               Password: <span style={{ fontWeight: 600 }}>{revealed ?? "●●●●●●●●●●●●●"}</span>
-              <button type="button" onClick={reveal} aria-label="Reveal" style={{ color: palette.mutedGreige }}>{revealed ? <EyeOff size={14} /> : <Eye size={14} />}</button>
+              {/* The EyeOff icon hides again — it used to re-decrypt (another
+                  credential_viewed row) and leave the password on a shared phone. */}
+              <button type="button" onClick={() => (revealed ? setRevealed(null) : reveal())} aria-label={revealed ? "Hide" : "Reveal"} style={{ color: palette.mutedGreige }}>{revealed ? <EyeOff size={14} /> : <Eye size={14} />}</button>
             </div>
           </div>
           <div className="flex gap-2 mt-3 flex-wrap">
@@ -824,7 +826,7 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet, changeRe
             {notesMeta.restored && <div className="mb-2"><DraftNotice meta={notesMeta} /></div>}
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="w-full font-body bg-transparent outline-none" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: 8, fontSize: 12.5 }} />
             <div className="flex gap-2 mt-2">
-              <button type="button" onClick={() => start(async () => { await addNote(buyer.id, notes); notesMeta.clear(); setEditingNotes(false); router.refresh(); flash("Notes saved"); })} className="font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 12px" }}>Save</button>
+              <button type="button" onClick={() => start(async () => { const r = await addNote(buyer.id, notes); if (!r.ok) { flash(r.error ?? "Could not save notes"); return; } notesMeta.clear(); setEditingNotes(false); router.refresh(); flash("Notes saved"); })} className="font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 12px" }}>Save</button>
               <button type="button" onClick={() => { notesMeta.clear(); setNotes(buyer.notes ?? ""); setEditingNotes(false); }} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, fontSize: 9, letterSpacing: "0.15em", padding: "7px 12px" }}>Cancel</button>
             </div>
           </div>

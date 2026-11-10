@@ -4,12 +4,14 @@
  *
  *   node scripts/merge-buyers.mjs --keep <id> --drop <id> [--prod] [--dry-run]
  *
- * WHY A SCRIPT AND NOT SQL: buyers is referenced by nine tables, five of them
+ * WHY A SCRIPT AND NOT SQL: buyers is referenced by ten tables, six of them
  * ON DELETE CASCADE (carts, notify_me, buyer_contacts, buyer_change_requests,
- * buyer_agents). A bare `delete from buyers` therefore SILENTLY discards
- * whatever the loser had in those, rather than merging it. This checks every
- * one of the nine and refuses to run if a cascading table holds rows it has no
- * rule for, so the failure mode is a stop rather than quiet data loss.
+ * buyer_agents, buyer_login_links). A bare `delete from buyers` therefore
+ * SILENTLY discards whatever the loser had in those, rather than merging it.
+ * This handles each of the ten by an explicit rule (REFERENCES below). It does
+ * NOT discover tables on its own: a migration that adds another buyer_id
+ * reference must add it to REFERENCES too, or the loser's rows in it cascade
+ * away (or, if it RESTRICTs, the final delete fails) when this runs.
  *
  * Order snapshots (orders.buyer_business_name and friends) are deliberately
  * frozen at submission and are NOT rewritten, with one exception: when the two
@@ -41,6 +43,7 @@ const REFERENCES = [
   { table: "buyer_agents", action: "move" },
   { table: "credit_ledger", action: "move" },
   { table: "credit_notes", action: "move" },
+  { table: "buyer_login_links", action: "drop" },      // the loser's /go link (0073) signs in a row that is going away
 ];
 
 const { data: keep } = await admin.from("buyers").select("*").eq("id", KEEP).maybeSingle();
@@ -96,12 +99,36 @@ const note = [keep.notes, `[merge ${new Date().toISOString().slice(0, 10)}] "${d
 await admin.from("buyers").update({ ...patch, notes: note }).eq("id", KEEP);
 console.log("  keeper updated (carried fields + merge note)");
 
-if (drop.email) {
-  const { data: page } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-  const hit = (page?.users ?? []).find((u) => (u.email || "").toLowerCase() === drop.email.toLowerCase());
-  if (hit) { const { error } = await admin.auth.admin.deleteUser(hit.id); console.log(`  auth user ${drop.email}: ${error ? error.message : "deleted"}`); }
-  else console.log(`  auth user ${drop.email}: not found`);
-}
+// Buyer logins are keyed by email in the one auth pool staff share, and
+// duplicate rows usually share an email (that is why 0007 allowed it). So the
+// auth user under drop.email is only the LOSER's login when the loser actually
+// had one and nobody else signs in with that email — otherwise deleting it
+// would lock out the keeper, another buyer, or a staff member.
+const dropEmail = (drop.email ?? "").trim().toLowerCase();
+if (dropEmail && drop.encrypted_password) {
+  const { data: staffRows, error: sErr } = await admin.from("staff_users").select("email").ilike("email", dropEmail);
+  const { data: buyerRows, error: bErr } = await admin.from("buyers").select("id, email")
+    .ilike("email", dropEmail).neq("id", DROP).not("encrypted_password", "is", null);
+  const same = (r) => (r.email ?? "").trim().toLowerCase() === dropEmail;
+  const keptBecause =
+    dropEmail === (keep.email ?? "").trim().toLowerCase() ? "shared with the keeper"
+    : sErr || bErr ? `could not check who else uses it (${(sErr ?? bErr).message.slice(0, 40)})`
+    : (staffRows ?? []).some(same) ? "shared with a staff member"
+    : (buyerRows ?? []).some(same) ? "shared with another buyer"
+    : null;
+  if (keptBecause) console.log(`  auth user ${drop.email}: kept — ${keptBecause}`);
+  else {
+    let hit = null;
+    for (let p = 1; p <= 20 && !hit; p++) {
+      const { data: page } = await admin.auth.admin.listUsers({ page: p, perPage: 200 });
+      const users = page?.users ?? [];
+      hit = users.find((u) => (u.email || "").toLowerCase() === dropEmail) ?? null;
+      if (users.length < 200) break;
+    }
+    if (hit) { const { error } = await admin.auth.admin.deleteUser(hit.id); console.log(`  auth user ${drop.email}: ${error ? error.message : "deleted"}`); }
+    else console.log(`  auth user ${drop.email}: not found`);
+  }
+} else if (dropEmail) console.log(`  auth user ${drop.email}: kept — the loser had no login of its own`);
 
 const { error: dErr } = await admin.from("buyers").delete().eq("id", DROP);
 console.log(`  loser row: ${dErr ? "FAILED " + dErr.message : "deleted"}`);
