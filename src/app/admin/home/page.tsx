@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { ReceiptText, QrCode, PackageCheck, Tag, ChevronRight, Store, Boxes, Briefcase, Palette } from "lucide-react";
 import { requireStaffOrRedirect, isAdminRole } from "@/lib/staff";
@@ -29,9 +30,11 @@ export default async function HomePage() {
   const isAdmin = isAdminRole(staff.role);
 
   const admin = createAdminClient();
-  const [today, attention, { data: syncRow }, { data: todayOrdersCount }] = await Promise.all([
+  // The "Needs you" inbox is not awaited here: it is a dozen queries, and the
+  // greeting, money and quick actions used to wait for all of them. It
+  // streams in below through <Suspense>.
+  const [today, { data: syncRow }, { data: todayOrdersCount }] = await Promise.all([
     computeToday(),
-    computeAttention(),
     // max(synced_at). NULLs last: Postgres sorts them FIRST in a descending
     // order, and rows the sheet sync never stamps (a custom line added to the
     // catalog) would otherwise make the stamp read "—" and "looks stuck".
@@ -96,28 +99,9 @@ export default async function HomePage() {
       {/* Needs you */}
       <div className="mt-6">
         <div className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>{t("home.needs_you")}</div>
-        <div className="mt-2 flex flex-col gap-1.5">
-          {attention.length === 0 && (
-            <div className="p-4 font-body" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)", fontSize: 12.5, color: palette.softBlack }}>
-              {t("home.all_clear")} — {today.orders} order{today.orders === 1 ? "" : "s"} billed today.
-            </div>
-          )}
-          {attention.map((a) => (
-            <Link key={a.key} href={a.href} className="flex items-center gap-3 p-3.5" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
-              <span className="min-w-0 flex-1">
-                <span className="font-body block" style={{ fontSize: 13, color: palette.black, fontWeight: 500 }}>{a.title}</span>
-                <span className="font-body block mt-0.5" style={{ fontSize: 11, color: palette.mutedGreige }}>{a.sub}</span>
-              </span>
-              <span
-                className="flex-shrink-0 flex items-center justify-center rounded-full font-body"
-                style={{ minWidth: 22, height: 22, padding: "0 6px", fontSize: 10.5, fontWeight: 700, background: SEVERITY_COLOR[a.severity], color: palette.ivory }}
-              >
-                {a.count}
-              </span>
-              <ChevronRight size={15} color={palette.mutedGreige} />
-            </Link>
-          ))}
-        </div>
+        <Suspense fallback={<NeedsYouSkeleton />}>
+          <NeedsYou ordersToday={today.orders} />
+        </Suspense>
       </div>
 
       {/* Quick actions — gold full-width scan first, per prototype */}
@@ -154,6 +138,47 @@ export default async function HomePage() {
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+// The "Needs you" list, rendered on its own so the rest of Home shows first.
+async function NeedsYou({ ordersToday }: { ordersToday: number }) {
+  const attention = await computeAttention();
+  return (
+    <div className="mt-2 flex flex-col gap-1.5">
+      {attention.length === 0 && (
+        <div className="p-4 font-body" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)", fontSize: 12.5, color: palette.softBlack }}>
+          {t("home.all_clear")} — {ordersToday} order{ordersToday === 1 ? "" : "s"} billed today.
+        </div>
+      )}
+      {attention.map((a) => (
+        <Link key={a.key} href={a.href} className="flex items-center gap-3 p-3.5" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
+          <span className="min-w-0 flex-1">
+            <span className="font-body block" style={{ fontSize: 13, color: palette.black, fontWeight: 500 }}>{a.title}</span>
+            <span className="font-body block mt-0.5" style={{ fontSize: 11, color: palette.mutedGreige }}>{a.sub}</span>
+          </span>
+          <span
+            className="flex-shrink-0 flex items-center justify-center rounded-full font-body"
+            style={{ minWidth: 22, height: 22, padding: "0 6px", fontSize: 10.5, fontWeight: 700, background: SEVERITY_COLOR[a.severity], color: palette.ivory }}
+          >
+            {a.count}
+          </span>
+          <ChevronRight size={15} color={palette.mutedGreige} />
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+// Three grey rows the height of an inbox card while the list loads.
+function NeedsYouSkeleton() {
+  return (
+    <div className="mt-2 flex flex-col gap-1.5 animate-pulse" role="status" aria-live="polite">
+      <span className="sr-only">Loading</span>
+      {[0, 1, 2].map((i) => (
+        <div key={i} style={{ height: 66, background: palette.soldBg, border: "1px solid rgba(26,26,26,0.06)" }} />
+      ))}
     </div>
   );
 }
