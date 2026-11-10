@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -19,7 +20,13 @@ export type StaffLookup = { kind: "staff"; staff: StaffCtx } | { kind: "none" } 
 // failed staff_users read used to look like no row, and the admin layout sent
 // a signed-in person to /login on a database blip (staff-core.ts). Looked up
 // by email (the link between auth.users and staff_users).
-export async function lookupStaff(): Promise<StaffLookup> {
+//
+// Wrapped in React cache(): the admin layout and the page's own gate both ask
+// within one render, and each ask used to cost an auth getUser call plus a
+// staff_users read. Inside a render the answer is shared for that request
+// only; outside one (route handlers, server actions) cache() calls straight
+// through, so those still check every time.
+export const lookupStaff = cache(async (): Promise<StaffLookup> => {
   const supabase = createServerSupabase();
   const {
     data: { user },
@@ -42,7 +49,7 @@ export async function lookupStaff(): Promise<StaffLookup> {
   const kind = classifyStaffLookup({ hasUser: !!user?.email, authError, rowError, row });
   if (kind !== "staff" || !row) return { kind: kind === "error" ? "error" : "none" };
   return { kind: "staff", staff: { id: row.id, email: row.email, name: row.name, role: row.role as StaffRole } };
-}
+});
 
 // The currently authenticated active staff user, or null (including when the
 // lookup failed). API routes and server actions use this.
