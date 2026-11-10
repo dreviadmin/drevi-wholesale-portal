@@ -26,7 +26,12 @@ import {
   isWalletApplication,
   isWalletTitle,
   walletDiscountTitle,
-  WALLET_DISCOUNT_TITLE, cartGidFromToken } from "./wallet-core";
+  WALLET_DISCOUNT_TITLE, cartGidFromToken,
+  debitShortfallPaise,
+  reconcileOrderMovements,
+  walletAllocatedPaise,
+  eachSettled,
+  type ReconcileOrderFacts } from "./wallet-core";
 
 describe("normalizePhone", () => {
   it("assumes India for a bare 10-digit mobile", () => {
@@ -292,5 +297,95 @@ describe("cartGidFromToken", () => {
   });
   it("makes no cart id out of a label, nothing, or junk", () => {
     for (const t of ["auto-e2e", "two-a", "", "  ", null, undefined, "x".repeat(16) + "?key=nothex!", "<script>"]) expect(cartGidFromToken(t)).toBeNull();
+  });
+});
+
+describe("debit shortfall", () => {
+  it("is what the clamp could not take", () => {
+    expect(debitShortfallPaise(100000, 100000)).toBe(0);
+    expect(debitShortfallPaise(100000, 40000)).toBe(60000);
+    expect(debitShortfallPaise(100000, 0)).toBe(100000);
+  });
+  it("is never negative", () => {
+    expect(debitShortfallPaise(50000, 80000)).toBe(0);
+    expect(debitShortfallPaise(0, 0)).toBe(0);
+    expect(debitShortfallPaise(100000, -5)).toBe(100000);
+  });
+});
+
+describe("what the wallet took off an order", () => {
+  it("adds the automatic discount and legacy WLT- codes, nothing else", () => {
+    expect(walletAllocatedPaise({}, 100000)).toBe(100000);
+    expect(walletAllocatedPaise({ "WLT-ABCDEFGH": 50000, PROMO10: 30000 }, 0)).toBe(50000);
+    expect(walletAllocatedPaise({ "WLT-ABCDEFGH": 50000 }, 20000)).toBe(70000);
+    expect(walletAllocatedPaise({ PROMO10: 30000 }, 0)).toBe(0);
+  });
+});
+
+describe("reconciling an order against the ledger", () => {
+  const facts = (over: Partial<ReconcileOrderFacts> = {}): ReconcileOrderFacts => ({
+    cancelled: false, paid: false, fulfilled: false, walletAllocatedPaise: 0, expectedEarnPaise: 0, walletReachable: true, ...over,
+  });
+
+  it("all good: debited what the wallet took off, earned the 10%", () => {
+    const rows = [{ kind: "redeem", amount_paise: -100000 }, { kind: "earn", amount_paise: 50000 }];
+    expect(reconcileOrderMovements(facts({ walletAllocatedPaise: 100000, paid: true, fulfilled: true, expectedEarnPaise: 50000 }), rows)).toEqual([]);
+  });
+  it("an order that never touched the wallet and isn't due a credit is fine with no rows", () => {
+    expect(reconcileOrderMovements(facts(), [])).toEqual([]);
+    expect(reconcileOrderMovements(facts({ paid: true, fulfilled: false, expectedEarnPaise: 50000 }), [])).toEqual([]);
+  });
+  it("redeem missing", () => {
+    expect(reconcileOrderMovements(facts({ walletAllocatedPaise: 100000 }), [])).toEqual([{ kind: "redeem", expectedPaise: 100000, gotPaise: 0 }]);
+  });
+  it("redeem short (a clamped debit)", () => {
+    expect(reconcileOrderMovements(facts({ walletAllocatedPaise: 100000 }), [{ kind: "redeem", amount_paise: -40000 }]))
+      .toEqual([{ kind: "redeem", expectedPaise: 100000, gotPaise: 40000 }]);
+  });
+  it("a debit on an order the wallet took nothing off", () => {
+    expect(reconcileOrderMovements(facts(), [{ kind: "redeem", amount_paise: -30000 }])).toEqual([{ kind: "redeem", expectedPaise: 0, gotPaise: 30000 }]);
+  });
+  it("earn missing on a paid and fulfilled order", () => {
+    expect(reconcileOrderMovements(facts({ paid: true, fulfilled: true, expectedEarnPaise: 77900 }), []))
+      .toEqual([{ kind: "earn", expectedPaise: 77900, gotPaise: 0 }]);
+  });
+  it("earn of the wrong amount", () => {
+    expect(reconcileOrderMovements(facts({ paid: true, fulfilled: true, expectedEarnPaise: 77900 }), [{ kind: "earn", amount_paise: 70000 }]))
+      .toEqual([{ kind: "earn", expectedPaise: 77900, gotPaise: 70000 }]);
+  });
+  it("no earn expected when there is no wallet and no phone to open one", () => {
+    expect(reconcileOrderMovements(facts({ paid: true, fulfilled: true, expectedEarnPaise: 77900, walletReachable: false }), [])).toEqual([]);
+  });
+  it("a refund's reversals don't count against the earn or the redeem rows", () => {
+    const rows = [{ kind: "redeem", amount_paise: -100000 }, { kind: "earn", amount_paise: 50000 }, { kind: "reverse_redeem", amount_paise: 50000 }, { kind: "reverse_earn", amount_paise: -25000 }];
+    expect(reconcileOrderMovements(facts({ walletAllocatedPaise: 100000 }), rows)).toEqual([]);
+  });
+  it("cancel without the credit handed back", () => {
+    expect(reconcileOrderMovements(facts({ cancelled: true, walletAllocatedPaise: 100000 }), [{ kind: "redeem", amount_paise: -100000 }]))
+      .toEqual([{ kind: "reverse_redeem", expectedPaise: 100000, gotPaise: 0 }]);
+    expect(reconcileOrderMovements(facts({ cancelled: true }), [{ kind: "redeem", amount_paise: -100000 }, { kind: "reverse_redeem", amount_paise: 40000 }]))
+      .toEqual([{ kind: "reverse_redeem", expectedPaise: 100000, gotPaise: 40000 }]);
+  });
+  it("cancel after a debit that was handed back, or cancelled before any debit: fine", () => {
+    expect(reconcileOrderMovements(facts({ cancelled: true, walletAllocatedPaise: 100000 }), [{ kind: "redeem", amount_paise: -100000 }, { kind: "reverse_redeem", amount_paise: 100000 }])).toEqual([]);
+    expect(reconcileOrderMovements(facts({ cancelled: true, walletAllocatedPaise: 100000, paid: true, fulfilled: true, expectedEarnPaise: 50000 }), [])).toEqual([]);
+  });
+});
+
+describe("eachSettled", () => {
+  it("keeps going when one step throws, and counts both", async () => {
+    const seen: string[] = [];
+    const errors: string[] = [];
+    const r = await eachSettled(["a", "b", "c", "d"], async (x) => {
+      seen.push(x);
+      if (x === "b") throw new Error("rpc down");
+      return x !== "d"; // d: already posted
+    }, (x, e) => errors.push(`${x}: ${(e as Error).message}`));
+    expect(seen).toEqual(["a", "b", "c", "d"]);
+    expect(r).toEqual({ done: 2, failed: 1 });
+    expect(errors).toEqual(["b: rpc down"]);
+  });
+  it("an empty list does nothing", async () => {
+    expect(await eachSettled([], async () => true, () => {})).toEqual({ done: 0, failed: 0 });
   });
 });

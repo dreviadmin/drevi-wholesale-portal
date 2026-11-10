@@ -157,6 +157,94 @@ export function walletReturnOwedPaise(input: {
   return Math.max(0, target - input.alreadyReturnedPaise);
 }
 
+/**
+ * What Shopify took off with the wallet that the ledger could not cover: the
+ * debit clamps at zero, so a wallet already spent elsewhere (two checkouts on
+ * one reservation, a lapse meanwhile) or a missing wallet debits less than
+ * the order received. That gap is money given away. Never negative.
+ */
+export function debitShortfallPaise(requestedPaise: number, debitedPaise: number): number {
+  return Math.max(0, Math.trunc(requestedPaise) - Math.max(0, Math.trunc(debitedPaise)));
+}
+
+/**
+ * What one order should have done to the ledger, as the nightly
+ * reconciliation sees it (wallet.ts reconcileRecent). These mirror the
+ * webhook handlers: orders/create debits what the wallet discount took off
+ * unless the order was already cancelled; the 10% is credited once the order
+ * is PAID and FULFILLED, if a wallet exists or the order has a phone to open
+ * one with; a cancel after a debit hands the credit back.
+ */
+export interface ReconcileOrderFacts {
+  cancelled: boolean;
+  paid: boolean;
+  fulfilled: boolean;
+  /** paise the wallet's discounts (the automatic one, or a legacy WLT- code) took off the order */
+  walletAllocatedPaise: number;
+  /** earnAmountPaise of the order's earn base as it stands now */
+  expectedEarnPaise: number;
+  /** a wallet matches the order, or the order carries a usable phone */
+  walletReachable: boolean;
+}
+
+export interface WalletMismatch { kind: "redeem" | "earn" | "reverse_redeem"; expectedPaise: number; gotPaise: number }
+
+/** What the wallet took off an order: its automatic discount plus any legacy WLT- code allocations. */
+export function walletAllocatedPaise(codeAllocations: Record<string, number>, walletAutoPaise: number): number {
+  let total = Math.max(0, walletAutoPaise);
+  for (const [code, paise] of Object.entries(codeAllocations)) if (isRedemptionCode(code)) total += Math.max(0, paise);
+  return total;
+}
+
+/**
+ * Expected against actual for one order. `rows` are every ledger row filed
+ * under the order and its refunds (whatever account they sit on). Returns an
+ * empty list when the ledger agrees. It only compares; nothing is posted.
+ * Refund-driven reversals are not checked here: a refunded order is no longer
+ * PAID, and its claw-backs clamp by design.
+ */
+export function reconcileOrderMovements(facts: ReconcileOrderFacts, rows: OrderMovement[]): WalletMismatch[] {
+  const total = (kind: string) => rows.filter((r) => r.kind === kind).reduce((s, r) => s + r.amount_paise, 0);
+  const redeemed = 0 - total("redeem"); // not -x: -0 would print as "got -0"
+  const returned = total("reverse_redeem");
+  const earned = total("earn");
+  const out: WalletMismatch[] = [];
+  if (facts.cancelled) {
+    // Cancelled before orders/create ran: nothing was debited, nothing is owed.
+    if (redeemed > 0 && returned < redeemed) out.push({ kind: "reverse_redeem", expectedPaise: redeemed, gotPaise: returned });
+    return out;
+  }
+  const allocated = Math.max(0, facts.walletAllocatedPaise);
+  if ((allocated > 0 || redeemed !== 0) && redeemed !== allocated) out.push({ kind: "redeem", expectedPaise: allocated, gotPaise: redeemed });
+  if (facts.paid && facts.fulfilled && facts.walletReachable && facts.expectedEarnPaise > 0 && earned !== facts.expectedEarnPaise) {
+    out.push({ kind: "earn", expectedPaise: facts.expectedEarnPaise, gotPaise: earned });
+  }
+  return out;
+}
+
+/**
+ * Run one async step per item, one at a time, and keep going when a step
+ * throws: the error goes to onError and is counted, and the rest still run.
+ * `done` counts the steps that returned true. The nightly cron uses it so one
+ * bad wallet cannot stop the others, or the discount sweep after them.
+ */
+export async function eachSettled<T>(
+  items: readonly T[],
+  step: (item: T) => Promise<boolean>,
+  onError: (item: T, error: unknown) => void,
+): Promise<{ done: number; failed: number }> {
+  let done = 0, failed = 0;
+  for (const item of items) {
+    try {
+      if (await step(item)) done++;
+    } catch (e) {
+      failed++;
+      onError(item, e);
+    }
+  }
+  return { done, failed };
+}
+
 /** Ledger reference for a refund: the order it belongs to, then the refund. */
 export function refundRef(orderId: string, refundId: string): string {
   return `${orderId}#${refundId}`;
