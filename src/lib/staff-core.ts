@@ -16,11 +16,15 @@ export interface StaffLookupInput {
   row: { active: boolean | null } | null | undefined;
 }
 
-// auth-js names network failures and 502/503/504 AuthRetryableFetchError
-// (status 0 for "no response"); any other 5xx comes back as an AuthApiError.
+// auth-js names network failures and gateway errors (502/503/504 and the
+// Cloudflare 52x codes) AuthRetryableFetchError, with status 0 for "no
+// response". Any other 5xx with a JSON body comes back as an AuthApiError with
+// that status. A reply that is not JSON at all (a proxy's HTML error page)
+// comes back as AuthUnknownError with no status: the auth server did not
+// answer, so that is not a "signed out" answer either.
 export function isRetryableAuthError(err: { name?: string; status?: number } | null | undefined): boolean {
   if (!err) return false;
-  if (err.name === "AuthRetryableFetchError") return true;
+  if (err.name === "AuthRetryableFetchError" || err.name === "AuthUnknownError") return true;
   return typeof err.status === "number" && err.status >= 500;
 }
 

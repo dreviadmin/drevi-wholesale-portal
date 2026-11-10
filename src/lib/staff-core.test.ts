@@ -65,4 +65,14 @@ describe("isRetryableAuthError", () => {
     expect(isRetryableAuthError({ name: "AuthApiError", status: 403 })).toBe(false);
     expect(isRetryableAuthError({ name: "AuthApiError" })).toBe(false);
   });
+
+  it("a reply that was not JSON (AuthUnknownError, no status) is retryable", () => {
+    expect(isRetryableAuthError({ name: "AuthUnknownError" })).toBe(true);
+    expect(classifyStaffLookup({ hasUser: false, authError: { name: "AuthUnknownError" }, rowError: null, row: null })).toBe("error");
+  });
+
+  it("a missing or revoked session is not retryable", () => {
+    expect(isRetryableAuthError({ name: "AuthSessionMissingError", status: 400 })).toBe(false);
+    expect(isRetryableAuthError({ name: "AuthSessionMissingError" })).toBe(false);
+  });
 });
