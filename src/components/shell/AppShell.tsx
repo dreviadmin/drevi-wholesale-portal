@@ -74,6 +74,29 @@ export function AppShell({
     activeSubTabRef.current?.scrollIntoView({ inline: "center", block: "nearest" });
   }, [pathname]);
 
+  // A fade on the strip's right edge while more sub-tabs sit off-screen; it
+  // goes at the end of the strip. Runs after the scroll-into-view above.
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const [moreRight, setMoreRight] = useState(false);
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el) {
+      setMoreRight(false);
+      return;
+    }
+    // 1px of slack: scrollLeft is fractional on high-density screens.
+    const update = () => setMoreRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    // The web font can land after the first paint and change the widths.
+    document.fonts?.ready.then(update).catch(() => {});
+    return () => {
+      el.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [pathname, subTabs.length]);
+
   function spaceHome(s: Space): string {
     return s.items[0]?.href ?? "/admin/home";
   }
@@ -167,29 +190,39 @@ export function AppShell({
           </button>
         </div>
         {subTabs.length > 1 && (
-          <div
-            className="flex overflow-x-auto"
-            style={{ borderTop: "1px solid rgba(196,163,90,0.18)", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}
-          >
-            {subTabs.map((i) => {
-              const active = isNavItemActive(pathname, i);
-              return (
-                <Link
-                  key={i.href}
-                  href={i.href}
-                  ref={active ? activeSubTabRef : undefined}
-                  className="flex-none font-body uppercase whitespace-nowrap"
-                  style={{
-                    fontSize: 9.5, letterSpacing: "0.14em",
-                    color: active ? palette.ivory : palette.champagne,
-                    borderBottom: `2px solid ${active ? palette.gold : "transparent"}`,
-                    padding: "10px 14px 8px",
-                  }}
-                >
-                  {t(i.label)}
-                </Link>
-              );
-            })}
+          <div className="relative">
+            <div
+              ref={stripRef}
+              className="flex overflow-x-auto"
+              style={{ borderTop: "1px solid rgba(196,163,90,0.18)", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}
+            >
+              {subTabs.map((i) => {
+                const active = isNavItemActive(pathname, i);
+                return (
+                  <Link
+                    key={i.href}
+                    href={i.href}
+                    ref={active ? activeSubTabRef : undefined}
+                    className="flex-none font-body uppercase whitespace-nowrap"
+                    style={{
+                      fontSize: 11.5, letterSpacing: "0.14em",
+                      color: active ? palette.ivory : palette.champagne,
+                      borderBottom: `2px solid ${active ? palette.gold : "transparent"}`,
+                      padding: "13px 14px 11px",
+                    }}
+                  >
+                    {t(i.label)}
+                  </Link>
+                );
+              })}
+            </div>
+            {moreRight && (
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute right-0 bottom-0"
+                style={{ top: 1, width: 24, background: `linear-gradient(to left, ${palette.black}, rgba(26,26,26,0))` }}
+              />
+            )}
           </div>
         )}
       </div>
@@ -210,7 +243,7 @@ export function AppShell({
               key={s.key}
               href={spaceHome(s)}
               className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 font-body uppercase"
-              style={{ fontSize: 8, letterSpacing: "0.14em", color: active ? palette.gold : palette.champagne }}
+              style={{ fontSize: 11, letterSpacing: "0.06em", color: active ? palette.gold : palette.champagne }}
             >
               <Icon size={18} strokeWidth={active ? 2 : 1.6} />
               {t(s.label)}
