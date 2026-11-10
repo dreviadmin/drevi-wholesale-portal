@@ -10,6 +10,10 @@ export interface NavItem {
   label: StringKey;
   href: string;
   roles?: StaffRole[]; // default: inherit the space's roles
+  // Extra path prefixes that also light this item: pages that belong to it
+  // but do not sit under its href (Log delivery is /admin/receipts/new, while
+  // the receipts history and each receipt are /admin/receipts[/<id>]).
+  match?: string[];
 }
 
 export interface Space {
@@ -53,7 +57,7 @@ export const SPACES: Space[] = [
     items: [
       // UX sprint (29 Jul): Receipts history lives behind Log delivery, and
       // Stock check folded into Stock count — 5 items fit small screens.
-      { label: "nav.log_delivery", href: "/admin/receipts/new" },
+      { label: "nav.log_delivery", href: "/admin/receipts/new", match: ["/admin/receipts"] },
       { label: "nav.sku_generator", href: "/admin/sku-generator" },
       { label: "nav.stock_take", href: "/admin/stock-take" },
       { label: "nav.vendors", href: "/admin/vendors" },
@@ -101,15 +105,30 @@ export function spacesForRole(role: StaffRole): Space[] {
   })).filter((s) => s.roles.includes(role) && s.items.length > 0);
 }
 
-// Which space a pathname belongs to (longest item-href prefix wins) — keeps
+// Length of the longest of an item's prefixes (its href, then any `match`
+// extras) that the pathname sits under, or -1 when none does.
+function matchLength(pathname: string, item: NavItem): number {
+  let best = -1;
+  for (const p of [item.href, ...(item.match ?? [])]) {
+    if ((pathname === p || pathname.startsWith(p + "/") || pathname.startsWith(p + "?")) && p.length > best) best = p.length;
+  }
+  return best;
+}
+
+// Whether a nav item is lit for this pathname: its own page, a drill-in under
+// it, or one of its `match` prefixes. The rail and the sub-tab strip use this.
+export function isNavItemActive(pathname: string, item: NavItem): boolean {
+  return matchLength(pathname, item) >= 0;
+}
+
+// Which space a pathname belongs to (longest matching prefix wins) — keeps
 // the parent tab/rail section lit on drill-ins like /admin/orders/[id].
 export function spaceForPath(pathname: string, spaces: Space[]): Space["key"] | null {
   let best: { key: Space["key"]; len: number } | null = null;
   for (const s of spaces) {
     for (const i of s.items) {
-      if ((pathname === i.href || pathname.startsWith(i.href + "/") || pathname.startsWith(i.href + "?")) && (!best || i.href.length > best.len)) {
-        best = { key: s.key, len: i.href.length };
-      }
+      const len = matchLength(pathname, i);
+      if (len >= 0 && (!best || len > best.len)) best = { key: s.key, len };
     }
   }
   return best?.key ?? null;

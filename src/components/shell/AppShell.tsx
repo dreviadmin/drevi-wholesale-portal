@@ -6,11 +6,12 @@ import { usePathname } from "next/navigation";
 import {
   House, Store, Boxes, Palette, Briefcase, ScanLine,
   Tag, QrCode, LayoutGrid, Tent, Truck, PackageCheck, Users,
-  ShoppingBag, ScrollText, Shield, BarChart3, SlidersHorizontal, RefreshCw, Handshake,} from "lucide-react";
+  ShoppingBag, ScrollText, Shield, BarChart3, SlidersHorizontal, RefreshCw, Handshake,
+  Building2, ListChecks,} from "lucide-react";
 import { SignOutButton } from "@/components/SignOutButton";
 import { palette } from "@/lib/palette";
 import { t } from "@/lib/strings";
-import { spacesForRole, spaceForPath, type Space } from "@/lib/nav";
+import { spacesForRole, spaceForPath, isNavItemActive, type Space } from "@/lib/nav";
 import { ScanSheet } from "./ScanSheet";
 import type { StaffRole } from "@/lib/types";
 
@@ -26,7 +27,7 @@ const ITEM_ICONS: Record<string, typeof Tag> = {
   "/admin/price-check": ScanLine,
   "/admin/catalog": LayoutGrid,
   "/admin/exhibition": Tent,
-  "/admin/in-store": Store,
+  "/admin/in-store": Building2,
   "/admin/sku-generator": QrCode,
   "/admin/receipts": PackageCheck,
   "/admin/receipts/new": PackageCheck,
@@ -38,7 +39,7 @@ const ITEM_ICONS: Record<string, typeof Tag> = {
   "/admin/buyers": Users,
   "/admin/agents": Handshake,
   "/admin/manage-catalog": SlidersHorizontal,
-  "/admin/lovs": SlidersHorizontal,
+  "/admin/lovs": ListChecks,
   "/admin/audit": ScrollText,
   "/admin/staff": Shield,
   "/admin/home": House,
@@ -103,7 +104,7 @@ export function AppShell({
               </div>
               {s.items.map((i) => {
                 const Icon = ITEM_ICONS[i.href] ?? Tag;
-                const active = pathname === i.href || pathname.startsWith(i.href + "/");
+                const active = isNavItemActive(pathname, i);
                 return (
                   <Link
                     key={i.href}
@@ -157,7 +158,7 @@ export function AppShell({
             style={{ borderTop: "1px solid rgba(196,163,90,0.18)", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}
           >
             {subTabs.map((i) => {
-              const active = pathname === i.href || pathname.startsWith(i.href + "/");
+              const active = isNavItemActive(pathname, i);
               return (
                 <Link
                   key={i.href}
