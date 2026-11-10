@@ -11,6 +11,7 @@ import {
 import { SignOutButton } from "@/components/SignOutButton";
 import { palette } from "@/lib/palette";
 import { t } from "@/lib/strings";
+import { staffFirstName } from "@/lib/staff-name";
 import { spacesForRole, spaceForPath, isNavItemActive, type Space } from "@/lib/nav";
 import { ScanSheet } from "./ScanSheet";
 import type { StaffRole } from "@/lib/types";
@@ -61,6 +62,7 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const [scanOpen, setScanOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const spaces = spacesForRole(staff.role);
   const activeSpace = spaceForPath(pathname, spaces) ?? (pathname === "/admin" || pathname === "/admin/home" ? "home" : null);
   const tabSpaces = spaces.slice(0, MAX_TABS);
@@ -150,7 +152,19 @@ export function AppShell({
           <Link href="/admin/home" className="font-display" style={{ fontSize: 14, letterSpacing: "0.3em", color: palette.ivory, fontWeight: 600 }}>
             DREVI
           </Link>
-          <SignOutButton style={{ color: palette.champagne }} />
+          {/* Who is signed in, as the desktop rail shows it. Log out sits in
+              the sheet this opens, not bare beside the wordmark. The negative
+              margin lets the 44px tap target fill the bar without growing it. */}
+          <button
+            type="button"
+            onClick={() => setAccountOpen(true)}
+            aria-haspopup="dialog"
+            aria-expanded={accountOpen}
+            className="font-body truncate"
+            style={{ fontSize: 11, color: palette.champagne, maxWidth: "62%", minHeight: 44, margin: "-12px -8px", padding: "0 8px" }}
+          >
+            {staffFirstName(staff)} · {ROLE_LABEL[staff.role]}
+          </button>
         </div>
         {subTabs.length > 1 && (
           <div
@@ -226,6 +240,60 @@ export function AppShell({
       </nav>
 
       {scanOpen && <ScanSheet onClose={() => setScanOpen(false)} />}
+      {accountOpen && <AccountSheet staff={staff} onClose={() => setAccountOpen(false)} />}
+    </div>
+  );
+}
+
+// Phone account sheet (same pattern as CancelBillButton): who is signed in,
+// Log out, and a way back without logging out.
+function AccountSheet({
+  staff,
+  onClose,
+}: {
+  staff: { name: string | null; email: string; role: StaffRole };
+  onClose: () => void;
+}) {
+  const name = staff.name?.trim() || null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-end md:items-center md:justify-center" style={{ background: "rgba(20,20,20,0.6)" }} onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="account-sheet-title"
+        className="w-full sm:max-w-md max-h-modal overflow-y-auto"
+        style={{ background: palette.ivory, padding: "20px 18px calc(20px + env(safe-area-inset-bottom))" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div id="account-sheet-title" className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.2em", color: palette.mutedGreige }}>
+          Signed in as
+        </div>
+        <div className="font-display mt-2" style={{ fontSize: 18, fontWeight: 600, color: palette.black, overflowWrap: "anywhere" }}>
+          {name ?? staff.email}
+        </div>
+        {name && (
+          <div className="font-body mt-0.5" style={{ fontSize: 13, color: palette.softBlack, overflowWrap: "anywhere" }}>{staff.email}</div>
+        )}
+        <div className="font-body uppercase mt-1.5" style={{ fontSize: 11, letterSpacing: "0.15em", color: palette.goldDeep }}>
+          {ROLE_LABEL[staff.role]}
+        </div>
+        <div className="flex gap-2 mt-5">
+          <div className="flex-1">
+            <SignOutButton
+              className="w-full justify-center"
+              style={{ gap: 6, fontSize: 11, letterSpacing: "0.16em", color: palette.ivory, background: palette.black, minHeight: 44, padding: "12px 0" }}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 font-body uppercase"
+            style={{ fontSize: 11, letterSpacing: "0.14em", color: palette.softBlack, border: "1px solid rgba(26,26,26,0.2)", minHeight: 44, padding: "12px 0" }}
+          >
+            Stay signed in
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
