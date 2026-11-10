@@ -11,6 +11,7 @@ import {
   uploadDesignImage,
   archiveFile,
 } from "@/lib/drive-design";
+import { SB_PREFIX, parseStorageRef } from "./image-ref-core";
 
 // UX sprint (29 Jul) — ONE front door for storing and serving design photos.
 //
@@ -24,7 +25,7 @@ import {
 // moment the Drive folder id is set, NEW uploads go to Drive while existing
 // sb: refs keep serving forever. Still no fallback to the legacy INPUT folder.
 
-export const SB_PREFIX = "sb:";
+export { SB_PREFIX };
 const BUCKET = "design-images";
 
 export const isStorageRef = (ref: string) => ref.startsWith(SB_PREFIX);
@@ -155,6 +156,12 @@ export async function archiveImageFile(fileRef: string, driveFolderId?: string |
  * Serve any image ref for /api/drive-photo. `bucket` widens it to the other
  * portal buckets (vendor-photos, order-attachments) via "sb:<bucket>:<path>"
  * — plain "sb:<path>" stays design-images for back-compat.
+ *
+ * `ref` can be the raw `id` query parameter of /api/drive-photo, and the
+ * download runs on the service-role client, so a path that fails
+ * parseStorageRef's allow-list is refused BEFORE Storage is called, so the
+ * request can only ever name an object inside its bucket (see
+ * image-ref-core.ts).
  */
 export async function fetchImageByRef(
   ref: string,
@@ -162,15 +169,9 @@ export async function fetchImageByRef(
 ): Promise<{ body: ArrayBuffer; contentType: string } | null> {
   if (!isStorageRef(ref)) return fetchDriveImage(ref, size);
 
-  const rest = ref.slice(SB_PREFIX.length);
-  const known = ["design-images", "vendor-photos", "order-attachments", "note-photos"];
-  let bucket = BUCKET;
-  let path = rest;
-  const head = rest.split(":", 1)[0];
-  if (known.includes(head)) {
-    bucket = head;
-    path = rest.slice(head.length + 1);
-  }
+  const parsed = parseStorageRef(ref);
+  if (!parsed) return null;
+  const { bucket, path } = parsed;
   const admin = createAdminClient();
   const { data, error } = await admin.storage.from(bucket).download(path);
   if (error || !data) return null;
