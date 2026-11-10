@@ -58,9 +58,12 @@ export async function GET(req: Request) {
   }
 
   // Orders against the ledger. It only reports and tags; it never posts.
+  // ?hours=N (by hand, with the secret) widens the window, up to 90 days,
+  // say to re-check everything since an outage; the nightly run uses 72.
+  const hours = Number(new URL(req.url).searchParams.get("hours"));
   let reconcile: Awaited<ReturnType<typeof reconcileRecent>> | { ok: false; error: string };
   try {
-    reconcile = await reconcileRecent();
+    reconcile = await reconcileRecent(Number.isFinite(hours) && hours > 0 ? { hours: Math.min(hours, 24 * 90) } : {});
   } catch (e) {
     console.error("[wallet-reconcile] failed:", (e as Error).message);
     reconcile = { ok: false, error: (e as Error).message.slice(0, 200) };
