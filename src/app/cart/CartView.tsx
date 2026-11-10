@@ -136,14 +136,17 @@ export function CartView({
 
                   {/* The stepper runs free in both directions. `l.special` is
                       still forwarded so a line a buyer flagged before this
-                      change keeps its exact quantity on edit. */}
+                      change keeps its exact quantity on edit. Disabled while a
+                      change is in flight: l.qty only moves after the refresh,
+                      so three quick taps on 5 each sent 6 and the line ended
+                      at 6, not 8. */}
                   <div className="flex items-center justify-between mt-2">
                     <div className="flex items-center" style={{ border: `1px solid rgba(26,26,26,0.2)` }}>
-                      <button type="button" onClick={() => editQty(l.sku, l.qty - 1, l.special)} aria-label="Decrease" className="px-2.5 py-1.5" style={{ color: palette.black }}>
+                      <button type="button" disabled={isPending} onClick={() => editQty(l.sku, l.qty - 1, l.special)} aria-label="Decrease" className="px-2.5 py-1.5 disabled:opacity-50" style={{ color: palette.black }}>
                         <Minus size={13} strokeWidth={2} />
                       </button>
                       <span className="font-body" style={{ minWidth: 28, textAlign: "center", fontSize: 13 }}>{l.qty}</span>
-                      <button type="button" onClick={() => editQty(l.sku, l.qty + 1, l.special)} aria-label="Increase" className="px-2.5 py-1.5" style={{ color: palette.black }}>
+                      <button type="button" disabled={isPending} onClick={() => editQty(l.sku, l.qty + 1, l.special)} aria-label="Increase" className="px-2.5 py-1.5 disabled:opacity-50" style={{ color: palette.black }}>
                         <Plus size={13} strokeWidth={2} />
                       </button>
                     </div>

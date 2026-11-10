@@ -113,23 +113,6 @@ export function InstallPrompt() {
     };
     window.addEventListener("beforeinstallprompt", onBip);
 
-    // iOS has no event to wait for, so offer the instructions directly. Held
-    // back a moment so it does not fight the first paint.
-    let t: ReturnType<typeof setTimeout> | undefined;
-    // WebKit fires no 'appinstalled' and the iOS card has no Install button,
-    // so nothing would ever record that it had been shown — it would return on
-    // every single visit. Showing it IS the event.
-    if (isIOS())
-      t = setTimeout(() => {
-        if (handledRef.current) return;
-        setMode((m) => {
-          if (m !== "none") return m;
-          handledRef.current = true;
-          remember("ios-shown");
-          return "ios";
-        });
-      }, 2500);
-
     const isField = (t: EventTarget | null) => {
       const el = t as HTMLElement | null;
       if (!el || !el.tagName) return false;
@@ -158,9 +141,33 @@ export function InstallPrompt() {
       window.removeEventListener("orientationchange", measure);
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("focusout", onFocusOut);
-      if (t) clearTimeout(t);
     };
   }, []);
+
+  // iOS has no event to wait for, so offer the instructions directly. Held
+  // back a moment so it does not fight the first paint.
+  //
+  // Armed only on a landing route. This component mounts on every page, and
+  // the timer used to run wherever the buyer first arrived — /go/<token> or
+  // /home off the WhatsApp links, never /login — so the flag below was written
+  // while the card (which renders on /login only) was nowhere on screen, and
+  // it was already spent by the time that buyer ever saw /login.
+  useEffect(() => {
+    if (!LANDING_ROUTES.has(pathname) || !isIOS() || isStandalone() || alreadySeen()) return;
+    // WebKit fires no 'appinstalled' and the iOS card has no Install button,
+    // so nothing would ever record that it had been shown — it would return on
+    // every single visit. Showing it IS the event.
+    const t = setTimeout(() => {
+      if (handledRef.current) return;
+      setMode((m) => {
+        if (m !== "none") return m;
+        handledRef.current = true;
+        remember("ios-shown");
+        return "ios";
+      });
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [pathname]);
 
   // Never over the offline fallback — there is no network to install over.
   if (mode === "none" || typing || !roomy || !LANDING_ROUTES.has(pathname)) return null;

@@ -9,6 +9,7 @@ import { ProductImage } from "@/components/ProductImage";
 import { addToCart } from "@/app/cart/actions";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { useToast } from "@/lib/use-toast";
 import type { WholesaleProduct } from "@/lib/types";
 
 export function ProductDetailView({
@@ -27,7 +28,9 @@ export function ProductDetailView({
   const images = product.image_urls ?? [];
   const [selected, setSelected] = useState(0);
   const [count, setCount] = useState(initialCartCount);
-  const [toast, setToast] = useState<string | null>(null);
+  // The shared timer, so "Added to cart" clears itself instead of sitting
+  // over the bottom of the page until the buyer navigates away.
+  const [toast, flash] = useToast();
   const [isPending, startTransition] = useTransition();
 
   // The buyer asks for whatever they want; feasibility is settled on the call,
@@ -43,9 +46,9 @@ export function ProductDetailView({
       const res = await addToCart(product.sku, qty);
       if (res.ok) {
         setCount(res.count);
-        setToast("Added to cart");
+        flash("Added to cart");
       } else {
-        setToast(res.message ?? "Could not add to cart");
+        flash(res.message ?? "Could not add to cart");
       }
     });
   }

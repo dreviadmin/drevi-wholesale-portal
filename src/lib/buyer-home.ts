@@ -109,10 +109,17 @@ export async function loadBuyerHome(buyerId: string): Promise<BuyerHomeData> {
     .select("sku_base, color, published_at")
     .gte("published_at", weekAgo);
   const freshGroups = new Set((freshImages ?? []).map((f) => `${f.sku_base}|${f.color}`.toUpperCase()));
+  // One tile per design + colour. Every size is its own row with the same
+  // photo, title and price, so two fresh 4-size designs used to fill all 8
+  // tiles with copies of themselves.
+  const seenGroups = new Set<string>();
   const newThisWeek = (products ?? []).filter((p) => {
     const parts = p.sku.toUpperCase().split("-");
     if (parts.length < 5 || !/^\d{2,4}$/.test(parts[3])) return false;
-    return freshGroups.has(`${parts.slice(0, 4).join("-")}|${parts[parts.length - 1]}`);
+    const group = `${parts.slice(0, 4).join("-")}|${parts[parts.length - 1]}`;
+    if (!freshGroups.has(group) || seenGroups.has(group)) return false;
+    seenGroups.add(group);
+    return true;
   }) as WholesaleProduct[];
 
   // Back-in-stock: this buyer's open notify requests whose group now has stock.

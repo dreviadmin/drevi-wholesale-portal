@@ -12,7 +12,17 @@ export default async function CartPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: buyer } = await supabase.from("buyers").select("id").eq("email", user.email ?? "").maybeSingle();
+  // The credentialed row, not .maybeSingle(): emails are not unique (0007), and
+  // with a second row on the same email maybeSingle() errored, buyer came back
+  // null and a full cart rendered as "Your cart is empty" with no submit.
+  // Same resolution as resolveActiveBuyer in ./actions.
+  const { data: rows } = await supabase
+    .from("buyers")
+    .select("id")
+    .eq("email", user.email ?? "")
+    .not("encrypted_password", "is", null)
+    .limit(1);
+  const buyer = rows?.[0] ?? null;
   const cart = buyer ? await getDetailedCart(buyer.id) : null;
 
   return (

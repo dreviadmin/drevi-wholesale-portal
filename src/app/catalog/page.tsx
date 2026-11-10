@@ -17,8 +17,16 @@ export default async function CatalogPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const [{ data: buyer }, { data: products }] = await Promise.all([
-    supabase.from("buyers").select("id, business_name").eq("email", user.email ?? "").maybeSingle(),
+  const [{ data: buyerRows }, { data: products }] = await Promise.all([
+    // The credentialed row, not .maybeSingle() (see cart/page.tsx): a second
+    // row on the same email nulled the buyer, so the cart map came back empty
+    // and tapping "Add to Cart" on a line already in the cart overwrote its qty.
+    supabase
+      .from("buyers")
+      .select("id, business_name")
+      .eq("email", user.email ?? "")
+      .not("encrypted_password", "is", null)
+      .limit(1),
     supabase
       .from("wholesale_products")
       .select(BUYER_PRODUCT_COLUMNS)
@@ -31,6 +39,7 @@ export default async function CatalogPage() {
       .order("title", { nullsFirst: false }),
   ]);
 
+  const buyer = buyerRows?.[0] ?? null;
   const rows = (products ?? []) as WholesaleProduct[];
   // The cards no longer carry an availability line, so the supply query that
   // fed it is gone with it — nothing else on this page reads availability.

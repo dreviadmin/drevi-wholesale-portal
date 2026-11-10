@@ -48,9 +48,19 @@ export function BuyerHome({ businessName, city, cartCount, data, wallet }: {
   function handleScan(text: string): ScanFeedback {
     const sku = text.trim().toUpperCase();
     if (!sku) return { ok: false, message: "Empty code" };
+    // A 401 (session expired, buyer suspended) comes back as {error} with no
+    // actions; handing that to setScanned crashed the page on actions.map.
     fetch(`/api/scan/resolve?sku=${encodeURIComponent(sku)}`)
-      .then((r) => r.json())
-      .then((d) => { setScanned(d); setScanOpen(false); })
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !Array.isArray(d.actions)) {
+          setScanOpen(false);
+          flash(d.error ?? "Could not look that up");
+          return;
+        }
+        setScanned(d);
+        setScanOpen(false);
+      })
       .catch(() => flash("Could not look that up"));
     return { ok: true, message: sku };
   }

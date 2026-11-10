@@ -5,6 +5,7 @@ import { SignOutButton } from "@/components/SignOutButton";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { currentCatalogImages, lineImage } from "@/lib/catalog-images";
+import { buyerBillLink } from "@/lib/invoice-link";
 import { ORDER_STATUS_LABEL } from "@/lib/order-status";
 import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -66,6 +67,14 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
   const creditNotes = (noteRows ?? []) as BuyerCreditNote[];
   const creditApplied = Number((order as Record<string, unknown>).credit_applied ?? 0) || 0;
   const returnedQtyByBillLine = returnedByBillLine(creditNotes);
+  // A bill's PDF opens through its permanent /i/<bill id> link
+  // (src/lib/invoice-link.ts), the same one staff send on WhatsApp: it signs a
+  // fresh storage link on every open, so it keeps working however old the bill
+  // is. The pdf_url saved on the row is a 30-day link, so a buyer opening an
+  // invoice from here a month after billing got an expired-token error. A
+  // cancelled bill gets no link at all (it is shown struck through below, the
+  // way the admin page shows it).
+  const billLinks = new Map(bills.map((b) => [b.id, buyerBillLink(b)]));
 
   // The bill snapshot is the stable address for a return (orders.items is
   // re-packed by Modify Order), so resolve each order line to its bill line —
@@ -243,9 +252,15 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>{formatINR(b.total)}</span>
-                  {b.pdf_url && (
-                    <a href={b.pdf_url} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.goldDeep, textDecoration: "underline" }}>PDF</a>
+                  {/* cancelBill keeps the row and frees its lines for a new
+                      bill, so after a cancel-and-rebill both rows are here.
+                      Unmarked, the buyer read two live invoices for one order. */}
+                  {b.cancelled_at && (
+                    <span className="font-body uppercase" style={{ fontSize: 8, letterSpacing: "0.1em", padding: "3px 7px", background: palette.crimsonSoft, color: palette.crimsonText, fontWeight: 600 }}>Cancelled</span>
+                  )}
+                  <span className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black, textDecoration: b.cancelled_at ? "line-through" : "none" }}>{formatINR(b.total)}</span>
+                  {billLinks.get(b.id) && (
+                    <a href={billLinks.get(b.id) ?? undefined} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.goldDeep, textDecoration: "underline" }}>PDF</a>
                   )}
                 </div>
               </div>
