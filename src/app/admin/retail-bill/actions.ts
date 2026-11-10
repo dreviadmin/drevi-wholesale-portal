@@ -260,7 +260,7 @@ export async function createRetailBill(
 }
 
 /** Void a bill: stock comes back, the row stays as a flagged record. */
-export async function voidRetailBill(billId: string): Promise<Res> {
+export async function voidRetailBill(billId: string): Promise<Res & { warning?: string }> {
   let staff;
   try { staff = await requireStaff(); } catch { return { ok: false, error: "Not authorized." }; }
   const admin = createAdminClient();
@@ -281,6 +281,10 @@ export async function voidRetailBill(billId: string): Promise<Res> {
 
   const returnFailed: string[] = [];
   for (const it of (bill.items ?? []) as OrderItem[]) {
+    // Custom lines never took stock (create and update both skip them), so
+    // they give none back — "returning" one wrote a junk CUSTOM ledger row, or
+    // phantom pieces on a SKU that "Also add to catalog" created at 0.
+    if (it.custom || !it.sku) continue;
     const res = await applyMovement({
       sku: it.sku, delta: Math.trunc(Number(it.qty) || 0), reason: "correction", refType: "retail_bill", refId: billId,
       note: `Retail bill ${bill.bill_number} — voided, stock returned`, createdBy: staff.email,
@@ -290,7 +294,9 @@ export async function voidRetailBill(billId: string): Promise<Res> {
   revalidatePath("/admin/retail-bill");
   if (returnFailed.length > 0) {
     // The void stands (CAS won) — but staff must know the ledger is short.
-    return { ok: true, error: `Voided, but stock did NOT return for ${returnFailed.join(", ")} — adjust in Stock take.` };
+    // A `warning`, like create/update: as `error` on an ok result the Void
+    // button never showed it.
+    return { ok: true, warning: `Voided, but stock did NOT return for ${returnFailed.join(", ")} — adjust in Stock take.` };
   }
   return { ok: true };
 }

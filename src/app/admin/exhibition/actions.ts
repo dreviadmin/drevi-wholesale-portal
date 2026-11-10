@@ -212,17 +212,19 @@ export async function submitExhibitionOrder(input: {
   // with a lower total than the staff quoted — audit finding).
   const items: OrderItem[] = [];
   const unavailable: string[] = [];
+  const toCatalog: Parameters<typeof syncCustomToCatalog>[0][] = [];
   let subtotal = 0;
   for (const it of input.items) {
     if (it.customTitle?.trim()) {
       // Ansh (4 Sep): a custom line may opt into the catalog (unchecked by
       // default) — lands hidden with the billed price as wholesale_price.
+      // Collected here, created only once the order has passed every check
+      // below (see the sync after the bill date).
       if (it.syncToCatalog) {
-        const sc = await syncCustomToCatalog({
+        toCatalog.push({
           sku: (it.catalogSku ?? "").trim(), title: it.customTitle, unitPrice: Number(it.unitPrice) || 0,
           kind: "wholesale", createdBy: staff.email,
         });
-        if (!sc.ok) return { ok: false, error: sc.error };
       }
       const qty = Math.max(1, Math.floor(it.qty));
       const unitPrice =
@@ -336,6 +338,15 @@ export async function submitExhibitionOrder(input: {
     if (!billDate) return { ok: false, error: "Bill date must be a valid date, today or earlier." };
   }
   const ymd = (billDate ?? todayIst).replace(/-/g, "");
+
+  // "Also add to catalog" runs only now that nothing above can reject the
+  // order. Inside the item loop it created the product BEFORE a sold-out line
+  // or a bad advance bounced the submit — and every retry (or offline drain)
+  // then failed with "already exists in the catalog".
+  for (const c of toCatalog) {
+    const sc = await syncCustomToCatalog(c);
+    if (!sc.ok) return { ok: false, error: sc.error };
+  }
 
   // Freeze the party onto the order (migration 0047). Without this every
   // exhibition and in-store order would render its party from the LIVE buyers

@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import type { AuditEventType } from "@/lib/types";
+import { lovCodeError } from "@/lib/sku/lov-code";
 
 const LISTS = ["category", "sub_category", "color", "size", "fabric", "occasion"] as const;
 export type LovList = (typeof LISTS)[number];
@@ -24,6 +25,9 @@ export async function upsertLov(input: {
   if (!LISTS.includes(input.list)) return { ok: false, error: "Unknown list." };
   const code = input.code.trim().toUpperCase();
   if (!code || code.length > 24) return { ok: false, error: "Code is required (max 24 chars)." };
+  // Codes that end up inside a SKU must fit the SKU's shape (see lov-code.ts).
+  const shapeError = lovCodeError(input.list, code);
+  if (shapeError) return { ok: false, error: shapeError };
 
   const admin = createAdminClient();
   const row = {

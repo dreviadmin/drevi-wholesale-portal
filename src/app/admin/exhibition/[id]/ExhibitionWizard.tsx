@@ -577,10 +577,12 @@ export function ExhibitionWizard({
       // real id once the queued capture syncs.
       const buyerNotYetSynced = !buyer.id && !!buyerClientRef;
       if ((typeof navigator !== "undefined" && !navigator.onLine) || buyerNotYetSynced) {
+        // takenBy rides along like the network-failure path below; without it
+        // the drained order credited whoever's device happened to drain it.
         await enqueue("order", {
           sessionId: session.id, eventName: session.event_name, clientRef,
           buyerId: buyerClientRef ? undefined : buyer.id, buyerClientRef: buyerClientRef ?? undefined,
-          items, staffNote, buyerNote, ...taxPay,
+          items, staffNote, buyerNote, takenBy, ...taxPay,
         });
         setConfirmInfo({ orderId: "", orderNumber: "Queued — will sync when back online" });
         setStep("confirm");

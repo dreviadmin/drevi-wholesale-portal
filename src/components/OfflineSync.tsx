@@ -69,6 +69,7 @@ export function OfflineSync() {
           taxMode: o.taxMode, taxRate: o.taxRate,
           discountType: o.discountType, discountValue: o.discountValue,
           advanceAmount: o.advanceAmount, paymentMethod: o.paymentMethod, paymentNotes: o.paymentNotes,
+          billDate: o.billDate,
         });
         if (res.ok) await removeQueued(item.id!);
         else await updateQueued({ ...item, attempts: item.attempts + 1, lastError: res.error });

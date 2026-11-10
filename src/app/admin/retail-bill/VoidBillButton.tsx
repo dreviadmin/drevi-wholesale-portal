@@ -28,6 +28,9 @@ export function VoidBillButton({ billId, billNumber }: { billId: string; billNum
         onClick={() => start(async () => {
           const r = await voidRetailBill(billId);
           if (!r.ok) { setErr(r.error ?? "Failed"); return; }
+          // An alert, not setErr: the refresh below stops rendering this
+          // button for a voided bill, so inline text would vanish unread.
+          if (r.warning) window.alert(`${billNumber}: ${r.warning}`);
           router.refresh();
         })}
         className="font-body uppercase disabled:opacity-40"

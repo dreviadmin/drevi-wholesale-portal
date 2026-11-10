@@ -200,6 +200,9 @@ export function RetailBillForm({ catalog, editBill }: { catalog: CatalogRow[]; e
         if (!r.ok) { flash(r.error ?? "Failed"); return; }
         setSavedInfo({ billNumber: `${editBill.bill_number} updated`, warning: r.warning });
         draftMeta.clear();
+        // The push remounts this form (its key goes from the bill id to
+        // "new"), so savedInfo's warning never paints — say it before leaving.
+        if (r.warning) window.alert(`${editBill.bill_number}: ${r.warning}`);
         router.push("/admin/retail-bill");
         router.refresh();
         return;

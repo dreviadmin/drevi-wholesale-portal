@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { uploadProductPhoto } from "@/lib/storage";
 import { writeAuditEvent } from "@/lib/audit";
+import { applyMovement, canonicalFromMovements, canonicalStock, movementsFor } from "@/lib/stock-ledger";
 
 // Fields an admin may edit by hand. Editing one LOCKS it, so the sheet sync
 // preserves the manual value until it is unlocked. `image_urls` is locked via
@@ -12,11 +13,17 @@ import { writeAuditEvent } from "@/lib/audit";
 const EDITABLE = ["title", "description", "category", "sub_category", "color", "primary_fabric", "hsn", "location", "wholesale_price", "min_order_qty", "current_qty", "restockable", "restock_days"] as const;
 type EditableField = (typeof EDITABLE)[number];
 
+// A number field that doesn't parse is refused, not saved. It used to fall
+// back to 0 / null and LOCK — "Rs 1250" or "12,5OO" (letter O on a phone
+// keypad) saved ₹0, the counter read "Price not set", and the sheet could no
+// longer fix it. Empty still means 0 / null, as before.
+const NOT_A_NUMBER = Symbol("not a number");
+
 function coerce(field: EditableField, raw: string): unknown {
   const v = raw.trim();
-  if (field === "wholesale_price") { const n = Number(v.replace(/[₹,\s]/g, "")); return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : 0; }
-  if (field === "min_order_qty" || field === "restock_days") { if (v === "") return null; const n = parseInt(v.replace(/[^\d]/g, ""), 10); return Number.isFinite(n) ? n : null; }
-  if (field === "current_qty") { const n = parseInt(v.replace(/[^\d-]/g, ""), 10); return Number.isFinite(n) ? n : 0; }
+  if (field === "wholesale_price") { const n = Number(v.replace(/[₹,\s]/g, "")); if (!Number.isFinite(n)) return NOT_A_NUMBER; return n >= 0 ? Math.round(n * 100) / 100 : 0; }
+  if (field === "min_order_qty" || field === "restock_days") { if (v === "") return null; const n = parseInt(v.replace(/[^\d]/g, ""), 10); return Number.isFinite(n) ? n : NOT_A_NUMBER; }
+  if (field === "current_qty") { if (v === "") return 0; const n = parseInt(v.replace(/[^\d-]/g, ""), 10); return Number.isFinite(n) ? n : NOT_A_NUMBER; }
   if (field === "restockable") return v === "true" || v.toUpperCase() === "Y" || v.toUpperCase() === "YES";
   return v || null;
 }
@@ -37,7 +44,9 @@ export async function updateProductFields(
   const locked = new Set<string>(Array.isArray(row.locked_fields) ? row.locked_fields : []);
   for (const [k, raw] of Object.entries(edits)) {
     if (!EDITABLE.includes(k as EditableField)) continue;
-    patch[k] = coerce(k as EditableField, raw ?? "");
+    const value = coerce(k as EditableField, raw ?? "");
+    if (value === NOT_A_NUMBER) return { ok: false, error: `${k.replace(/_/g, " ")}: '${(raw ?? "").trim()}' is not a number.` };
+    patch[k] = value;
     locked.add(k);
   }
   if (Object.keys(patch).length === 0) return { ok: false, error: "Nothing to update." };
@@ -78,7 +87,7 @@ export async function uploadProductPhotoAction(sku: string, formData: FormData):
   const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp"]);
   if (!ALLOWED.has(file.type)) return { ok: false, error: "Only JPEG, PNG or WebP images are allowed." };
   const admin = createAdminClient();
-  const { data: row } = await admin.from("wholesale_products").select("locked_fields").eq("sku", sku).maybeSingle();
+  const { data: row } = await admin.from("wholesale_products").select("locked_fields, image_urls").eq("sku", sku).maybeSingle();
   if (!row) return { ok: false, error: "Product not found." };
   try {
     const bytes = Buffer.from(await file.arrayBuffer());
@@ -88,8 +97,13 @@ export async function uploadProductPhotoAction(sku: string, formData: FormData):
     const url = `${stored}?v=${Date.now().toString(36)}`;
     const locked = new Set<string>(Array.isArray(row.locked_fields) ? row.locked_fields : []);
     locked.add("image_urls");
+    // Replace the FRONT shot only (slot 0 — the one the modal shows as
+    // "Photo"). Writing [url] dated from when a SKU had one image; since the
+    // Drive sync copies the whole folder it wiped the back/detail shots, and
+    // the lock kept the sync from ever restoring them.
+    const rest = Array.isArray(row.image_urls) ? (row.image_urls as string[]).slice(1) : [];
     const { error } = await admin.from("wholesale_products")
-      .update({ image_urls: [url], images_fetched_at: new Date().toISOString(), locked_fields: Array.from(locked) })
+      .update({ image_urls: [url, ...rest], images_fetched_at: new Date().toISOString(), locked_fields: Array.from(locked) })
       .eq("sku", sku);
     if (error) return { ok: false, error: error.message };
     await writeAuditEvent({ eventType: "catalog_edit", staffUserId: staff.id, notes: `${sku}: photo` });
@@ -117,7 +131,7 @@ export async function renameProductSku(oldSku: string, newSkuRaw: string): Promi
 
   // Lock the sku field so a sheet row that happens to use newSku can't fight it,
   // and record the old sku on the ignore list.
-  const { data: row } = await admin.from("wholesale_products").select("locked_fields").eq("sku", oldSku).maybeSingle();
+  const { data: row } = await admin.from("wholesale_products").select("locked_fields, current_qty").eq("sku", oldSku).maybeSingle();
   if (!row) return { ok: false, error: "Product not found." };
   const locked = new Set<string>(Array.isArray(row.locked_fields) ? row.locked_fields : []);
   locked.add("sku");
@@ -125,8 +139,58 @@ export async function renameProductSku(oldSku: string, newSkuRaw: string): Promi
   const { error } = await admin.from("wholesale_products").update({ sku: newSku, locked_fields: Array.from(locked) }).eq("sku", oldSku);
   if (error) return { ok: false, error: error.message };
   await admin.from("sync_ignored_skus").upsert({ sku: oldSku.toUpperCase(), reason: `renamed to ${newSku}` });
-  await writeAuditEvent({ eventType: "catalog_edit", staffUserId: staff.id, notes: `rename ${oldSku} → ${newSku}` });
+
+  // Only the catalog row changes its key above. Nothing cascades: the stock
+  // ledger and product_vendor_info are keyed by plain-text sku, so without
+  // these two carries the next sale on the new SKU computed stock from that
+  // one movement (5 pieces → -1) and the tag lost its vendor code and sheet
+  // MRP (the old SKU's sheet row is ignored from here on).
+  //
+  // Stock carries as ONE correction on the new SKU, not by re-keying the old
+  // movements: those rows reference the orders, bills and receipts that still
+  // name the old SKU, and reversals/restocks match them on (sku, ref_id). The
+  // target is the carried balance, not an increment, so renaming back to a
+  // SKU that still has its own ledger lands on the right count too. A
+  // correction (not setStock) so a negative balance stays honest.
+  //
+  // A product with no ledger rows at all (a sheet row that has never moved
+  // since 0026 seeded the ledger) has only its cached count, so that is what
+  // carries — the same opening balance 0026 gave every product. Carrying the
+  // ledger's 0 there would leave the next sale to reset it to one delta.
+  const problems: string[] = [];
+  const oldMoves = await movementsFor(oldSku);
+  const shown = Math.trunc(Number(row.current_qty) || 0);
+  const carried = oldMoves.length > 0 ? canonicalFromMovements(oldMoves) : shown;
+  const current = await canonicalStock(newSku);
+  if (carried !== current) {
+    const mv = await applyMovement({
+      sku: newSku, delta: carried - current, reason: "correction", refType: "rename",
+      note: `Carried over from rename of ${oldSku.toUpperCase()}`, createdBy: staff.email,
+    });
+    if (!mv.ok) problems.push(`stock did NOT carry over (${mv.error ?? "movement failed"}) — set ${carried} pc in Stock take`);
+  }
+  // Vendor / retail row: copied, never overwriting a row the new SKU already
+  // has (the sheet's own, or this product's from before an earlier rename).
+  let vendorCopied = false;
+  const { data: vendor, error: vendorReadErr } = await admin.from("product_vendor_info").select("*").eq("sku", oldSku.toUpperCase()).maybeSingle();
+  if (vendorReadErr) problems.push(`vendor info could not be read (${vendorReadErr.message})`);
+  else if (vendor) {
+    const { error: vendorErr } = await admin.from("product_vendor_info").upsert({ ...vendor, sku: newSku }, { onConflict: "sku", ignoreDuplicates: true });
+    if (vendorErr) problems.push(`vendor info did NOT copy (${vendorErr.message})`);
+    else vendorCopied = true;
+  }
+
+  await writeAuditEvent({
+    eventType: "catalog_edit",
+    staffUserId: staff.id,
+    // The screen's count goes in too when it differed from the ledger, so the
+    // jump to the ledger's figure can be traced later.
+    notes: `rename ${oldSku} → ${newSku} · ledger ${carried} pc${oldMoves.length === 0 ? " (no ledger yet, carried the shown count)" : shown !== carried ? ` (screen showed ${shown} pc)` : ""}${vendorCopied ? " · vendor info copied" : ""}${problems.length ? ` · ${problems.join("; ")}` : ""}`,
+  });
   revalidatePath("/admin/manage-catalog");
+  // The rename itself stands; the modal only shows errors, so a half-carry
+  // must come back as one or nobody would know the ledger is short.
+  if (problems.length) return { ok: false, error: `Renamed to ${newSku}, but ${problems.join("; ")}.` };
   return { ok: true };
 }
 

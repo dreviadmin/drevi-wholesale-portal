@@ -26,6 +26,10 @@ export interface OrderPayload {
   advanceAmount?: number;
   paymentMethod?: string;
   paymentNotes?: string;
+  /** Past-dated billing — YYYY-MM-DD. The wizard always queued it (taxPay
+   *  carries it); it must drain through too, or a back-dated order lands
+   *  with the drain day's number and submitted_at. */
+  billDate?: string;
 }
 export interface CapturePayload {
   clientRef: string;

@@ -62,7 +62,7 @@ export async function GET(request: Request) {
   const designKey = parts.length >= 5 && /^\d{2,4}$/.test(parts[3])
     ? { base: parts.slice(0, 4).join("-"), color: parts[parts.length - 1] }
     : null;
-  const [{ data: product }, { data: vendorInfo }, { data: design }] = await Promise.all([
+  const [{ data: product }, { data: vendorInfo }, { data: design }, { data: minted }] = await Promise.all([
     admin
       .from("wholesale_products")
       .select("sku, title, image_urls, wholesale_visible")
@@ -72,9 +72,14 @@ export async function GET(request: Request) {
     designKey
       ? admin.from("designs").select("id, mrp_override, auto_mrp").eq("base_sku", designKey.base).eq("color", designKey.color).maybeSingle()
       : Promise.resolve({ data: null }),
+    admin.from("sku_registry").select("variant_sku").eq("variant_sku", sku).maybeSingle(),
   ]);
 
-  const known = !!(product || vendorInfo);
+  // A size minted in the registry but not received yet is a real tag (Studio
+  // prints those, and Retail Price Check prices them — counterSkus includes
+  // the registry). Calling it unknown offered "Create SKU", which the
+  // generator then refused as a duplicate.
+  const known = !!(product || vendorInfo || minted);
   const isAdmin = isAdminRole(staff.role);
 
   if (!known) {
@@ -96,7 +101,8 @@ export async function GET(request: Request) {
     actions.push({ key: "sales", label: "Sales and reorder", href: `/admin/dashboard?view=customers&f=${encodeURIComponent(`design:${designOf(sku)}`)}` });
     actions.push({ key: "log_receipt", label: "Log into a receipt", href: `/admin/receipts/new?sku=${encodeURIComponent(sku)}` });
     if (design?.id) actions.push({ key: "open_studio", label: "Open in studio", href: `/admin/studio/${design.id}` });
-    actions.push({ key: "edit_master", label: "Edit product master", href: `/admin/manage-catalog?sku=${encodeURIComponent(sku)}` });
+    // Not for a registry-only mint: Manage Catalog has no row to open yet.
+    if (product || vendorInfo) actions.push({ key: "edit_master", label: "Edit product master", href: `/admin/manage-catalog?sku=${encodeURIComponent(sku)}` });
   }
   actions.push({ key: "add_to_print", label: "Add to print sheet" }); // client handles
 
