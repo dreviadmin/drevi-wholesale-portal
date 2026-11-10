@@ -48,7 +48,7 @@ vi.mock("@/lib/supabase/admin", () => ({
   }),
 }));
 
-import { onOrderCreated, reconcileRecent, type WalletAccount } from "./wallet";
+import { onOrderCreated, openWalletForCustomer, reconcileRecent, type WalletAccount } from "./wallet";
 
 const has = (c: Call, m: string, ...a: unknown[]) => c.ops.some((o) => o.m === m && a.every((x, i) => o.a[i] === x));
 const writes = () => db.calls.filter((c) => c.ops.some((o) => o.m === "insert" || o.m === "update" || o.m === "delete" || o.m === "upsert"));
@@ -76,6 +76,36 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+});
+
+describe("joining when the customer already has a wallet", () => {
+  it("hands the wallet back unchanged and writes nothing to Shopify or the database", async () => {
+    const mine = account();
+    db.answer = (c) => (c.table === "wallet_accounts" && has(c, "eq", "shopify_customer_id", ME) ? { data: mine, error: null } : { data: null, error: null });
+    const r = await openWalletForCustomer({ customerGid: ME, phone: "9123456789", name: "Someone Else", consent: false, source: "popup" });
+    expect(r).toEqual({ ok: true, account: mine, created: false, phoneReview: false });
+    expect(shopify.setCustomerPhone).not.toHaveBeenCalled();
+    expect(shopify.addCustomerTags).not.toHaveBeenCalled();
+    expect(shopify.removeCustomerTags).not.toHaveBeenCalled();
+    expect(shopify.setCustomerNames).not.toHaveBeenCalled();
+    expect(shopify.getCustomer).not.toHaveBeenCalled();
+    expect(writes()).toEqual([]);
+  });
+
+  it("still opens a wallet, with the phone and tags, for a customer who has none", async () => {
+    const fresh = account({ id: "acc-new", phone: "919123456789", wa_opt_in_at: null });
+    shopify.getCustomer.mockResolvedValue({ id: ME, email: "a@b.co", phone: null, firstName: "A", lastName: null, tags: [] });
+    db.answer = (c) => {
+      if (c.table === "wallet_accounts" && c.end === "single") return { data: fresh, error: null };
+      if (c.table === "wallet_accounts" && has(c, "eq", "id", "acc-new")) return { data: fresh, error: null };
+      return { data: null, error: null };
+    };
+    db.rpc.mockResolvedValue({ data: { id: "l1", amount_paise: 100000 }, error: null });
+    const r = await openWalletForCustomer({ customerGid: ME, phone: "9123456789", consent: false, source: "popup" });
+    expect(r).toMatchObject({ ok: true, created: true });
+    expect(shopify.setCustomerPhone).toHaveBeenCalledWith(ME, "919123456789");
+    expect(shopify.addCustomerTags).toHaveBeenCalledWith(ME, ["drevi-wallet", "source:wallet"]);
+  });
 });
 
 describe("orders/create: a shortfall tags the order", () => {

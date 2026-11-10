@@ -657,7 +657,8 @@ export const WALLET_TAGS = ["drevi-wallet", "source:wallet"];
  * Open (or find) the wallet of a SIGNED-IN customer for the phone they give.
  * Sign-in proves the email, not the phone, so phoneClaimDecision decides
  * whether an existing wallet on that phone can be moved here. Also writes
- * the phone, name and WhatsApp choice onto the Shopify customer.
+ * the phone, name and WhatsApp choice onto the Shopify customer. A customer
+ * who already has a wallet gets it back unchanged, with nothing written.
  */
 export async function openWalletForCustomer(input: {
   customerGid: string;
@@ -666,6 +667,13 @@ export async function openWalletForCustomer(input: {
   consent: boolean;
   source: "popup" | "seed" | "order" | "manual";
 }): Promise<{ ok: true; account: WalletAccount; created: boolean; phoneReview: boolean } | { ok: false; reason: "invalid_phone" | "phone_in_use" | "no_customer" }> {
+  // A customer who already has a wallet gets it back as it is. The theme only
+  // asks to join for a signed-in shopper without one, so a member's call here
+  // is a stale page or a copied token, and it must not rewrite their Shopify
+  // phone or WhatsApp choice (new-wallet-1, Nov 2026).
+  const existing = await getAccountByCustomer(input.customerGid);
+  if (existing) return { ok: true, account: existing, created: false, phoneReview: false };
+
   const phone = normalizePhone(input.phone);
   if (!phone) return { ok: false, reason: "invalid_phone" };
   const customer = await getCustomer(input.customerGid);
@@ -673,28 +681,26 @@ export async function openWalletForCustomer(input: {
   const admin = createAdminClient();
   const name = (input.name ?? "").trim().slice(0, 80) || null;
 
-  let account = await getAccountByCustomer(input.customerGid);
+  let account: WalletAccount;
   let created = false;
   let phoneReview = false;
 
-  if (!account) {
-    const byPhone = await getAccountByPhone(phone);
-    let other: ShopifyCustomerFull | null = null;
-    if (byPhone?.shopify_customer_id && byPhone.shopify_customer_id !== input.customerGid) {
-      other = await getCustomer(byPhone.shopify_customer_id).catch(() => null);
-    }
-    const decision = phoneClaimDecision({ walletExists: !!byPhone, walletCustomerId: byPhone?.shopify_customer_id, me: input.customerGid, otherHasEmail: !!other?.email });
-    if (decision === "in_use") return { ok: false, reason: "phone_in_use" };
-    if (decision === "relink" && byPhone) {
-      await admin.from("wallet_accounts").update({ shopify_customer_id: input.customerGid, updated_at: new Date().toISOString() }).eq("id", byPhone.id);
-      phoneReview = true;
-      if (other) await addCustomerTags(other.id, ["wallet-relinked", "phone-review"]).catch(() => {});
-      account = { ...byPhone, shopify_customer_id: input.customerGid };
-    } else {
-      const r = await ensureAccount({ phone, name, shopifyCustomerId: input.customerGid, source: input.source, waOptIn: input.consent });
-      account = r.account;
-      created = r.created;
-    }
+  const byPhone = await getAccountByPhone(phone);
+  let other: ShopifyCustomerFull | null = null;
+  if (byPhone?.shopify_customer_id && byPhone.shopify_customer_id !== input.customerGid) {
+    other = await getCustomer(byPhone.shopify_customer_id).catch(() => null);
+  }
+  const decision = phoneClaimDecision({ walletExists: !!byPhone, walletCustomerId: byPhone?.shopify_customer_id, me: input.customerGid, otherHasEmail: !!other?.email });
+  if (decision === "in_use") return { ok: false, reason: "phone_in_use" };
+  if (decision === "relink" && byPhone) {
+    await admin.from("wallet_accounts").update({ shopify_customer_id: input.customerGid, updated_at: new Date().toISOString() }).eq("id", byPhone.id);
+    phoneReview = true;
+    if (other) await addCustomerTags(other.id, ["wallet-relinked", "phone-review"]).catch(() => {});
+    account = { ...byPhone, shopify_customer_id: input.customerGid };
+  } else {
+    const r = await ensureAccount({ phone, name, shopifyCustomerId: input.customerGid, source: input.source, waOptIn: input.consent });
+    account = r.account;
+    created = r.created;
   }
 
   // The Shopify record: phone (unless another customer holds it), name if
