@@ -687,7 +687,10 @@ export function OrderEditor({
                   ))}
                 </div>
               </div>
-              <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Payment note (optional)" className="w-full font-body bg-transparent outline-none mt-2" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "6px 8px", fontSize: 11, background: palette.ivory }} />
+              {/* A textarea, not an input: recordPayment keeps one dated line per
+                  receipt here, and an <input> strips line breaks — the first
+                  keystroke flattened the whole history into one run-on line. */}
+              <textarea rows={3} value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Payment note (optional)" className="w-full font-body bg-transparent outline-none mt-2" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "6px 8px", fontSize: 11, background: palette.ivory }} />
             </div>
 
             <div className="mt-4 font-body" style={{ fontSize: 12, color: palette.softBlack }}>

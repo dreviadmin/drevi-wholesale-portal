@@ -9,7 +9,7 @@ import { postOrderMovements, applyMovement } from "@/lib/stock-ledger";
 import { getStockState } from "@/lib/stock";
 import { storeAuxPhoto } from "@/lib/design-image-store";
 import { refreshOrderFromCatalog } from "@/lib/order-catalog-sync";
-import { billableLines, computeBillTotals, validateBillDate, billDateToIso, effectiveLineState, emptyBillReason } from "@/lib/order-lines-core";
+import { billableLines, computeBillTotals, priorBillsConsumed, billingTermsChanged, validateBillDate, billDateToIso, effectiveLineState, emptyBillReason } from "@/lib/order-lines-core";
 import { renderAndStoreBillPdf, type BillForPdf } from "@/lib/bill-pdf";
 import { writeAuditEvent } from "@/lib/audit";
 import { formatINR } from "@/lib/format";
@@ -361,25 +361,6 @@ export async function updateOrderItems(
   // Recompute money server-side — same math as order submission; never trust
   // client totals. Terms the editor sends replace the stored ones; anything
   // omitted keeps the order's existing value.
-  // The money TERMS freeze once anything prices off them. computeBillTotals
-  // treats an absolute discount as a pot consumed across bills, and a credit
-  // note's discountShareFor prorates against the figure that stood when it was
-  // raised — move either afterwards and both documents start lying.
-  const termKeys = ["discountType", "discountValue", "taxMode", "taxRate"] as const;
-  const termsTouched = !!terms && termKeys.some((k) => k in terms);
-  if (termsTouched) {
-    const [{ count: billCount }, { count: noteCount }] = await Promise.all([
-      admin.from("order_bills").select("id", { count: "exact", head: true }).eq("order_id", orderId).is("cancelled_at", null),
-      admin.from("credit_notes").select("id", { count: "exact", head: true }).eq("order_id", orderId).eq("status", "issued"),
-    ]);
-    if ((billCount ?? 0) > 0) {
-      return { ok: false, error: "This order has a bill — its discount and tax are fixed by the invoice. Cancel the bill to change them." };
-    }
-    if ((noteCount ?? 0) > 0) {
-      return { ok: false, error: "A credit note was priced off this order's discount and tax — void it before changing them." };
-    }
-  }
-
   const discountType: DiscountType | null =
     terms && "discountType" in terms
       ? terms.discountType === "percent" || terms.discountType === "absolute" ? terms.discountType : null
@@ -412,6 +393,28 @@ export async function updateOrderItems(
       total = netSubtotal + taxAmount;
     } else {
       taxAmount = Math.round(netSubtotal * (taxRate / (100 + taxRate)) * 100) / 100;
+    }
+  }
+
+  // The money TERMS freeze once anything prices off them. computeBillTotals
+  // treats an absolute discount as a pot consumed across bills, and a credit
+  // note's discountShareFor prorates against the figure that stood when it was
+  // raised — move either afterwards and both documents start lying.
+  // It is the MOVE that is refused, not the save (audit fix, 4 Oct): the editor
+  // always sends all four terms, so keying this on "were they sent" refused
+  // every edit of a billed order — a pending line, an added line, even an
+  // open-and-save — and split billing ("bill now, adjust the rest later") died
+  // with it. Compared after normalising, so the check sees what would be stored.
+  if (billingTermsChanged(order, { discountType, discountValue, taxMode, taxRate })) {
+    const [{ count: billCount }, { count: noteCount }] = await Promise.all([
+      admin.from("order_bills").select("id", { count: "exact", head: true }).eq("order_id", orderId).is("cancelled_at", null),
+      admin.from("credit_notes").select("id", { count: "exact", head: true }).eq("order_id", orderId).eq("status", "issued"),
+    ]);
+    if ((billCount ?? 0) > 0) {
+      return { ok: false, error: "This order has a bill — its discount and tax are fixed by the invoice. Cancel the bill to change them." };
+    }
+    if ((noteCount ?? 0) > 0) {
+      return { ok: false, error: "A credit note was priced off this order's discount and tax — void it before changing them." };
     }
   }
 
@@ -582,9 +585,14 @@ export async function setOrderLineHsn(
   const items = [...((order.items ?? []) as OrderItem[])];
   if (index < 0 || index >= items.length) return { ok: false, error: "Line not found — reload the page." };
 
-  items[index] = { ...items[index], hsn: value || null };
-  const { error } = await admin.from("orders").update({ items }).eq("id", orderId);
-  if (error) return { ok: false, error: error.message };
+  // Through patchOrderLine (audit fix, 4 Oct): writing back the whole array
+  // read above, with no lines_rev guard, could land on top of a bill being
+  // generated or a line being confirmed and quietly undo its billed_in or
+  // stock_moved — a line billable twice, or stock that moves twice.
+  const w = await patchOrderLine(orderId, index, { hsn: value || null }, (fresh) =>
+    fresh.sku !== items[index].sku ? "The order changed — reload the page." : null,
+  );
+  if (!w.ok) return { ok: false, error: w.error };
 
   const sku = items[index].sku;
   if (value && sku && !(items[index] as { custom?: boolean }).custom) {
@@ -756,7 +764,7 @@ export async function generateOrderBill(
       const stuck = (o.items ?? []).filter((it) => it.billed_in && !liveIds.has(it.billed_in)).length;
       if (stuck > 0) {
         const dead = (orderBills ?? []).find((x) => x.cancelled_at)?.bill_number;
-        return { ok: false, error: `${stuck} line${stuck === 1 ? " is" : "s are"} still tied to a cancelled bill${dead ? ` (${dead})` : ""} — reload the order; if it persists, cancel that bill again to release them.` };
+        return { ok: false, error: `${stuck} line${stuck === 1 ? " is" : "s are"} still tied to a cancelled bill${dead ? ` (${dead})` : ""} — reload the order; if it persists, use Release lines on that bill.` };
       }
       revalidatePath(`/admin/orders/${orderId}`);
       return { ok: true, alreadyBilled: true, billNumber: live[0]?.bill_number, pdfUrl: live[0]?.pdf_url ?? undefined };
@@ -769,15 +777,14 @@ export async function generateOrderBill(
   const billDate = opts.billDate ? validateBillDate(opts.billDate, todayIst) : todayIst;
   if (!billDate) return { ok: false, error: "Bill date must be a valid date, today or earlier." };
 
+  // Every bill — cancelled ones included — for the seq, so numbering carries on
+  // past a cancelled B1; only the LIVE ones for what the pots have given out.
   const { data: prevBills } = await admin
     .from("order_bills")
-    .select("seq, discount_amount, advance_applied")
+    .select("seq, discount_amount, advance_applied, cancelled_at")
     .eq("order_id", orderId)
     .order("seq", { ascending: false });
-  const prior = {
-    discountApplied: (prevBills ?? []).reduce((s, b) => s + (Number(b.discount_amount) || 0), 0),
-    advanceApplied: (prevBills ?? []).reduce((s, b) => s + (Number(b.advance_applied) || 0), 0),
-  };
+  const prior = priorBillsConsumed(prevBills ?? []);
   const lines = billable.map((b) => b.item);
   const totals = computeBillTotals(lines, o, prior);
 
@@ -1025,6 +1032,9 @@ export async function setBillDate(
   const { data: billRow } = await admin.from("order_bills").select("*").eq("id", billId).maybeSingle();
   if (!billRow) return { ok: false, error: "Bill not found." };
   const b = billRow as OrderBill;
+  // A cancelled bill is kept as it stood. Re-dating it would also re-render
+  // its PDF — reissuing a document regenerateBillPdf refuses to reissue.
+  if (b.cancelled_at) return { ok: false, error: "This bill is cancelled — its date stands." };
 
   const todayIst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   const billDate = validateBillDate(newDate, todayIst);
@@ -1127,11 +1137,13 @@ export async function setOrderDate(
 
   // A bill is dated on or after the sale it bills, so the order can only move
   // forward as far as the first bill raised against it — setBillDate is how
-  // that ceiling itself gets moved.
+  // that ceiling itself gets moved. Live bills only: a cancelled one bills
+  // nothing, and setBillDate cannot move it, so it would be a ceiling for good.
   const { data: billRows } = await admin
     .from("order_bills")
     .select("bill_number, bill_date")
     .eq("order_id", orderId)
+    .is("cancelled_at", null)
     .order("bill_date")
     .limit(1);
   const firstBill = billRows?.[0] as { bill_number: string; bill_date: string } | undefined;
@@ -1303,7 +1315,14 @@ export async function cancelBill(
     .eq("id", billId)
     .maybeSingle();
   if (!bill) return { ok: false, error: "Bill not found." };
-  if (bill.cancelled_at) return { ok: false, error: `${bill.bill_number} is already cancelled.` };
+  // Already cancelled is not always finished (audit fix, 4 Oct): a cancel whose
+  // line release lost its race leaves lines tied to a dead bill — not billable,
+  // not editable — and this used to refuse the retry generateOrderBill told
+  // staff to make, so only a database edit got them out. Now a repeat (the
+  // "Release lines" control on a cancelled bill) skips the cancel and runs only
+  // the release, which is idempotent. With nothing left to release it is the
+  // plain "already cancelled" it always was.
+  const alreadyCancelled = !!bill.cancelled_at;
 
   const { count: liveNotes } = await admin
     .from("credit_notes")
@@ -1314,21 +1333,51 @@ export async function cancelBill(
     return { ok: false, error: `A credit note was raised against ${bill.bill_number} — void it before cancelling the bill it reverses.` };
   }
 
-  const { data: won, error } = await admin
-    .from("order_bills")
-    .update({ cancelled_at: new Date().toISOString(), cancelled_by: staff.email, cancel_reason: clean })
-    .eq("id", billId)
-    .is("cancelled_at", null)
-    .select("id, bill_number")
-    .maybeSingle();
-  if (error) return { ok: false, error: error.message };
-  if (!won) return { ok: false, error: "That bill was cancelled in another session." };
+  if (!alreadyCancelled) {
+    const { data: won, error } = await admin
+      .from("order_bills")
+      .update({ cancelled_at: new Date().toISOString(), cancelled_by: staff.email, cancel_reason: clean })
+      .eq("id", billId)
+      .is("cancelled_at", null)
+      .select("id, bill_number")
+      .maybeSingle();
+    if (error) return { ok: false, error: error.message };
+    if (!won) return { ok: false, error: "That bill was cancelled in another session." };
+  }
 
-  // Release the lines. CAS on lines_rev, like every other writer of items.
-  let linesFreed = 0;
-  const { data: orderRow } = await admin
-    .from("orders").select("items, lines_rev").eq("id", bill.order_id).maybeSingle();
-  if (orderRow) {
+  const release = await releaseBillLines(bill.order_id, billId);
+  if (!release.ok) {
+    return { ok: false, error: "The order changed while the bill was being cancelled — the bill IS cancelled, but its lines were not released. Reload and check them." };
+  }
+  const linesFreed = release.linesFreed;
+  if (alreadyCancelled && linesFreed === 0) return { ok: false, error: `${bill.bill_number} is already cancelled.` };
+
+  await writeAuditEvent({
+    eventType: "order_bill_cancelled",
+    staffUserId: staff.id,
+    notes: alreadyCancelled
+      ? `${bill.bill_number} (already cancelled) — ${linesFreed} stuck line(s) released back to the order by ${staff.email} — ${clean}`
+      : `${bill.bill_number} cancelled by ${staff.email} — ${clean}; ${linesFreed} line(s) released back to the order`,
+  });
+
+  revalidatePath(`/admin/orders/${bill.order_id}`);
+  revalidatePath("/admin/orders");
+  return { ok: true, billNumber: bill.bill_number, linesFreed };
+}
+
+/**
+ * Clear billed_in wherever it names this bill. CAS on lines_rev, like every
+ * other writer of items — and retried on a fresh read the way patchOrderLine
+ * is, because the single attempt this used to make lost to any concurrent line
+ * write and stranded the lines. Clearing is idempotent, so a retry (or a whole
+ * second cancelBill) can never release anything twice.
+ */
+async function releaseBillLines(orderId: string, billId: string): Promise<{ ok: boolean; linesFreed: number }> {
+  const admin = createAdminClient();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data: orderRow } = await admin.from("orders").select("items, lines_rev").eq("id", orderId).maybeSingle();
+    if (!orderRow) return { ok: true, linesFreed: 0 };
+    let linesFreed = 0;
     const items = ((orderRow.items ?? []) as OrderItem[]).map((it) => {
       if (it.billed_in !== billId) return it;
       linesFreed++;
@@ -1336,28 +1385,16 @@ export async function cancelBill(
       delete (next as { billed_in?: string | null }).billed_in;
       return next;
     });
-    if (linesFreed > 0) {
-      const rev = Number((orderRow as { lines_rev?: number }).lines_rev) || 0;
-      const { data: patched } = await admin
-        .from("orders")
-        .update({ items, lines_rev: rev + 1 })
-        .eq("id", bill.order_id)
-        .eq("lines_rev", rev)
-        .select("id")
-        .maybeSingle();
-      if (!patched) {
-        return { ok: false, error: "The order changed while the bill was being cancelled — the bill IS cancelled, but its lines were not released. Reload and check them." };
-      }
-    }
+    if (linesFreed === 0) return { ok: true, linesFreed: 0 };
+    const rev = Number((orderRow as { lines_rev?: number }).lines_rev) || 0;
+    const { data: patched } = await admin
+      .from("orders")
+      .update({ items, lines_rev: rev + 1 })
+      .eq("id", orderId)
+      .eq("lines_rev", rev)
+      .select("id")
+      .maybeSingle();
+    if (patched) return { ok: true, linesFreed };
   }
-
-  await writeAuditEvent({
-    eventType: "order_bill_cancelled",
-    staffUserId: staff.id,
-    notes: `${won.bill_number} cancelled by ${staff.email} — ${clean}; ${linesFreed} line(s) released back to the order`,
-  });
-
-  revalidatePath(`/admin/orders/${bill.order_id}`);
-  revalidatePath("/admin/orders");
-  return { ok: true, billNumber: won.bill_number, linesFreed };
+  return { ok: false, linesFreed: 0 };
 }

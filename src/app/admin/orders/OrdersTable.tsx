@@ -35,10 +35,11 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
 // UX sprint — bulk stage changes from the list. Each target names the stage
 // and which current statuses it applies to; ineligible selections are skipped
 // server-side too.
-const BULK_TARGETS: { status: OrderStatus; label: string; from: OrderStatus[] }[] = [
-  { status: "confirmed", label: "Confirm", from: ["submitted"] },
-  { status: "packed", label: "Mark packed", from: ["confirmed"] },
-  { status: "delivered", label: "Mark delivered", from: ["confirmed", "packed", "out_for_delivery"] },
+// `done` is the past tense for the toast — label + "ed" read "mark packeded".
+const BULK_TARGETS: { status: OrderStatus; label: string; done: string; from: OrderStatus[] }[] = [
+  { status: "confirmed", label: "Confirm", done: "confirmed", from: ["submitted"] },
+  { status: "packed", label: "Mark packed", done: "marked packed", from: ["confirmed"] },
+  { status: "delivered", label: "Mark delivered", done: "marked delivered", from: ["confirmed", "packed", "out_for_delivery"] },
 ];
 const SOURCES: OrderSource[] = ["portal_self_service", "exhibition", "in_store"];
 const SOURCE_LABEL: Record<OrderSource, string> = { portal_self_service: "Portal", exhibition: "Exhibition", in_store: "In-store" };
@@ -83,7 +84,9 @@ export function OrdersTable({ rows }: { rows: OrderRowDTO[] }) {
       if (source.size && !source.has(r.source)) return false;
       if (range === "today" && istDay(r.submitted_at) !== todayIst) return false;
       if (range === "7d" && new Date(r.submitted_at).getTime() < cutoff7) return false;
-      if (from && r.submitted_at < from) return false;
+      // The IST day, like "today" above — submitted_at is a UTC timestamp, so
+      // the raw string dropped orders placed 00:00–05:30 IST on the From day.
+      if (from && istDay(r.submitted_at) < from) return false;
       if (!q) return true;
       return (
         r.order_number.toLowerCase().includes(q) ||
@@ -140,7 +143,7 @@ export function OrdersTable({ rows }: { rows: OrderRowDTO[] }) {
 
   function runBulk(target: (typeof BULK_TARGETS)[number]) {
     const eligible = selectedRows.filter((r) => target.from.includes(r.status));
-    if (eligible.length === 0) { flash(`Nothing selected can be ${target.label.toLowerCase()}ed`); return; }
+    if (eligible.length === 0) { flash(`Nothing selected can be ${target.done}`); return; }
     const label = `${target.label} ${eligible.length} order${eligible.length === 1 ? "" : "s"}`;
     if (!window.confirm(`${label}?${target.status === "confirmed" ? " Stock leaves the shelf on confirm." : ""}`)) return;
     startTransition(async () => {

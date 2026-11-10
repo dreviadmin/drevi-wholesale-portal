@@ -6,6 +6,7 @@ import { requireAdmin, requireStaff } from "@/lib/staff";
 import { writeAuditEvent } from "@/lib/audit";
 import { loadAgentAccount } from "@/lib/agent-ledger";
 import { payoutCheck } from "@/lib/agent-core";
+import { validateBillDate } from "@/lib/order-lines-core";
 
 export interface AgentInput {
   name: string;
@@ -183,11 +184,18 @@ export async function recordAgentPayment(input: {
   const check = payoutCheck(totals, input.amount);
   if (!check.ok) return { ok: false, error: check.error };
 
+  // The IST day, like every other document date here — the UTC slice dated a
+  // payout recorded before 05:30 IST to the day before. A date passed in gets
+  // the bill-date rule: a real day, never in the future.
+  const todayIst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const paidOn = input.paidOn ? validateBillDate(input.paidOn, todayIst) : todayIst;
+  if (!paidOn) return { ok: false, error: "Payment date must be a valid date, today or earlier." };
+
   const { error } = await admin.from("agent_payments").insert({
     agent_id: input.agentId,
     amount: Math.round(input.amount * 100) / 100,
     method: clean(input.method), reference: clean(input.reference),
-    paid_on: input.paidOn || new Date().toISOString().slice(0, 10),
+    paid_on: paidOn,
     note: clean(input.note),
     client_ref: input.clientRef,
     created_by: staff.email,

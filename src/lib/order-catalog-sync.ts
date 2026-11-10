@@ -45,33 +45,54 @@ export function refreshItems(
   return { items: next, result: { changed: touched.length > 0, touchedSkus: touched } };
 }
 
-/** Refresh one order's items from the live catalog. Returns what changed. */
+/**
+ * Refresh one order's items from the live catalog. Returns what changed.
+ *
+ * The write is the WHOLE items array, so it is guarded on lines_rev (audit fix,
+ * 4 Oct): unguarded, a bill marking billed_in, a line confirm flipping
+ * stock_moved or a return reserving returned_qty between this read and this
+ * write was silently undone — a line billable twice, or stock moved twice.
+ * Every one of those writers bumps lines_rev, so a lost race here re-reads and
+ * retries. This one deliberately does NOT bump it: nothing it touches is money,
+ * so it must neither flag an agent's commission as "revised" nor bounce a
+ * Modify Order that is open at the same moment. The worst a stale writer can
+ * do to it is drop the descriptive patch, which the next sync puts back.
+ */
 export async function refreshOrderFromCatalog(
   admin: SupabaseClient,
   orderId: string,
 ): Promise<{ ok: boolean; error?: string } & Partial<RefreshResult>> {
-  const { data: order } = await admin.from("orders").select("id, items").eq("id", orderId).maybeSingle();
-  if (!order) return { ok: false, error: "Order not found" };
-  const items = (order.items ?? []) as OrderItemLike[];
-  const skus = [...new Set(items.filter((i) => i.sku && !i.custom).map((i) => i.sku!.trim().toUpperCase()))];
-  if (skus.length === 0) return { ok: true, changed: false, touchedSkus: [] };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data: order } = await admin.from("orders").select("id, items, lines_rev").eq("id", orderId).maybeSingle();
+    if (!order) return { ok: false, error: "Order not found" };
+    const items = (order.items ?? []) as OrderItemLike[];
+    const skus = [...new Set(items.filter((i) => i.sku && !i.custom).map((i) => i.sku!.trim().toUpperCase()))];
+    if (skus.length === 0) return { ok: true, changed: false, touchedSkus: [] };
 
-  const { data: products } = await admin
-    .from("wholesale_products")
-    .select("sku, title, image_urls, hsn")
-    .in("sku", skus);
-  const bySku = new Map(
-    (products ?? []).map((p) => [
-      p.sku.trim().toUpperCase(),
-      { title: p.title, image_url: (p.image_urls as string[] | null)?.[0] ?? null, hsn: p.hsn ?? null },
-    ]),
-  );
+    const { data: products } = await admin
+      .from("wholesale_products")
+      .select("sku, title, image_urls, hsn")
+      .in("sku", skus);
+    const bySku = new Map(
+      (products ?? []).map((p) => [
+        p.sku.trim().toUpperCase(),
+        { title: p.title, image_url: (p.image_urls as string[] | null)?.[0] ?? null, hsn: p.hsn ?? null },
+      ]),
+    );
 
-  const { items: next, result } = refreshItems(items, bySku);
-  if (!result.changed) return { ok: true, ...result };
-  const { error } = await admin.from("orders").update({ items: next }).eq("id", orderId);
-  if (error) return { ok: false, error: error.message };
-  return { ok: true, ...result };
+    const { items: next, result } = refreshItems(items, bySku);
+    if (!result.changed) return { ok: true, ...result };
+    const { data: won, error } = await admin
+      .from("orders")
+      .update({ items: next })
+      .eq("id", orderId)
+      .eq("lines_rev", Number(order.lines_rev) || 0)
+      .select("id")
+      .maybeSingle();
+    if (error) return { ok: false, error: error.message };
+    if (won) return { ok: true, ...result };
+  }
+  return { ok: false, error: "The order kept changing during the refresh — try again in a moment." };
 }
 
 /** States whose orders auto-refresh after a catalog sync. Terminal orders are history — left alone. */

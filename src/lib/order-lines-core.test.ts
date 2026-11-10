@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { effectiveLineState, billableLines, pendingLines, computeBillTotals, validateBillDate, billDateToIso, emptyBillReason } from "./order-lines-core";
+import { effectiveLineState, billableLines, pendingLines, computeBillTotals, priorBillsConsumed, billingTermsChanged, validateBillDate, billDateToIso, emptyBillReason } from "./order-lines-core";
 import type { OrderItem } from "./types";
 
 const line = (over: Partial<OrderItem> = {}): OrderItem => ({
@@ -99,6 +99,63 @@ describe("computeBillTotals", () => {
     expect(computeBillTotals(items, o, none).advanceApplied).toBe(2500);
     expect(computeBillTotals(items, o, { discountApplied: 0, advanceApplied: 2500 }).advanceApplied).toBe(1500);
     expect(computeBillTotals(items, o, { discountApplied: 0, advanceApplied: 4000 }).advanceApplied).toBe(0);
+  });
+});
+
+describe("priorBillsConsumed — a cancelled bill gives its share of the pots back", () => {
+  it("sums only live bills", () => {
+    expect(
+      priorBillsConsumed([
+        { discount_amount: 500, advance_applied: 1000, cancelled_at: null },
+        { discount_amount: 2000, advance_applied: 5000, cancelled_at: "2026-10-01T10:00:00Z" },
+        { discount_amount: 250, advance_applied: 0 },
+      ]),
+    ).toEqual({ discountApplied: 750, advanceApplied: 1000 });
+  });
+  it("no bills, or only cancelled ones, consume nothing", () => {
+    expect(priorBillsConsumed([])).toEqual({ discountApplied: 0, advanceApplied: 0 });
+    expect(priorBillsConsumed([{ discount_amount: 2000, advance_applied: 5000, cancelled_at: "2026-10-01T10:00:00Z" }])).toEqual({ discountApplied: 0, advanceApplied: 0 });
+  });
+  it("a bill re-raised after cancelling B1 gets the discount and advance B1 had", () => {
+    // ₹20,000 of lines, ₹2,000 absolute discount, ₹5,000 advance; B1 took it all, then was cancelled.
+    const lines = [line({ qty: 10, unit_price: 2000 })];
+    const o = { discount_type: "absolute" as const, discount_value: 2000, tax_mode: "none" as const, tax_rate: null, advance_amount: 5000 };
+    const b1 = computeBillTotals(lines, o, priorBillsConsumed([]));
+    const b2 = computeBillTotals(lines, o, priorBillsConsumed([{ discount_amount: b1.discountAmount, advance_applied: b1.advanceApplied, cancelled_at: "2026-10-02T09:00:00Z" }]));
+    expect(b2).toMatchObject({ discountAmount: 2000, total: 18000, advanceApplied: 5000 });
+    expect(b2).toEqual(b1);
+  });
+});
+
+describe("billingTermsChanged — Modify Order's freeze refuses a MOVE, not a save", () => {
+  const stored = { discount_type: "absolute" as const, discount_value: 2000, tax_mode: "exclusive" as const, tax_rate: 12 };
+  const same = { discountType: "absolute" as const, discountValue: 2000, taxMode: "exclusive" as const, taxRate: 12 };
+  it("the editor re-sending the stored terms is not a change (a pending-line edit on a billed order)", () => {
+    expect(billingTermsChanged(stored, same)).toBe(false);
+  });
+  it("every real move is a change", () => {
+    expect(billingTermsChanged(stored, { ...same, discountValue: 2500 })).toBe(true);
+    expect(billingTermsChanged(stored, { ...same, discountType: "percent" })).toBe(true);
+    expect(billingTermsChanged(stored, { ...same, discountType: null, discountValue: null })).toBe(true);
+    expect(billingTermsChanged(stored, { ...same, taxMode: "inclusive" })).toBe(true);
+    expect(billingTermsChanged(stored, { ...same, taxMode: "none", taxRate: null })).toBe(true);
+    expect(billingTermsChanged(stored, { ...same, taxRate: 18 })).toBe(true);
+  });
+  it("adding terms to an order that had none is a change", () => {
+    const bare = { discount_type: null, discount_value: null, tax_mode: "none" as const, tax_rate: null };
+    expect(billingTermsChanged(bare, { discountType: null, discountValue: null, taxMode: "none", taxRate: null })).toBe(false);
+    expect(billingTermsChanged(bare, { discountType: "percent", discountValue: 10, taxMode: "none", taxRate: null })).toBe(true);
+    expect(billingTermsChanged(bare, { discountType: null, discountValue: null, taxMode: "exclusive", taxRate: 5 })).toBe(true);
+  });
+  it("what no bill prices off is ignored: a value with no type, a rate with no tax, null vs 0", () => {
+    expect(billingTermsChanged({ discount_type: null, discount_value: 300, tax_mode: "none", tax_rate: 12 }, { discountType: null, discountValue: null, taxMode: "none", taxRate: null })).toBe(false);
+    expect(billingTermsChanged({ discount_type: "percent", discount_value: null, tax_mode: "none", tax_rate: null }, { discountType: "percent", discountValue: 0, taxMode: "none", taxRate: null })).toBe(false);
+  });
+  it("a stored figure the save would only normalise still counts — later bills would see it", () => {
+    // Legacy exclusive order with no rate: bills priced it at 0%, the save would store 5%.
+    expect(billingTermsChanged({ discount_type: null, discount_value: null, tax_mode: "exclusive", tax_rate: null }, { discountType: null, discountValue: null, taxMode: "exclusive", taxRate: 5 })).toBe(true);
+    // An unclamped 150% the save would clamp to 100%.
+    expect(billingTermsChanged({ discount_type: "percent", discount_value: 150, tax_mode: "none", tax_rate: null }, { discountType: "percent", discountValue: 100, taxMode: "none", taxRate: null })).toBe(true);
   });
 });
 

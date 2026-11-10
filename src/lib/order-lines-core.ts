@@ -1,4 +1,4 @@
-import type { Order, OrderItem, OrderStatus, TaxMode } from "@/lib/types";
+import type { DiscountType, Order, OrderItem, OrderStatus, TaxMode } from "@/lib/types";
 
 // Line-level confirmation + split billing (Ansh, 18 Aug) — the pure rules,
 // kept import-safe for vitest (no server-only, no supabase).
@@ -75,6 +75,44 @@ export interface PriorBills {
   discountApplied: number;
   /** Sum of advance_applied on earlier bills. */
   advanceApplied: number;
+}
+
+/**
+ * What the LIVE earlier bills consumed (audit fix, 4 Oct). A cancelled bill is
+ * kept as a record, but its lines go back to the order and are billed again —
+ * so it gives its share of the discount and advance pots back. Counting it
+ * left the re-raised bill with no discount and no advance, overstating both
+ * the tax invoice and the amount due.
+ */
+export function priorBillsConsumed(
+  bills: { discount_amount?: number | null; advance_applied?: number | null; cancelled_at?: string | null }[],
+): PriorBills {
+  const live = bills.filter((b) => !b.cancelled_at);
+  return {
+    discountApplied: live.reduce((s, b) => s + (Number(b.discount_amount) || 0), 0),
+    advanceApplied: live.reduce((s, b) => s + (Number(b.advance_applied) || 0), 0),
+  };
+}
+
+/**
+ * Would saving these terms MOVE anything a bill prices off? (Audit fix, 4 Oct.)
+ * Modify Order sends all four terms on every save, so "were terms sent" was
+ * always true and the freeze refused every edit of a billed order — a pending
+ * line's qty included. The freeze exists to stop the terms moving, so this
+ * compares them the way computeBillTotals reads them: a value with no discount
+ * type, or a rate with no tax, prices nothing. Deliberately strict otherwise —
+ * a stored figure the save would merely normalise (a legacy exclusive order
+ * with no rate becoming 5%) still counts, because later bills would see it.
+ */
+export function billingTermsChanged(
+  stored: Pick<Order, "discount_type" | "discount_value" | "tax_mode" | "tax_rate">,
+  next: { discountType: DiscountType | null; discountValue: number | null; taxMode: TaxMode; taxRate: number | null },
+): boolean {
+  if ((next.discountType ?? null) !== (stored.discount_type ?? null)) return true;
+  if (next.discountType && (Number(next.discountValue) || 0) !== (Number(stored.discount_value) || 0)) return true;
+  if (next.taxMode !== (stored.tax_mode ?? "none")) return true;
+  if (next.taxMode !== "none" && (Number(next.taxRate) || 0) !== (Number(stored.tax_rate) || 0)) return true;
+  return false;
 }
 
 /**

@@ -22,7 +22,7 @@ import { LineStateControls, GenerateBillBar } from "./LineBilling";
 import { SettleReturn, type SettleTarget } from "./SettleReturn";
 import { CancelBillButton } from "./CancelBillButton";
 import { ReturnPanel, ApplyCreditBar, type ReturnPanelLine } from "./ReturnPanel";
-import { effectiveLineState, billableLines, computeBillTotals } from "@/lib/order-lines-core";
+import { effectiveLineState, billableLines, computeBillTotals, priorBillsConsumed } from "@/lib/order-lines-core";
 import { loadOrderCredit, loadBuyerWallet } from "@/lib/credit-load";
 import { resolveDocumentParty } from "@/lib/buyer-snapshot";
 import type { Order, OrderBill } from "@/lib/types";
@@ -164,26 +164,28 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   });
   // A return is raised against a BILL, so "can anything still come back" is a
   // per-bill question — and it is the one the order-level entry point answers.
-  const returnableBills = bills
+  // Live bills only (audit fix, 4 Oct): createReturnCreditNote refuses a
+  // cancelled bill, and listing one here also hid the order-anchored return
+  // below — the page offered a panel that always failed and nothing that worked.
+  const liveBills = bills.filter((b) => !b.cancelled_at);
+  const returnableBills = liveBills
     .map((b) => ({
       bill: b,
       remaining: (b.items ?? []).reduce((s, it, k) => s + Math.max(0, (Number(it.qty) || 0) - returnedOf(b.id, k)), 0),
     }))
     .filter((r) => r.remaining > 0);
-  const billedPieces = bills.reduce((s, b) => s + (b.items ?? []).reduce((t, it) => t + (Number(it.qty) || 0), 0), 0);
-  const returnedPieces = bills.reduce((s, b) => s + (b.items ?? []).reduce((t, _it, k) => t + returnedOf(b.id, k), 0), 0);
+  const billedPieces = liveBills.reduce((s, b) => s + (b.items ?? []).reduce((t, it) => t + (Number(it.qty) || 0), 0), 0);
+  const returnedPieces = liveBills.reduce((s, b) => s + (b.items ?? []).reduce((t, _it, k) => t + returnedOf(b.id, k), 0), 0);
 
   // Date corrections (14 Sep). A bill may not predate its order, and an order
   // may not start after the first bill raised against it — the same two bounds
   // the actions enforce, shown to the picker so it never offers a refusal.
   const orderDay = istDay(o.submitted_at);
-  const earliestBillDate = bills.reduce<string | null>((min, b) => (min == null || b.bill_date < min ? b.bill_date : min), null);
+  const earliestBillDate = liveBills.reduce<string | null>((min, b) => (min == null || b.bill_date < min ? b.bill_date : min), null);
 
   const billable = billableLines(o);
-  const billableTotals = computeBillTotals(billable.map((b) => b.item), o, {
-    discountApplied: bills.reduce((s, b) => s + (Number(b.discount_amount) || 0), 0),
-    advanceApplied: bills.reduce((s, b) => s + (Number(b.advance_applied) || 0), 0),
-  });
+  // Same pots generateOrderBill will use — a cancelled bill gives its share back.
+  const billableTotals = computeBillTotals(billable.map((b) => b.item), o, priorBillsConsumed(bills));
 
   // Catalog for the "add item" picker in the order editor (admins only).
   let pickerProducts: PickerProduct[] = [];
@@ -518,7 +520,7 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
                   {new Date(b.bill_date + "T12:00:00+05:30").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                   {" · "}{(b.items ?? []).length} line{(b.items ?? []).length === 1 ? "" : "s"}
                   {b.advance_applied > 0 ? ` · advance ${formatINR(b.advance_applied)} applied` : ""}
-                  {isAdminRole(staff.role) && o.status !== "cancelled" && (
+                  {isAdminRole(staff.role) && o.status !== "cancelled" && !b.cancelled_at && (
                     <>
                       {" "}
                       <DateCorrection
@@ -540,6 +542,11 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
                     while naming an action nobody could perform. */}
                 {isAdminRole(staff.role) && !b.cancelled_at && (
                   <CancelBillButton billId={b.id} billNumber={b.bill_number} />
+                )}
+                {/* A cancel whose line release lost a race leaves lines tied
+                    to this dead bill; cancelBill run again finishes the job. */}
+                {isAdminRole(staff.role) && b.cancelled_at && (o.items ?? []).some((it) => it.billed_in === b.id) && (
+                  <CancelBillButton billId={b.id} billNumber={b.bill_number} releaseOnly />
                 )}
                 <span className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black, textDecoration: b.cancelled_at ? "line-through" : "none" }}>{formatINR(b.total)}</span>
                 <BillShareActions

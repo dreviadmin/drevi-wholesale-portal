@@ -13,9 +13,18 @@ export default async function AgentPage({ params }: { params: { id: string } }) 
   const [{ data: agent }, account, { data: linked }] = await Promise.all([
     admin.from("agents").select("*").eq("id", params.id).maybeSingle(),
     loadAgentAccount(params.id),
-    admin.from("buyers").select("id, business_name").eq("agent_id", params.id).order("business_name"),
+    // The link lives in buyer_agents since 0067 dropped buyers.agent_id — the
+    // old read errored on the missing column, so this page never listed a
+    // buyer while the agents list counted them from here.
+    admin.from("buyer_agents").select("buyer_id, buyers(id, business_name)").eq("agent_id", params.id),
   ]);
   if (!agent) notFound();
+  const buyers = (linked ?? [])
+    .map((r) => {
+      const b = (Array.isArray(r.buyers) ? r.buyers[0] : r.buyers) as { business_name: string | null } | null | undefined;
+      return { id: r.buyer_id as string, name: b?.business_name ?? "—" };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <AgentDetail
@@ -27,7 +36,7 @@ export default async function AgentPage({ params }: { params: { id: string } }) 
       totals={account.totals}
       orders={account.orders}
       payments={account.payments}
-      buyers={(linked ?? []).map((b) => ({ id: b.id, name: b.business_name ?? "—" }))}
+      buyers={buyers}
     />
   );
 }
