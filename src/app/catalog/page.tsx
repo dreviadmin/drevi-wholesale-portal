@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 import { getDetailedCart } from "@/lib/cart";
 import { CatalogView } from "./CatalogView";
 import type { WholesaleProduct } from "@/lib/types";
@@ -17,7 +18,7 @@ export default async function CatalogPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const [{ data: buyerRows }, { data: products }] = await Promise.all([
+  const [{ data: buyerRows }, rows] = await Promise.all([
     // The credentialed row, not .maybeSingle() (see cart/page.tsx): a second
     // row on the same email nulled the buyer, so the cart map came back empty
     // and tapping "Add to Cart" on a line already in the cart overwrote its qty.
@@ -27,20 +28,24 @@ export default async function CatalogPage() {
       .eq("email", user.email ?? "")
       .not("encrypted_password", "is", null)
       .limit(1),
-    supabase
-      .from("wholesale_products")
-      .select(BUYER_PRODUCT_COLUMNS)
-      // buyer_visible, NOT wholesale_visible (0062). The old flag is the
-      // sheet/ops one that every billing screen reads; this one is set only
-      // by a wholesale push from Studio, which is what the owner asked the
-      // catalog to mean.
-      .eq("buyer_visible", true)
-      .order("category", { nullsFirst: false })
-      .order("title", { nullsFirst: false }),
+    // Paged with fetchAll (still this buyer's own RLS client): a bare select
+    // stops at 1,000 rows without a word. SKU ends the sort so no product can
+    // fall between two pages or show twice.
+    fetchAll<WholesaleProduct>(supabase, "wholesale_products", BUYER_PRODUCT_COLUMNS, (q) =>
+      q
+        // buyer_visible, NOT wholesale_visible (0062). The old flag is the
+        // sheet/ops one that every billing screen reads; this one is set only
+        // by a wholesale push from Studio, which is what the owner asked the
+        // catalog to mean.
+        .eq("buyer_visible", true)
+        .order("category", { nullsFirst: false })
+        .order("title", { nullsFirst: false })
+        .order("sku"),
+    ),
   ]);
 
   const buyer = buyerRows?.[0] ?? null;
-  const rows = (products ?? []) as WholesaleProduct[];
+
   // The cards no longer carry an availability line, so the supply query that
   // fed it is gone with it — nothing else on this page reads availability.
   const cart = buyer ? await getDetailedCart(buyer.id) : null;

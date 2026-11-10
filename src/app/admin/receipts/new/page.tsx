@@ -47,24 +47,33 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: {
   }
 
   // Known designs for the reorder path (§5.5): ident thumb, supply, last cost.
-  const [{ data: designs }, { data: identImages }, { data: costs }] = await Promise.all([
-    admin
-      .from("designs")
-      .select("id, base_sku, color, title, vendor_sku, ident_image_id, supply_mode, vendor_stock_qty, making_days, making_moq, delivery_days, supply_note, supply_updated_at")
-      .order("base_sku"),
-    admin.from("design_images").select("id, file_ref").eq("role", "ident"),
-    admin.from("product_vendor_info").select("sku, last_cost").gt("last_cost", 0),
+  // Paged with fetchAll: a bare select stops at 1,000 rows without a word, so
+  // designs past that point could not be found to reorder. Each sort ends in
+  // the primary key so no row can fall between two pages.
+  type KnownDesignRow = {
+    id: string; base_sku: string; color: string; title: string | null; vendor_sku: string | null; ident_image_id: string | null;
+    supply_mode: string | null; vendor_stock_qty: number | null; making_days: number | null; making_moq: number | null;
+    delivery_days: number | null; supply_note: string | null; supply_updated_at: string | null;
+  };
+  const [designs, identImages, costs] = await Promise.all([
+    fetchAll<KnownDesignRow>(
+      admin, "designs",
+      "id, base_sku, color, title, vendor_sku, ident_image_id, supply_mode, vendor_stock_qty, making_days, making_moq, delivery_days, supply_note, supply_updated_at",
+      (q) => q.order("base_sku").order("id"),
+    ),
+    fetchAll<{ id: string; file_ref: string }>(admin, "design_images", "id, file_ref", (q) => q.eq("role", "ident").order("id")),
+    fetchAll<{ sku: string; last_cost: number }>(admin, "product_vendor_info", "sku, last_cost", (q) => q.gt("last_cost", 0).order("sku")),
   ]);
-  const identBy = new Map((identImages ?? []).map((i) => [i.id, i.file_ref]));
+  const identBy = new Map(identImages.map((i) => [i.id, i.file_ref]));
   const costByGroup = new Map<string, number>();
-  for (const c of costs ?? []) {
+  for (const c of costs) {
     const parts = c.sku.toUpperCase().split("-");
     if (parts.length < 5 || !/^\d{2,4}$/.test(parts[3])) continue;
     const key = `${parts.slice(0, 4).join("-")}|${parts[parts.length - 1]}`;
     costByGroup.set(key, Math.max(costByGroup.get(key) ?? 0, Number(c.last_cost)));
   }
 
-  const knownDesigns = (designs ?? []).map((d) => ({
+  const knownDesigns = designs.map((d) => ({
     id: d.id,
     baseSku: d.base_sku,
     color: d.color,

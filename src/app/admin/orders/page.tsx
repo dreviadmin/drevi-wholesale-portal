@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireAdminOrRedirect } from "@/lib/staff";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { OrdersTable, type OrderRowDTO } from "./OrdersTable";
@@ -102,18 +103,24 @@ export default async function OrdersPage({ searchParams }: { searchParams?: { st
     );
   }
 
-  const { data: orders } = await admin
-    .from("orders")
-    .select("id, order_number, buyer_id, total_amount, advance_amount, credit_applied, status, source, exhibition_event, submitted_at, items")
-    .order("submitted_at", { ascending: false });
+  // Paged with fetchAll: a bare select stops at 1,000 rows without a word, and
+  // this list must show every order. Read oldest first (then id) so an order
+  // placed mid-read lands at the tail rather than shifting a page boundary,
+  // then reversed to the newest-first order the list has always had. Every
+  // buyer is read too, in place of an .in() list of every buyer id.
+  type OrderListRow = Pick<Order, "id" | "order_number" | "buyer_id" | "total_amount" | "advance_amount" | "credit_applied" | "status" | "source" | "exhibition_event" | "submitted_at" | "items">;
+  const [orders, buyers] = await Promise.all([
+    fetchAll<OrderListRow>(
+      admin, "orders",
+      "id, order_number, buyer_id, total_amount, advance_amount, credit_applied, status, source, exhibition_event, submitted_at, items",
+      (q) => q.order("submitted_at", { ascending: true }).order("id", { ascending: true }),
+    ),
+    fetchAll<Pick<Buyer, "id" | "business_name" | "phone">>(admin, "buyers", "id, business_name, phone", (q) => q.order("id")),
+  ]);
+  orders.reverse();
+  const buyerById = new Map(buyers.map((b) => [b.id, b]));
 
-  const buyerIds = Array.from(new Set((orders ?? []).map((o) => o.buyer_id)));
-  const { data: buyers } = buyerIds.length
-    ? await admin.from("buyers").select("id, business_name, phone").in("id", buyerIds)
-    : { data: [] as Pick<Buyer, "id" | "business_name" | "phone">[] };
-  const buyerById = new Map((buyers ?? []).map((b) => [b.id, b]));
-
-  const rows: OrderRowDTO[] = ((orders ?? []) as Array<Pick<Order, "id" | "order_number" | "buyer_id" | "total_amount" | "advance_amount" | "credit_applied" | "status" | "source" | "exhibition_event" | "submitted_at" | "items">>).map((o) => {
+  const rows: OrderRowDTO[] = orders.map((o) => {
     const advance = o.advance_amount ?? 0;
     return {
       id: o.id,

@@ -4,6 +4,7 @@ import { BackLink } from "@/components/BackLink";
 import { ZoomImage } from "@/components/Lightbox";
 import { requireAdminOrRedirect, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 import { currentCatalogImages, lineImage } from "@/lib/catalog-images";
 import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -195,14 +196,13 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   // The add-item picker exists on any order still open to edits — without this
   // the editor renders on a delivered order with an empty catalog.
   if (isAdminRole(staff.role) && o.status !== "cancelled") {
-    const { data: prods } = await admin
-      .from("wholesale_products")
-      .select("sku, title, wholesale_price, image_urls")
-      .eq("wholesale_visible", true)
-      .order("title", { nullsFirst: false })
-      // PostgREST's default cap is 1000 rows; the catalog is 322 and growing.
-      .range(0, 4999);
-    pickerProducts = (prods ?? []).map((p) => ({
+    // Paged with fetchAll: .range(0, 4999) alone was still cut to 1,000 rows
+    // by the server's own cap, and the catalog keeps growing.
+    const prods = await fetchAll<{ sku: string; title: string | null; wholesale_price: number; image_urls: string[] | null }>(
+      admin, "wholesale_products", "sku, title, wholesale_price, image_urls",
+      (q) => q.eq("wholesale_visible", true).order("title", { nullsFirst: false }).order("sku"),
+    );
+    pickerProducts = prods.map((p) => ({
       sku: p.sku,
       title: p.title,
       wholesale_price: p.wholesale_price,

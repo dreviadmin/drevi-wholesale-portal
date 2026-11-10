@@ -43,11 +43,15 @@ export async function computeAttention(): Promise<AttentionItem[]> {
     //    counter and at exhibitions too, and restocking it matters whether or
     //    not it has been pushed to the buyer catalog yet (audit, 4 Oct).
     admin.from("wholesale_products").select("sku").lte("current_qty", 0).eq("wholesale_visible", true),
-    admin.from("orders").select("items").neq("status", "cancelled"),
+    // Every order not cancelled, so paged: a bare select stops at 1,000 rows,
+    // and a SKU ordered only in the rows it dropped was never flagged. A read
+    // failure here must not cost the whole inbox, as before.
+    fetchAll<{ items: { sku?: string }[] | null }>(admin, "orders", "items", (q) => q.neq("status", "cancelled").order("id"))
+      .catch(() => []),
   ]);
   const orderedSkus = new Set<string>();
-  for (const o of orderedItems.data ?? []) {
-    for (const it of (o.items as { sku?: string }[] | null) ?? []) {
+  for (const o of orderedItems) {
+    for (const it of o.items ?? []) {
       if (it.sku) orderedSkus.add(it.sku.toUpperCase());
     }
   }
