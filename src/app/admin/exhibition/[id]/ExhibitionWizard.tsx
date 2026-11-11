@@ -129,7 +129,7 @@ export function ExhibitionWizard({
   // (custom items) — golden rule: every photo is clickable.
   const [photoZoom, setPhotoZoom] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirmInfo, setConfirmInfo] = useState<{ orderId: string; orderNumber: string; pdfUrl?: string; warning?: string } | null>(null);
+  const [confirmInfo, setConfirmInfo] = useState<{ orderId: string; orderNumber: string; pdfUrl?: string; warning?: string; sent?: boolean } | null>(null);
   const [buyerClientRef, setBuyerClientRef] = useState<string | null>(null);
   const [isPending, start] = useTransition();
 
@@ -603,7 +603,7 @@ export function ExhibitionWizard({
         return;
       }
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
-      setConfirmInfo({ orderId: res.orderId!, orderNumber: res.orderNumber ?? "", pdfUrl: res.pdfUrl, warning: res.warning });
+      setConfirmInfo({ orderId: res.orderId!, orderNumber: res.orderNumber ?? "", pdfUrl: res.pdfUrl, warning: res.warning, sent: !!res.sent });
       setStep("confirm");
     });
   }
@@ -1271,10 +1271,16 @@ export function ExhibitionWizard({
         <div className="px-4 md:px-6 py-10 max-w-md mx-auto text-center">
           <div className="font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.22em", color: palette.gold }}>Order Submitted</div>
           <div className="font-display mt-2" style={{ fontSize: 24, fontWeight: 600 }}>{confirmInfo.orderNumber}</div>
-          <p className="font-body mt-3" style={{ fontSize: 12, color: palette.softBlack, lineHeight: 1.7 }}>
-            {confirmInfo.orderId
-              ? "The order summary PDF has been generated and sent to the buyer's WhatsApp (or available to download below)."
-              : "Saved on this device. It will sync — and the PDF send will fire — automatically when you're back online."}
+          <p className="font-body mt-3" style={{ fontSize: 13, color: palette.softBlack, lineHeight: 1.7 }}>
+            {/* Only claim a send the server recorded (pdf_sent_at): nothing goes
+                out when WhatsApp sending is not set up or the buyer has no phone. */}
+            {!confirmInfo.orderId
+              ? "Saved on this device. It will sync — and the PDF send will fire — automatically when you're back online."
+              : confirmInfo.sent
+                ? "The order PDF was sent to the buyer's WhatsApp."
+                : confirmInfo.pdfUrl
+                  ? "Not sent automatically: tap WhatsApp or Share to send the PDF."
+                  : "Not sent automatically: tap Download PDF, then send it to the buyer."}
           </p>
           {confirmInfo.warning && (
             <p className="font-body mt-3" style={{ fontSize: 13, color: palette.crimsonText, lineHeight: 1.6 }}>{confirmInfo.warning}</p>

@@ -138,7 +138,8 @@ vi.mock("@/lib/storage", () => ({
   uploadCustomItemImage: async () => "https://cdn.example.test/custom.jpg",
   uploadOrderPdf: async () => "https://cdn.example.test/bill.pdf",
 }));
-vi.mock("@/lib/order-finalize", () => ({ finalizeOrder: async () => ({}) }));
+const finalizeOrder = vi.fn(async (orderId: string) => { void orderId; return {}; });
+vi.mock("@/lib/order-finalize", () => ({ finalizeOrder: (orderId: string) => finalizeOrder(orderId) }));
 vi.mock("@/lib/order-pdf", () => ({ renderOrderPdf: async () => new Uint8Array() }));
 vi.mock("@/lib/interakt", () => ({ sendPendingReviewAlert: async () => {} }));
 vi.mock("@/lib/buyer-snapshot", () => ({ captureBuyerSnapshot: async () => ({}), snapshotSourceForDate: () => "live" }));
@@ -616,6 +617,39 @@ describe("submitExhibitionOrder: the staff note stays with staff", () => {
     expect(db.orders).toHaveLength(1);
     expect(r.warning).toContain("staff note did not save");
     expect(r.warning).toContain("notes table unavailable");
+  });
+});
+
+describe("submitExhibitionOrder: says whether the PDF went to the buyer", () => {
+  const line = { sku: "", qty: 1, unitPrice: 1000, customTitle: "Sample" };
+
+  beforeEach(() => {
+    db.exhibition_sessions = [{ id: "s1", session_type: "exhibition", event_name: "Expo", orders_count: 0, ended_at: null }];
+  });
+
+  it("sent is false when nothing went out (no WhatsApp set up, or no phone)", async () => {
+    const r = await exhibition.submitExhibitionOrder({ sessionId: "s1", eventName: "Expo", buyerId: "b1", items: [line] });
+    expect(r).toMatchObject({ ok: true, sent: false });
+  });
+
+  it("sent is true once the send is recorded on the order, and a replay reports the same", async () => {
+    finalizeOrder.mockImplementationOnce(async (orderId: string) => {
+      const o = db.orders.find((x) => x.id === orderId)!;
+      Object.assign(o, { pdf_url: "https://cdn.example.test/order.pdf", pdf_sent_via: "whatsapp", pdf_sent_at: "2026-11-10T06:00:00Z" });
+      return {};
+    });
+    const input = { sessionId: "s1", eventName: "Expo", buyerId: "b1", items: [line], clientRef: "ref-sent" };
+    const r = await exhibition.submitExhibitionOrder(input);
+    expect(r).toMatchObject({ ok: true, sent: true, pdfUrl: "https://cdn.example.test/order.pdf" });
+    const replay = await exhibition.submitExhibitionOrder(input);
+    expect(replay).toMatchObject({ ok: true, orderId: r.orderId, sent: true });
+  });
+
+  it("a replay of an order that was never sent says so", async () => {
+    const input = { sessionId: "s1", eventName: "Expo", buyerId: "b1", items: [line], clientRef: "ref-unsent" };
+    const r = await exhibition.submitExhibitionOrder(input);
+    const replay = await exhibition.submitExhibitionOrder(input);
+    expect(replay).toMatchObject({ ok: true, orderId: r.orderId, sent: false });
   });
 });
 

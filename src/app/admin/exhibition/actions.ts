@@ -170,7 +170,7 @@ export async function submitExhibitionOrder(input: {
    * snapshot is captured at DRAIN time, not sale time, so it is recorded as
    * "queued" rather than pretending to be contemporaneous with the sale. */
   fromQueue?: boolean;
-}): Promise<{ ok: boolean; orderId?: string; orderNumber?: string; pdfUrl?: string; error?: string; warning?: string }> {
+}): Promise<{ ok: boolean; orderId?: string; orderNumber?: string; pdfUrl?: string; error?: string; warning?: string; sent?: boolean }> {
   let staff;
   try { staff = await requireStaff(); } catch { return { ok: false, error: "Not authorized." }; }
   const admin = createAdminClient();
@@ -184,10 +184,10 @@ export async function submitExhibitionOrder(input: {
   if (clientRef) {
     const { data: existing } = await admin
       .from("orders")
-      .select("id, order_number, pdf_url")
+      .select("id, order_number, pdf_url, pdf_sent_at")
       .eq("client_ref", clientRef)
       .maybeSingle();
-    if (existing) return { ok: true, orderId: existing.id, orderNumber: existing.order_number, pdfUrl: existing.pdf_url ?? undefined };
+    if (existing) return { ok: true, orderId: existing.id, orderNumber: existing.order_number, pdfUrl: existing.pdf_url ?? undefined, sent: !!existing.pdf_sent_at };
   }
 
   // Session drives the source + order prefix (exhibition → DX, in-store → IS).
@@ -410,8 +410,8 @@ export async function submitExhibitionOrder(input: {
       // Could be the order_number (retry — loop again) or the client_ref (a
       // concurrent replay already inserted this exact order — return that one).
       if (clientRef) {
-        const { data: won } = await admin.from("orders").select("id, order_number, pdf_url").eq("client_ref", clientRef).maybeSingle();
-        if (won) return { ok: true, orderId: won.id, orderNumber: won.order_number, pdfUrl: won.pdf_url ?? undefined };
+        const { data: won } = await admin.from("orders").select("id, order_number, pdf_url, pdf_sent_at").eq("client_ref", clientRef).maybeSingle();
+        if (won) return { ok: true, orderId: won.id, orderNumber: won.order_number, pdfUrl: won.pdf_url ?? undefined, sent: !!won.pdf_sent_at };
       }
     } else if (error) {
       return { ok: false, error: error.message };
@@ -436,8 +436,14 @@ export async function submitExhibitionOrder(input: {
   await admin.from("exhibition_sessions").update({ orders_count: (sess?.orders_count ?? 0) + 1 }).eq("id", input.sessionId);
 
   await finalizeOrder(orderId); // PDF + Interakt (best-effort)
-  const { data: withPdf } = await admin.from("orders").select("pdf_url").eq("id", orderId).maybeSingle();
-  return { ok: true, orderId, orderNumber: orderNumber ?? undefined, pdfUrl: withPdf?.pdf_url ?? undefined, ...(warning ? { warning } : {}) };
+  // finalizeOrder stamps pdf_sent_at only when the WhatsApp send went through
+  // (Interakt configured AND the buyer has a phone) — the confirmation reads
+  // it so it never claims a send that did not happen.
+  const { data: withPdf } = await admin.from("orders").select("pdf_url, pdf_sent_at").eq("id", orderId).maybeSingle();
+  return {
+    ok: true, orderId, orderNumber: orderNumber ?? undefined, pdfUrl: withPdf?.pdf_url ?? undefined,
+    sent: !!withPdf?.pdf_sent_at, ...(warning ? { warning } : {}),
+  };
 }
 
 export async function endSession(sessionId: string, eventName: string): Promise<{ ok: boolean }> {
