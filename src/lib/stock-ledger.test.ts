@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canonicalFromMovements, type Movement, type MovementReason } from "./stock-ledger-core";
+import { canonicalBySku, canonicalFromMovements, sheetSyncQty, type Movement, type MovementReason } from "./stock-ledger-core";
 
 let seq = 0;
 function m(reason: MovementReason, opts: { delta?: number; snapshot?: number; day: number }): Movement {
@@ -96,5 +96,57 @@ describe("canonical stock from the ledger (§3.5, §10)", () => {
     ];
     expect(canonicalFromMovements(rows)).toBe(7);
     expect(rows).toHaveLength(2); // nothing deleted
+  });
+});
+
+describe("canonical stock per SKU", () => {
+  it("groups by upper-cased SKU and computes each one's canonical stock", () => {
+    const a = (reason: MovementReason, opts: { delta?: number; snapshot?: number; day: number }) => ({ ...m(reason, opts), sku: "dd-sar-prd-067-l-rst" });
+    const b = (reason: MovementReason, opts: { delta?: number; snapshot?: number; day: number }) => ({ ...m(reason, opts), sku: "DD-SUT-PLZ-024-M-RED" });
+    const out = canonicalBySku([
+      a("receipt", { delta: 5, day: 1 }),
+      b("reset", { snapshot: 3, day: 1 }),
+      a("order", { delta: -2, day: 2 }),
+      b("order", { delta: -1, day: 2 }),
+    ]);
+    expect(out.get("DD-SAR-PRD-067-L-RST")).toBe(3);
+    expect(out.get("DD-SUT-PLZ-024-M-RED")).toBe(2);
+    expect(out.size).toBe(2);
+  });
+
+  it("is empty with no movements", () => {
+    expect(canonicalBySku([]).size).toBe(0);
+  });
+});
+
+// Audit round 2 (4 Oct) — the sheet sync no longer writes over ledger-owned stock.
+// null = "leave the column alone" (the row goes up without current_qty).
+describe("sheet sync current_qty (sheetSyncQty)", () => {
+  const ledger = new Map([["DD-LEH-FLR-001-M-BLU", 2]]);
+
+  it("does not write an existing SKU that has movements, whatever the sheet says", () => {
+    // The finding's exact case: ledger 2, sheet 0 — the booth must not read Sold Out.
+    expect(sheetSyncQty("DD-LEH-FLR-001-M-BLU", 0, true, ledger)).toBeNull();
+    expect(sheetSyncQty("dd-leh-flr-001-m-blu", 9, true, ledger)).toBeNull();
+  });
+
+  it("seeds a row the sync is about to create from the ledger when the SKU has movements", () => {
+    expect(sheetSyncQty("DD-LEH-FLR-001-M-BLU", 7, false, ledger)).toBe(2);
+  });
+
+  it("still takes the sheet's number for a SKU the ledger has never seen — new and existing", () => {
+    expect(sheetSyncQty("DD-KUR-CTN-310-S-PNK", 6, false, ledger)).toBe(6);
+    expect(sheetSyncQty("DD-KUR-CTN-310-S-PNK", 6, true, ledger)).toBe(6);
+  });
+
+  it("an unreadable ledger writes no existing row, and a new row takes the sheet", () => {
+    expect(sheetSyncQty("DD-KUR-CTN-310-S-PNK", 6, true, null)).toBeNull();
+    expect(sheetSyncQty("DD-KUR-CTN-310-S-PNK", 6, false, null)).toBe(6);
+  });
+
+  it("a SKU whose movements net to zero is still the ledger's", () => {
+    const zero = new Map([["DD-LEH-FLR-001-M-BLU", 0]]);
+    expect(sheetSyncQty("DD-LEH-FLR-001-M-BLU", 5, true, zero)).toBeNull();
+    expect(sheetSyncQty("DD-LEH-FLR-001-M-BLU", 5, false, zero)).toBe(0);
   });
 });

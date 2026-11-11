@@ -277,6 +277,8 @@ export async function saveCrop(
 
 /** Mode D guard — the API refusal for detail angles (§7.1). */
 export async function assertGenerable(angleId: string): Promise<Res> {
+  // Admin only, the same gate as every other action in this file.
+  try { await requireAdmin(); } catch { return fail("Not authorized"); }
   const admin = createAdminClient();
   const { data: angle } = await admin.from("design_angles").select("angle").eq("id", angleId).maybeSingle();
   if (!angle) return fail("Angle not found");

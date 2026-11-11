@@ -61,7 +61,8 @@ export async function updateProductFields(
 }
 
 // Hand a field back to the sheet (removes it from locked_fields). The next sync
-// re-applies the sheet value.
+// re-applies the sheet value — except current_qty on a SKU with stock
+// movements, which the sync now leaves to the ledger (sheetSyncQty, 4 Oct).
 export async function unlockProductField(sku: string, field: string): Promise<{ ok: boolean; error?: string }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }

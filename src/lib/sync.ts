@@ -1,6 +1,8 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAll } from "@/lib/supabase/fetch-all";
+import { canonicalBySku, sheetSyncQty, type Movement } from "@/lib/stock-ledger-core";
 import { refreshActiveOrders } from "@/lib/order-catalog-sync";
 import { readMaster } from "@/lib/sheets";
 import { fetchProductImageUrls } from "@/lib/shopify-auth";
@@ -387,6 +389,25 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
     }
   }
 
+  // Ledger-owned stock (audit round 2, 4 Oct): a SKU with any stock movement
+  // is the ledger's, and the sync no longer writes its current_qty — see
+  // sheetSyncQty. Read here, right before the upsert, so a brand-new row
+  // seeded from the ledger is as fresh as possible. Every movement, PAGED and
+  // ordered like reconcile(): a truncated read would hand back to the sheet
+  // exactly the SKUs whose movements fell past row 1000. A failed read is NOT
+  // "no movements" — null leaves every existing row's stock alone this run.
+  let ledgerQty: Map<string, number> | null = null;
+  if (skus.length > 0) {
+    try {
+      const movements = await fetchAll<Movement>(supabase, "stock_movements", "id, sku, delta, snapshot_qty, reason, created_at", (q) =>
+        q.order("created_at", { ascending: true }).order("id", { ascending: true }),
+      );
+      ledgerQty = canonicalBySku(movements);
+    } catch (err) {
+      warnings.push(`Stock ledger read failed — no existing current_qty written this run: ${(err as Error).message}`);
+    }
+  }
+
   // Build upsert payload — every row carries image columns (fresh, or carried
   // forward from cache) so a bulk upsert never nulls existing images. Fields an
   // admin locked in Manage Catalog keep their existing DB value: the sheet no
@@ -401,6 +422,8 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
     // bulk upsert, so ONE brand-new sheet SKU (no existing row → key absent)
     // would null the column for itself and abort the whole sync on NOT NULL.
     const row: Record<string, unknown> = { ...p, image_urls, images_fetched_at, synced_at: nowIso, locked_fields: ex?.locked_fields ?? [] };
+    const qty = sheetSyncQty(p.sku, p.current_qty, !!ex, ledgerQty);
+    if (qty !== null) row.current_qty = qty;
     if (ex) {
       for (const f of ex.locked_fields) {
         if (f === "image_urls") {
@@ -411,11 +434,23 @@ export async function syncProducts(opts?: { driveBudget?: number; driveTimeBudge
         }
       }
     }
+    // Ledger-owned: the column is not written at all — not even with the
+    // cached value read above, which an order confirmed during the Drive pass
+    // would already have made stale. After the lock loop, so a current_qty
+    // lock cannot put it back.
+    if (qty === null) delete row.current_qty;
     return row;
   });
 
-  if (payload.length > 0) {
-    const { error } = await supabase.from("wholesale_products").upsert(payload, { onConflict: "sku" });
+  // Two upserts, split on whether the row carries current_qty: PostgREST
+  // unifies columns across ONE bulk upsert, so a row without the key in the
+  // same request would get current_qty nulled. Every row in the second batch
+  // already exists, so the upsert only updates the columns it carries.
+  const withQty = payload.filter((r) => "current_qty" in r);
+  const ledgerOwned = payload.filter((r) => !("current_qty" in r));
+  for (const batch of [withQty, ledgerOwned]) {
+    if (batch.length === 0) continue;
+    const { error } = await supabase.from("wholesale_products").upsert(batch, { onConflict: "sku" });
     if (error) throw new Error(`Upsert failed: ${error.message}`);
   }
 

@@ -464,8 +464,24 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
     const { data: existing } = await admin.from("goods_receipts").select("id, receipt_number").eq("client_ref", clientRef).maybeSingle();
     if (existing) {
       // Same shape as a fresh save so a replayed "Save & print tags" still stages its tray.
-      const { data: ls } = await admin.from("goods_receipt_lines").select("sku, design_id, description").eq("receipt_id", existing.id).order("position");
+      const { data: ls, error: lsErr } = await admin.from("goods_receipt_lines").select("sku, design_id, description").eq("receipt_id", existing.id).order("position");
+      if (lsErr) return fail(`${existing.receipt_number}: could not read its lines (${lsErr.message}) — retry`);
       const lineRows = ls ?? [];
+      // The header is written BEFORE the per-garment loop, so a save that died
+      // or timed out part way leaves a header with only some of its lines. A
+      // retry used to replay that as "saved" and clear the draft, and the
+      // missing garments had no lines, no stock and no cost. Every size entry
+      // inserts exactly one line (no de-duplication in the loop below — if that
+      // ever changes, this count must change with it), so fewer lines than
+      // sizes means the first save never finished. It may also still be
+      // RUNNING: adding the "missing" garments by hand right now would double
+      // them when it lands, hence the wait-then-check wording. Deleting the
+      // orphan header is not an option — designs.first_receipt_id references
+      // it once a line has stamped a design, and posted lines carry movements.
+      const expected = input.garments.reduce((n, g) => n + (g.sizes?.length ?? 0), 0);
+      if (lineRows.length < expected) {
+        return fail(`${existing.receipt_number} was only partly saved (${lineRows.length} of ${expected} lines) — it may still be saving; refresh in a minute, then open the receipt and add the missing garments`);
+      }
       const ids = [...new Set(lineRows.map((l) => l.design_id).filter(Boolean))] as string[];
       const ds = ids.length ? (await admin.from("designs").select("id, base_sku, color, title, specs_verified, first_receipt_id").in("id", ids)).data ?? [] : [];
       const designs: SavedDesign[] = ds.map((d) => ({
@@ -479,6 +495,13 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
       return { ok: true, receiptId: existing.id, receiptNumber: existing.receipt_number, skus: lineRows.map((l) => l.sku), designs };
     }
   }
+
+  // Checked up front, before a GR number is burned or the header exists: this
+  // used to run inside the loop, so a card without its design failed the save
+  // AFTER earlier garments were written, leaving exactly the half-saved
+  // receipt the replay check above has to catch. (The same test stays in the
+  // loop — unreachable now, it keeps g.designId narrowed for the writes.)
+  if (input.garments.some((g) => !g.designId || !g.baseSku)) return fail("A garment is missing its design — re-open the card");
 
   const today = istToday();
   const receiptDate = input.receiptDate?.trim() || today;

@@ -3,12 +3,14 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { ALL_ANGLES } from "./state";
+import { mergeSheetMirror, type DesignMirror } from "./ingest-core";
 
 // Studio ingest (build guide §7.3): for every synced product row, parse
 // DD-CAT-SUB-NNN-SIZE-COLOR, upsert the (base, color) design with its
 // sheet-mirror fields, and ensure the 6 design_angles rows plus the two
 // publish_targets rows exist. Idempotent, additive; NEVER touches
-// specs_verified, tier, or any studio-owned state on existing designs.
+// specs_verified, tier, or any studio-owned state on existing designs — and
+// since 4 Oct the mirror fields only fill blanks (mergeSheetMirror).
 
 interface IngestRow {
   sku: string;
@@ -47,22 +49,31 @@ export async function ingestDesigns(
   // truncated haveAngle re-listed ~700 existing pairs every run, each 500-row
   // insert batch died whole on unique(design_id, angle), and a new sheet-born
   // design's angles sat in those batches and were never created.
-  let before: { id: string }[];
+  //
+  // The read also carries each design's current mirror values: a value the
+  // portal holds is never overwritten (see mergeSheetMirror). It stays a hard
+  // stop on failure — without it every design would look blank and take the
+  // sheet's values, which is exactly the overwrite this guards against.
+  type BeforeRow = { id: string; base_sku: string; color: string } & Partial<DesignMirror>;
+  let before: BeforeRow[];
   try {
-    before = await fetchAll<{ id: string }>(admin, "designs", "id", (q) => q.order("id"));
+    before = await fetchAll<BeforeRow>(admin, "designs", "id, base_sku, color, title, category, sub_category, fabric", (q) => q.order("id"));
   } catch (err) {
     warnings.push(`Studio ingest skipped — designs read failed: ${(err as Error).message}`);
     return { designs: 0, created: 0 };
   }
+  const existingByKey = new Map(before.map((d) => [`${String(d.base_sku).toUpperCase()}|${String(d.color).toUpperCase()}`, d]));
 
   // Upsert mirror fields only — absent columns are untouched on conflict.
   const payload = [...groups.values()].map(({ base, color, row }) => ({
     base_sku: base,
     color,
-    title: row.title ?? null,
-    category: row.category ?? null,
-    sub_category: row.sub_category ?? null,
-    fabric: row.primary_fabric ?? null,
+    ...mergeSheetMirror(existingByKey.get(`${base}|${color}`), {
+      title: row.title ?? null,
+      category: row.category ?? null,
+      sub_category: row.sub_category ?? null,
+      fabric: row.primary_fabric ?? null,
+    }),
   }));
   for (let i = 0; i < payload.length; i += 200) {
     const { error } = await admin.from("designs").upsert(payload.slice(i, i + 200), { onConflict: "base_sku,color" });

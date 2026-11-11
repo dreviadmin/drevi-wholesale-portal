@@ -14,5 +14,10 @@ export default async function StudioPage() {
   // The board carries retired designs down and hides them client-side —
   // that is what lets "Show discontinued" work without a round trip.
   const [rows, buckets] = await Promise.all([loadBoard({ includeDiscontinued: true }), loadStudioBuckets()]);
-  return <StudioBoard rows={rows} buckets={buckets} fashnOn={fashnEnabled()} />;
+  // The hosted runner (ANSH-04) is the only worker for scan_drive jobs (the
+  // in-process /api/pipeline/run has no engine for it) and for the batch's
+  // tryon jobs (nothing calls /run for those). Same test as the jobs route's
+  // GitHub dispatch.
+  const runnerOn = !!(process.env.GITHUB_PAT && process.env.GITHUB_RUNNER_REPO);
+  return <StudioBoard rows={rows} buckets={buckets} fashnOn={fashnEnabled()} runnerOn={runnerOn} />;
 }

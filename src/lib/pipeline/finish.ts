@@ -49,9 +49,18 @@ export async function finishGenerationJob(args: {
     .single();
   if (error) return { ok: false, error: `Candidate insert failed: ${error.message}` };
 
+  // Only an in-flight job closes as done. Cancel (cancelJobsForAngle) and the
+  // stale-job sweep can finalise the row while the engine is still rendering;
+  // without this guard the late return flipped a cancelled or timed-out job
+  // back to 'done'. On the normal path the row is 'running' here (the run route
+  // claims it so, the poll route requires it), so nothing changes there. The
+  // candidate above still lands: its file is already stored and paid for —
+  // whether to keep or drop a render that arrives after a cancel is a product
+  // call, not this guard's.
   await admin
     .from("pipeline_jobs")
     .update({ status: "done", progress: 100, cost_credits: engineCost(args.engine), finished_at: new Date().toISOString() })
-    .eq("id", args.jobId);
+    .eq("id", args.jobId)
+    .in("status", ["claimed", "running"]);
   return { ok: true, imageId: row.id };
 }

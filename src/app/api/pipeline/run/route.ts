@@ -50,10 +50,13 @@ export async function POST(request: Request) {
   if (!claimed) return NextResponse.json({ error: "Job is not queued (already running, done, or unknown)" }, { status: 409 });
 
   const failJob = async (message: string) => {
+    // Same in-flight guard as finishGenerationJob: an engine that throws after
+    // the operator pressed Cancel must not overwrite 'cancelled' with 'error'.
     await admin
       .from("pipeline_jobs")
       .update({ status: "error", log: message.slice(0, 800), finished_at: new Date().toISOString() })
-      .eq("id", jobId);
+      .eq("id", jobId)
+      .in("status", ["claimed", "running"]);
     return NextResponse.json({ error: message }, { status: 500 });
   };
 

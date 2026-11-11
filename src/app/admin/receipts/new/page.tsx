@@ -13,6 +13,12 @@ import { DeliveryIntake } from "./DeliveryIntake";
 
 export const dynamic = "force-dynamic";
 
+// saveDelivery (a server action run from this page) writes a header and then
+// loops ~10 Supabase round trips per size with no transaction around it. A
+// big delivery cut off by the 60s default leaves a half-saved receipt, so the
+// same 300s stock-take has. The replay check in saveDelivery is the other belt.
+export const maxDuration = 300;
+
 // Retrofit R3 — "Log delivery" behind RECEIPT_INTAKE_V2. The previous receipt
 // form stays reachable and unchanged until the flag flips (§0.4, §5.1).
 export default async function NewReceiptPage({ searchParams }: { searchParams: { sku?: string; design?: string } }) {

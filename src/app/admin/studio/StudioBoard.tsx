@@ -54,11 +54,14 @@ export function StudioBoard({
   rows: serverRows,
   buckets: serverBuckets,
   fashnOn = false,
+  runnerOn = false,
 }: {
   rows: BoardRow[];
   buckets: StudioBucket[];
   /** fashnEnabled() on the server — model swap is parked unless FASHN_ENABLED=true. */
   fashnOn?: boolean;
+  /** GITHUB_PAT + GITHUB_RUNNER_REPO set on the server — the only worker for scan_drive and batch tryon jobs. */
+  runnerOn?: boolean;
 }) {
   const router = useRouter();
   // Buckets (0074). A pick shows at once — the row moves between filter chips
@@ -501,26 +504,40 @@ export function StudioBoard({
             {live.length} designs · photos, copy and publishing converge here.
           </p>
         </div>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() => {
-            startTransition(async () => {
-              const res = await fetch("/api/pipeline/jobs", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ type: "scan_drive", params: { all: true } }),
+        {/* A scan_drive job is run ONLY by the hosted runner (ANSH-04, parked):
+            /api/pipeline/run has no engine for it. Without the runner the button
+            said "Drive backfill queued", nothing was ingested, and the row timed
+            out 30 minutes later. So, like "FASHN parked", it stays drawn,
+            disabled and saying why until the runner is configured; the queue
+            code is untouched. Per-design Sync Drive in the Workbench works. */}
+        <div className="flex flex-col items-end gap-1">
+          <button
+            type="button"
+            disabled={pending || !runnerOn}
+            title={runnerOn ? undefined : "No hosted runner is configured, so nothing would run this job"}
+            onClick={() => {
+              startTransition(async () => {
+                const res = await fetch("/api/pipeline/jobs", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ type: "scan_drive", params: { all: true } }),
+                });
+                const d = await res.json();
+                flash(res.ok ? "Drive backfill queued" : d.error ?? "Failed");
+                router.refresh();
               });
-              const d = await res.json();
-              flash(res.ok ? "Drive backfill queued" : d.error ?? "Failed");
-              router.refresh();
-            });
-          }}
-          className="font-body uppercase disabled:opacity-50"
-          style={{ fontSize: 9.5, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, padding: "9px 12px" }}
-        >
-          Backfill from Drive
-        </button>
+            }}
+            className="font-body uppercase disabled:opacity-50"
+            style={{ fontSize: 9.5, letterSpacing: "0.14em", border: `1px solid ${palette.black}`, color: palette.black, padding: "9px 12px" }}
+          >
+            Backfill from Drive
+          </button>
+          {!runnerOn && (
+            <span className="font-body text-right" style={{ fontSize: 10, color: palette.mutedGreige, maxWidth: 220 }}>
+              Parked — no hosted runner. Use Sync Drive on a design’s Workbench.
+            </span>
+          )}
+        </div>
       </div>
       <JobsTicker />
 
@@ -925,11 +942,15 @@ export function StudioBoard({
                 every angle off the fashn engine, so while parked this gold
                 button could only ever answer "No pending AI angles". It stays
                 drawn, disabled and saying why, rather than silently vanishing;
-                the engine code is untouched for the day the flag comes back. */}
+                the engine code is untouched for the day the flag comes back.
+                Its tryon jobs are also run ONLY by the hosted runner (nothing
+                calls /api/pipeline/run for them), so with the flag on but no
+                runner it would take the credit confirm and queue jobs that
+                time out — disabled and saying so, like Backfill from Drive. */}
             <button
               type="button"
-              disabled={pending || !fashnOn}
-              title={fashnOn ? undefined : "Model swap is parked — set FASHN_ENABLED=true to bring it back"}
+              disabled={pending || !fashnOn || !runnerOn}
+              title={!fashnOn ? "Model swap is parked — set FASHN_ENABLED=true to bring it back" : !runnerOn ? "No hosted runner is configured, so nothing would run these jobs" : undefined}
               onClick={() => {
                 startTransition(async () => {
                   const pre = await runFashnBatch(ids, true);
@@ -939,12 +960,12 @@ export function StudioBoard({
               }}
               className="font-body uppercase disabled:opacity-50"
               style={
-                fashnOn
+                fashnOn && runnerOn
                   ? { fontSize: 9, letterSpacing: "0.1em", color: palette.black, background: palette.gold, padding: "8px 10px" }
                   : { fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }
               }
             >
-              {fashnOn ? "Run FASHN" : "FASHN parked"}
+              {!fashnOn ? "FASHN parked" : !runnerOn ? "FASHN · no runner" : "Run FASHN"}
             </button>
             <button
               type="button"

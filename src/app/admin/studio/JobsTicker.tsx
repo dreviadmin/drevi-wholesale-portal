@@ -86,7 +86,11 @@ export function JobsTicker() {
               )}
               <span className="font-mono" style={{ fontSize: 11, color: palette.black }}>{j.type}</span>
               <span className="font-body" style={{ fontSize: 10.5, color: palette.mutedGreige }}>
-                {j.status === "queued" ? "queued · ~15–40 s to start" : running ? `running ${j.progress}%` : j.status}
+                {/* The jobs route stamps "No hosted runner yet" on a row nothing
+                    will pick up — promising a start time there was untrue. */}
+                {j.status === "queued"
+                  ? (j.log ?? "").startsWith("No hosted runner") ? "queued · no hosted runner (see log)" : "queued · ~15–40 s to start"
+                  : running ? `running ${j.progress}%` : j.status}
               </span>
             </span>
             {expanded === j.id && j.log && (

@@ -96,16 +96,33 @@ export function StockTake({ catalog }: { catalog: CountableProduct[] }) {
     return outcome;
   }
 
-  function handleScan(text: string): ScanFeedback {
+  function handleScan(text: string): Promise<ScanFeedback> {
     const sku = text.trim().toUpperCase();
-    // The scanner is synchronous; resolve in the background and report.
-    startTransition(async () => {
-      const r = await lookupSku(sku);
-      if (!r.ok || !r.item) { flash(r.error ?? "Not found"); return; }
-      const outcome = add(r.item);
-      flash(outcome === "existing" ? `${sku} — already on the list` : `${sku} · system ${r.item.systemQty}`);
+    // Answer with the REAL lookup, as OrderEditor's scan does: QrScanner shows
+    // "checking…" and only beeps pass/fail on the verdict. This used to return
+    // ok at once, so a tag not in the catalog beeped success while its "not
+    // found" went to a toast behind the scanner — and the garment was never
+    // counted. Still run through startTransition, as before; a throw rejects,
+    // which QrScanner reports as "could not check; retry".
+    return new Promise<ScanFeedback>((resolve, reject) => {
+      startTransition(async () => {
+        try {
+          const r = await lookupSku(sku);
+          if (!r?.ok || !r.item) {
+            const m = r?.error ?? `${sku} — not found`;
+            flash(m);
+            resolve({ ok: false, message: m });
+            return;
+          }
+          const outcome = add(r.item);
+          const m = outcome === "existing" ? `${sku} — already on the list` : `${sku} · system ${r.item.systemQty}`;
+          flash(m);
+          resolve({ ok: true, message: m });
+        } catch (e) {
+          reject(e);
+        }
+      });
     });
-    return { ok: true, message: sku };
   }
 
   function addManual() {

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
-import { applyMovement, setStock } from "@/lib/stock-ledger";
+import { applyMovement, canonicalFromMovements, recomputeCache, setStock, type Movement } from "@/lib/stock-ledger";
 import { autoMrpFrom, autoWholesaleFrom, clampMultiplier, DEFAULT_MARKUP_MULTIPLIER, DEFAULT_WHOLESALE_MULTIPLIER } from "@/lib/pricing";
 import { isOriginValue, isStyleValue } from "@/lib/studio/copy-prompt";
 import type { SupplyBlock } from "@/app/admin/receipts/new/delivery-actions";
@@ -308,6 +308,24 @@ export async function saveVariant(
   if (qtyChanged && !patch.stockNote?.trim()) {
     return fail("Changing stock needs a note — say what happened");
   }
+  // The movement is sized against the LEDGER, not the cached column (audit
+  // round 2, 4 Oct). Save promises the stock ends at the typed number, but the
+  // delta used to be typed − cache: once the cache had drifted (the sheet sync
+  // used to write its Current Qty over it), ledger 2 / cache 0 / typed 3
+  // posted +3 and left the ledger at 5. Whether a note is needed still follows
+  // what the operator changed on screen (typed vs the cache they saw), so an
+  // untouched stock box never demands one. Read before any write, and a failed
+  // read refuses the save — a missing ledger must not read as zero stock.
+  let ledgerQty = prevQty;
+  if (qtyChanged) {
+    const { data: mv, error: mvErr } = await admin
+      .from("stock_movements")
+      .select("*")
+      .eq("sku", sku.trim().toUpperCase())
+      .order("created_at", { ascending: true });
+    if (mvErr) return fail(`Could not read the stock ledger (${mvErr.message}) — retry`);
+    ledgerQty = canonicalFromMovements((mv ?? []) as Movement[]);
+  }
 
   const locks = new Set<string>(Array.isArray(row.locked_fields) ? row.locked_fields : []);
   locks.add("current_qty");
@@ -323,16 +341,20 @@ export async function saveVariant(
     .eq("sku", sku);
   if (error) return fail(error.message);
 
-  if (qtyChanged) {
+  if (qtyChanged && nextQty !== ledgerQty) {
     const res = await applyMovement({
       sku,
-      delta: nextQty - prevQty,
+      delta: nextQty - ledgerQty,
       reason: "manual",
       refType: "master_editor",
       note: patch.stockNote!.trim(),
       createdBy: staff.email,
     });
     if (!res.ok) return fail(res.error ?? "Could not record the stock movement");
+  } else if (qtyChanged) {
+    // The typed number IS the ledger's — only the cache was stale. No movement
+    // to write; re-point the cache, or the current_qty lock above freezes it.
+    await recomputeCache(sku);
   }
   await writeAuditEvent({ eventType: "catalog_edit", staffUserId: staff.id, notes: `master variant ${sku} qty=${patch.currentQty} ws=${patch.wholesalePrice}` });
   revalidatePath("/admin/studio");

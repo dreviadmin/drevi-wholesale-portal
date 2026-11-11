@@ -1,6 +1,8 @@
 -- 0075 — bring generate_sku, next_order_number, order_counters and
 -- sync_ignored_skus in line with the house rule that security-definer RPCs and
 -- internal tables are service-role only (as in 0046, 0048, 0060).
+-- A second, separately commented section at the end fixes the pipeline_jobs
+-- staff-read policy (0017), which matched no one.
 --
 -- generate_sku (0013) and next_order_number (0008) predate that rule and kept
 -- the default EXECUTE grants. Every caller in src/ and scripts/ uses the
@@ -44,3 +46,36 @@ alter function public.generate_sku(text, text, text, text, text, text, text, tex
 
 alter table public.order_counters enable row level security;
 alter table public.sync_ignored_skus enable row level security;
+
+-- ----------------------------------------------------------------------------
+-- pipeline_jobs staff read (Studio JobsTicker) — audit round 2, 4 Oct.
+--
+-- 0017's policy matched `staff_users.id = auth.uid()`, but staff_users.id is
+-- its own gen_random_uuid() (0001) — addStaffUser inserts without an id and
+-- nothing aligns it with auth.users — so the predicate never held for anyone.
+-- The ticker (which reads through the anon-key user client) got zero rows, and
+-- Realtime filtered every pipeline_jobs event out by the same policy: no
+-- progress chips after Generate, no auto-refresh when a job finished.
+--
+-- Staff are matched by JWT email everywhere else (lib/staff.ts, and every
+-- staff policy since 0001 via public.is_active_staff()), so this does the
+-- same. Buyers and anon still read nothing: is_active_staff() is true only
+-- for an active staff_users row whose email is the caller's JWT email. Writes
+-- stay service-role only (still no insert/update/delete policy).
+--
+-- Expect old chips once applied: the ticker lists the 6 newest queued/claimed/
+-- running/error rows with no age limit, and those have been invisible until
+-- now (stale error rows, scan_drive/tryon rows queued with no hosted runner).
+--
+-- REVERSAL (restores 0017's never-matching predicate):
+--   drop policy if exists pipeline_jobs_staff_read on public.pipeline_jobs;
+--   create policy pipeline_jobs_staff_read on public.pipeline_jobs for select to authenticated
+--     using (exists (select 1 from public.staff_users s where s.id = auth.uid() and s.active));
+--
+-- Idempotent: drop-if-exists + create. Verify afterwards with
+--   select qual from pg_policies where tablename = 'pipeline_jobs' and policyname = 'pipeline_jobs_staff_read';  -- is_active_staff()
+
+drop policy if exists pipeline_jobs_staff_read on public.pipeline_jobs;
+create policy pipeline_jobs_staff_read on public.pipeline_jobs
+  for select to authenticated
+  using (public.is_active_staff());

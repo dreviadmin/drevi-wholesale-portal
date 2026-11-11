@@ -207,7 +207,9 @@ function EditModal({ product, hsnOptions, onClose, onSaved }: { product: Wholesa
       const res = await unlockProductField(product.sku, field);
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
       setLocked((s) => { const n = new Set(s); n.delete(field); return n; });
-      flash(`${field} unlocked — sheet controls it again`);
+      // Stock is the exception: once a SKU has ledger movements the sync
+      // leaves current_qty to the ledger, so "sheet controls it" would be untrue.
+      flash(field === "current_qty" ? "Stock unlocked — the stock ledger still owns it once the SKU has movements" : `${field} unlocked — sheet controls it again`);
       router.refresh();
     });
   }
