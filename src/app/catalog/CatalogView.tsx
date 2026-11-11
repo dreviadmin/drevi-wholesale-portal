@@ -11,6 +11,7 @@ import { arrivedByBackOrForward } from "@/components/InAppHistory";
 import { setQty as setCartQty } from "@/app/cart/actions";
 import { baseSkuOf, groupByBase } from "@/lib/variants";
 import { cartPieces } from "@/lib/cart-count";
+import { cartReplyToast } from "@/lib/cart-toast";
 import { catalogFiltersFrom, catalogHref, savedScroll, scrollToRestore } from "@/lib/catalog-url";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
@@ -153,30 +154,34 @@ export function CatalogView({
   }
 
   function changeQty(product: WholesaleProduct, qty: number) {
-    // Optimistic update — server returns the canonical qty.
+    // The card's number moves at once; the server returns the canonical qty.
     const next = qty <= 0 ? 0 : qty;
-    setCart((c) => {
-      const copy = { ...c };
-      if (next === 0) delete copy[product.sku];
-      else copy[product.sku] = next;
-      return copy;
-    });
-    if (next === 0) showToast("Removed from cart");
-    else if (!cart[product.sku]) showToast("Added to cart");
-    startTransition(async () => {
-      const res = await setCartQty(product.sku, next);
-      // Sync to authoritative qty (in case the server clamped further).
+    const before = cartRef.current[product.sku] ?? 0;
+    const setLine = (q: number) =>
       setCart((c) => {
         const copy = { ...c };
-        if (res.qty === 0) delete copy[product.sku];
-        else copy[product.sku] = res.qty;
+        if (q === 0) delete copy[product.sku];
+        else copy[product.sku] = q;
         return copy;
       });
-      // The server dropped the line (sold out, or no longer in the catalog):
-      // replace the optimistic "Added to cart" rather than let the card quietly
-      // revert. Same words as addToCart, and no stock count — buyers aren't
-      // shown one.
-      if (next > 0 && res.qty === 0) showToast("This item is no longer available.");
+    setLine(next);
+    if (next === 0) showToast("Removed from cart");
+    startTransition(async () => {
+      let stored: number;
+      try {
+        stored = (await setCartQty(product.sku, next)).qty;
+      } catch {
+        setLine(before);
+        showToast("Could not update your cart. Please try again.");
+        return;
+      }
+      // Sync to authoritative qty (in case the server clamped further).
+      setLine(stored);
+      // "Added to cart" only once the server has the line (Nov review): a
+      // size that just sold out says only that it is no longer available,
+      // not "Added" first.
+      const msg = cartReplyToast(before, next, stored);
+      if (msg) showToast(msg);
     });
   }
 
