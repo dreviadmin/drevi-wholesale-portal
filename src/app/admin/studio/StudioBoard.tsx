@@ -467,10 +467,14 @@ export function StudioBoard({
           </span>
         )}
         <span className="min-w-0 flex-1">
-          <span className="font-mono block truncate" style={{ fontSize: 12, fontWeight: 700, color: palette.black }}>
-            {r.baseSku} · {r.color} {r.tier === "hero" && <Crown size={11} className="inline" color={palette.goldDeep} />}
+          {/* Wraps instead of truncating: at 375px an ellipsis ate the colour,
+              so two colours of one base SKU looked the same. "· COLOR" (and
+              the hero crown) stay together, so the line breaks before them. */}
+          <span className="font-mono block" style={{ fontSize: 12, fontWeight: 700, color: palette.black, overflowWrap: "anywhere" }}>
+            {r.baseSku}{" "}
+            <span className="whitespace-nowrap">· {r.color}{r.tier === "hero" && <>{" "}<Crown size={11} className="inline" color={palette.goldDeep} /></>}</span>
           </span>
-          {/* Own line: inside the truncated SKU line above it was cut off at phone width. */}
+          {/* Own line, so the tag never crowds the SKU. */}
           {r.discontinuedAt && (
             <span className="font-body uppercase inline-block my-0.5" style={{ fontSize: 10, letterSpacing: "0.12em", color: "#9C3A31", border: "1px solid #9C3A31", padding: "1px 5px" }}>Discontinued</span>
           )}
