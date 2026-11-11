@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ProductCard } from "@/components/ProductCard";
-import { variantLabelOf } from "@/lib/variants";
+import { buyerVariantLabel, sortVariantsForBuyer } from "@/lib/variants";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
 
@@ -34,15 +34,20 @@ export function GroupedProductCard({
   readOnly?: boolean;
   showStock?: boolean;
 }) {
+  // Chips on the size ladder (S, M, L…), not in database order.
+  const ordered = sortVariantsForBuyer(variants);
   // Default to the first variant already in cart, else the first one.
-  const initial = variants.find((v) => (cartBySku[v.sku] ?? 0) > 0)?.sku ?? variants[0].sku;
+  const initial = ordered.find((v) => (cartBySku[v.sku] ?? 0) > 0)?.sku ?? ordered[0].sku;
   const [selectedSku, setSelectedSku] = useState(initial);
-  const selected = variants.find((v) => v.sku === selectedSku) ?? variants[0];
+  const selected = ordered.find((v) => v.sku === selectedSku) ?? ordered[0];
 
+  // Names ("XL · Cream"), not codes. Mixed case at 11px rather than uppercase
+  // at 8.5px: the names are longer than the codes, and uppercase at the 11px
+  // floor would leave one chip per row on a phone.
   const variantBar =
-    variants.length > 1 ? (
-      <div className="flex gap-1 mt-2 flex-wrap">
-        {variants.map((v) => {
+    ordered.length > 1 ? (
+      <div className="flex gap-1.5 mt-2 flex-wrap">
+        {ordered.map((v) => {
           const active = v.sku === selected.sku;
           const inCart = (cartBySku[v.sku] ?? 0) > 0;
           return (
@@ -50,18 +55,19 @@ export function GroupedProductCard({
               key={v.sku}
               type="button"
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedSku(v.sku); }}
-              className="flex items-center gap-1 font-body uppercase"
+              className="flex items-center gap-1 font-body"
               style={{
-                fontSize: 8.5,
-                letterSpacing: "0.08em",
-                padding: "4px 7px",
+                fontSize: 11,
+                letterSpacing: "0.02em",
+                padding: "0 9px",
+                minHeight: 34,
                 color: active ? palette.ivory : palette.softBlack,
                 background: active ? palette.black : "transparent",
                 border: active ? "none" : "1px solid rgba(26,26,26,0.2)",
               }}
             >
               {inCart && <span style={{ width: 5, height: 5, borderRadius: 5, background: palette.gold, display: "inline-block" }} />}
-              {variantLabelOf(v.sku)}
+              {buyerVariantLabel(v.sku) ?? v.sku}
             </button>
           );
         })}
