@@ -210,7 +210,7 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku, onCa
           const fd = new FormData();
           fd.append("bill", await downscalePhoto(billFile, BILL_MAX_EDGE));
           const up = await uploadReceiptBill(initial!.id!, fd).catch(() => undefined);
-          if (!up?.ok) window.alert(`Saved, but the bill photo failed to upload: ${up?.error ?? BILL_REFUSED}. Add it again from the receipt page.`);
+          if (!up?.ok) window.alert(`Saved, but the bill photo failed to upload: ${(up?.error ?? BILL_REFUSED).replace(/\.+$/, "")}. Add it again from the receipt page.`);
         }
         // Keep the incoming ?from= so the back link still points where the
         // user came from after saving.
@@ -225,7 +225,7 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku, onCa
           const fd = new FormData();
           fd.append("bill", await downscalePhoto(billFile, BILL_MAX_EDGE));
           const up = await uploadReceiptBill(res.id, fd).catch(() => undefined);
-          if (!up?.ok) window.alert(`Receipt saved, but the bill photo failed to upload: ${up?.error ?? BILL_REFUSED}. Add it again from the receipt page.`);
+          if (!up?.ok) window.alert(`Receipt saved, but the bill photo failed to upload: ${(up?.error ?? BILL_REFUSED).replace(/\.+$/, "")}. Add it again from the receipt page.`);
         }
         draftMeta.clear();
         router.push(`/admin/receipts/${res.id}`);

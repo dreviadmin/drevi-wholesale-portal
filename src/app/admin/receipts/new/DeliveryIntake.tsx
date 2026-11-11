@@ -265,7 +265,9 @@ export function DeliveryIntake({
         const fd = new FormData();
         fd.append("bill", await downscalePhoto(billFile, BILL_MAX_EDGE));
         const up = await uploadReceiptBill(res.receiptId, fd).catch(() => undefined);
-        if (!up?.ok) window.alert(`${res.receiptNumber} saved, but the bill photo failed to upload: ${up?.error ?? BILL_REFUSED}. Add it again from the receipt page.`);
+        // uploadReceiptBill's own messages end in a full stop ("Image must be
+        // under 5 MB."); drop it so the sentence below does not read "MB..".
+        if (!up?.ok) window.alert(`${res.receiptNumber} saved, but the bill photo failed to upload: ${(up?.error ?? BILL_REFUSED).replace(/\.+$/, "")}. Add it again from the receipt page.`);
       }
       // §5.6 — Save & print tags stages EXACTLY this delivery's SKUs; Save only
       // queues them behind whatever the device already has in the tray.
@@ -441,8 +443,10 @@ export function DeliveryIntake({
           </div>
           <div className="grid grid-cols-2 gap-2 mt-3">
             <div>{label("Receipt date (vendor's bill)")}<input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} className="font-body" style={input} /></div>
-            {/* A date field too, read-only, so both dates read in the phone's own format. */}
-            <div>{label("Entry date")}<input type="date" value={entryDate} disabled readOnly aria-label="Entry date" className="font-body" style={{ ...input, background: palette.ivoryDeep, color: palette.mutedGreige }} /></div>
+            {/* A date field too, read-only, so both dates read in the phone's own format.
+                iOS Safari draws a disabled input at 40% opacity with its own
+                text fill; opacity and the fill colour keep it readable. */}
+            <div>{label("Entry date")}<input type="date" value={entryDate} disabled readOnly aria-label="Entry date" className="font-body" style={{ ...input, background: palette.ivoryDeep, color: palette.mutedGreige, WebkitTextFillColor: palette.mutedGreige, opacity: 1 }} /></div>
             <div>{label("Bill amount (optional)")}<input type="number" min="0" value={billAmount} onChange={(e) => setBillAmount(e.target.value)} className="font-body" style={input} /></div>
             {/* Bill photo — the same evidence the receipt editor takes. */}
             <div className="col-span-2">
