@@ -72,7 +72,10 @@ const withPWA = withPWAInit({
   dynamicStartUrl: false,
 
   // Precached at build time and served by the handlerDidError hook that
-  // next-pwa attaches to every route below.
+  // next-pwa attaches to every route below THAT HAS AN `options` KEY. A route
+  // without one is skipped silently (@ducanh2912/next-pwa 10.2.9,
+  // dist/index.js:993: `!e.options || ...`), which is why the navigation route
+  // carries an empty `options` object.
   fallbacks: { document: "/~offline" },
 
   workboxOptions: {
@@ -133,6 +136,11 @@ const withPWA = withPWAInit({
         urlPattern: ({ request, url, sameOrigin }) =>
           request.mode === "navigate" && sameOrigin && !url.pathname.startsWith("/api/"),
         handler: "NetworkOnly",
+        // Must stay present (even empty): it is what makes next-pwa push the
+        // handlerDidError -> self.fallback plugin onto this route. Without it
+        // an offline navigation got the browser's error page, not /~offline.
+        // NetworkOnly never writes to a cache, so no cacheName belongs here.
+        options: {},
       },
       {
         // Content-hashed build output — immutable by construction.
