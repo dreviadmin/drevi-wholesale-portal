@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Search, QrCode } from "lucide-react";
 import { DreviHeader } from "@/components/DreviHeader";
@@ -11,7 +11,7 @@ import { arrivedByBackOrForward } from "@/components/InAppHistory";
 import { setQty as setCartQty } from "@/app/cart/actions";
 import { baseSkuOf, groupByBase } from "@/lib/variants";
 import { cartPieces } from "@/lib/cart-count";
-import { cartReplyToast } from "@/lib/cart-toast";
+import { CatalogCardSaves } from "@/lib/catalog-card-saves";
 import { catalogFiltersFrom, catalogHref, savedScroll, scrollToRestore } from "@/lib/catalog-url";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
@@ -71,11 +71,59 @@ export function CatalogView({
     const t = setTimeout(() => setUrlQuery(query), 300);
     return () => clearTimeout(t);
   }, [query]);
-  // replaceState, not router.replace: no new history entry and no server
-  // round trip. Next 14.2 keeps useSearchParams in step with it.
+  const [cart, setCart] = useState<Record<string, number>>(initialCartBySku);
+  const [scanning, setScanning] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Scanner callbacks outlive renders — read the live cart via a ref.
+  const cartRef = useRef(cart);
+  cartRef.current = cart;
+
+  function showToast(msg: string) {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), toastDuration(msg));
+  }
+  function setLine(sku: string, q: number) {
+    setCart((c) => {
+      const copy = { ...c };
+      if (q === 0) delete copy[sku];
+      else copy[sku] = q;
+      return copy;
+    });
+  }
+
+  // Card saves one at a time, and no address write or page change while one
+  // is outstanding: Next 14.2 drops a queued server action when the router
+  // navigates or history is written, so a chip tap mid-save used to lose a
+  // tap without a word (Nov review; see src/lib/catalog-card-saves.ts).
+  const [saves] = useState(
+    () =>
+      new CatalogCardSaves({
+        save: async (sku, qty) => (await setCartQty(sku, qty)).qty,
+        showLine: setLine,
+        toast: showToast,
+        // replaceState, not router.replace: no new history entry and no
+        // server round trip. Next 14.2 keeps useSearchParams in step with it.
+        replaceUrl: (href) => {
+          if (href !== window.location.pathname + window.location.search) window.history.replaceState(null, "", href);
+        },
+        navigate: (href) => router.push(href),
+        onBusyChange: setSaving,
+      }),
+  );
+  useEffect(() => {
+    saves.setActive(true);
+    return () => {
+      saves.setActive(false);
+      saves.flush();
+    };
+  }, [saves]);
+
   function writeUrl(q: string) {
     const href = catalogHref({ category, sub, query: q });
-    if (href !== window.location.pathname + window.location.search) window.history.replaceState(null, "", href);
+    saves.writeUrl(href);
     return href;
   }
   // Not on mount, only once the buyer moves a filter. On mount the address
@@ -95,12 +143,25 @@ export function CatalogView({
     // writeUrl reads category and sub, both listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category, sub, urlQuery]);
-  // Opening a product: bring the URL up to date with the live search (the
-  // pause may not be over) and note the scroll for the way Back.
-  function onGridClick(e: React.MouseEvent) {
-    if (!(e.target as HTMLElement).closest('a[href^="/product/"]')) return;
-    const href = writeUrl(query);
-    try { sessionStorage.setItem(SCROLL_KEY, savedScroll(href, window.scrollY)); } catch { /* private mode: no restore */ }
+  // Every link on the page (cards, the wordmark, the menu) waits while a
+  // card save is outstanding, then goes. Opening a product also brings the
+  // URL up to date with the live search (the pause may not be over) and
+  // notes the scroll for the way Back.
+  function onLinkClick(e: React.MouseEvent) {
+    const a = (e.target as HTMLElement).closest("a[href]");
+    if (!(a instanceof HTMLAnchorElement)) return;
+    const href = a.getAttribute("href") ?? "";
+    if (!href.startsWith("/") || href.startsWith("//")) return;
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (a.target && a.target !== "_self")) return;
+    if (href.startsWith("/product/")) {
+      const here = writeUrl(query);
+      try { sessionStorage.setItem(SCROLL_KEY, savedScroll(here, window.scrollY)); } catch { /* private mode: no restore */ }
+    }
+    // Held: Link sees defaultPrevented and leaves it to saves.go.
+    if (saves.holding) {
+      e.preventDefault();
+      saves.go(href);
+    }
   }
   // Back to the same URL: put the scroll back once, then forget it.
   useEffect(() => {
@@ -112,15 +173,6 @@ export function CatalogView({
     const y = scrollToRestore(raw, window.location.pathname + window.location.search, arrivedByBackOrForward());
     if (y != null) requestAnimationFrame(() => window.scrollTo(0, y));
   }, []);
-  const [cart, setCart] = useState<Record<string, number>>(initialCartBySku);
-  const [scanning, setScanning] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Scanner callbacks outlive renders — read the live cart via a ref.
-  const cartRef = useRef(cart);
-  cartRef.current = cart;
-
   const categories = useMemo(() => buildCategories(products), [products]);
   const subCategories = useMemo(() => buildSubCategories(products, category), [products, category]);
   const filtered = useMemo(() => {
@@ -137,12 +189,6 @@ export function CatalogView({
   // Pieces, like the badge on Home and the cart menu (Oct review).
   const cartCount = useMemo(() => cartPieces(Object.values(cart)), [cart]);
 
-  function showToast(msg: string) {
-    setToast(msg);
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), toastDuration(msg));
-  }
-
   // QR decode → add to cart (continuous: scanner stays open, returns feedback).
   function handleScan(text: string): { ok: boolean; message: string } {
     const sku = text.trim().toUpperCase();
@@ -154,40 +200,19 @@ export function CatalogView({
   }
 
   function changeQty(product: WholesaleProduct, qty: number) {
-    // The card's number moves at once; the server returns the canonical qty.
+    // The card's number moves at once. The save follows in turn; a clamp or a
+    // failure puts the card to what the server holds, and "Added to cart" or
+    // "no longer available" waits for the reply (CatalogCardSaves).
     const next = qty <= 0 ? 0 : qty;
     const before = cartRef.current[product.sku] ?? 0;
-    const setLine = (q: number) =>
-      setCart((c) => {
-        const copy = { ...c };
-        if (q === 0) delete copy[product.sku];
-        else copy[product.sku] = q;
-        return copy;
-      });
-    setLine(next);
+    setLine(product.sku, next);
     if (next === 0) showToast("Removed from cart");
-    startTransition(async () => {
-      let stored: number;
-      try {
-        stored = (await setCartQty(product.sku, next)).qty;
-      } catch {
-        setLine(before);
-        showToast("Could not update your cart. Please try again.");
-        return;
-      }
-      // Sync to authoritative qty (in case the server clamped further).
-      setLine(stored);
-      // "Added to cart" only once the server has the line (Nov review): a
-      // size that just sold out says only that it is no longer available,
-      // not "Added" first.
-      const msg = cartReplyToast(before, next, stored);
-      if (msg) showToast(msg);
-    });
+    saves.change(product.sku, next, before);
   }
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: palette.ivory }}>
-      <DreviHeader businessName={businessName} cartCount={cartCount} onCart={() => router.push("/cart")} />
+    <div onClickCapture={onLinkClick} className="min-h-screen flex flex-col" style={{ background: palette.ivory }}>
+      <DreviHeader businessName={businessName} cartCount={cartCount} onCart={() => saves.go("/cart")} />
       <FilterChips categories={categories} active={category} onSelect={(c) => { setCategory(c); setSub(null); }} />
       {subCategories.length > 0 && (
         <FilterChips categories={["All", ...subCategories]} active={sub ?? "All"} onSelect={(s) => setSub(s === "All" ? null : s)} />
@@ -228,7 +253,7 @@ export function CatalogView({
             Nothing matches.
           </div>
         ) : (
-          <div onClickCapture={onGridClick} className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 ${isPending ? "opacity-95" : ""}`}>
+          <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 ${saving ? "opacity-95" : ""}`}>
             {groups.map((g) => (
               <GroupedProductCard
                 key={g.base}
@@ -236,7 +261,7 @@ export function CatalogView({
                 cartBySku={cart}
                 onChangeQty={changeQty}
                 detailHrefFor={(sku) => `/product/${encodeURIComponent(sku)}`}
-                onGoToCart={() => router.push("/cart")}
+                onGoToCart={() => saves.go("/cart")}
                 showStock={false}
               />
             ))}
@@ -261,7 +286,7 @@ export function CatalogView({
         <QrScanner
           onScan={handleScan}
           onClose={() => setScanning(false)}
-          onGoToCart={() => { setScanning(false); router.push("/cart"); }}
+          onGoToCart={() => { setScanning(false); saves.go("/cart"); }}
         />
       )}
     </div>
