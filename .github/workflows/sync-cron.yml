@@ -1,5 +1,5 @@
-# Product sync every 10 minutes. Vercel Hobby only allows daily crons, so the
-# frequent cadence runs here (free) and vercel.json keeps a once-daily backstop.
+# Product sync every 10 minutes. The 10-minute cadence runs here on GitHub
+# Actions; vercel.json keeps a once-daily Vercel cron as a backstop.
 #
 # Repo secrets required (Settings → Secrets and variables → Actions):
 #   PORTAL_URL   e.g. https://wholesale.drevifashion.com
