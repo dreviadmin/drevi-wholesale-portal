@@ -9,6 +9,7 @@ import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { BuyerNavDrawer } from "@/components/BuyerNavDrawer";
 import { palette } from "@/lib/palette";
 import { formatINR } from "@/lib/format";
+import { buyerVariantLabel } from "@/lib/variants";
 import type { BuyerHomeData } from "@/lib/buyer-home";
 import { useToast } from "@/lib/use-toast";
 import { BuyerWalletCard, type BuyerWallet } from "@/components/BuyerWalletCard";
@@ -170,6 +171,11 @@ export function BuyerHome({ businessName, city, cartCount, data, wallet }: {
                   </Link>
                   <div className="p-2">
                     <div className="font-body truncate" style={{ fontSize: 11.5, color: palette.black }}>{r.title ?? r.sku}</div>
+                    {/* One tile per SKU, so two sizes of a design looked
+                        identical until the size was on the tile (Oct review). */}
+                    {buyerVariantLabel(r.sku) && (
+                      <div className="font-body truncate" style={{ fontSize: 11, color: palette.softBlack }}>{buyerVariantLabel(r.sku)}</div>
+                    )}
                     <div className="font-display mt-0.5" style={{ fontSize: 13, fontWeight: 600, color: palette.black }}>
                       {formatINR(r.wholesalePrice)} <span className="font-body" style={{ fontSize: 9, color: palette.mutedGreige }}>/pc</span>
                     </div>
