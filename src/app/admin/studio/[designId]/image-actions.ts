@@ -205,7 +205,7 @@ export async function rejectImage(imageId: string): Promise<Res> {
   const { data: img } = await admin.from("design_images").select("id, design_id, angle_id, file_ref").eq("id", imageId).maybeSingle();
   if (!img) return fail("Image not found");
   const { data: angle } = img.angle_id
-    ? await admin.from("design_angles").select("id, design_id, approved_image_id").eq("id", img.angle_id).maybeSingle()
+    ? await admin.from("design_angles").select("id, design_id, approved_image_id, source_image_id, source_ref").eq("id", img.angle_id).maybeSingle()
     : { data: null };
 
   await admin.from("design_images").update({ status: "rejected" }).eq("id", imageId);
@@ -214,9 +214,24 @@ export async function rejectImage(imageId: string): Promise<Res> {
   // while it sits there the Workbench hides Generate, so rejecting without
   // this would leave the angle unable to try anything else.
   if (img.angle_id) await cancelJobsForAngle(admin, img.angle_id, staff.email);
-  if (angle?.approved_image_id === imageId) {
-    await admin.from("design_angles").update({ approved_image_id: null }).eq("id", angle.id);
-    await flipLive(angle.design_id);
+  const wasApproved = angle?.approved_image_id === imageId;
+  // Use directly makes an image the source AND the approved one, and an angle
+  // with no approved image publishes its source (17 Sep). Clearing only the
+  // approval left the rejected photo publishing. Matched on the file as well,
+  // for a source recorded before it had its own image row.
+  const wasSource = !!angle && (angle.source_image_id === imageId || (!!img.file_ref && angle.source_ref === img.file_ref));
+  if (angle && (wasApproved || wasSource)) {
+    await admin
+      .from("design_angles")
+      .update({
+        ...(wasApproved ? { approved_image_id: null } : {}),
+        ...(wasSource ? { source_image_id: null, source_ref: null } : {}),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", angle.id);
+    // A source behind some other approved image never published, so losing
+    // it changes nothing a buyer sees.
+    if (wasApproved || !angle.approved_image_id) await flipLive(angle.design_id);
     await syncCatalogFrontQuietly(angle.design_id);
   }
   const { data: design } = await admin.from("designs").select("drive_folder_id").eq("id", img.design_id!).maybeSingle();

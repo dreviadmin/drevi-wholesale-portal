@@ -446,6 +446,45 @@ describe("Changing what a live design publishes asks for a Re-push", () => {
   });
 });
 
+describe("Reject takes a Use-directly photo out of the published set", () => {
+  it("clears the source as well as the approval, and asks for a Re-push", async () => {
+    db.design_images = [{ id: "img-pool", design_id: DESIGN, angle_id: null, role: "ident", file_ref: "pool-ref", status: "active" }];
+    db.design_angles = [{ id: "a-front", design_id: DESIGN, angle: "front", source_ref: null, source_image_id: null, approved_image_id: null }];
+    expect(await imageActions.applyImageDirectly("a-front", "img-pool")).toEqual({ ok: true });
+    expect(db.design_angles[0]).toMatchObject({ source_image_id: "img-pool", source_ref: "pool-ref", approved_image_id: "img-pool" });
+    for (const t of db.publish_targets) t.state = "live";
+
+    expect(await imageActions.rejectImage("img-pool")).toEqual({ ok: true });
+    expect(db.design_angles[0]).toMatchObject({ source_image_id: null, source_ref: null, approved_image_id: null });
+    expect(db.design_images[0].status).toBe("rejected");
+    expect(target(DESIGN, "wholesale")!.state).toBe("changes_pending");
+    expect(target(DESIGN, "shopify")!.state).toBe("changes_pending");
+    expect(target(OTHER, "wholesale")!.state).toBe("live");
+  });
+
+  it("a rejected source behind another approved image is cleared without a Re-push", async () => {
+    db.design_images = [
+      { id: "img-src", design_id: DESIGN, angle_id: "a-front", role: "source", file_ref: "src-ref", status: "active" },
+      { id: "img-ok", design_id: DESIGN, angle_id: "a-front", role: "candidate", file_ref: "ok-ref", status: "active" },
+    ];
+    db.design_angles = [{ id: "a-front", design_id: DESIGN, angle: "front", source_ref: "src-ref", source_image_id: "img-src", approved_image_id: "img-ok" }];
+    expect(await imageActions.rejectImage("img-src")).toEqual({ ok: true });
+    expect(db.design_angles[0]).toMatchObject({ source_image_id: null, source_ref: null, approved_image_id: "img-ok" });
+    expect(target(DESIGN, "wholesale")!.state).toBe("live");
+  });
+
+  it("rejecting a candidate leaves the angle's source alone", async () => {
+    db.design_images = [
+      { id: "img-src", design_id: DESIGN, angle_id: "a-front", role: "source", file_ref: "src-ref", status: "active" },
+      { id: "img-cand", design_id: DESIGN, angle_id: "a-front", role: "candidate", file_ref: "cand-ref", status: "active" },
+    ];
+    db.design_angles = [{ id: "a-front", design_id: DESIGN, angle: "front", source_ref: "src-ref", source_image_id: "img-src", approved_image_id: null }];
+    expect(await imageActions.rejectImage("img-cand")).toEqual({ ok: true });
+    expect(db.design_angles[0]).toMatchObject({ source_image_id: "img-src", source_ref: "src-ref", approved_image_id: null });
+    expect(target(DESIGN, "wholesale")!.state).toBe("live");
+  });
+});
+
 describe("Product Master saves ask Shopify for a Re-push when they move what it shows", () => {
   const facts = { fabric: "Silk", handwork: "Zardosi", origin: "curated", color_name: "Emerald" };
   const specsPatch = { fabric: "Silk", handwork: "Zardosi", origin: "curated", colorName: "Emerald", specsVerified: true };
