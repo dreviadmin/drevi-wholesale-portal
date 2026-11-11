@@ -129,7 +129,7 @@ export function ExhibitionWizard({
   // (custom items) — golden rule: every photo is clickable.
   const [photoZoom, setPhotoZoom] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirmInfo, setConfirmInfo] = useState<{ orderId: string; orderNumber: string; pdfUrl?: string } | null>(null);
+  const [confirmInfo, setConfirmInfo] = useState<{ orderId: string; orderNumber: string; pdfUrl?: string; warning?: string } | null>(null);
   const [buyerClientRef, setBuyerClientRef] = useState<string | null>(null);
   const [isPending, start] = useTransition();
 
@@ -603,7 +603,7 @@ export function ExhibitionWizard({
         return;
       }
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
-      setConfirmInfo({ orderId: res.orderId!, orderNumber: res.orderNumber ?? "", pdfUrl: res.pdfUrl });
+      setConfirmInfo({ orderId: res.orderId!, orderNumber: res.orderNumber ?? "", pdfUrl: res.pdfUrl, warning: res.warning });
       setStep("confirm");
     });
   }
@@ -1276,6 +1276,9 @@ export function ExhibitionWizard({
               ? "The order summary PDF has been generated and sent to the buyer's WhatsApp (or available to download below)."
               : "Saved on this device. It will sync — and the PDF send will fire — automatically when you're back online."}
           </p>
+          {confirmInfo.warning && (
+            <p className="font-body mt-3" style={{ fontSize: 13, color: palette.crimsonText, lineHeight: 1.6 }}>{confirmInfo.warning}</p>
+          )}
           {confirmInfo.orderId && (
             <div className="flex gap-2 justify-center mt-4 flex-wrap">
               <a href={`/api/orders/${confirmInfo.orderId}/pdf`} target="_blank" rel="noreferrer" className="inline-block font-body uppercase" style={{ border: `1px solid ${palette.black}`, fontSize: 10, letterSpacing: "0.18em", padding: "10px 18px", color: palette.black }}>Download PDF</a>

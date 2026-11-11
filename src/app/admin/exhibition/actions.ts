@@ -170,7 +170,7 @@ export async function submitExhibitionOrder(input: {
    * snapshot is captured at DRAIN time, not sale time, so it is recorded as
    * "queued" rather than pretending to be contemporaneous with the sale. */
   fromQueue?: boolean;
-}): Promise<{ ok: boolean; orderId?: string; orderNumber?: string; pdfUrl?: string; error?: string }> {
+}): Promise<{ ok: boolean; orderId?: string; orderNumber?: string; pdfUrl?: string; error?: string; warning?: string }> {
   let staff;
   try { staff = await requireStaff(); } catch { return { ok: false, error: "Not authorized." }; }
   const admin = createAdminClient();
@@ -325,7 +325,11 @@ export async function submitExhibitionOrder(input: {
   const advance = Math.max(0, Number(input.advanceAmount) || 0);
   if (advance > total) return { ok: false, error: "Advance cannot exceed the order total." };
 
-  const note = [input.staffNote?.trim() ? `Staff: ${input.staffNote.trim()}` : "", input.buyerNote?.trim() ? `Buyer: ${input.buyerNote.trim()}` : ""].filter(Boolean).join(" | ") || null;
+  // orders.notes is the BUYER's note: their order page shows it as "Your
+  // note" and the order PDF prints it. The staff note used to be joined in
+  // here ("Staff: … | Buyer: …") and so reached the buyer; it now goes to the
+  // staff-only notes log once the order exists (below).
+  const note = input.buyerNote?.trim() || null;
 
   // Day string in IST — Vercel runs UTC, and a post-midnight order must carry
   // today's Indian date in its number (audit fix). Past-dated billing (18 Aug):
@@ -415,12 +419,25 @@ export async function submitExhibitionOrder(input: {
   }
   if (!orderId) return { ok: false, error: "Could not generate an order number." };
 
+  // Staff note → the order's Notes panel (entity_notes: staff-only, never on
+  // the buyer's page or the PDF). A replayed submit returned above with the
+  // first attempt's row, so this runs once per order. The order stands if it
+  // fails, so say so rather than lose the note quietly.
+  let warning: string | undefined;
+  const staffNote = input.staffNote?.trim();
+  if (staffNote) {
+    const { error: noteErr } = await admin
+      .from("entity_notes")
+      .insert({ entity_type: "order", entity_id: orderId, note: staffNote, photo_refs: [], created_by: staff.email });
+    if (noteErr) warning = `Order saved, but the staff note did not save (${noteErr.message}). Add it under Notes on the order.`;
+  }
+
   // bump session order count
   await admin.from("exhibition_sessions").update({ orders_count: (sess?.orders_count ?? 0) + 1 }).eq("id", input.sessionId);
 
   await finalizeOrder(orderId); // PDF + Interakt (best-effort)
   const { data: withPdf } = await admin.from("orders").select("pdf_url").eq("id", orderId).maybeSingle();
-  return { ok: true, orderId, orderNumber: orderNumber ?? undefined, pdfUrl: withPdf?.pdf_url ?? undefined };
+  return { ok: true, orderId, orderNumber: orderNumber ?? undefined, pdfUrl: withPdf?.pdf_url ?? undefined, ...(warning ? { warning } : {}) };
 }
 
 export async function endSession(sessionId: string, eventName: string): Promise<{ ok: boolean }> {

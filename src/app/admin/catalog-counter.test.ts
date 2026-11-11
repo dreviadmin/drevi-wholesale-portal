@@ -565,6 +565,60 @@ describe("submitExhibitionOrder: Also add to catalog", () => {
   });
 });
 
+describe("submitExhibitionOrder: the staff note stays with staff", () => {
+  const line = { sku: "", qty: 1, unitPrice: 1000, customTitle: "Sample" };
+
+  beforeEach(() => {
+    db.exhibition_sessions = [{ id: "s1", session_type: "exhibition", event_name: "Expo", orders_count: 0, ended_at: null }];
+    db.entity_notes = [];
+  });
+
+  it("keeps only the buyer note on the order and files the staff note in the order's Notes", async () => {
+    const r = await exhibition.submitExhibitionOrder({
+      sessionId: "s1", eventName: "Expo", buyerId: "b1", items: [line], staffNote: "  S-test ", buyerNote: " B-test ",
+    });
+    expect(r.ok).toBe(true);
+    expect(r.warning).toBeUndefined();
+    expect(db.orders[0].notes).toBe("B-test");
+    expect(db.entity_notes).toHaveLength(1);
+    expect(db.entity_notes[0]).toMatchObject({
+      entity_type: "order", entity_id: r.orderId, note: "S-test", photo_refs: [], created_by: STAFF.email,
+    });
+  });
+
+  it("a staff note alone leaves the buyer no note at all", async () => {
+    const r = await exhibition.submitExhibitionOrder({ sessionId: "s1", eventName: "Expo", buyerId: "b1", items: [line], staffNote: "S-test" });
+    expect(r.ok).toBe(true);
+    expect(db.orders[0].notes).toBeNull();
+    expect(db.entity_notes.map((n) => n.note)).toEqual(["S-test"]);
+  });
+
+  it("writes no staff note when there is none", async () => {
+    const r = await exhibition.submitExhibitionOrder({ sessionId: "s1", eventName: "Expo", buyerId: "b1", items: [line], staffNote: "   ", buyerNote: "B-test" });
+    expect(r.ok).toBe(true);
+    expect(db.orders[0].notes).toBe("B-test");
+    expect(db.entity_notes).toHaveLength(0);
+  });
+
+  it("a replayed submit (offline queue, double tap) files the staff note once", async () => {
+    const input = { sessionId: "s1", eventName: "Expo", buyerId: "b1", items: [line], staffNote: "S-test", clientRef: "ref-1" };
+    const first = await exhibition.submitExhibitionOrder(input);
+    const replay = await exhibition.submitExhibitionOrder({ ...input, fromQueue: true });
+    expect(replay).toMatchObject({ ok: true, orderId: first.orderId });
+    expect(db.orders).toHaveLength(1);
+    expect(db.entity_notes).toHaveLength(1);
+  });
+
+  it("the order stands when the note fails to save, and says so", async () => {
+    failInsert = (table) => (table === "entity_notes" ? "notes table unavailable" : null);
+    const r = await exhibition.submitExhibitionOrder({ sessionId: "s1", eventName: "Expo", buyerId: "b1", items: [line], staffNote: "S-test" });
+    expect(r.ok).toBe(true);
+    expect(db.orders).toHaveLength(1);
+    expect(r.warning).toContain("staff note did not save");
+    expect(r.warning).toContain("notes table unavailable");
+  });
+});
+
 describe("upsertLov refuses codes that cannot sit inside a SKU", () => {
   it("refuses a bad category, an unscoped sub-category and a hyphenated colour without writing", async () => {
     for (const [list, code] of [["category", "BRIDAL"], ["sub_category", "FLR"], ["color", "RS-GLD"], ["size", "2-3Y"]] as const) {
