@@ -235,8 +235,10 @@ export function QrScanner({
             className="flex items-center gap-2 font-body"
             style={{ background: feedback.ok ? "#2E5941" : palette.crimsonText, color: palette.ivory, fontSize: 12, padding: "9px 16px" }}
           >
-            {feedback.ok ? <Check size={14} strokeWidth={2.5} /> : <X size={14} strokeWidth={2.5} />}
-            <span className="truncate">{feedback.message}</span>
+            {feedback.ok ? <Check size={14} strokeWidth={2.5} className="flex-shrink-0" /> : <X size={14} strokeWidth={2.5} className="flex-shrink-0" />}
+            {/* Wraps rather than truncates: at phone width a one-line overlay
+                cut the advice off ("… Bill it with + Add a custom item."). */}
+            <span className="min-w-0" style={{ overflowWrap: "anywhere", lineHeight: 1.4 }}>{feedback.message}</span>
           </div>
         </div>
       )}
