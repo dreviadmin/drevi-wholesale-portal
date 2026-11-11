@@ -160,7 +160,7 @@ export function RetailCheckClient({ products, retail, pricesAsOf, drivePhotos }:
       </div>
     ) : (
       <div className="font-body mt-3" style={{ fontSize: 13, color: palette.goldDeep, fontWeight: 600 }}>
-        Retail price not set — ask an admin to set the MRP in Studio → Product details (or add Final MRP in the sheet, then tap Sync Prices)
+        Retail price not set: ask an admin to set the MRP in Product Master.
       </div>
     );
   };
@@ -239,7 +239,7 @@ export function RetailCheckClient({ products, retail, pricesAsOf, drivePhotos }:
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="font-body truncate" style={{ fontSize: 12.5, color: palette.black }}>{p.title ?? p.sku}</div>
+                    <div className="font-body truncate" style={{ fontSize: 13, color: palette.black }}>{p.title || "Untitled design"}</div>
                     <div className="font-body" style={{ fontSize: 8.5, color: palette.mutedGreige, letterSpacing: "0.08em" }}>{p.sku}</div>
                   </div>
                   <span className="font-display" style={{ fontSize: 13, fontWeight: 600, color: palette.black }}>{price > 0 ? formatINR(price) : "—"}</span>
@@ -271,7 +271,7 @@ export function RetailCheckClient({ products, retail, pricesAsOf, drivePhotos }:
           )}
           <div className="min-w-0 flex-1">
             <div className="font-display" style={{ fontSize: 17, fontWeight: 600, color: palette.black, lineHeight: 1.25 }}>
-              {current.product?.title ?? current.sku}
+              {current.product ? current.product.title || "Untitled design" : current.sku}
             </div>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               <span className="font-body" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.12em" }}>{current.sku}</span>
@@ -293,7 +293,7 @@ export function RetailCheckClient({ products, retail, pricesAsOf, drivePhotos }:
             {priceBlock(current.sku)}
             {!current.product && !retailBySku.has(current.sku.trim().toUpperCase()) && (
               <p className="font-body mt-2" style={{ fontSize: 11, color: palette.mutedGreige, lineHeight: 1.5 }}>
-                Unknown SKU — check it, or add it to the sheet and tap Sync Prices.
+                Unknown SKU: check the tag, or ask an admin to log this garment&rsquo;s delivery so it gets a catalog row.
               </p>
             )}
           </div>
@@ -309,9 +309,12 @@ export function RetailCheckClient({ products, retail, pricesAsOf, drivePhotos }:
               return (
                 <div key={r.sku} className="flex items-center justify-between gap-2 py-2" style={{ borderBottom: "1px solid rgba(26,26,26,0.06)" }}>
                   <button type="button" onClick={() => show(r)} className="min-w-0 flex-1 text-left">
-                    <span className="font-body truncate block" style={{ fontSize: 12, color: palette.softBlack }}>
-                      {r.product?.title ?? r.sku}
+                    <span className="font-body truncate block" style={{ fontSize: 13, color: palette.softBlack }}>
+                      {r.product ? r.product.title || "Untitled design" : r.sku}
                     </span>
+                    {r.product && (
+                      <span className="font-body block" style={{ fontSize: 11, color: palette.mutedGreige, letterSpacing: "0.08em" }}>{r.sku}</span>
+                    )}
                   </button>
                   <span className="font-body flex-shrink-0" style={{ fontSize: 12, color: palette.black, fontWeight: 600 }}>{price > 0 ? formatINR(price) : "—"}</span>
                 </div>
