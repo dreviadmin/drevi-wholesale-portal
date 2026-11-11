@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { syncCatalogFrontQuietly } from "@/lib/studio/catalog-front";
 import { sweepStaleJobs, cancelJobsForAngle } from "@/lib/pipeline/sweep";
 import { writeAuditEvent } from "@/lib/audit";
 import { defaultAnglePrompt } from "@/lib/studio/prompts";
@@ -35,119 +34,9 @@ async function flipLiveTargets(designId: string) {
     .eq("state", "live");
 }
 
-export async function approveCandidate(candidateId: string): Promise<Res> {
-  let staff;
-  try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
-  const admin = createAdminClient();
-
-  const { data: cand } = await admin
-    .from("design_images")
-    .select("id, angle_id, status")
-    .eq("id", candidateId)
-    .maybeSingle();
-  if (!cand) return fail("Candidate not found");
-  const { data: angle } = await admin
-    .from("design_angles")
-    .select("id, design_id, approved_image_id")
-    .eq("id", cand.angle_id)
-    .single();
-  if (!angle) return fail("Angle not found");
-
-  // D1: approving any candidate demotes the previously-approved one.
-  if (angle.approved_image_id && angle.approved_image_id !== candidateId) {
-    await admin.from("design_images").update({ status: "active" }).eq("id", angle.approved_image_id);
-  }
-  const { error: e1 } = await admin.from("design_images").update({ status: "active" }).eq("id", candidateId);
-  if (e1) return fail(e1.message);
-  const { error: e2 } = await admin
-    .from("design_angles")
-    .update({ approved_image_id: candidateId, updated_at: new Date().toISOString() })
-    .eq("id", angle.id);
-  if (e2) return fail(e2.message);
-
-  await flipLiveTargets(angle.design_id);
-  await writeAuditEvent({ eventType: "studio_candidate_approved", staffUserId: staff.id, notes: `candidate ${candidateId} on angle ${angle.id}` });
-  await syncCatalogFrontQuietly(angle.design_id);
-  revalidatePath(`/admin/studio/${angle.design_id}`);
-  revalidatePath("/admin/studio");
-  return { ok: true };
-}
-
-export async function rejectCandidate(candidateId: string): Promise<Res> {
-  let staff;
-  try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
-  const admin = createAdminClient();
-  const { data: cand } = await admin
-    .from("design_images")
-    .select("id, angle_id")
-    .eq("id", candidateId)
-    .maybeSingle();
-  if (!cand) return fail("Candidate not found");
-  const { data: angle } = await admin
-    .from("design_angles")
-    .select("id, design_id, approved_image_id")
-    .eq("id", cand.angle_id)
-    .single();
-  if (!angle) return fail("Angle not found");
-
-  const { error } = await admin.from("design_images").update({ status: "rejected" }).eq("id", candidateId);
-  if (error) return fail(error.message);
-  if (angle.approved_image_id === candidateId) {
-    await admin.from("design_angles").update({ approved_image_id: null }).eq("id", angle.id);
-    await flipLiveTargets(angle.design_id); // the live set just lost a photo
-  }
-  await writeAuditEvent({ eventType: "studio_candidate_rejected", staffUserId: staff.id, notes: `candidate ${candidateId} on angle ${angle.id}` });
-  await syncCatalogFrontQuietly(angle.design_id);
-  revalidatePath(`/admin/studio/${angle.design_id}`);
-  revalidatePath("/admin/studio");
-  return { ok: true };
-}
-
-// Detail/macro cards (and raw-engine angles): approve the SOURCE as-is —
-// registers a raw candidate over source_ref and approves it (D5 fidelity).
-export async function approveAsIs(angleId: string): Promise<Res> {
-  let staff;
-  try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
-  const admin = createAdminClient();
-  const { data: angle } = await admin
-    .from("design_angles")
-    .select("id, design_id, source_ref, source_image_id, approved_image_id")
-    .eq("id", angleId)
-    .maybeSingle();
-  if (!angle) return fail("Angle not found");
-  if (!angle.source_ref) return fail("No source image on this angle yet");
-
-  // Post-0022 the source is already a design_images row — approve it in place
-  // rather than minting a duplicate (§7.5).
-  if (angle.source_image_id) {
-    if (angle.approved_image_id && angle.approved_image_id !== angle.source_image_id) {
-      await admin.from("design_images").update({ status: "archived" }).eq("id", angle.approved_image_id);
-    }
-    await admin.from("design_angles").update({ approved_image_id: angle.source_image_id, updated_at: new Date().toISOString() }).eq("id", angleId);
-    await admin.from("publish_targets").update({ state: "changes_pending" }).eq("design_id", angle.design_id).eq("state", "live");
-    await writeAuditEvent({ eventType: "studio_candidate_approved", staffUserId: staff.id, notes: `approve-as-is angle ${angleId}` });
-    await syncCatalogFrontQuietly(angle.design_id);
-    revalidatePath(`/admin/studio/${angle.design_id}`);
-    revalidatePath("/admin/studio");
-    return { ok: true };
-  }
-
-  const { data: cand, error } = await admin
-    .from("design_images")
-    .insert({ design_id: angle.design_id, angle_id: angleId, role: "source", engine: "raw", file_ref: angle.source_ref, status: "active", created_by: staff.email })
-    .select("id")
-    .single();
-  if (error) return fail(error.message);
-  if (angle.approved_image_id) {
-    await admin.from("design_images").update({ status: "active" }).eq("id", angle.approved_image_id);
-  }
-  await admin.from("design_angles").update({ approved_image_id: cand.id, updated_at: new Date().toISOString() }).eq("id", angleId);
-  await flipLiveTargets(angle.design_id);
-  await writeAuditEvent({ eventType: "studio_candidate_approved", staffUserId: staff.id, notes: `approve-as-is on angle ${angleId}` });
-  await syncCatalogFrontQuietly(angle.design_id);
-  revalidatePath(`/admin/studio/${angle.design_id}`);
-  return { ok: true };
-}
+// Approving and rejecting images lives in image-actions.ts (approveImage,
+// rejectImage). It is the one path, so a previous production image is always
+// archived the same way: row marked, file moved to _archive.
 
 export async function setAnglePrompt(angleId: string, prompt: string): Promise<Res> {
   try { await requireAdmin(); } catch { return fail("Not authorized"); }

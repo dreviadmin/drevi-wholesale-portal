@@ -537,7 +537,7 @@ export function Workbench({ board, buckets: serverBuckets, angles, copy, pool, a
           )}
           {/* Approve-as-is retired (17 Sep): the source already counts as
               filled and publishes as the effective image, so the stamp was a
-              no-op. approveAsIs stays exported for back-compat. */}
+              no-op. The action itself was removed in the October review. */}
           {/* Offered engines only. The old gate was `engine !== "raw"`, which still
               rendered Generate for an angle on the parked fashn — a button whose
               only outcome was an error naming an environment variable. */}

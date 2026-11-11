@@ -150,6 +150,8 @@ const unarchiveShopifyProduct = vi.fn(async (id: string) => { void id; return tr
 let images: Record<string, { body: ArrayBuffer; contentType: string }> = {};
 const fetchImageByRef = vi.fn(async (ref: string, size?: number) => { void size; return images[ref] ?? null; });
 const storeDesignImage = vi.fn(async (a: { angle: string; kind: string }) => ({ fileRef: `sb:${a.angle}-${a.kind}-${++nextId}`, fileName: `${a.angle}.jpg`, driveFolderId: null }));
+// A storage file moves under its folder's _archive/, as the real one does.
+const archiveImageFile = vi.fn(async (ref: string) => ref.replace(/^sb:([^/]+)\/(?!_archive\/)/, "sb:$1/_archive/"));
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -176,7 +178,7 @@ vi.mock("@/lib/design-image-store", () => ({
   fetchImageByRef: (ref: string, size?: number) => fetchImageByRef(ref, size),
   downloadNameForRef: async () => "DD-LEH-FLR-115-GRN-front",
   storeDesignImage: (a: { angle: string; kind: string }) => storeDesignImage(a),
-  archiveImageFile: async () => {},
+  archiveImageFile: (ref: string) => archiveImageFile(ref),
   isStorageRef: (r: string) => r.startsWith("sb:"),
   ingestDriveFolder: async () => ({ ok: true, added: 0 }),
 }));
@@ -280,6 +282,7 @@ beforeEach(() => {
   unarchiveShopifyProduct.mockClear();
   fetchImageByRef.mockClear();
   storeDesignImage.mockClear();
+  archiveImageFile.mockClear();
 });
 
 describe("Discontinue and Restore leave the wholesale target honest", () => {
@@ -443,6 +446,33 @@ describe("Changing what a live design publishes asks for a Re-push", () => {
     expect(r.ok).toBe(true);
     expect(db.design_angles[0].source_ref).toMatch(/^sb:front-src-/);
     expect(target(DESIGN, "wholesale")!.state).toBe("changes_pending");
+  });
+});
+
+describe("Use directly replaces a production image the way every approval does", () => {
+  it("archives the old row AND moves its file, flips live targets and logs the approval", async () => {
+    db.design_images = [
+      { id: "img-old", design_id: DESIGN, angle_id: "a-front", role: "ident", file_ref: "sb:DD-GRN/old.jpg", status: "active" },
+      { id: "img-new", design_id: DESIGN, angle_id: null, role: "ident", file_ref: "sb:DD-GRN/new.jpg", status: "active" },
+    ];
+    db.design_angles = [{ id: "a-front", design_id: DESIGN, angle: "front", source_ref: "sb:DD-GRN/old.jpg", source_image_id: "img-old", approved_image_id: "img-old" }];
+    expect(await imageActions.applyImageDirectly("a-front", "img-new")).toEqual({ ok: true });
+    expect(db.design_angles[0]).toMatchObject({ source_image_id: "img-new", source_ref: "sb:DD-GRN/new.jpg", approved_image_id: "img-new" });
+    expect(db.design_images.find((i) => i.id === "img-new")).toMatchObject({ angle_id: "a-front", status: "active" });
+    expect(archiveImageFile).toHaveBeenCalledTimes(1);
+    expect(archiveImageFile).toHaveBeenCalledWith("sb:DD-GRN/old.jpg");
+    expect(db.design_images.find((i) => i.id === "img-old")).toMatchObject({ status: "archived", file_ref: "sb:DD-GRN/_archive/old.jpg" });
+    expect(target(DESIGN, "wholesale")!.state).toBe("changes_pending");
+    expect(target(DESIGN, "shopify")!.state).toBe("changes_pending");
+    expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "studio_candidate_approved", notes: expect.stringContaining("img-new") }));
+  });
+
+  it("using the production image again moves nothing", async () => {
+    db.design_images = [{ id: "img-a", design_id: DESIGN, angle_id: "a-front", role: "ident", file_ref: "sb:DD-GRN/a.jpg", status: "active" }];
+    db.design_angles = [{ id: "a-front", design_id: DESIGN, angle: "front", source_ref: "sb:DD-GRN/a.jpg", source_image_id: "img-a", approved_image_id: "img-a" }];
+    expect(await imageActions.applyImageDirectly("a-front", "img-a")).toEqual({ ok: true });
+    expect(archiveImageFile).not.toHaveBeenCalled();
+    expect(db.design_images[0]).toMatchObject({ status: "active", file_ref: "sb:DD-GRN/a.jpg" });
   });
 });
 

@@ -138,31 +138,31 @@ export async function importFinished(angleId: string, formData: FormData): Promi
  * chip and NO Generate button. Using a photo as-is is not a statement about
  * which engine should run if you later change your mind, so the engine is
  * left exactly as it was.
+ *
+ * The approval half goes through approveImage, the one approval path, so the
+ * previous production image is archived the way every other approval archives
+ * it (row marked AND file moved to _archive), live targets flip and the audit
+ * trail says what replaced what.
  */
 export async function applyImageDirectly(angleId: string, imageId: string): Promise<Res> {
-  let staff;
-  try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
+  try { await requireAdmin(); } catch { return fail("Not authorized"); }
   const admin = createAdminClient();
-  const { data: angle } = await admin.from("design_angles").select("id, design_id, approved_image_id").eq("id", angleId).maybeSingle();
+  const { data: angle } = await admin.from("design_angles").select("id, design_id").eq("id", angleId).maybeSingle();
   if (!angle) return fail("Angle not found");
   const { data: img } = await admin.from("design_images").select("id, design_id, role, file_ref").eq("id", imageId).maybeSingle();
   if (!img) return fail("Image not found");
 
   // Attach a design-level image to this angle without losing its identity.
   await admin.from("design_images").update({ angle_id: angleId, status: "active" }).eq("id", imageId);
-  await admin
+  const { error } = await admin
     .from("design_angles")
-    .update({ source_image_id: imageId, source_ref: img.file_ref, approved_image_id: imageId, updated_at: new Date().toISOString() })
+    .update({ source_image_id: imageId, source_ref: img.file_ref, updated_at: new Date().toISOString() })
     .eq("id", angleId);
-  if (angle.approved_image_id && angle.approved_image_id !== imageId) {
-    await admin.from("design_images").update({ status: "archived" }).eq("id", angle.approved_image_id);
-  }
-  await flipLive(angle.design_id);
+  if (error) return fail(error.message);
+  const promoted = await approveImage(angleId, imageId);
+  if (!promoted.ok) return fail(promoted.error ?? "Set as the source, but could not make it the production image");
   await ensureDesignImagery(admin, angle.design_id);
   await syncCatalogFrontQuietly(angle.design_id);
-  await writeAuditEvent({ eventType: "studio_candidate_approved", staffUserId: staff.id, notes: `mode B use-directly image ${imageId} on angle ${angleId}` });
-  revalidatePath(`/admin/studio/${angle.design_id}`);
-  revalidatePath("/admin/studio");
   return { ok: true };
 }
 
