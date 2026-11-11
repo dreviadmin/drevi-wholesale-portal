@@ -627,8 +627,9 @@ page their reads explicitly past PostgREST's silent 1000-row cap.
   tables **and every storage bucket in the backup list** via
   `/api/cron/backup`, storing a gzip artifact.
 - **Watchdog** — `watchdog.yml` health-checks the deployment every 10
-  minutes with auto-restore. `master-mirror.yml` mirrors mints to the legacy
-  registry sheet; `pipeline-runner.yml` is the parked GitHub-hosted
+  minutes and fails (so GitHub emails an alert) when it is unhealthy; no
+  auto-restore, as Supabase Pro does not pause. `master-mirror.yml` mirrors
+  mints to the legacy registry sheet; `pipeline-runner.yml` is the parked GitHub-hosted
   generation runner (generation currently runs in-process on Vercel).
 - **Order numbering** — `next_order_number(prefix, day)` RPC reserves
   numbers atomically; duplicates are impossible under concurrency. Goods
