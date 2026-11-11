@@ -6,7 +6,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import { ALL_ANGLES } from "@/lib/studio/state";
 import { BASE_SKU_RE } from "@/lib/sku/vocab";
-import { validCodes } from "@/lib/sku/vocab-live";
+import { validateCatSub, validCodes } from "@/lib/sku/vocab-live";
+import { unknownMintCode } from "@/lib/sku/mint-codes";
 import { applyMovement } from "@/lib/stock-ledger";
 import { storeDesignImage } from "@/lib/design-image-store";
 import { ensureDesignImagery } from "@/lib/design-imagery";
@@ -352,9 +353,10 @@ async function mintGarmentDesign(input: {
     if (!BASE_SKU_RE.test(baseSku)) return fail(`"${baseSku}" is not a valid base SKU`);
     if (!color) return fail("Pick the new colour");
     // Same merged vocab /api/sku/generate validates against, so a colour
-    // Rakesh added in /admin/lovs mints here too.
-    const { colors } = await validCodes();
-    if (!colors.has(color)) return fail(`Unknown colour code "${color}"`);
+    // Rakesh added in /admin/lovs mints here too — and the sizes get the same
+    // check the generator gives them.
+    const badCode = unknownMintCode(await validCodes(), { color, sizes });
+    if (badCode) return fail(badCode);
 
     // This path extends a number that exists; it never invents one.
     const { data: registered } = await admin.from("sku_registry").select("base_sku").ilike("base_sku", baseSku).limit(1).maybeSingle();
@@ -407,6 +409,11 @@ async function mintGarmentDesign(input: {
   const sub = (input.sub ?? "").trim().toUpperCase();
   const color = (input.color ?? "").trim().toUpperCase();
   if (!cat || !sub || !color) return fail("Category, sub-category and colour are required");
+  // The checks /api/sku/generate runs before the same RPC, so both ways of
+  // minting refuse the same codes.
+  if (!(await validateCatSub(cat, sub))) return fail(`Unknown category/sub-category "${cat}-${sub}"`);
+  const badCode = unknownMintCode(await validCodes(), { color, sizes });
+  if (badCode) return fail(badCode);
 
   const first = await mintSku("new", { cat, sub, color, size: sizes[0], description: input.description ?? "", staffEmail: staff.email });
   if (!first.ok) return fail(first.error);
