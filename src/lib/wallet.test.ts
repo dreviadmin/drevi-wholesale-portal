@@ -48,7 +48,7 @@ vi.mock("@/lib/supabase/admin", () => ({
   }),
 }));
 
-import { onOrderCreated, openWalletForCustomer, reconcileRecent, type WalletAccount } from "./wallet";
+import { onOrderCancelled, onOrderCreated, openWalletForCustomer, reconcileRecent, type WalletAccount } from "./wallet";
 
 const has = (c: Call, m: string, ...a: unknown[]) => c.ops.some((o) => o.m === m && a.every((x, i) => o.a[i] === x));
 const writes = () => db.calls.filter((c) => c.ops.some((o) => o.m === "insert" || o.m === "update" || o.m === "delete" || o.m === "upsert"));
@@ -234,3 +234,27 @@ describe("reconcileRecent", () => {
   });
 });
 
+describe("orders/cancelled", () => {
+  const scene = (cancelledAt: string | null) => {
+    shopify.fetchWalletOrder.mockResolvedValue(order({ cancelledAt }));
+    db.answer = (c) => {
+      if (c.table === "wallet_accounts" && has(c, "eq", "shopify_customer_id", ME)) return { data: account(), error: null };
+      if (c.table === "wallet_ledger" && has(c, "eq", "ref_type", "shopify_order")) return { data: [{ kind: "redeem", amount_paise: -100000 }], error: null };
+      return { data: [], error: null };
+    };
+    db.rpc.mockResolvedValue({ data: { id: "l9", amount_paise: 100000 }, error: null });
+  };
+
+  it("for an order that is not cancelled (a replay sent for the wrong order) returns nothing", async () => {
+    scene(null);
+    expect(await onOrderCancelled("gid://shopify/Order/9001")).toBe("not cancelled");
+    expect(db.rpc).not.toHaveBeenCalled();
+    expect(writes()).toEqual([]);
+  });
+
+  it("for a cancelled order gives the spent credit back", async () => {
+    scene("2026-11-10T10:00:00Z");
+    expect(await onOrderCancelled("gid://shopify/Order/9001")).toBe("returned 100000");
+    expect(db.rpc).toHaveBeenCalledWith("wallet_post_movement", expect.objectContaining({ p_kind: "reverse_redeem", p_amount: 100000, p_ref_id: "gid://shopify/Order/9001" }));
+  });
+});

@@ -536,6 +536,10 @@ export async function onOrderPaidOrFulfilled(orderId: string): Promise<string> {
 export async function onOrderCancelled(orderId: string): Promise<string> {
   const order = await fetchWalletOrder(orderId);
   if (!order) return "order not found";
+  // Shopify has no un-cancel, so a real delivery always finds cancelledAt. A
+  // replay sent for the wrong order would otherwise hand back the credit it
+  // spent on an order that stands.
+  if (!order.cancelledAt) return "not cancelled";
   const account = await accountForOrder(order);
   if (!account) return "no wallet";
   const { spentPaise: spent, earnedNetPaise: earned } = orderWalletTotals(await orderMovements(account.id, order.id));

@@ -6,19 +6,28 @@
  * which does nothing for a movement it has already posted, so a replay of an
  * event that did get through answers "already debited" / "already earned".
  *
- *   node scripts/wallet-replay.mjs --order '#1091' --topic orders/paid
- *   node scripts/wallet-replay.mjs --order gid://shopify/Order/123 --topic refunds/create --dry
+ *   node scripts/wallet-replay.mjs --prod --order '#1091' --topic orders/paid --dry
+ *   node scripts/wallet-replay.mjs --prod --order '#1091' --topic orders/paid
+ *   node scripts/wallet-replay.mjs --prod --order gid://shopify/Order/123 --topic refunds/create
  *   node scripts/wallet-replay.mjs --dev --order '#1091' --topic orders/create     (to http://localhost:3000)
  *
  *   --order   #name (quote it: the shell treats # as a comment), the order's
  *             gid, or its numeric id
  *   --topic   orders/create | orders/paid | orders/fulfilled | orders/cancelled | refunds/create
  *             (refunds/create sends one delivery per refund on the order)
- *   --url     receiver; default the prod receiver, or with --dev
- *             http://localhost:3000/api/wallet/webhooks/shopify
+ *   --prod    send to the prod receiver (it moves money on the live ledger,
+ *             so it is never the default)
+ *   --dev     send to http://localhost:3000/api/wallet/webhooks/shopify and
+ *             read .env.development.local instead of .env.local
+ *   --url     send to this receiver instead; the prod host still needs --prod
+ *             (one of --prod, --dev or --url is required)
  *   --dry     print what would be sent, send nothing
- *   --dev     read .env.development.local instead of .env.local
  *   --env F   read env file F instead (a path); wins over --dev
+ *
+ * It refuses a topic the order's state says never happened: orders/cancelled
+ * for an order that is not cancelled (that would hand back the credit spent
+ * on an order that stands), orders/paid unless it is PAID, orders/fulfilled
+ * unless it is FULFILLED, refunds/create with no refund on it.
  *
  * Needs SHOPIFY_STORE_DOMAIN, WALLET_SHOPIFY_CLIENT_ID and
  * WALLET_SHOPIFY_CLIENT_SECRET (the Drevi Admin Automation app, whose secret
@@ -36,15 +45,21 @@ const API = "2026-01";
 const argv = process.argv.slice(2);
 const opt = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
 const dev = argv.includes("--dev");
+const prod = argv.includes("--prod");
 const dry = argv.includes("--dry");
 const envFile = opt("--env") ?? (dev ? ".env.development.local" : ".env.local");
 const orderArg = opt("--order");
 const topic = opt("--topic");
-const url = opt("--url") ?? (dev ? DEV_URL : PROD_URL);
+const url = opt("--url") ?? (dev ? DEV_URL : prod ? PROD_URL : undefined);
 
 function die(msg) { console.error(msg); process.exit(1); }
-if (!orderArg || !topic) die("usage: node scripts/wallet-replay.mjs --order <#name|gid|id> --topic <" + TOPICS.join("|") + "> [--url <receiver>] [--dry] [--dev] [--env <file>]");
+if (!orderArg || !topic) die("usage: node scripts/wallet-replay.mjs (--prod | --dev | --url <receiver>) --order <#name|gid|id> --topic <" + TOPICS.join("|") + "> [--dry] [--env <file>]");
 if (!TOPICS.includes(topic)) die(`unknown --topic ${topic}; one of ${TOPICS.join(", ")}`);
+if (dev && prod) die("--dev and --prod: pick one");
+if (!url) die("say where to send it: --prod (the live ledger), --dev (http://localhost:3000) or --url <receiver>");
+let host = "";
+try { host = new URL(url).host; } catch { die(`--url ${url} is not a URL`); }
+if (host === new URL(PROD_URL).host && !prod) die(`${url} is the prod receiver: add --prod to send there`);
 
 dotenv.config({ path: envFile, quiet: true });
 const domain = process.env.SHOPIFY_STORE_DOMAIN;
@@ -92,16 +107,31 @@ async function resolveOrder(tok, arg) {
 
 const tail = (gid) => String(gid).split("/").pop();
 
+/**
+ * Why this topic must not be replayed for this order, or null. Shopify sends
+ * each of these only once the order is in that state, so an order that isn't
+ * means the wrong order or the wrong topic. orders/cancelled matters most: its
+ * handler gives the spent credit back and takes the 10% back.
+ */
+function refusal(t, o) {
+  if (t === "orders/cancelled" && !o.cancelledAt) return `${o.name} is not cancelled`;
+  if (t === "orders/paid" && o.displayFinancialStatus !== "PAID") return `${o.name} is ${o.displayFinancialStatus ?? "not PAID"}, not PAID`;
+  if (t === "orders/fulfilled" && o.displayFulfillmentStatus !== "FULFILLED") return `${o.name} is ${o.displayFulfillmentStatus ?? "not FULFILLED"}, not FULFILLED`;
+  if (t === "refunds/create" && !o.refunds.length) return `${o.name} has no refunds`;
+  return null;
+}
+
 const tok = await token();
 const order = await resolveOrder(tok, orderArg);
 console.log(`order ${order.name} (${order.id}): ${order.displayFinancialStatus ?? "?"} / ${order.displayFulfillmentStatus ?? "?"}${order.cancelledAt ? " / cancelled" : ""}`);
+const why = refusal(topic, order);
+if (why) die(`refusing ${topic}: ${why}. Shopify would never have sent it; check the order number and the topic.`);
 
 // The receiver reads admin_graphql_api_id for order topics; for a refund it
 // reads order_id (numeric) and the refund's admin_graphql_api_id.
 const deliveries = topic === "refunds/create"
   ? order.refunds.map((r) => ({ order_id: Number(tail(order.id)), admin_graphql_api_id: r.id }))
   : [{ id: Number(tail(order.id)), admin_graphql_api_id: order.id }];
-if (!deliveries.length) die(`${order.name} has no refunds; nothing to send for refunds/create`);
 
 console.log(`${dry ? "would send" : "sending"} ${deliveries.length} × ${topic} to ${url}`);
 for (const payload of deliveries) {
