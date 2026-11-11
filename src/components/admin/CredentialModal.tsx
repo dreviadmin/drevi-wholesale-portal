@@ -21,6 +21,9 @@ export function CredentialModal({
   // src/lib/password.ts, the same one Regenerate on the buyer page gives.
   const [generated, setGenerated] = useState("");
   const [suggesting, setSuggesting] = useState(true);
+  // Kept apart from `error` (the Save result): it is about the Auto box only,
+  // so it shows only in Auto mode, and a refresh never wipes a Save error.
+  const [suggestError, setSuggestError] = useState<string | null>(null);
   const suggestSeq = useRef(0);
   const [custom, setCustom] = useState("");
   const [showCustom, setShowCustom] = useState(false);
@@ -38,14 +41,15 @@ export function CredentialModal({
     // Only the latest request may fill the box (a double tap on refresh).
     const seq = ++suggestSeq.current;
     setSuggesting(true);
+    setSuggestError(null);
     setGenerated("");
     suggestBuyerPassword(buyerId)
       .then((res) => {
         if (seq !== suggestSeq.current) return;
-        if (res.ok && res.password) { setGenerated(res.password); setError(null); }
-        else setError(res.error ?? "Could not make a password — tap the refresh icon to try again.");
+        if (res.ok && res.password) setGenerated(res.password);
+        else setSuggestError(res.error ?? "Could not make a password — tap the refresh icon to try again.");
       })
-      .catch(() => { if (seq === suggestSeq.current) setError("Could not make a password — tap the refresh icon to try again."); })
+      .catch(() => { if (seq === suggestSeq.current) setSuggestError("Could not make a password — tap the refresh icon to try again."); })
       .finally(() => { if (seq === suggestSeq.current) setSuggesting(false); });
   }
 
@@ -111,9 +115,12 @@ export function CredentialModal({
                 <input type="radio" checked={mode === "auto"} onChange={() => setMode("auto")} /> Auto-generate a password (first name + 3 digits)
               </label>
               {mode === "auto" && (
-                <div className="flex items-center gap-2 ml-5">
-                  <span className="font-body" style={{ fontSize: 13, fontWeight: 600, color: suggesting ? palette.mutedGreige : palette.black }}>{suggesting ? "Making one…" : generated}</span>
-                  <button type="button" onClick={suggest} disabled={suggesting} aria-label="Regenerate" className="flex items-center justify-center disabled:opacity-50" style={{ color: palette.goldDeep, width: 44, height: 44 }}><RefreshCw size={13} /></button>
+                <div className="ml-5">
+                  <div className="flex items-center gap-2">
+                    <span className="font-body" style={{ fontSize: 13, fontWeight: 600, color: suggesting ? palette.mutedGreige : palette.black }}>{suggesting ? "Making one…" : generated}</span>
+                    <button type="button" onClick={suggest} disabled={suggesting} aria-label="Regenerate" className="flex items-center justify-center disabled:opacity-50" style={{ color: palette.goldDeep, width: 44, height: 44 }}><RefreshCw size={13} /></button>
+                  </div>
+                  {suggestError && <p className="font-body" style={{ fontSize: 11, color: palette.crimsonText }}>{suggestError}</p>}
                 </div>
               )}
               <label className="flex items-center gap-2 font-body" style={{ fontSize: 12, minHeight: 44 }}>
