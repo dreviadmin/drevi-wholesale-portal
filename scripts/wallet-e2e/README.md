@@ -119,7 +119,7 @@ Joining:
    just planted).
 4. `/join` again, with another number, changes nothing: same Shopify phone,
    same wallet phone, same tags, `created: false`.
-5. A storefront token older than 24 hours is refused (401).
+5. A storefront token older than 2 hours is refused (401).
 
 Check 4 needs a portal that has the November 2026 `/join` change (a member's
 `/join` writes nothing); an older deploy fails it. Check 5 uses

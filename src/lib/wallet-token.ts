@@ -12,7 +12,10 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 // holds the same key (WALLET_STOREFRONT_SECRET). The token only carries "who
 // is signed in" across to us; it is short-lived and never stored.
 
-export const TOKEN_MAX_AGE_S = 24 * 3600;
+// Two hours: a page left open longer gets a fresh token by reloading (the
+// theme reloads once on a 401). Was 24 hours until Nov 2026; a copied token
+// was good for a day.
+export const TOKEN_MAX_AGE_S = 2 * 3600;
 const FUTURE_SKEW_S = 300;
 
 export function signCustomerToken(customerId: string | number, ts: number, secret: string): string {

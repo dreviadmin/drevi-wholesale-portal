@@ -45,7 +45,7 @@ EMAIL_DOMAIN = '@drevifashion.com'
 TEST_NAMES = ('Wallet E2E A', 'Wallet E2E B')
 OLD_TEST_NAMES = ('Test Wallet', 'Test Second')  # the October runs
 WALLET_TITLE = 'Drevi Wallet'
-TOKEN_MAX_AGE_H = 24  # src/lib/wallet-token.ts TOKEN_MAX_AGE_S
+TOKEN_MAX_AGE_H = 2  # src/lib/wallet-token.ts TOKEN_MAX_AGE_S
 RNG = random.SystemRandom()
 
 ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])

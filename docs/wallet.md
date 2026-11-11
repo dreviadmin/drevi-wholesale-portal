@@ -64,8 +64,10 @@ set none of the overrides.
   `snippets/drevi-wallet-store.liquid` renders
   `"<customerId>.<unixSeconds>.<hmac>"` with Liquid's `hmac_sha256` and the
   key in the shop metafield `drevi.wallet_key`. The portal checks it with the
-  same key (`WALLET_STOREFRONT_SECRET`) and accepts it for 24 hours
-  (`src/lib/wallet-token.ts`). If that env var is missing or shorter than 32
+  same key (`WALLET_STOREFRONT_SECRET`) and accepts it for 2 hours
+  (`src/lib/wallet-token.ts`; 24 hours until Nov 2026). The page reloads
+  once on a 401 to get a fresh token (theme change that must be live before
+  the 2-hour portal change ships). If that env var is missing or shorter than 32
   characters, every signed-in wallet route (`me`, `join`, `redeem`, `cart`)
   answers 401. The public `signup` route and the webhook receiver do not use
   the token.
@@ -367,7 +369,7 @@ First ask where it went wrong: in the bag, at checkout, or on a placed order.
 | "Nothing in your wallet yet" | Balance is zero | Check the statement with `wallet-status.mjs`. |
 | "Lots of shoppers are using their wallet right now" | The 25 cap | See [the 25 cap](#the-25-automatic-discount-cap). |
 | "Couldn't load your wallet. Refresh the page to try again." | The wallet summary call failed: the portal is down, or it rejected the page's token | Refresh. If every shopper sees it, read the Vercel logs and check that `WALLET_STOREFRONT_SECRET` matches `drevi.wallet_key`. |
-| "Please sign in again." (after tapping Use) | The page's token is over 24 hours old, or was rejected | Reload the page. |
+| "Please sign in again." (after tapping Use) | The page's token is over 2 hours old (the theme reloads once to get a fresh one first), or was rejected | Reload the page. |
 | "Couldn't reach your wallet…" | The request got no answer | Check the portal is up and read the Vercel logs. |
 | "Applied. It comes off at checkout, however you pay." | Reserved, but this cart could not be identified | See [The bag keeps reloading](#the-bag-keeps-reloading-or-the-wallet-line-comes-and-goes). |
 
@@ -772,7 +774,7 @@ The app already holds `write_orders`, so no scope change was needed.
 
 ## Test before prod
 
-- Unit tests (on 11 Nov: 4 files, 89 tests, all pass). They cover
+- Unit tests (on 11 Nov: 4 files, 90 tests, all pass). They cover
   `wallet-core.ts`, the token, the CORS helper and, with Supabase and Shopify
   mocked, the parts of `wallet.ts` changed in Nov 2026 (shortfall tag, the
   tag guard including the dev project's production deploy, the
@@ -950,8 +952,11 @@ them.
   customers that join with WhatsApp consent off and a number checked to be
   unused. The October runs joined with consent on and random numbers, so
   their numbers may still be in the AiSensy WhatsApp app's contacts.
-  Planned separately: cutting the storefront token's lifetime from 24 hours
-  to 2, which waits for a theme change that reloads the page once on a 401.
+  The storefront token's lifetime went from 24 hours to 2 (branch
+  `hc/wallet-ttl`). It ships only after the theme change is live that makes
+  `snippets/drevi-wallet-store.liquid` reload the page once on a 401 (so
+  Liquid renders a fresh token); without it, a page left open over 2 hours
+  shows "Please sign in again" on Use.
 
 Check what has shipped before you rely on it in production:
 

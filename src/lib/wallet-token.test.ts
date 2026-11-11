@@ -19,7 +19,15 @@ describe("storefront customer token", () => {
     expect(checkCustomerToken("123.456.abc", SECRET, NOW)).toBeNull();
     expect(checkCustomerToken(null, SECRET, NOW)).toBeNull();
   });
-  it("expires after a day and refuses the future", () => {
+  it("lives two hours", () => {
+    expect(TOKEN_MAX_AGE_S).toBe(2 * 3600);
+    const t = signCustomerToken(123, NOW, SECRET);
+    expect(checkCustomerToken(t, SECRET, NOW + 1 * 3600 + 59 * 60)).toBe("gid://shopify/Customer/123");
+    expect(checkCustomerToken(t, SECRET, NOW + 2 * 3600)).toBe("gid://shopify/Customer/123");
+    expect(checkCustomerToken(t, SECRET, NOW + 2 * 3600 + 1)).toBeNull();
+    expect(checkCustomerToken(t, SECRET, NOW + 3 * 3600)).toBeNull();
+  });
+  it("expires after its lifetime and refuses the future", () => {
     const t = signCustomerToken(123, NOW, SECRET);
     expect(checkCustomerToken(t, SECRET, NOW + TOKEN_MAX_AGE_S + 1)).toBeNull();
     expect(checkCustomerToken(signCustomerToken(123, NOW + 3600, SECRET), SECRET, NOW)).toBeNull();
