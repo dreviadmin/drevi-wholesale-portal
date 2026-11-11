@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
+import { inRuns } from "@/lib/chunk";
 import { bucketKeyFor, cleanBucketLabel, sameBucketLabel, type BucketChange, type StudioBucket } from "@/lib/studio/buckets";
 
 // Studio buckets (0074; several per design since 0078). Same gate as the rest
@@ -14,6 +15,8 @@ import { bucketKeyFor, cleanBucketLabel, sameBucketLabel, type BucketChange, typ
 const SET_CAP = 500;
 const COLS = "key, label, sort, preset, active";
 const INSERT_CHUNK = 1000;
+// Design ids go into the URL of a read or a delete, so they travel in runs.
+const ID_RUN = 150;
 
 /** 0078 not applied yet: say so instead of a raw schema-cache error. */
 function membershipError(error: { code?: string; message: string }): string {
@@ -63,18 +66,10 @@ export async function changeDesignBuckets(designIds: string[], change: BucketCha
     }
   }
 
-  const { data: designs, error: readErr } = await admin.from("designs").select("id, base_sku, color").in("id", ids);
+  const { data: found, error: readErr } = await inRuns(ids, ID_RUN, (run) => admin.from("designs").select("id, base_sku, color").in("id", run));
   if (readErr) return { ok: false, error: readErr.message };
-  const found = designs ?? [];
   if (found.length === 0) return { ok: false, error: "Those designs no longer exist." };
   const live = found.map((d) => d.id as string);
-
-  if (change.clear || remove.length) {
-    let q = admin.from("design_buckets").delete().in("design_id", live);
-    if (!change.clear) q = q.in("bucket_key", remove);
-    const { error } = await q;
-    if (error) return { ok: false, error: membershipError(error) };
-  }
 
   // Worded before any write, so a partly saved change is logged as precisely
   // as a full one.
@@ -86,6 +81,22 @@ export async function changeDesignBuckets(designIds: string[], change: BucketCha
     add.length ? `+ ${add.map(quote).join(", ")}` : "",
     remove.length ? `− ${remove.map(quote).join(", ")}` : "",
   ].filter(Boolean).join(" · ");
+
+  if (change.clear || remove.length) {
+    const { error, done } = await inRuns(live, ID_RUN, (run) => {
+      let q = admin.from("design_buckets").delete().in("design_id", run);
+      if (!change.clear) q = q.in("bucket_key", remove);
+      return q;
+    });
+    if (error) {
+      // Earlier runs have landed: record them, and say so, as the adds do.
+      if (done > 0) {
+        await writeAuditEvent({ eventType: "catalog_edit", staffUserId: staff.id, notes: `studio buckets partly saved (${what}) on ${on}: removals saved for ${done} of ${live.length}, adds not saved — ${membershipError(error)}` });
+        revalidatePath("/admin/studio");
+      }
+      return { ok: false, error: done > 0 ? `Saved in part — check the list after the refresh. (${membershipError(error)})` : membershipError(error) };
+    }
+  }
 
   const setAt = new Date().toISOString();
   const setBy = staff.name?.trim() || staff.email;

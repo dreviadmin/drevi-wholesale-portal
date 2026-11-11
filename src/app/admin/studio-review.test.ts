@@ -17,6 +17,8 @@ let beforeWrite: ((table: string, op: string) => void) | null = null;
 let failSelect: ((table: string) => string | null) | null = null;
 /** Makes a write fail with this message (the table is left as it was). */
 let failWrite: ((table: string, op: string) => string | null) | null = null;
+/** The length of every .in() list sent: the longest is what a request URL carries. */
+let inSizes: number[] = [];
 
 const UNIQUE: Record<string, string[]> = {
   designs: ["base_sku", "color"],
@@ -53,7 +55,13 @@ function fakeAdmin() {
         delete() { op = "delete"; return b; },
         eq(k: string, v: unknown) { tests.push((r) => r[k] === v); return b; },
         is(k: string, v: unknown) { tests.push((r) => (r[k] ?? null) === v); return b; },
-        in(k: string, vs: unknown[]) { tests.push((r) => vs.includes(r[k])); return b; },
+        in(k: string, vs: unknown[]) { inSizes.push(vs.length); tests.push((r) => vs.includes(r[k])); return b; },
+        // Only the shape the tray lookup sends: col.ilike.pattern, OR-ed.
+        or(expr: string) {
+          const alts = expr.split(",").map((e) => { const [k, , p] = e.split("."); return { k, re: likeTest(p, "i") }; });
+          tests.push((r) => alts.some((a) => a.re.test(String(r[a.k] ?? ""))));
+          return b;
+        },
         like(k: string, p: string) { const re = likeTest(p); tests.push((r) => re.test(String(r[k] ?? ""))); return b; },
         ilike(k: string, p: string) { const re = likeTest(p, "i"); tests.push((r) => re.test(String(r[k] ?? ""))); return b; },
         not(k: string, o: string, v: unknown) {
@@ -211,6 +219,8 @@ vi.mock("@/lib/stock-ledger", () => ({
 vi.mock("@/lib/pricing", async () => await import("../../lib/pricing"));
 vi.mock("@/lib/studio/copy-prompt", async () => await import("../../lib/studio/copy-prompt"));
 vi.mock("@/lib/studio/shopify-facts", async () => await import("../../lib/studio/shopify-facts"));
+vi.mock("@/lib/chunk", async () => await import("../../lib/chunk"));
+vi.mock("@/lib/studio/buckets", async () => await import("../../lib/studio/buckets"));
 // loadDesignDetail, rebuilt from the fake tables: what publish.ts reads.
 vi.mock("../../lib/studio/load", () => ({
   loadDesignDetail: async (designId: string) => {
@@ -239,6 +249,7 @@ const studio = await import("./studio/actions");
 const workbench = await import("./studio/[designId]/actions");
 const imageActions = await import("./studio/[designId]/image-actions");
 const master = await import("./studio/master/[designId]/actions");
+const bucketActions = await import("./studio/bucket-actions");
 const { ingestDesigns } = await import("../../lib/studio/ingest");
 const publish = await import("../../lib/studio/publish");
 const drivePhoto = await import("../api/drive-photo/route");
@@ -257,6 +268,7 @@ beforeEach(() => {
   beforeWrite = null;
   failSelect = null;
   failWrite = null;
+  inSizes = [];
   signedIn = STAFF;
   images = {};
   db = {
@@ -407,6 +419,77 @@ describe("Run FASHN while model swap is parked", () => {
     process.env.FASHN_ENABLED = "true";
     fashnAngle();
     expect(await studio.runFashnBatch([DESIGN], true)).toEqual({ ok: true, jobs: 1, credits: 2 });
+  });
+});
+
+describe("A large Studio selection is acted on in full", () => {
+  /** n designs, each with a Shopify target, as a Select all on a big board makes them. */
+  const many = (n: number) => {
+    const ids = Array.from({ length: n }, (_, i) => `bulk-${i}`);
+    db.designs = ids.map((id, i) => ({ id, base_sku: `DD-LEH-FLR-${String(i).padStart(4, "0")}`, color: "GRN", tier: "standard", discontinued_at: null }));
+    db.publish_targets = ids.map((id) => ({ design_id: id, portal: "shopify", enabled: true, state: "ready" }));
+    return ids;
+  };
+  const longestIn = () => Math.max(0, ...inSizes);
+
+  it("Set hero reaches every design past the old 500, in short requests", async () => {
+    const ids = many(620);
+    expect(await studio.setTierBatch(ids, "hero")).toEqual({ ok: true });
+    expect(db.designs.every((d) => d.tier === "hero")).toBe(true);
+    expect(longestIn()).toBeLessThanOrEqual(150);
+    expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "studio_tier_set", notes: "tier=hero on 620 design(s)" }));
+  });
+
+  it("past the sanity cap it says so and changes nothing", async () => {
+    const ids = many(2001);
+    expect(await studio.setTierBatch(ids, "hero")).toEqual({ ok: false, error: "Select at most 2,000 designs at a time." });
+    expect(await studio.togglePortalBatch(ids, "shopify", false)).toEqual({ ok: false, error: "Select at most 2,000 designs at a time." });
+    expect(db.designs.some((d) => d.tier === "hero")).toBe(false);
+    expect(db.publish_targets.every((t) => t.enabled)).toBe(true);
+  });
+
+  it("Shopify off reaches every selected design", async () => {
+    const ids = many(620);
+    expect(await studio.togglePortalBatch(ids, "shopify", false)).toEqual({ ok: true });
+    expect(db.publish_targets.every((t) => !t.enabled)).toBe(true);
+    expect(longestIn()).toBeLessThanOrEqual(150);
+  });
+
+  it("Use candidates lists every angle, past the 1,000-row cap on one read", async () => {
+    const ids = many(200);
+    const angles = ["front", "back", "side", "lifestyle", "detail_1", "detail_2"];
+    db.design_angles = ids.flatMap((id) => angles.map((angle) => ({ id: `${id}-${angle}`, design_id: id, angle, approved_image_id: null })));
+    db.design_images = db.design_angles.map((a) => ({ id: `img-${a.id}`, angle_id: a.id, role: "candidate", file_ref: `ref-${a.id}`, status: "active", created_at: "2026-11-01T00:00:00Z" }));
+    const r = await studio.approveAllPreflight(ids);
+    expect(r.ok).toBe(true);
+    expect(r.items).toHaveLength(1200);
+    expect(longestIn()).toBeLessThanOrEqual(100);
+  });
+
+  it("Print labels finds the tags of every design past the old 200", async () => {
+    const ids = many(250);
+    db.sku_registry = db.designs.flatMap((d) => ["S", "M"].map((s) => ({ variant_sku: `${d.base_sku}-${s}-GRN` })));
+    const r = await studio.traySkusForDesigns(ids);
+    expect(r).toMatchObject({ ok: true, groups: 250, missing: [] });
+    expect(r.skus).toHaveLength(500);
+    expect(longestIn()).toBeLessThanOrEqual(100);
+  });
+
+  it("a bucket add and a clear reach every selected design, in short requests", async () => {
+    const ids = many(400);
+    db.studio_buckets = [{ key: "c_rush", label: "Rush", sort: 1, preset: false, active: true }];
+    db.design_buckets = [];
+    expect(await bucketActions.changeDesignBuckets(ids, { add: ["c_rush"] })).toMatchObject({ ok: true, updated: 400 });
+    expect(db.design_buckets).toHaveLength(400);
+    inSizes = [];
+    expect(await bucketActions.changeDesignBuckets(ids, { clear: true })).toMatchObject({ ok: true, updated: 400 });
+    expect(db.design_buckets).toHaveLength(0);
+    expect(longestIn()).toBeLessThanOrEqual(150);
+  });
+
+  it("a bucket change over the cap is refused whole, as before", async () => {
+    const ids = many(501);
+    expect(await bucketActions.changeDesignBuckets(ids, { clear: true })).toEqual({ ok: false, error: "Select at most 500 designs at a time." });
   });
 });
 

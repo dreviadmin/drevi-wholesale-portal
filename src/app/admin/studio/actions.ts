@@ -8,9 +8,20 @@ import { writeAuditEvent } from "@/lib/audit";
 import { DETAIL_ANGLES } from "@/lib/studio/state";
 import { loadVocab } from "@/lib/sku/vocab-live";
 import { fashnEnabled } from "@/lib/pipeline/engines";
+import { inRuns } from "@/lib/chunk";
 
 // Stage 3's two LIVE batch actions (§7.4). Spend/push actions arrive with
 // Stages 4–7 — their buttons render disabled until then.
+
+// A selection goes to the database in runs (chunk.ts) rather than one .in()
+// list: a few hundred UUIDs in one URL risks a 414, and a read of several rows
+// per design can pass the 1,000-row cap. Every selected design is acted on;
+// past the sanity cap the action says so instead of quietly doing part.
+const WRITE_RUN = 150;
+const READ_RUN = 100; // six angles a design, so a run reads at most 600 angle rows
+const BATCH_CAP = 2000;
+const overCap = (ids: string[]) =>
+  ids.length > BATCH_CAP ? `Select at most ${BATCH_CAP.toLocaleString("en-IN")} designs at a time.` : null;
 
 export async function setTierBatch(designIds: string[], tier: "standard" | "hero"): Promise<{ ok: boolean; error?: string }> {
   let staff;
@@ -20,14 +31,21 @@ export async function setTierBatch(designIds: string[], tier: "standard" | "hero
     return { ok: false, error: "Not authorized" };
   }
   if (designIds.length === 0) return { ok: false, error: "Nothing selected" };
+  const capErr = overCap(designIds);
+  if (capErr) return { ok: false, error: capErr };
   const admin = createAdminClient();
-  const { error } = await admin.from("designs").update({ tier, updated_at: new Date().toISOString() }).in("id", designIds.slice(0, 500));
-  if (error) return { ok: false, error: error.message };
+  const updatedAt = new Date().toISOString();
+  const { error, done } = await inRuns(designIds, WRITE_RUN, (ids) => admin.from("designs").update({ tier, updated_at: updatedAt }).in("id", ids));
+  if (error && done === 0) return { ok: false, error: error.message };
   await writeAuditEvent({
     eventType: "studio_tier_set",
     staffUserId: staff.id,
-    notes: `tier=${tier} on ${designIds.length} design(s)`,
+    notes: `tier=${tier} on ${error ? `${done} of ${designIds.length}` : designIds.length} design(s)${error ? `, then failed: ${error.message}` : ""}`,
   });
+  if (error) {
+    revalidatePath("/admin/studio");
+    return { ok: false, error: `Set on ${done} of ${designIds.length} designs, then: ${error.message}` };
+  }
   revalidatePath("/admin/studio");
   return { ok: true };
 }
@@ -44,18 +62,22 @@ export async function togglePortalBatch(
     return { ok: false, error: "Not authorized" };
   }
   if (designIds.length === 0) return { ok: false, error: "Nothing selected" };
+  const capErr = overCap(designIds);
+  if (capErr) return { ok: false, error: capErr };
   const admin = createAdminClient();
-  const { error } = await admin
-    .from("publish_targets")
-    .update({ enabled })
-    .eq("portal", portal)
-    .in("design_id", designIds.slice(0, 500));
-  if (error) return { ok: false, error: error.message };
+  const { error, done } = await inRuns(designIds, WRITE_RUN, (ids) =>
+    admin.from("publish_targets").update({ enabled }).eq("portal", portal).in("design_id", ids),
+  );
+  if (error && done === 0) return { ok: false, error: error.message };
   await writeAuditEvent({
     eventType: "studio_portal_toggled",
     staffUserId: staff.id,
-    notes: `${portal} ${enabled ? "enabled" : "disabled"} on ${designIds.length} design(s)`,
+    notes: `${portal} ${enabled ? "enabled" : "disabled"} on ${error ? `${done} of ${designIds.length}` : designIds.length} design(s)${error ? `, then failed: ${error.message}` : ""}`,
   });
+  if (error) {
+    revalidatePath("/admin/studio");
+    return { ok: false, error: `Changed on ${done} of ${designIds.length} designs, then: ${error.message}` };
+  }
   revalidatePath("/admin/studio");
   return { ok: true };
 }
@@ -79,14 +101,20 @@ export async function runFashnBatch(
   // Parked (FASHN_ENABLED, default off) — the board draws this button disabled,
   // and the action refuses too rather than queue tryon jobs nothing will run.
   if (!fashnEnabled()) return { ok: false, error: "Model swap is parked — set FASHN_ENABLED=true to bring it back" };
+  const capErr = overCap(designIds);
+  if (capErr) return { ok: false, error: capErr };
   const admin = createAdminClient();
-  const [{ data: angles }, { data: activeJobs }] = await Promise.all([
-    admin
-      .from("design_angles")
-      .select("id, design_id, angle, engine, source_ref, approved_image_id")
-      .in("design_id", designIds.slice(0, 500)),
+  const [{ data: angles, error: anglesErr }, { data: activeJobs }] = await Promise.all([
+    inRuns(designIds, READ_RUN, (ids) =>
+      admin
+        .from("design_angles")
+        .select("id, design_id, angle, engine, source_ref, approved_image_id")
+        .in("design_id", ids),
+    ),
     admin.from("pipeline_jobs").select("angle_id").in("status", ["queued", "claimed", "running"]),
   ]);
+  // A lost run would undercount the jobs and the credits on the confirm sheet.
+  if (anglesErr) return { ok: false, error: anglesErr.message };
   const busy = new Set((activeJobs ?? []).map((j) => j.angle_id));
   const targets = (angles ?? []).filter(
     (a) =>
@@ -138,15 +166,24 @@ export async function approveAllPreflight(
   } catch {
     return { ok: false, error: "Not authorized" };
   }
+  const capErr = overCap(designIds);
+  if (capErr) return { ok: false, error: capErr };
   const admin = createAdminClient();
-  const { data: designs } = await admin.from("designs").select("id, base_sku, color").in("id", designIds.slice(0, 500));
-  const byId = new Map((designs ?? []).map((d) => [d.id, `${d.base_sku}·${d.color}`]));
-  const { data: angles } = await admin
-    .from("design_angles")
-    .select("id, design_id, angle, approved_image_id, design_images!angle_id(id, role, file_ref, status, created_at)")
-    .in("design_id", designIds.slice(0, 500));
+  const { data: designs, error: designsErr } = await inRuns(designIds, READ_RUN, (ids) =>
+    admin.from("designs").select("id, base_sku, color").in("id", ids),
+  );
+  if (designsErr) return { ok: false, error: designsErr.message };
+  const byId = new Map(designs.map((d) => [d.id, `${d.base_sku}·${d.color}`]));
+  const { data: angles, error: anglesErr } = await inRuns(designIds, READ_RUN, (ids) =>
+    admin
+      .from("design_angles")
+      .select("id, design_id, angle, approved_image_id, design_images!angle_id(id, role, file_ref, status, created_at)")
+      .in("design_id", ids),
+  );
+  // A lost run would leave candidates off the confirm sheet with nothing saying so.
+  if (anglesErr) return { ok: false, error: anglesErr.message };
   const items: { candidateId: string; fileRef: string; label: string }[] = [];
-  for (const a of angles ?? []) {
+  for (const a of angles) {
     if (a.approved_image_id) continue;
     const cands = ((a.design_images as { id: string; role: string; file_ref: string; status: string; created_at: string }[] | null) ?? [])
       .filter((c) => c.status === "active" && c.role !== "source")
@@ -328,14 +365,15 @@ export async function traySkusForDesigns(
     return { ok: false, error: "Not authorized" };
   }
   if (designIds.length === 0) return { ok: false, error: "Nothing selected" };
+  const capErr = overCap(designIds);
+  if (capErr) return { ok: false, error: capErr };
   const admin = createAdminClient();
 
-  const { data: designs, error } = await admin
-    .from("designs")
-    .select("id, base_sku, color")
-    .in("id", designIds.slice(0, 200));
+  const { data: designs, error } = await inRuns(designIds, READ_RUN, (ids) =>
+    admin.from("designs").select("id, base_sku, color").in("id", ids),
+  );
   if (error) return { ok: false, error: error.message };
-  if (!designs?.length) return { ok: false, error: "No designs found" };
+  if (!designs.length) return { ok: false, error: "No designs found" };
 
   // One query for every base in the selection, then filtered on the colour
   // suffix in memory. Chained .like() on the same column is unreliable through
