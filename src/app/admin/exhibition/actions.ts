@@ -141,6 +141,43 @@ export async function updateBuyerContact(
   return { ok: true };
 }
 
+/**
+ * Files the staff note in the order's Notes panel (entity_notes: staff-only,
+ * never on the buyer's page or the PDF). Returns a warning when it did not
+ * save; the order stands either way.
+ *
+ * `replay`: the order was already there (an offline queue replay, a double
+ * tap, a reply that never arrived). The note is filed only if no earlier
+ * attempt filed it, so a note that failed the first time lands now instead of
+ * being lost, and one that went through is not filed twice (Nov review: the
+ * offline drain dropped the warning with the queue item, the only other copy
+ * of the note).
+ */
+async function fileStaffNote(
+  admin: ReturnType<typeof createAdminClient>,
+  orderId: string,
+  note: string | undefined,
+  createdBy: string,
+  replay: boolean,
+): Promise<string | undefined> {
+  if (!note) return undefined;
+  if (replay) {
+    const { data: filed, error } = await admin
+      .from("entity_notes")
+      .select("id")
+      .eq("entity_type", "order")
+      .eq("entity_id", orderId)
+      .eq("note", note)
+      .limit(1);
+    if (error) return `Order saved, but its staff note could not be checked (${error.message}). Check Notes on the order.`;
+    if ((filed ?? []).length > 0) return undefined;
+  }
+  const { error } = await admin
+    .from("entity_notes")
+    .insert({ entity_type: "order", entity_id: orderId, note, photo_refs: [], created_by: createdBy });
+  return error ? `Order saved, but the staff note did not save (${error.message}). Add it under Notes on the order.` : undefined;
+}
+
 // E6 — submit the order on behalf of the buyer.
 export async function submitExhibitionOrder(input: {
   sessionId: string;
@@ -181,13 +218,20 @@ export async function submitExhibitionOrder(input: {
   // (a replayed queue item, a double-tap), return the existing row instead of
   // billing the buyer again.
   const clientRef = input.clientRef?.trim() || null;
+  const staffNote = input.staffNote?.trim() || undefined;
   if (clientRef) {
     const { data: existing } = await admin
       .from("orders")
       .select("id, order_number, pdf_url, pdf_sent_at")
       .eq("client_ref", clientRef)
       .maybeSingle();
-    if (existing) return { ok: true, orderId: existing.id, orderNumber: existing.order_number, pdfUrl: existing.pdf_url ?? undefined, sent: !!existing.pdf_sent_at };
+    if (existing) {
+      const warning = await fileStaffNote(admin, existing.id, staffNote, staff.email, true);
+      return {
+        ok: true, orderId: existing.id, orderNumber: existing.order_number, pdfUrl: existing.pdf_url ?? undefined,
+        sent: !!existing.pdf_sent_at, ...(warning ? { warning } : {}),
+      };
+    }
   }
 
   // Session drives the source + order prefix (exhibition → DX, in-store → IS).
@@ -411,7 +455,13 @@ export async function submitExhibitionOrder(input: {
       // concurrent replay already inserted this exact order — return that one).
       if (clientRef) {
         const { data: won } = await admin.from("orders").select("id, order_number, pdf_url, pdf_sent_at").eq("client_ref", clientRef).maybeSingle();
-        if (won) return { ok: true, orderId: won.id, orderNumber: won.order_number, pdfUrl: won.pdf_url ?? undefined, sent: !!won.pdf_sent_at };
+        if (won) {
+          const warning = await fileStaffNote(admin, won.id, staffNote, staff.email, true);
+          return {
+            ok: true, orderId: won.id, orderNumber: won.order_number, pdfUrl: won.pdf_url ?? undefined,
+            sent: !!won.pdf_sent_at, ...(warning ? { warning } : {}),
+          };
+        }
       }
     } else if (error) {
       return { ok: false, error: error.message };
@@ -419,18 +469,10 @@ export async function submitExhibitionOrder(input: {
   }
   if (!orderId) return { ok: false, error: "Could not generate an order number." };
 
-  // Staff note → the order's Notes panel (entity_notes: staff-only, never on
-  // the buyer's page or the PDF). A replayed submit returned above with the
-  // first attempt's row, so this runs once per order. The order stands if it
-  // fails, so say so rather than lose the note quietly.
-  let warning: string | undefined;
-  const staffNote = input.staffNote?.trim();
-  if (staffNote) {
-    const { error: noteErr } = await admin
-      .from("entity_notes")
-      .insert({ entity_type: "order", entity_id: orderId, note: staffNote, photo_refs: [], created_by: staff.email });
-    if (noteErr) warning = `Order saved, but the staff note did not save (${noteErr.message}). Add it under Notes on the order.`;
-  }
+  // Staff note → the order's Notes panel. A replay returned above, after
+  // filing a note an earlier attempt lost. The order stands if this fails, so
+  // say so rather than lose the note quietly.
+  const warning = await fileStaffNote(admin, orderId, staffNote, staff.email, false);
 
   // bump session order count
   await admin.from("exhibition_sessions").update({ orders_count: (sess?.orders_count ?? 0) + 1 }).eq("id", input.sessionId);

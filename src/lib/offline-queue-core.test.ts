@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { retryingCaptureRefs, unsyncedBuyerCountsAttempt, ordersWaitingOn } from "./offline-queue-core";
+import { retryingCaptureRefs, unsyncedBuyerCountsAttempt, ordersWaitingOn, orderDrainOutcome } from "./offline-queue-core";
 import type { CapturePayload, OrderPayload, QueueItem } from "./offline";
 
 const capture = (id: number, clientRef: string, attempts = 0): QueueItem => ({
@@ -57,5 +57,32 @@ describe("ordersWaitingOn", () => {
   });
   it("does nothing when an order (not a capture) is retried", () => {
     expect(ordersWaitingOn(queue, queue[1])).toEqual([]);
+  });
+});
+
+// Nov review: a drained order whose staff note failed came back ok with a
+// warning, and the drain deleted the queue item, the only other copy of the
+// note, with nothing on any screen.
+describe("orderDrainOutcome", () => {
+  const queued = (over: Partial<OrderPayload> = {}) => order(1, { clientRef: "ref-1", staffNote: "collect balance Friday", ...over }).payload as OrderPayload;
+
+  it("takes a saved order off the queue", () => {
+    expect(orderDrainOutcome(queued(), { ok: true, orderNumber: "DX-20261111-004" })).toEqual({ remove: true });
+  });
+
+  it("keeps a saved order whose staff note did not save, with the order number and the warning showing", () => {
+    const warning = "Order saved, but the staff note did not save (timeout). Add it under Notes on the order.";
+    expect(orderDrainOutcome(queued(), { ok: true, orderNumber: "DX-20261111-004", warning })).toEqual({
+      remove: false,
+      lastError: `DX-20261111-004: ${warning}`,
+    });
+  });
+
+  it("still takes it off when it has no clientRef, since a replay would bill it twice", () => {
+    expect(orderDrainOutcome(queued({ clientRef: undefined }), { ok: true, warning: "note did not save" })).toEqual({ remove: true });
+  });
+
+  it("keeps a refused order with the server's reason, as before", () => {
+    expect(orderDrainOutcome(queued(), { ok: false, error: "Session not found." })).toEqual({ remove: false, lastError: "Session not found." });
   });
 });

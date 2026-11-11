@@ -56,3 +56,25 @@ export function ordersWaitingOn(queue: QueueItem[], capture: QueueItem): number[
     .filter((i) => i.type === "order" && i.id != null && (i.payload as OrderPayload).buyerClientRef === ref)
     .map((i) => i.id as number);
 }
+
+/**
+ * What the drain does with a queued order once the server has answered: take
+ * it off the queue, or keep it with the reason showing (lastError) and count
+ * the attempt.
+ *
+ * A saved order that came back with a warning stays (Nov review): the warning
+ * says its staff note did not save, and the queue item is the only other copy
+ * of that note. The drain used to drop both without a word. Kept, the next
+ * drain replays it, and the replay finds the saved order by its clientRef and
+ * files the note then; at the attempt cap it shows Failed with the warning,
+ * so staff can add the note by hand and Discard. An order without a clientRef
+ * cannot be replayed without billing it twice, so it still leaves the queue.
+ */
+export function orderDrainOutcome(
+  order: OrderPayload,
+  res: { ok: boolean; error?: string; warning?: string; orderNumber?: string },
+): { remove: true } | { remove: false; lastError?: string } {
+  if (!res.ok) return { remove: false, lastError: res.error };
+  if (!res.warning || !order.clientRef) return { remove: true };
+  return { remove: false, lastError: res.orderNumber ? `${res.orderNumber}: ${res.warning}` : res.warning };
+}

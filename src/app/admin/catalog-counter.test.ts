@@ -622,6 +622,47 @@ describe("submitExhibitionOrder: the staff note stays with staff", () => {
     expect(r.warning).toContain("staff note did not save");
     expect(r.warning).toContain("notes table unavailable");
   });
+
+  // Nov review: the offline drain replays a queued order until it comes back
+  // without a warning. The replay finds the order by its clientRef, and used
+  // to return it without trying the note again, so a lost note stayed lost.
+  it("a replay files a staff note the first attempt lost, once, on the same order", async () => {
+    const input = { sessionId: "s1", eventName: "Expo", buyerId: "b1", items: [line], staffNote: "collect balance Friday", clientRef: "ref-note" };
+    failInsert = (table) => (table === "entity_notes" ? "notes table unavailable" : null);
+    const first = await exhibition.submitExhibitionOrder({ ...input, fromQueue: true });
+    expect(first.warning).toContain("staff note did not save");
+    expect(db.entity_notes).toHaveLength(0);
+
+    failInsert = null;
+    const replay = await exhibition.submitExhibitionOrder({ ...input, fromQueue: true });
+    expect(replay).toMatchObject({ ok: true, orderId: first.orderId, orderNumber: first.orderNumber });
+    expect(replay.warning).toBeUndefined();
+    expect(db.orders).toHaveLength(1);
+    expect(db.entity_notes.map((n) => [n.entity_id, n.note])).toEqual([[first.orderId, "collect balance Friday"]]);
+
+    const again = await exhibition.submitExhibitionOrder({ ...input, fromQueue: true });
+    expect(again.warning).toBeUndefined();
+    expect(db.entity_notes).toHaveLength(1);
+  });
+
+  it("a replay whose note still will not save says so again, so the queue keeps it", async () => {
+    const input = { sessionId: "s1", eventName: "Expo", buyerId: "b1", items: [line], staffNote: "S-test", clientRef: "ref-note-2" };
+    failInsert = (table) => (table === "entity_notes" ? "notes table unavailable" : null);
+    await exhibition.submitExhibitionOrder(input);
+    const replay = await exhibition.submitExhibitionOrder({ ...input, fromQueue: true });
+    expect(replay.ok).toBe(true);
+    expect(replay.warning).toContain("staff note did not save");
+  });
+
+  it("a replay that cannot check the notes says so rather than risk filing it twice", async () => {
+    const input = { sessionId: "s1", eventName: "Expo", buyerId: "b1", items: [line], staffNote: "S-test", clientRef: "ref-note-3" };
+    await exhibition.submitExhibitionOrder(input);
+    failSelect = (table) => (table === "entity_notes" ? "notes read timed out" : null);
+    const replay = await exhibition.submitExhibitionOrder({ ...input, fromQueue: true });
+    expect(replay.ok).toBe(true);
+    expect(replay.warning).toContain("could not be checked");
+    expect(db.entity_notes).toHaveLength(1);
+  });
 });
 
 describe("submitExhibitionOrder: says whether the PDF went to the buyer", () => {

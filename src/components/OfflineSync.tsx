@@ -6,7 +6,7 @@ import {
   getQueue, removeQueued, updateQueued, resetQueuedAttempts, getMeta, setMeta,
   type CapturePayload, type OrderPayload, type QueueItem,
 } from "@/lib/offline";
-import { retryingCaptureRefs, unsyncedBuyerCountsAttempt, ordersWaitingOn } from "@/lib/offline-queue-core";
+import { retryingCaptureRefs, unsyncedBuyerCountsAttempt, ordersWaitingOn, orderDrainOutcome } from "@/lib/offline-queue-core";
 import { captureBuyer, submitExhibitionOrder } from "@/app/admin/exhibition/actions";
 import { palette } from "@/lib/palette";
 
@@ -88,8 +88,11 @@ export function OfflineSync() {
           advanceAmount: o.advanceAmount, paymentMethod: o.paymentMethod, paymentNotes: o.paymentNotes,
           billDate: o.billDate,
         });
-        if (res.ok) await removeQueued(item.id!);
-        else await updateQueued({ ...item, attempts: item.attempts + 1, lastError: res.error });
+        // A saved order whose staff note did not save stays queued with the
+        // warning, so the next drain files the note (orderDrainOutcome).
+        const out = orderDrainOutcome(o, res);
+        if (out.remove) await removeQueued(item.id!);
+        else await updateQueued({ ...item, attempts: item.attempts + 1, lastError: out.lastError });
       }
     } finally {
       drainingRef.current = false;
