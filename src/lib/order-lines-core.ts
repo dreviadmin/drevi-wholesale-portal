@@ -131,6 +131,24 @@ export function billingTermsChanged(
 }
 
 /**
+ * Why Modify Order cannot move the discount or GST right now, or null when it
+ * can (review fix, Nov). The same two refusals updateOrderItems makes when the
+ * terms change — a live bill, then an issued credit note — said up front so
+ * the editor disables those controls instead of a save bouncing.
+ */
+export function billingTermsFrozenReason(
+  bills: { bill_number: string; cancelled_at?: string | null }[],
+  creditNotes: { note_number: string; status: string }[],
+): string | null {
+  const live = bills.filter((b) => !b.cancelled_at).map((b) => b.bill_number);
+  if (live.length === 1) return `Discount and GST are fixed by bill ${live[0]}. Cancel the bill to change them.`;
+  if (live.length > 1) return `Discount and GST are fixed by bills ${live.join(", ")}. Cancel the bills to change them.`;
+  const issued = creditNotes.filter((n) => n.status === "issued").map((n) => n.note_number);
+  if (issued.length > 0) return `A credit note was priced off these terms. Void ${issued.join(", ")} first.`;
+  return null;
+}
+
+/**
  * Totals for one bill, derived from the ORDER's billing terms:
  *   · a percent discount applies to every bill (it scales with the lines);
  *   · an absolute ₹ discount is a fixed pot — each bill consumes what earlier

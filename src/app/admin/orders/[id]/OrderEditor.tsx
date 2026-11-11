@@ -155,6 +155,7 @@ export function OrderEditor({
   advanceAmount,
   paymentMethod,
   paymentNotes,
+  termsFrozen = null,
 }: {
   orderId: string;
   status: string;
@@ -167,6 +168,9 @@ export function OrderEditor({
   advanceAmount: number | null;
   paymentMethod: string | null;
   paymentNotes: string | null;
+  /** Why discount and GST cannot move (a live bill / an issued credit note),
+   *  or null. The page computes it with billingTermsFrozenReason. */
+  termsFrozen?: string | null;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -210,7 +214,21 @@ export function OrderEditor({
       return { ...EMPTY_DRAFT, ...d, lines };
     },
   });
-  const { open, lines, dType, dValue, tMode, tRate, customRate, advance, payMethod, payNote } = draft;
+  // The order's stored discount and GST, in the editor's terms.
+  const storedTerms = useMemo((): Pick<EditorDraft, "dType" | "dValue" | "tMode" | "tRate" | "customRate"> => {
+    const storedRate = taxRate != null && taxRate > 0 ? taxRate : 5;
+    return {
+      dType: discountType ?? "none",
+      dValue: discountValue != null && discountValue > 0 ? String(discountValue) : "",
+      tMode: taxMode ?? "none",
+      tRate: TAX_RATES.includes(storedRate) ? storedRate : 5,
+      customRate: TAX_RATES.includes(storedRate) ? "" : String(storedRate),
+    };
+  }, [discountType, discountValue, taxMode, taxRate]);
+  const { open, lines, advance, payMethod, payNote } = draft;
+  // Frozen terms always read as stored — a draft saved before the bill was
+  // raised must not preview (or send) a discount the save would refuse.
+  const { dType, dValue, tMode, tRate, customRate } = termsFrozen ? storedTerms : draft;
   const setOpen = (v: boolean) => setDraft((d) => ({ ...d, open: v }));
   const setLines = (u: DraftLine[] | ((prev: DraftLine[]) => DraftLine[])) =>
     setDraft((d) => ({ ...d, lines: typeof u === "function" ? u(d.lines) : u }));
@@ -236,7 +254,6 @@ export function OrderEditor({
 
   // Open the editor seeded from the order as stored.
   function seedFromServer() {
-    const storedRate = taxRate != null && taxRate > 0 ? taxRate : 5;
     setDraft({
       open: true,
       lines: items.map((it, i) => {
@@ -265,11 +282,7 @@ export function OrderEditor({
         };
       }),
       // Billing terms start from the order's stored values.
-      dType: discountType ?? "none",
-      dValue: discountValue != null && discountValue > 0 ? String(discountValue) : "",
-      tMode: taxMode ?? "none",
-      tRate: TAX_RATES.includes(storedRate) ? storedRate : 5,
-      customRate: TAX_RATES.includes(storedRate) ? "" : String(storedRate),
+      ...storedTerms,
       advance: advanceAmount != null && advanceAmount > 0 ? String(advanceAmount) : "",
       payMethod: paymentMethod ?? "Cash",
       payNote: paymentNotes ?? "",
@@ -455,10 +468,13 @@ export function OrderEditor({
       return { kind: "add", sku: l.sku, qty, unitPrice, actualQty };
     });
     const terms: OrderEditTerms = {
-      taxMode: tMode,
-      taxRate: tMode === "none" ? null : effRate,
-      discountType: dType === "none" ? null : dType,
-      discountValue: dType === "none" ? null : Math.max(0, Number(dValue) || 0),
+      // Frozen: leave discount and GST out, so the server keeps the stored ones.
+      ...(termsFrozen ? {} : {
+        taxMode: tMode,
+        taxRate: tMode === "none" ? null : effRate,
+        discountType: dType === "none" ? null : dType,
+        discountValue: dType === "none" ? null : Math.max(0, Number(dValue) || 0),
+      }),
       advanceAmount: advanceNum,
       paymentMethod: advanceNum > 0 ? payMethod : null,
       paymentNotes: payNote || null,
@@ -531,7 +547,9 @@ export function OrderEditor({
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(26,26,26,0.45)" }} onClick={() => !isPending && closeEditor()}>
           <div
             className="w-full sm:max-w-xl max-h-modal overflow-y-auto"
-            style={{ background: palette.ivory, padding: "20px 18px", paddingBottom: "calc(20px + var(--kb-inset, 0px))" }}
+            // No bottom padding here: the sticky footer below carries it (and the
+            // keyboard inset), so it sits flush on the panel's bottom edge.
+            style={{ background: palette.ivory, padding: "20px 18px 0" }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
@@ -657,7 +675,13 @@ export function OrderEditor({
 
             {/* Billing — every option the cart page has, editable after the fact */}
             <div className="mt-5 p-3" style={{ background: palette.ivoryDeep }}>
-              <div className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}>Discount</div>
+              {termsFrozen && (
+                <p className="font-body mb-2" style={{ fontSize: 13, lineHeight: 1.5, color: palette.goldDeep }}>{termsFrozen}</p>
+              )}
+              {/* A disabled fieldset disables every button and input inside it:
+                  discount and GST lock together, Payment below stays open. */}
+              <fieldset disabled={!!termsFrozen} style={{ minWidth: 0, opacity: termsFrozen ? 0.5 : 1 }}>
+              <div className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.18em", color: palette.mutedGreige }}>Discount</div>
               <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                 {([["none", "None"], ["percent", "%"], ["absolute", "₹ Off"]] as const).map(([v, label]) => (
                   <button key={v} type="button" onClick={() => setDType(v)} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", padding: "6px 12px", color: dType === v ? palette.ivory : palette.softBlack, background: dType === v ? palette.black : "transparent", border: dType === v ? "none" : "1px solid rgba(26,26,26,0.2)" }}>{label}</button>
@@ -669,12 +693,12 @@ export function OrderEditor({
                     onChange={(e) => setDValue(e.target.value)}
                     placeholder={dType === "percent" ? "e.g. 10" : "e.g. 500"}
                     className="font-body bg-transparent outline-none"
-                    style={{ width: 84, border: "1px solid rgba(26,26,26,0.2)", padding: "6px 8px", fontSize: 12 }}
+                    style={{ width: 96, border: "1px solid rgba(26,26,26,0.2)", padding: "6px 8px", fontSize: 16 }}
                   />
                 )}
               </div>
 
-              <div className="font-body uppercase mt-3" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}>GST</div>
+              <div className="font-body uppercase mt-3" style={{ fontSize: 11, letterSpacing: "0.18em", color: palette.mutedGreige }}>GST</div>
               <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                 <button type="button" onClick={() => setTMode("none")} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", padding: "6px 11px", color: tMode === "none" ? palette.ivory : palette.softBlack, background: tMode === "none" ? palette.black : "transparent", border: tMode === "none" ? "none" : "1px solid rgba(26,26,26,0.2)" }}>No tax</button>
                 {TAX_RATES.map((r) => {
@@ -690,7 +714,7 @@ export function OrderEditor({
                   onBlur={() => { if (customRate.trim() !== "") setCustomRate(String(Math.min(18, Math.max(5, Number(customRate) || 5)))); }}
                   placeholder="Custom %"
                   className="font-body bg-transparent outline-none"
-                  style={{ width: 76, border: "1px solid rgba(26,26,26,0.2)", padding: "6px 8px", fontSize: 10 }}
+                  style={{ width: 104, border: "1px solid rgba(26,26,26,0.2)", padding: "6px 8px", fontSize: 16 }}
                 />
               </div>
               {tMode !== "none" && (
@@ -703,7 +727,9 @@ export function OrderEditor({
                 </div>
               )}
 
-              <div className="font-body uppercase mt-3" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}>Payment</div>
+              </fieldset>
+
+              <div className="font-body uppercase mt-3" style={{ fontSize: 11, letterSpacing: "0.18em", color: palette.mutedGreige }}>Payment</div>
               <div className="flex items-center gap-3 mt-2 flex-wrap">
                 <label className="flex items-center gap-2 font-body" style={{ fontSize: 12 }}>
                   Advance ₹
@@ -721,7 +747,7 @@ export function OrderEditor({
               <textarea rows={3} value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Payment note (optional)" className="w-full font-body bg-transparent outline-none mt-2" style={{ border: "1px solid rgba(26,26,26,0.2)", padding: "6px 8px", fontSize: 11, background: palette.ivory }} />
             </div>
 
-            <div className="mt-4 font-body" style={{ fontSize: 12, color: palette.softBlack }}>
+            <div className="mt-4 font-body" style={{ fontSize: 13, color: palette.softBlack }}>
               <div className="flex justify-between"><span>Subtotal</span><span>{formatINR(preview.subtotal)}</span></div>
               {preview.discount > 0 && (
                 <div className="flex justify-between mt-1" style={{ color: palette.goldDeep }}>
@@ -729,46 +755,57 @@ export function OrderEditor({
                 </div>
               )}
               {tMode === "exclusive" && <div className="flex justify-between mt-1"><span>GST @ {effRate}% (added)</span><span>{formatINR(preview.tax)}</span></div>}
-              <div className="flex justify-between items-baseline mt-2">
-                <span className="uppercase" style={{ fontSize: 10, letterSpacing: "0.18em" }}>New total</span>
+            </div>
+            <p className="font-body mt-3 mb-4" style={{ fontSize: 11, lineHeight: 1.5, color: palette.mutedGreige }}>
+              Qty and price are the real figures. “Bill as ×N” shows one piece as N cheaper units on the invoice (GST split) — the real count stays on record. Saving regenerates the invoice PDF.
+            </p>
+
+            {/* Sticky footer: New total, Balance due and Save stay in view on a
+                long order instead of sitting below the whole list. */}
+            <div
+              className="sticky bottom-0 font-body"
+              style={{
+                background: palette.ivory, borderTop: "1px solid rgba(26,26,26,0.12)", color: palette.softBlack, fontSize: 13,
+                margin: "0 -18px", padding: "10px 18px", paddingBottom: "calc(12px + var(--kb-inset, 0px) + env(safe-area-inset-bottom, 0px))",
+              }}
+            >
+              <div className="flex justify-between items-baseline">
+                <span className="uppercase" style={{ fontSize: 11, letterSpacing: "0.18em" }}>New total</span>
                 <span className="font-display" style={{ fontSize: 19, fontWeight: 600, color: palette.black }}>{formatINR(preview.total)}</span>
               </div>
-              {tMode === "inclusive" && <div className="text-right mt-0.5" style={{ fontSize: 9.5, color: palette.mutedGreige }}>includes GST @ {effRate}% = {formatINR(preview.tax)}</div>}
+              {tMode === "inclusive" && <div className="text-right mt-0.5" style={{ fontSize: 11, color: palette.mutedGreige }}>includes GST @ {effRate}% = {formatINR(preview.tax)}</div>}
               <div className="flex justify-between mt-1" style={{ color: advanceNum > 0 ? palette.goldDeep : palette.mutedGreige }}>
                 <span>Balance due</span><span style={{ fontWeight: 600 }}>{formatINR(Math.max(0, preview.total - advanceNum))}</span>
               </div>
               {advanceNum > preview.total && (
-                <p className="mt-1" style={{ fontSize: 10.5, color: palette.crimsonText }}>
+                <p className="mt-1" style={{ fontSize: 13, color: palette.crimsonText }}>
                   Advance exceeds the new total by {formatINR(advanceNum - preview.total)} — a refund will be owed.
                 </p>
               )}
-            </div>
 
-            {error && <p className="font-body mt-3" style={{ fontSize: 11.5, color: "#9b2c2c" }}>{error}</p>}
+              {error && <p role="alert" className="mt-2" style={{ fontSize: 13, color: "#9b2c2c" }}>{error}</p>}
 
-            <div className="flex gap-2 mt-5">
-              <button
-                type="button"
-                onClick={save}
-                disabled={isPending || lines.length === 0}
-                className="font-body uppercase flex-1 disabled:opacity-50"
-                style={{ fontSize: 10, letterSpacing: "0.16em", padding: "11px 0", background: palette.black, color: palette.ivory }}
-              >
-                {isPending ? "Saving…" : "Save Changes"}
-              </button>
-              <button
-                type="button"
-                onClick={closeEditor}
-                disabled={isPending}
-                className="font-body uppercase px-5"
-                style={{ fontSize: 10, letterSpacing: "0.16em", border: `1px solid ${palette.black}`, color: palette.black, background: "transparent" }}
-              >
-                Cancel
-              </button>
+              <div className="flex gap-2 mt-3">
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={isPending || lines.length === 0}
+                  className="font-body uppercase flex-1 disabled:opacity-50"
+                  style={{ fontSize: 11, letterSpacing: "0.16em", minHeight: 44, background: palette.black, color: palette.ivory }}
+                >
+                  {isPending ? "Saving…" : "Save Changes"}
+                </button>
+                <button
+                  type="button"
+                  onClick={closeEditor}
+                  disabled={isPending}
+                  className="font-body uppercase px-5"
+                  style={{ fontSize: 11, letterSpacing: "0.16em", minHeight: 44, border: `1px solid ${palette.black}`, color: palette.black, background: "transparent" }}
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
-            <p className="font-body mt-2" style={{ fontSize: 9.5, color: palette.mutedGreige }}>
-              Qty and price are the real figures. “Bill as ×N” shows one piece as N cheaper units on the invoice (GST split) — the real count stays on record. Saving regenerates the invoice PDF.
-            </p>
           </div>
         </div>
       )}

@@ -23,7 +23,7 @@ import { LineStateControls, GenerateBillBar } from "./LineBilling";
 import { SettleReturn, type SettleTarget } from "./SettleReturn";
 import { CancelBillButton } from "./CancelBillButton";
 import { ReturnPanel, ApplyCreditBar, type ReturnPanelLine } from "./ReturnPanel";
-import { effectiveLineState, billableLines, computeBillTotals, priorBillsConsumed } from "@/lib/order-lines-core";
+import { effectiveLineState, billableLines, computeBillTotals, priorBillsConsumed, billingTermsFrozenReason } from "@/lib/order-lines-core";
 import { loadOrderCredit, loadBuyerWallet } from "@/lib/credit-load";
 import { resolveDocumentParty } from "@/lib/buyer-snapshot";
 import type { Order, OrderBill } from "@/lib/types";
@@ -190,6 +190,9 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
   const billable = billableLines(o);
   // Same pots generateOrderBill will use — a cancelled bill gives its share back.
   const billableTotals = computeBillTotals(billable.map((b) => b.item), o, priorBillsConsumed(bills));
+  // Modify Order's discount and GST lock while a live bill or an issued credit
+  // note prices off them — the reason updateOrderItems would refuse with.
+  const termsFrozen = billingTermsFrozenReason(bills, credit.notes);
 
   // Catalog for the "add item" picker in the order editor (admins only).
   let pickerProducts: PickerProduct[] = [];
@@ -346,6 +349,7 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
               advanceAmount={o.advance_amount}
               paymentMethod={o.payment_method}
               paymentNotes={o.payment_notes}
+              termsFrozen={termsFrozen}
             />
             {/* The return control the owner never found lived per billed line,
                 below the fold, on a page that goes read-only after delivery.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { effectiveLineState, billableLines, pendingLines, computeBillTotals, billPreviewRows, priorBillsConsumed, billingTermsChanged, validateBillDate, billDateToIso, emptyBillReason, addedLineTakesStock } from "./order-lines-core";
+import { effectiveLineState, billableLines, pendingLines, computeBillTotals, billPreviewRows, priorBillsConsumed, billingTermsChanged, billingTermsFrozenReason, validateBillDate, billDateToIso, emptyBillReason, addedLineTakesStock } from "./order-lines-core";
 import type { OrderItem, OrderStatus } from "./types";
 
 const line = (over: Partial<OrderItem> = {}): OrderItem => ({
@@ -214,6 +214,33 @@ describe("billingTermsChanged — Modify Order's freeze refuses a MOVE, not a sa
     expect(billingTermsChanged({ discount_type: null, discount_value: null, tax_mode: "exclusive", tax_rate: null }, { discountType: null, discountValue: null, taxMode: "exclusive", taxRate: 5 })).toBe(true);
     // An unclamped 150% the save would clamp to 100%.
     expect(billingTermsChanged({ discount_type: "percent", discount_value: 150, tax_mode: "none", tax_rate: null }, { discountType: "percent", discountValue: 100, taxMode: "none", taxRate: null })).toBe(true);
+  });
+});
+
+describe("billingTermsFrozenReason — Modify Order says up front why discount and GST are locked", () => {
+  it("open when there is no live bill and no issued credit note", () => {
+    expect(billingTermsFrozenReason([], [])).toBeNull();
+    expect(billingTermsFrozenReason(
+      [{ bill_number: "DW-20261101-001-B1", cancelled_at: "2026-11-02T10:00:00Z" }],
+      [{ note_number: "CN-0007", status: "void" }],
+    )).toBeNull();
+  });
+  it("a live bill fixes them, and names the bill", () => {
+    expect(billingTermsFrozenReason([{ bill_number: "DW-20261101-001-B1", cancelled_at: null }], [])).toBe(
+      "Discount and GST are fixed by bill DW-20261101-001-B1. Cancel the bill to change them.",
+    );
+    expect(billingTermsFrozenReason(
+      [{ bill_number: "X-B1" }, { bill_number: "X-B2", cancelled_at: "2026-11-02T10:00:00Z" }, { bill_number: "X-B3", cancelled_at: null }],
+      [],
+    )).toBe("Discount and GST are fixed by bills X-B1, X-B3. Cancel the bills to change them.");
+  });
+  it("with no live bill, an issued credit note fixes them, and names it", () => {
+    expect(billingTermsFrozenReason([], [{ note_number: "CN-0007", status: "issued" }, { note_number: "CN-0008", status: "void" }])).toBe(
+      "A credit note was priced off these terms. Void CN-0007 first.",
+    );
+  });
+  it("a live bill is reported before a credit note, as the save checks them", () => {
+    expect(billingTermsFrozenReason([{ bill_number: "X-B1" }], [{ note_number: "CN-0007", status: "issued" }])).toContain("bill X-B1");
   });
 });
 
