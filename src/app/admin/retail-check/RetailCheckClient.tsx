@@ -290,11 +290,14 @@ export function RetailCheckClient({ products, retail, pricesAsOf, drivePhotos }:
                 </button>
               )}
             </div>
-            {priceBlock(current.sku)}
-            {!current.product && !retailBySku.has(current.sku.trim().toUpperCase()) && (
-              <p className="font-body mt-2" style={{ fontSize: 11, color: palette.mutedGreige, lineHeight: 1.5 }}>
-                Unknown SKU: check the tag, or ask an admin to log this garment&rsquo;s delivery so it gets a catalog row.
+            {/* An unknown tag has no product, so there is no MRP an admin could
+                set: only the tag advice shows, not "Retail price not set". */}
+            {!current.product && !retailBySku.has(current.sku.trim().toUpperCase()) ? (
+              <p className="font-body mt-3" style={{ fontSize: 12, color: palette.softBlack, lineHeight: 1.5 }}>
+                Unknown SKU: check the tag. To sell it now, bill it at the counter with + Add a custom item.
               </p>
+            ) : (
+              priceBlock(current.sku)
             )}
           </div>
         </div>
