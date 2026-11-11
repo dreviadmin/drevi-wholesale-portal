@@ -53,6 +53,7 @@ ap.add_argument('--target', choices=sorted(TARGETS), required=True)
 ap.add_argument('--env', action='append', metavar='FILE', help='env file to read (repeatable; replaces the defaults; relative paths are from the repo root)')
 ap.add_argument('--base', help='portal base URL (default: the target\'s)')
 ap.add_argument('--cleanup', action='store_true', help='sweep leftovers of earlier runs and exit')
+ap.add_argument('--skip-bag', action='store_true', help='skip the 8 checks on real storefront carts (when drevifashion.com answers the script with 429)')
 args = ap.parse_args()
 T = TARGETS[args.target]
 
@@ -259,11 +260,35 @@ def shopper():
     op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 
     def s(path, body=None):
-        req = urllib.request.Request(ORIGIN + path, method='POST' if body is not None else 'GET', data=json.dumps(body).encode() if body is not None else None,
-                                     headers={'User-Agent': 'Mozilla/5.0 (wallet e2e)', 'Accept': 'application/json', **({'Content-Type': 'application/json'} if body is not None else {})})
-        with op.open(req, timeout=60) as r:
-            return json.loads(r.read())
+        for attempt in range(3):
+            req = urllib.request.Request(ORIGIN + path, method='POST' if body is not None else 'GET', data=json.dumps(body).encode() if body is not None else None,
+                                         headers={'User-Agent': 'Mozilla/5.0 (wallet e2e)', 'Accept': 'application/json', **({'Content-Type': 'application/json'} if body is not None else {})})
+            try:
+                with op.open(req, timeout=60) as r:
+                    return json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                # The cart API rate-limits a burst (429 with Retry-After): wait as asked, then try again.
+                if e.code != 429 or attempt == 2:
+                    raise
+                wait = min(65.0, float(e.headers.get('Retry-After') or 30))
+                print(f'  (storefront asked to wait {wait:.0f} s on {path.split("?")[0]})')
+                time.sleep(wait)
     return s
+
+
+def bag_variant():
+    """(variant id, price in paise) of an in-stock ₹5,000+ variant on the store.
+
+    From the Admin API: since November 2026 the storefront's /products.json
+    answers a script with 429 (the cart endpoints still work).
+    """
+    d = gql('{ products(first:50, query:"status:active AND published_status:published", sortKey:UPDATED_AT, reverse:true){'
+            ' nodes{ variants(first:20){ nodes{ legacyResourceId price availableForSale } } } } }')['products']['nodes']
+    for p in d:
+        for v in p['variants']['nodes']:
+            if v['availableForSale'] and float(v['price']) >= 5000:
+                return int(v['legacyResourceId']), round(float(v['price']) * 100)
+    raise RuntimeError('no in-stock variant of ₹5,000 or more among the 50 latest products')
 
 
 def wallet_on(s):
@@ -274,6 +299,7 @@ def wallet_on(s):
 
 
 results = []
+SKIPPED = 0
 
 
 def check(name, cond, detail=''):
@@ -375,35 +401,38 @@ try:
     check('does not stack with other order discounts', a.get('combinesWith', {}).get('orderDiscounts') is False, a.get('combinesWith'))
 
     # --- the 3 Oct bag failure: Shopify shows a customer-limited discount only on an identified cart ---
-    prods = shopper()('/products.json?limit=60')['products']
-    var = next(v for p in prods for v in p['variants'] if v.get('available') and float(v['price']) >= 5000)
-    vid, price = var['id'], round(float(var['price']) * 100)
-    sA = shopper()
-    sA('/cart/add.js', {'items': [{'id': vid, 'quantity': 1}]})
-    tokA = sA('/cart.js')['token']
-    st, b = call('POST', '/api/wallet/redeem', {'subtotal_paise': price, 'amount_paise': 100000, 'cart_token': tokA}, token=tok(n))
-    check('use wallet with a real cart -> identified', st == 200 and b.get('identified') is True, (st, b))
-    apps, total = wallet_on(sA)
-    check('the cart shows "Drevi Wallet · <code>" −₹1,000 after one update', apps == [('Drevi Wallet · ' + b.get('code', ''), 100000)] and total == price - 100000, (apps, total, price))
-    st, m = call('GET', '/api/wallet/me?orders=0', token=tok(n))
-    check('/me reports the open reservation and ₹0 available', st == 200 and (m.get('redemption') or {}).get('code') == b.get('code') and m.get('wallet', {}).get('available_paise') == 0, (st, m.get('redemption'), m.get('wallet')))
-    sB = shopper()
-    sB('/cart/add.js', {'items': [{'id': vid, 'quantity': 1}]})
-    tokB = sB('/cart.js')['token']
-    check('a second device does not show it by itself', wallet_on(sB)[0] == [])
-    st, x = call('POST', '/api/wallet/cart', {'cart_token': tokB}, token=tok(n))
-    check('/api/wallet/cart identifies the second cart', st == 200 and x.get('identified') is True and (x.get('redemption') or {}).get('code') == b.get('code'), (st, x))
-    check('...and now it shows the line too', wallet_on(sB)[0] == [('Drevi Wallet · ' + b.get('code', ''), 100000)])
-    st, _ = call('DELETE', '/api/wallet/redeem', token=tok(n))
-    check('remove clears it from both carts on their next update', st == 200 and wallet_on(sA)[0] == [] and wallet_on(sB)[0] == [])
-    st, x = call('POST', '/api/wallet/cart', {'cart_token': tokA}, token=tok(n))
-    check('/api/wallet/cart with nothing open says so', st == 200 and x.get('identified') is False and x.get('redemption') is None, (st, x))
+    if args.skip_bag:
+        SKIPPED += 8
+        print('SKIP 8 checks on real storefront carts (--skip-bag)')
+    else:
+        vid, price = bag_variant()
+        sA = shopper()
+        sA('/cart/add.js', {'items': [{'id': vid, 'quantity': 1}]})
+        tokA = sA('/cart.js')['token']
+        st, b = call('POST', '/api/wallet/redeem', {'subtotal_paise': price, 'amount_paise': 100000, 'cart_token': tokA}, token=tok(n))
+        check('use wallet with a real cart -> identified', st == 200 and b.get('identified') is True, (st, b))
+        apps, total = wallet_on(sA)
+        check('the cart shows "Drevi Wallet · <code>" −₹1,000 after one update', apps == [('Drevi Wallet · ' + b.get('code', ''), 100000)] and total == price - 100000, (apps, total, price))
+        st, m = call('GET', '/api/wallet/me?orders=0', token=tok(n))
+        check('/me reports the open reservation and ₹0 available', st == 200 and (m.get('redemption') or {}).get('code') == b.get('code') and m.get('wallet', {}).get('available_paise') == 0, (st, m.get('redemption'), m.get('wallet')))
+        sB = shopper()
+        sB('/cart/add.js', {'items': [{'id': vid, 'quantity': 1}]})
+        tokB = sB('/cart.js')['token']
+        check('a second device does not show it by itself', wallet_on(sB)[0] == [])
+        st, x = call('POST', '/api/wallet/cart', {'cart_token': tokB}, token=tok(n))
+        check('/api/wallet/cart identifies the second cart', st == 200 and x.get('identified') is True and (x.get('redemption') or {}).get('code') == b.get('code'), (st, x))
+        check('...and now it shows the line too', wallet_on(sB)[0] == [('Drevi Wallet · ' + b.get('code', ''), 100000)])
+        st, _ = call('DELETE', '/api/wallet/redeem', token=tok(n))
+        check('remove clears it from both carts on their next update', st == 200 and wallet_on(sA)[0] == [] and wallet_on(sB)[0] == [])
+        st, x = call('POST', '/api/wallet/cart', {'cart_token': tokA}, token=tok(n))
+        check('/api/wallet/cart with nothing open says so', st == 200 and x.get('identified') is False and x.get('redemption') is None, (st, x))
     st, b = call('POST', '/api/wallet/redeem', {'subtotal_paise': 1599900, 'amount_paise': 100000, 'cart_token': 'auto-e2e'}, token=tok(n))
     check('a label instead of a token: still ok, just not identified', st == 200 and b.get('ok') and b.get('identified') is False, (st, b))
     red = sb(f"wallet_redemptions?account_id=eq.{acc['id']}&status=eq.open&select=id,code,shopify_discount_id,expires_at")
     did = red[0]['shopify_discount_id']
-    sA('/cart/clear.js', {})
-    sB('/cart/clear.js', {})
+    if not args.skip_bag:
+        sA('/cart/clear.js', {})
+        sB('/cart/clear.js', {})
     # re-apply replaces
     st, b = call('POST', '/api/wallet/redeem', {'subtotal_paise': 1599900, 'amount_paise': 50000}, token=tok(n))
     red2 = sb(f"wallet_redemptions?account_id=eq.{acc['id']}&status=eq.open&select=shopify_discount_id")
@@ -442,8 +471,9 @@ finally:
         for p in strip_and_delete(c):
             print(f'cleanup {c}: {p}')
     tc, wd, on_test = leftovers()
-    print(f"\n{sum(results)}/{len(results)} passed ({args.target}); test data removed; "
+    print(f"\n{sum(results)}/{len(results)} passed ({args.target}){f', {SKIPPED} skipped' if SKIPPED else ''}; test data removed; "
           f"active 'Drevi Wallet' automatic discounts left: {len(wd)} (on test customers: {len(on_test)}); wallet-test customers left: {len(tc)}")
     if tc or on_test:
         print('leftovers found: run again with --cleanup')
-sys.exit(0 if results and all(results) else 1)
+# 0: every check passed; 1: a check failed; 3: all that ran passed, some were skipped.
+sys.exit(1 if not results or not all(results) else 3 if SKIPPED else 0)

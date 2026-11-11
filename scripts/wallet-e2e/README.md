@@ -23,7 +23,8 @@ live store**:
 - Real automatic discounts titled `Drevi Wallet · WLT-…`, limited to those
   customers. They count toward Shopify's 25 active automatic discounts while
   they exist (a few seconds to a minute).
-- Two storefront carts on drevifashion.com (cookie jars, no orders placed).
+- Two storefront carts on drevifashion.com (cookie jars, no orders placed),
+  holding one in-stock ₹5,000+ variant that it picks through the Admin API.
 - Wallet rows (`wallet_accounts`, `wallet_ledger`, `wallet_redemptions`) in
   the target's Supabase project.
 
@@ -80,8 +81,20 @@ DEVELOPER_DIR=/Library/Developer/CommandLineTools python3 -E scripts/wallet-e2e/
   --env .env.local --env /Users/anshsarawagi/Documents/drevi/wholesale-portal/.env.development.local
 ```
 
-It exits 0 only when every check passed. If the last line reports leftovers
-on test customers, sweep them:
+It exits 0 when every check passed, 1 when one failed, and 3 when every
+check that ran passed but some were skipped.
+
+On 11 Nov 2026 drevifashion.com's edge (Cloudflare) began answering this
+script's HTTP client with 429 after a few runs in a row, first on
+`/products.json` (so the script now picks the variant through the Admin
+API), then on the cart endpoints too, while `curl` from the same Mac still
+got 200. The script waits once or twice when asked to, then fails. Do not
+try to get round the block. Wait and run again later (how long the block lasts is not known), or run
+the rest with `--skip-bag`, which skips the 8 checks on real carts (13 to
+20 below) and says so on the last line. A full pass needs the bag checks,
+so a `--skip-bag` run does not replace one.
+
+If the last line reports leftovers on test customers, sweep them:
 
 ```bash
 DEVELOPER_DIR=/Library/Developer/CommandLineTools python3 -E scripts/wallet-e2e/wallet_e2e.py --target dev --cleanup
