@@ -1241,8 +1241,11 @@ export function StudioBoard({
                 <div className="grid grid-cols-4 gap-2 mt-3">
                   {confirm.items.map((it) => (
                     <div key={it.candidateId}>
+                      {/* Lazy: the sheet now lists every candidate of a big
+                          selection, and an eager grid fired one photo request
+                          per candidate the moment it opened. */}
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={`/api/drive-photo?id=${encodeURIComponent(it.fileRef)}&s=200`} alt={it.label} style={{ width: "100%", aspectRatio: "4/5", objectFit: "cover", background: palette.ivoryDeep }} />
+                      <img src={`/api/drive-photo?id=${encodeURIComponent(it.fileRef)}&s=200`} alt={it.label} loading="lazy" decoding="async" style={{ width: "100%", aspectRatio: "4/5", objectFit: "cover", background: palette.ivoryDeep }} />
                       <div className="font-mono truncate" style={{ fontSize: 7, color: palette.mutedGreige }}>{it.label}</div>
                     </div>
                   ))}
