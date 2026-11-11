@@ -7,6 +7,7 @@ import { writeAuditEvent } from "@/lib/audit";
 import { applyMovement, canonicalFromMovements, recomputeCache, setStock, type Movement } from "@/lib/stock-ledger";
 import { autoMrpFrom, autoWholesaleFrom, clampMultiplier, DEFAULT_MARKUP_MULTIPLIER, DEFAULT_WHOLESALE_MULTIPLIER } from "@/lib/pricing";
 import { isOriginValue, isStyleValue } from "@/lib/studio/copy-prompt";
+import { shopifyFactsChanged, type ShopifyFacts } from "@/lib/studio/shopify-facts";
 import type { SupplyBlock } from "@/app/admin/receipts/new/delivery-actions";
 
 // Product Master editor actions (build guide §12.1). Every save is admin+,
@@ -91,6 +92,21 @@ async function writeGroupCost(admin: Admin, skus: string[], existing: VendorRow[
   return error ? fail(error.message) : { ok: true };
 }
 
+/**
+ * D3 for the Shopify push: it reads the facts and the price off the design
+ * row, so a save that moves them on a live product asks for a Re-push rather
+ * than leaving the shop on the old values with nothing saying so. Nothing is
+ * sent. Wholesale is left alone: its push reads none of these.
+ */
+async function flagShopifyRepush(admin: Admin, designId: string) {
+  await admin
+    .from("publish_targets")
+    .update({ state: "changes_pending" })
+    .eq("design_id", designId)
+    .eq("portal", "shopify")
+    .eq("state", "live");
+}
+
 export async function saveSpecs(
   designId: string,
   patch: { fabric: string; handwork: string; origin: string; style?: string; colorName?: string; specsVerified: boolean; supply?: SupplyBlock },
@@ -132,14 +148,20 @@ export async function saveSpecs(
     update.supply_updated_by = staff.email;
   }
 
+  // The facts as they were, so a live Shopify product can be flagged when the
+  // save moves one. An unreadable row counts as moved: a needless Re-push
+  // prompt costs a tap, a missed one leaves the shop wrong.
+  const { data: before } = await admin.from("designs").select("fabric, handwork, origin, color_name").eq("id", designId).maybeSingle();
   const { error } = await admin.from("designs").update(update).eq("id", designId);
   if (error) return fail(error.message);
+  if (!before || shopifyFactsChanged(before, update)) await flagShopifyRepush(admin, designId);
   await writeAuditEvent({
     eventType: "catalog_edit",
     staffUserId: staff.id,
     notes: `master specs ${designId} (verified=${patch.specsVerified}${supplyTouched ? ", supply updated" : ""})`,
   });
   revalidatePath(`/admin/studio/master/${designId}`);
+  revalidatePath(`/admin/studio/${designId}`);
   revalidatePath("/admin/studio");
   return { ok: true };
 }
@@ -172,7 +194,7 @@ export async function savePricing(
   const mult = clampMultiplier(patch.markupMultiplier, DEFAULT_MARKUP_MULTIPLIER);
   const wsMult = clampMultiplier(patch.wholesaleMultiplier, DEFAULT_WHOLESALE_MULTIPLIER);
 
-  const { data: design } = await admin.from("designs").select("base_sku, color").eq("id", designId).maybeSingle();
+  const { data: design } = await admin.from("designs").select("base_sku, color, auto_mrp, mrp_override").eq("id", designId).maybeSingle();
   if (!design) return fail("Design not found");
   const { rows, error: rowsErr } = await loadGroupRows(admin, design.base_sku, design.color);
   if (rowsErr || !rows) return fail(rowsErr ?? "Could not read the size variants");
@@ -232,6 +254,14 @@ export async function savePricing(
       ? `Compare-at price must be higher than the MRP (₹${Math.round(mrpAfterSave).toLocaleString("en-IN")}). Nothing was saved.`
       : "Set the MRP before a compare-at price. Nothing was saved.");
   }
+  // What Shopify sells at before this save, to tell whether the save moves it.
+  // The compare-at is read on its own, as the push reads it, so a database
+  // without 0076 still saves the rest of the card.
+  const priceBefore: ShopifyFacts = { auto_mrp: design.auto_mrp, mrp_override: design.mrp_override };
+  if (compareAt !== undefined) {
+    const { data: c } = await admin.from("designs").select("compare_at_price").eq("id", designId).maybeSingle();
+    priceBefore.compare_at_price = (c as { compare_at_price?: number | null } | null)?.compare_at_price ?? null;
+  }
 
   // The cost lands BEFORE the design row, so a design never carries autos
   // computed from a cost that failed to save.
@@ -254,6 +284,7 @@ export async function savePricing(
   // 42703: 0076 not applied yet. Say so plainly rather than a column error.
   if (error?.code === "42703" && compareAt !== undefined) return fail("The compare-at price needs database update 0076 first. Nothing was saved.");
   if (error) return fail(error.message);
+  if (shopifyFactsChanged(priceBefore, designPatch)) await flagShopifyRepush(admin, designId);
 
   // A design whose sizes are deliberately priced apart is NOT flattened by a
   // save that never named a wholesale price — someone nudging the MRP

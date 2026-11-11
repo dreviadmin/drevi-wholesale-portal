@@ -198,6 +198,17 @@ vi.mock("@/lib/pipeline/engines", async () => await import("../../lib/pipeline/e
 vi.mock("@/lib/studio/publish", async () => await import("../../lib/studio/publish"));
 vi.mock("@/lib/studio/copy", async () => await import("../../lib/studio/copy"));
 vi.mock("@/lib/attachment-name", async () => await import("../../lib/attachment-name"));
+// Product Master's saves (specs and pricing). The ledger is faked; the price
+// maths, the origin options and the Shopify-facts rule are the real ones.
+vi.mock("@/lib/stock-ledger", () => ({
+  applyMovement: async () => ({ ok: true }),
+  canonicalFromMovements: () => 0,
+  recomputeCache: async () => {},
+  setStock: async () => ({ ok: true, stock: 0 }),
+}));
+vi.mock("@/lib/pricing", async () => await import("../../lib/pricing"));
+vi.mock("@/lib/studio/copy-prompt", async () => await import("../../lib/studio/copy-prompt"));
+vi.mock("@/lib/studio/shopify-facts", async () => await import("../../lib/studio/shopify-facts"));
 // loadDesignDetail, rebuilt from the fake tables: what publish.ts reads.
 vi.mock("../../lib/studio/load", () => ({
   loadDesignDetail: async (designId: string) => {
@@ -225,6 +236,7 @@ vi.mock("../../lib/studio/load", () => ({
 const studio = await import("./studio/actions");
 const workbench = await import("./studio/[designId]/actions");
 const imageActions = await import("./studio/[designId]/image-actions");
+const master = await import("./studio/master/[designId]/actions");
 const { ingestDesigns } = await import("../../lib/studio/ingest");
 const publish = await import("../../lib/studio/publish");
 const drivePhoto = await import("../api/drive-photo/route");
@@ -431,6 +443,50 @@ describe("Changing what a live design publishes asks for a Re-push", () => {
     expect(r.ok).toBe(true);
     expect(db.design_angles[0].source_ref).toMatch(/^sb:front-src-/);
     expect(target(DESIGN, "wholesale")!.state).toBe("changes_pending");
+  });
+});
+
+describe("Product Master saves ask Shopify for a Re-push when they move what it shows", () => {
+  const facts = { fabric: "Silk", handwork: "Zardosi", origin: "curated", color_name: "Emerald" };
+  const specsPatch = { fabric: "Silk", handwork: "Zardosi", origin: "curated", colorName: "Emerald", specsVerified: true };
+  beforeEach(() => {
+    Object.assign(db.designs[0], facts, { auto_mrp: null, mrp_override: 5999, compare_at_price: null });
+  });
+
+  it("a fabric change flips the live Shopify target only", async () => {
+    expect(await master.saveSpecs(DESIGN, { ...specsPatch, fabric: "Georgette" })).toEqual({ ok: true });
+    expect(target(DESIGN, "shopify")!.state).toBe("changes_pending");
+    expect(target(DESIGN, "wholesale")!.state).toBe("live");
+    expect(target(OTHER, "shopify")!.state).toBe("live");
+  });
+
+  it("a supply-only save leaves Shopify live", async () => {
+    expect(await master.saveSpecs(DESIGN, { ...specsPatch, supply: { supplyNote: "Two weeks to make" } })).toEqual({ ok: true });
+    expect(db.designs[0].supply_note).toBe("Two weeks to make");
+    expect(target(DESIGN, "shopify")!.state).toBe("live");
+  });
+
+  it("a new MRP flips it; the same MRP again does not", async () => {
+    const pricing = { markupMultiplier: 2.5, mrpOverride: 5999, wholesaleMultiplier: 1.2, wholesaleOverride: null };
+    expect((await master.savePricing(DESIGN, pricing)).ok).toBe(true);
+    expect(target(DESIGN, "shopify")!.state).toBe("live");
+
+    expect((await master.savePricing(DESIGN, { ...pricing, mrpOverride: 6499 })).ok).toBe(true);
+    expect(db.designs[0].mrp_override).toBe(6499);
+    expect(target(DESIGN, "shopify")!.state).toBe("changes_pending");
+    expect(target(DESIGN, "wholesale")!.state).toBe("live");
+  });
+
+  it("a new compare-at flips it", async () => {
+    const r = await master.savePricing(DESIGN, { markupMultiplier: 2.5, mrpOverride: 5999, wholesaleMultiplier: 1.2, wholesaleOverride: null, compareAtPrice: 7999 });
+    expect(r.ok).toBe(true);
+    expect(target(DESIGN, "shopify")!.state).toBe("changes_pending");
+  });
+
+  it("a refused save changes nothing", async () => {
+    const r = await master.savePricing(DESIGN, { markupMultiplier: 2.5, mrpOverride: 6499, wholesaleMultiplier: 1.2, wholesaleOverride: null, compareAtPrice: 100 });
+    expect(r.ok).toBe(false);
+    expect(target(DESIGN, "shopify")!.state).toBe("live");
   });
 });
 
