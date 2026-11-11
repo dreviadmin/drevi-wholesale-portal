@@ -9,6 +9,7 @@ import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { useSort, SortTh, type SortAccessor } from "@/components/sortable";
 import { palette } from "@/lib/palette";
 import { formatINR } from "@/lib/format";
+import { ORDER_STATUS_LABEL } from "@/lib/order-status";
 import type { OrderStatus, OrderSource } from "@/lib/types";
 import { useToast } from "@/lib/use-toast";
 
@@ -27,11 +28,9 @@ export interface OrderRowDTO {
 }
 
 const STATUSES: OrderStatus[] = ["submitted", "confirmed", "packed", "out_for_delivery", "delivered", "fulfilled", "cancelled"];
-const STATUS_LABEL: Record<OrderStatus, string> = {
-  submitted: "Submitted", confirmed: "Confirmed", packed: "Packed",
-  out_for_delivery: "Out for delivery", delivered: "Delivered",
-  fulfilled: "Fulfilled", cancelled: "Cancelled",
-};
+// The shared map, except that staff filter chips must keep the legacy
+// 'fulfilled' status apart from Delivered; buyers see both as Delivered.
+const STATUS_LABEL: Record<OrderStatus, string> = { ...ORDER_STATUS_LABEL, fulfilled: "Fulfilled" };
 // UX sprint — bulk stage changes from the list. Each target names the stage
 // and which current statuses it applies to; ineligible selections are skipped
 // server-side too.

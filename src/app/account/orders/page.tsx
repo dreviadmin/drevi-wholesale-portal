@@ -5,6 +5,7 @@ import { SignOutButton } from "@/components/SignOutButton";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { ORDER_STATUS_LABEL } from "@/lib/order-status";
 import type { Order } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -12,16 +13,6 @@ export const dynamic = "force-dynamic";
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
 }
-
-const STATUS_LABEL: Record<string, string> = {
-  submitted: "Submitted",
-  confirmed: "Confirmed",
-  packed: "Being packed",
-  out_for_delivery: "Out for delivery",
-  delivered: "Delivered",
-  fulfilled: "Delivered",
-  cancelled: "Cancelled",
-};
 
 export default async function OrderHistoryPage() {
   const supabase = createServerSupabase();
@@ -74,8 +65,8 @@ export default async function OrderHistoryPage() {
               >
                 <div>
                   <div className="font-display" style={{ fontSize: 14, fontWeight: 600, color: palette.black }}>{o.order_number}</div>
-                  <div className="font-body mt-0.5" style={{ fontSize: 10, color: palette.mutedGreige, letterSpacing: "0.04em" }}>
-                    {fmtDate(o.submitted_at)} · {STATUS_LABEL[o.status] ?? o.status}
+                  <div className="font-body mt-0.5" style={{ fontSize: 11, color: palette.mutedGreige, letterSpacing: "0.04em" }}>
+                    {fmtDate(o.submitted_at)} · {ORDER_STATUS_LABEL[o.status] ?? o.status}
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
