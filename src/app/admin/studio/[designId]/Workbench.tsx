@@ -695,32 +695,40 @@ export function Workbench({ board, buckets: serverBuckets, angles, copy, pool, a
           const g = board.gates[portal];
           const t = board.targets.find((x) => x.portal === portal);
           const archiveStuck = portal === "shopify" && archiveFailed({ discontinuedAt: board.discontinuedAt, hasProduct: t?.hasProduct, error: t?.error });
+          const showBlockers = !g.ready && t?.enabled !== false && g.blockers.length > 0;
+          const canUnpublish = t?.state === "live" || t?.state === "changes_pending" || archiveStuck;
+          // The full list only earns a place behind the toggle when the line
+          // above it cannot show every blocker.
+          const moreLabel = [
+            showBlockers && g.blockers.length > 1 ? `All ${g.blockers.length} blockers` : "",
+            canUnpublish ? (portal === "shopify" && board.discontinuedAt ? "Archive" : "Unpublish") : "",
+          ].filter(Boolean).join(" · ");
           return (
-            <details key={portal} className="p-3" style={{ background: palette.ivory, border: `1px solid ${g.ready ? "#1F6B45" : "rgba(26,26,26,0.1)"}` }}>
-              <summary className="flex items-center justify-between cursor-pointer list-none">
-                <span className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.14em", color: palette.black, fontWeight: 600 }}>
+            // Push and the first blocker stay in view; only the full list and
+            // Unpublish sit behind a tap, so pushing never means hunting for
+            // the button first.
+            <div key={portal} className="p-3 flex flex-col" style={{ background: palette.ivory, border: `1px solid ${g.ready ? "#1F6B45" : "rgba(26,26,26,0.1)"}` }}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.12em", color: palette.black, fontWeight: 600 }}>
                   {portal === "wholesale" ? "Wholesale" : "Shopify"}
                 </span>
-                <span className="font-body" style={{ fontSize: 9, color: archiveStuck ? "#9C3A31" : t?.enabled === false ? palette.mutedGreige : g.ready ? "#1F6B45" : "#8a6d1a" }}>
+                <span className="font-body text-right" style={{ fontSize: 11, color: archiveStuck ? "#9C3A31" : t?.enabled === false ? palette.mutedGreige : g.ready ? "#1F6B45" : "#8a6d1a" }}>
                   {archiveStuck ? "archive failed" : t?.enabled === false ? "disabled" : t?.state === "live" ? "live" : t?.state === "changes_pending" ? "changes pending" : g.ready ? "ready" : `${g.blockers.length} blocker${g.blockers.length === 1 ? "" : "s"}`}
                 </span>
-              </summary>
+              </div>
               {archiveStuck && (
-                <p className="mt-1.5 font-body" style={{ fontSize: 10, color: "#9C3A31", lineHeight: 1.5, overflowWrap: "anywhere" }}>
+                <p className="mt-1.5 font-body" style={{ fontSize: 11, color: "#9C3A31", lineHeight: 1.5, overflowWrap: "anywhere" }}>
                   Archive failed: {t?.error}. Press Archive in Shopify to try again. It is safe if the product is already archived.
                 </p>
               )}
-              {!g.ready && t?.enabled !== false && (
-                <ul className="mt-1.5">
-                  {g.blockers.map((b) => (
-                    <li key={b} className="font-body" style={{ fontSize: 10, color: palette.mutedGreige, lineHeight: 1.7 }}>
-                      · {b}
-                      {b === "Wholesale price not set" && (
-                        <> — <Link href={specsHref} style={{ color: palette.goldDeep, textDecoration: "underline" }}>Set price</Link></>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+              {showBlockers && (
+                <p className="mt-1.5 font-body" style={{ fontSize: 11, color: palette.mutedGreige, lineHeight: 1.5 }}>
+                  {g.blockers[0]}
+                  {g.blockers.length > 1 && ` +${g.blockers.length - 1} more`}
+                  {g.blockers[0] === "Wholesale price not set" && (
+                    <> — <Link href={specsHref} style={{ color: palette.goldDeep, textDecoration: "underline" }}>Set price</Link></>
+                  )}
+                </p>
               )}
               <button
                 type="button"
@@ -732,42 +740,65 @@ export function Workbench({ board, buckets: serverBuckets, angles, copy, pool, a
                   )
                 }
                 className="mt-2 w-full font-body uppercase disabled:opacity-40"
-                style={{ fontSize: 8.5, letterSpacing: "0.12em", background: g.ready || t?.state === "changes_pending" ? palette.black : "transparent", color: g.ready || t?.state === "changes_pending" ? palette.ivory : palette.black, border: `1px solid ${palette.black}`, padding: "7px 0" }}
+                style={{ fontSize: 11, letterSpacing: "0.08em", minHeight: 44, background: g.ready || t?.state === "changes_pending" ? palette.black : "transparent", color: g.ready || t?.state === "changes_pending" ? palette.ivory : palette.black, border: `1px solid ${palette.black}`, padding: "6px 4px" }}
                 title={portal === "shopify" ? "Creates or updates a DRAFT product — photos, copy, the retail price, one tracked variant per size (SKU + barcode) and the five product metafields. Going live stays a human act inside Shopify." : undefined}
               >
                 {t?.state === "changes_pending" ? "Re-push" : "Push"} {portal === "wholesale" ? "wholesale" : "Shopify"}
               </button>
 
-              {/* Unpublish — only once it is actually out there (Ansh, 22 Sep).
-                  Wholesale takes it out of the buyer catalog; Shopify sets the
-                  product to DRAFT, because a published product cannot be
-                  un-created and deleting it would throw away the handle, the
-                  URL and anything a customer has bookmarked. Either way the
-                  work survives and a later push reconciles the same product.
-                  On a discontinued design this is the retry for an archive
-                  that failed, so it says Archive and does that (unpublish()
-                  reads the same stamp), from any state the failure left. */}
-              {(t?.state === "live" || t?.state === "changes_pending" || archiveStuck) && (
-                <button
-                  type="button"
-                  disabled={pending}
-                  onClick={() => {
-                    if (!window.confirm(
-                      portal === "wholesale"
-                        ? "Take this out of the buyer catalog? Staff can still bill it at the counter, and its photos and description stay — pushing again puts it straight back."
-                        : board.discontinuedAt
-                          ? "Archive this Shopify product? It disappears from the storefront but keeps its URL, variants and metafields. Restoring the design brings it back as a draft."
-                          : "Set this Shopify product back to DRAFT? It disappears from the storefront but keeps its URL, variants and metafields, and pushing again updates the same product.",
-                    )) return;
-                    run(() => unpublishDesign(board.id, portal), portal === "wholesale" ? "Taken out of the catalog" : board.discontinuedAt ? "Archived in Shopify" : "Set to draft in Shopify");
-                  }}
-                  className="mt-1.5 w-full font-body uppercase disabled:opacity-40"
-                  style={{ fontSize: 8.5, letterSpacing: "0.12em", background: "transparent", color: "#9C3A31", border: "1px solid #9C3A31", padding: "7px 0" }}
-                >
-                  {portal === "wholesale" ? "Unpublish from catalog" : board.discontinuedAt ? "Archive in Shopify" : "Unpublish (set to draft)"}
-                </button>
+              {moreLabel && (
+                // Open from the start when an archive failed: the retry is
+                // the one thing to do on this card.
+                <details className="group mt-1" open={archiveStuck || undefined}>
+                  <summary className="flex items-center justify-center gap-1 cursor-pointer list-none font-body" style={{ fontSize: 11, color: palette.goldDeep, minHeight: 44 }}>
+                    {moreLabel}
+                    <ChevronDown size={12} className="transition-transform group-open:rotate-180" />
+                  </summary>
+                  {showBlockers && g.blockers.length > 1 && (
+                    <ul>
+                      {g.blockers.map((b) => (
+                        <li key={b} className="font-body" style={{ fontSize: 11, color: palette.mutedGreige, lineHeight: 1.7 }}>
+                          · {b}
+                          {b === "Wholesale price not set" && (
+                            <> — <Link href={specsHref} style={{ color: palette.goldDeep, textDecoration: "underline" }}>Set price</Link></>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {/* Unpublish — only once it is actually out there (Ansh, 22 Sep).
+                      Wholesale takes it out of the buyer catalog; Shopify sets the
+                      product to DRAFT, because a published product cannot be
+                      un-created and deleting it would throw away the handle, the
+                      URL and anything a customer has bookmarked. Either way the
+                      work survives and a later push reconciles the same product.
+                      On a discontinued design this is the retry for an archive
+                      that failed, so it says Archive and does that (unpublish()
+                      reads the same stamp), from any state the failure left. */}
+                  {canUnpublish && (
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => {
+                        if (!window.confirm(
+                          portal === "wholesale"
+                            ? "Take this out of the buyer catalog? Staff can still bill it at the counter, and its photos and description stay — pushing again puts it straight back."
+                            : board.discontinuedAt
+                              ? "Archive this Shopify product? It disappears from the storefront but keeps its URL, variants and metafields. Restoring the design brings it back as a draft."
+                              : "Set this Shopify product back to DRAFT? It disappears from the storefront but keeps its URL, variants and metafields, and pushing again updates the same product.",
+                        )) return;
+                        run(() => unpublishDesign(board.id, portal), portal === "wholesale" ? "Taken out of the catalog" : board.discontinuedAt ? "Archived in Shopify" : "Set to draft in Shopify");
+                      }}
+                      className="mt-1.5 w-full font-body uppercase disabled:opacity-40"
+                      style={{ fontSize: 11, letterSpacing: "0.08em", minHeight: 44, background: "transparent", color: "#9C3A31", border: "1px solid #9C3A31", padding: "6px 4px" }}
+                    >
+                      {portal === "wholesale" ? "Unpublish from catalog" : board.discontinuedAt ? "Archive in Shopify" : "Unpublish (set to draft)"}
+                    </button>
+                  )}
+                </details>
               )}
-            </details>
+            </div>
           );
         })}
       </div>
