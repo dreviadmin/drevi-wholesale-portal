@@ -79,7 +79,9 @@ export default async function RetailBillPage({ searchParams }: { searchParams?: 
                 {!b.voided_at && (
                   <a href={`/admin/retail-bill?edit=${b.id}`} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.goldDeep, textDecoration: "underline" }}>Edit</a>
                 )}
-                {!b.voided_at && <VoidBillButton billId={b.id} billNumber={b.bill_number} />}
+                {/* Rendered for voided bills too, in the same slot — a void's
+                    warning stays up in its sheet after the row turns VOIDED. */}
+                <VoidBillButton billId={b.id} billNumber={b.bill_number} total={formatINR(b.total)} voided={!!b.voided_at} />
               </div>
             </div>
           ))}

@@ -93,7 +93,8 @@ export default async function OrdersPage({ searchParams }: { searchParams?: { st
                   {!b.voided_at && (
                     <Link href={`/admin/retail-bill?edit=${b.id}`} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.12em", color: palette.goldDeep, textDecoration: "underline" }}>Edit</Link>
                   )}
-                  {!b.voided_at && <VoidBillButton billId={b.id} billNumber={b.bill_number} />}
+                  {/* Rendered for voided bills too — see VoidBillButton. */}
+                  <VoidBillButton billId={b.id} billNumber={b.bill_number} total={formatINR(b.total)} voided={!!b.voided_at} />
                 </div>
               </div>
             ))}
