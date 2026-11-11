@@ -105,3 +105,28 @@ describe("backup redaction", () => {
     expect(readFileSync(SCRIPT_PATH, "utf8")).toMatch(/out\[t\]\s*=\s*redact\(t, rows\)/);
   });
 });
+
+// The hourly workflow stores the export as a repo artifact, and artifacts can
+// be downloaded by anyone who can see the repo. So only the gpg-encrypted file
+// is ever uploaded; with no BACKUP_PASSPHRASE the run stores nothing and says
+// so, but still ends green so it does not email a failure every hour.
+describe("backup workflow", () => {
+  const WORKFLOW = readFileSync(join(__dirname, "..", "..", ".github", "workflows", "backup.yml"), "utf8");
+  const live = WORKFLOW.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
+  const encrypt = live.slice(live.indexOf("- name: Encrypt"), live.indexOf("- name: Store artifact"));
+  const store = live.slice(live.indexOf("- name: Store artifact"));
+
+  it("only ever points the upload at the encrypted file", () => {
+    expect([...live.matchAll(/ARTIFACT=([^"\s]+)/g)].map((m) => m[1])).toEqual(["backup.json.gz.gpg"]);
+    expect(store).toContain("if: ${{ env.ARTIFACT == 'backup.json.gz.gpg' }}");
+    expect(store).toContain("path: ${{ env.ARTIFACT }}");
+  });
+
+  it("without the passphrase it uploads nothing, flags an error and ends green", () => {
+    const orElse = encrypt.slice(encrypt.indexOf("else\n"), encrypt.search(/\n\s*fi\n/));
+    expect(orElse).toContain("::error");
+    expect(orElse).toContain("no backup artifact was stored this run");
+    expect(orElse).not.toMatch(/exit\s+[1-9]/);
+    expect(orElse).not.toContain("ARTIFACT=");
+  });
+});
