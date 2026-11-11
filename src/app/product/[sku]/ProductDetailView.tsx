@@ -3,9 +3,9 @@
 import { useState, useTransition } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ChevronLeft, ShoppingBag, Minus, Plus } from "lucide-react";
 import { ProductImage } from "@/components/ProductImage";
+import { useInAppBack } from "@/components/InAppHistory";
 import { addToCart } from "@/app/cart/actions";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -24,7 +24,7 @@ export function ProductDetailView({
    * page.tsx can be dropped without touching this file again.
    */
 }) {
-  const router = useRouter();
+  const back = useInAppBack("/home");
   const images = product.image_urls ?? [];
   const [selected, setSelected] = useState(0);
   const [count, setCount] = useState(initialCartCount);
@@ -60,12 +60,14 @@ export function ProductDetailView({
         className="flex items-center justify-between px-4 py-3.5 sticky top-0 z-10"
         style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.08)" }}
       >
-        <button type="button" onClick={() => router.back()} aria-label="Back" className="flex items-center" style={{ color: palette.black }}>
+        {/* router.back() alone did nothing when the product was opened straight
+            from a WhatsApp link: nothing in the app was behind it. Home then. */}
+        <button type="button" onClick={back} aria-label="Back" className="flex items-center justify-center" style={{ color: palette.black, padding: 11, margin: -11 }}>
           <ChevronLeft size={22} strokeWidth={1.5} />
         </button>
-        <div className="font-display" style={{ fontSize: 16, letterSpacing: "0.35em", color: palette.black, fontWeight: 600 }}>
+        <Link href="/home" aria-label="Home" className="font-display" style={{ fontSize: 16, letterSpacing: "0.35em", color: palette.black, fontWeight: 600, padding: "6px 4px" }}>
           DREVI
-        </div>
+        </Link>
         <Link href="/cart" aria-label="Cart" className="relative" style={{ color: palette.black }}>
           <ShoppingBag size={19} strokeWidth={1.5} />
           {count > 0 && (

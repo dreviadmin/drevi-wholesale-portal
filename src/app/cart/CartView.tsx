@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useFormState, useFormStatus } from "react-dom";
 import { ChevronLeft, Menu, Minus, Plus, X } from "lucide-react";
 import { BuyerNavDrawer } from "@/components/BuyerNavDrawer";
+import { useInAppBack } from "@/components/InAppHistory";
 import { setQty, setSpecialQty, removeFromCart, submitOrder, type SubmitState } from "./actions";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -60,6 +61,7 @@ export function CartView({
   maxLeadDays?: number;
 }) {
   const router = useRouter();
+  const back = useInAppBack("/catalog");
   const [menuOpen, setMenuOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [state, formAction] = useFormState<SubmitState, FormData>(submitOrder, {});
@@ -93,9 +95,13 @@ export function CartView({
           className="flex items-center justify-between px-4 py-3.5"
           style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.08)" }}
         >
-          <Link href="/catalog" aria-label="Back to catalog" style={{ color: palette.black }}>
+          {/* Back to wherever the cart was opened from (home, catalog, a
+              product); straight to the catalog when nothing in the app is
+              behind it. The negative margin widens the tap area to ~44px
+              without moving the bar. */}
+          <button type="button" onClick={back} aria-label="Back" className="flex items-center justify-center" style={{ color: palette.black, padding: 11, margin: -11 }}>
             <ChevronLeft size={22} strokeWidth={1.5} />
-          </Link>
+          </button>
           <div className="font-body uppercase" style={{ fontSize: 12, letterSpacing: "0.3em", color: palette.black }}>
             Cart
           </div>

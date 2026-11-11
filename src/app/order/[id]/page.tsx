@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import { ChevronLeft } from "lucide-react";
 import { SignOutButton } from "@/components/SignOutButton";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -120,10 +121,16 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
     <div className="min-h-screen" style={{ background: palette.ivory }}>
       {/* The left slot was an 18px spacer balancing an 18px icon. The sign-out
           control carries words now, so both flanks grow instead — the wordmark
-          stays centred rather than drifting a thumb's width to the left. */}
+          stays centred rather than drifting a thumb's width to the left. The
+          left flank now holds the way back to the buyer's orders, and the
+          wordmark goes home (Oct review: this page had no way out). */}
       <div className="px-4 py-3.5 sticky top-0 z-10 flex items-center" style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.08)" }}>
-        <span className="flex-1" />
-        <div className="font-display whitespace-nowrap" style={{ fontSize: 16, letterSpacing: "0.35em", color: palette.black, fontWeight: 600 }}>DREVI</div>
+        <div className="flex-1 flex">
+          <Link href="/account/orders" aria-label="My orders" className="flex items-center justify-center" style={{ color: palette.black, padding: 11, margin: -11 }}>
+            <ChevronLeft size={22} strokeWidth={1.5} />
+          </Link>
+        </div>
+        <Link href="/home" aria-label="Home" className="font-display whitespace-nowrap" style={{ fontSize: 16, letterSpacing: "0.35em", color: palette.black, fontWeight: 600, padding: "6px 4px" }}>DREVI</Link>
         <div className="flex-1 flex justify-end">
           <SignOutButton />
         </div>

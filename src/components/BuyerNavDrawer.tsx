@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ClipboardList, Store, ShoppingBag, Wallet, UserRound } from "lucide-react";
+import { ClipboardList, House, Store, ShoppingBag, Wallet, UserRound } from "lucide-react";
 import { SignOutButton } from "@/components/SignOutButton";
 import { palette } from "@/lib/palette";
 
@@ -28,7 +28,10 @@ const ROW_STYLE = {
 
 // Credit and details sit behind their own doors rather than inside the wallet
 // card, so the way in exists even when there is no credit and nothing to fix.
+// Home leads: from the catalog or the cart there was no way back to /home but
+// the browser's own Back (Oct review).
 const LINKS = [
+  { href: "/home", label: "Home", Icon: House },
   { href: "/catalog", label: "Catalog", Icon: Store },
   { href: "/cart", label: "Cart", Icon: ShoppingBag },
   { href: "/account/orders", label: "My Orders", Icon: ClipboardList },

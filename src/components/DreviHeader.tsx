@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Menu, X, Search, ShoppingBag } from "lucide-react";
 import { BuyerNavDrawer } from "@/components/BuyerNavDrawer";
 import { palette } from "@/lib/palette";
@@ -29,9 +30,10 @@ export function DreviHeader({
         <button type="button" onClick={() => setMenuOpen((v) => !v)} aria-label="Menu">
           {menuOpen ? <X size={20} color={palette.black} strokeWidth={1.5} /> : <Menu size={20} color={palette.black} strokeWidth={1.5} />}
         </button>
-        <div className="font-display" style={{ fontSize: 17, letterSpacing: "0.35em", color: palette.black, fontWeight: 600 }}>
+        {/* The wordmark goes home, as it does on the product and order pages. */}
+        <Link href="/home" aria-label="Home" className="font-display" style={{ fontSize: 17, letterSpacing: "0.35em", color: palette.black, fontWeight: 600, padding: "6px 4px" }}>
           DREVI
-        </div>
+        </Link>
         <div className="flex items-center gap-3">
           {onSearch && (
             <button type="button" onClick={onSearch} aria-label="Search">

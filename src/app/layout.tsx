@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Playfair_Display, Cormorant_Garamond, Montserrat } from "next/font/google";
 import { KeyboardInset } from "@/components/KeyboardInset";
 import { InstallPrompt } from "@/components/InstallPrompt";
+import { InAppHistory } from "@/components/InAppHistory";
 import "./globals.css";
 
 const playfair = Playfair_Display({
@@ -61,6 +62,8 @@ export default function RootLayout({
     <html lang="en" className={`${playfair.variable} ${cormorant.variable} ${montserrat.variable}`}>
       <body className="font-body antialiased bg-page-bg text-black">
         <KeyboardInset />
+        {/* Counts the in-app pages behind this one, for the buyer Back buttons. */}
+        <InAppHistory />
         {children}
         <InstallPrompt />
       </body>
