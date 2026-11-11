@@ -4,8 +4,9 @@ import { useEffect, useMemo, useRef, useState, useTransition, type Dispatch, typ
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { withFrom } from "@/components/BackLink";
-import { Search, X, ScanLine, Plus, Minus, Camera, Image as ImageIcon, Trash2, ChevronDown, Check, Package, AlertTriangle } from "lucide-react";
+import { Search, X, ScanLine, Plus, Minus, Camera, Image as ImageIcon, ImageOff, Trash2, ChevronDown, Check, Package, AlertTriangle } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
+import { ZoomImage } from "@/components/Lightbox";
 import { KeyboardInset } from "@/components/KeyboardInset";
 import { HsnInput } from "@/components/admin/HsnInput";
 import { ColorCombobox } from "@/components/admin/ColorCombobox";
@@ -22,6 +23,7 @@ import { billMismatch } from "@/lib/gst";
 import type { LiveVocab } from "@/lib/sku/vocab-live";
 import { queueTray } from "@/app/admin/sku-generator/labels";
 import { resolveGarmentDesign, uploadIdentPhoto, saveDelivery, quickAddVendor, type SupplyBlock, type SavedDesign } from "./delivery-actions";
+import { uploadReceiptBill } from "../actions";
 import { downscalePhoto } from "@/lib/downscale-photo";
 import { useToast } from "@/lib/use-toast";
 
@@ -92,6 +94,10 @@ type Gst = { mode: "kaccha" | "pakka" | null; rate: number | null; inclusive: bo
 interface DeliveryDraft { vendorId: string; receiptDate: string; billAmount: string; gst: Gst; notes: string; garments: Garment[]; clientRef: string }
 
 const istToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+// Bill photo, as the receipt editor does it: long edge after downscaling, and
+// what an upload the server never ran (too large, or a lapsed session) reports.
+const BILL_MAX_EDGE = 2000;
+const BILL_REFUSED = "the photo was not accepted (too large, or your session expired)";
 // clientRef lives in the draft: saveDelivery is idempotent on it, so a retry
 // after a refresh resolves to the same receipt. Minted fresh per empty form.
 const emptyDraft = (): DeliveryDraft => ({
@@ -137,6 +143,17 @@ export function DeliveryIntake({
   const [vendorQuery, setVendorQuery] = useState("");
   const [newVendor, setNewVendor] = useState<{ name: string; phone: string } | null>(null);
   const [headerOpen, setHeaderOpen] = useState(true);
+  // The vendor's bill, photographed at intake. Kept in state only — a File
+  // cannot go in the draft — and uploaded once the receipt exists.
+  const [billFile, setBillFile] = useState<File | null>(null);
+  const [billPreview, setBillPreview] = useState<string | null>(null);
+  const billCameraRef = useRef<HTMLInputElement>(null);
+  const billGalleryRef = useRef<HTMLInputElement>(null);
+  function pickBill(f: File | null) {
+    if (billPreview) URL.revokeObjectURL(billPreview);
+    setBillPreview(f ? URL.createObjectURL(f) : null);
+    setBillFile(f);
+  }
   // The open capture sheet is its own draft so a half-captured garment survives
   // a refresh: a restored sheet reopens itself; Cancel / Add to delivery clear it.
   // Only a sheet with progress is worth restoring — an untouched blank one
@@ -241,6 +258,15 @@ export function DeliveryIntake({
       });
       if (!res) { flash("Session expired — sign in again; the delivery is kept as a draft"); return; }
       if (!res.ok) { flash(res.error ?? "Save failed"); return; }
+      // The bill photo goes up once the receipt exists, before anything
+      // navigates away. A failed upload never undoes the save: it is said
+      // plainly, and the photo can be added from the receipt page.
+      if (billFile && res.receiptId) {
+        const fd = new FormData();
+        fd.append("bill", await downscalePhoto(billFile, BILL_MAX_EDGE));
+        const up = await uploadReceiptBill(res.receiptId, fd).catch(() => undefined);
+        if (!up?.ok) window.alert(`${res.receiptNumber} saved, but the bill photo failed to upload: ${up?.error ?? BILL_REFUSED}. Add it again from the receipt page.`);
+      }
       // §5.6 — Save & print tags stages EXACTLY this delivery's SKUs; Save only
       // queues them behind whatever the device already has in the tray.
       queueTray(res.skus ?? [], thenPrint ? "replace" : "merge");
@@ -274,6 +300,7 @@ export function DeliveryIntake({
     setVendorQuery("");
     setNewVendor(null);
     setHeaderOpen(true);
+    pickBill(null);
   }
 
   const label = (t: string) => (
@@ -363,7 +390,7 @@ export function DeliveryIntake({
 
   // Discarding the restored delivery must also reopen the vendor block the
   // restore collapsed, or the empty form would sit behind a "—" chip.
-  const headerDraftMeta: DraftMeta = { ...draftMeta, discard: () => { draftMeta.discard(); setHeaderOpen(true); } };
+  const headerDraftMeta: DraftMeta = { ...draftMeta, discard: () => { draftMeta.discard(); setHeaderOpen(true); pickBill(null); } };
 
   return (
     <div className="pb-40">
@@ -417,6 +444,30 @@ export function DeliveryIntake({
             {/* A date field too, read-only, so both dates read in the phone's own format. */}
             <div>{label("Entry date")}<input type="date" value={entryDate} disabled readOnly aria-label="Entry date" className="font-body" style={{ ...input, background: palette.ivoryDeep, color: palette.mutedGreige }} /></div>
             <div>{label("Bill amount (optional)")}<input type="number" min="0" value={billAmount} onChange={(e) => setBillAmount(e.target.value)} className="font-body" style={input} /></div>
+            {/* Bill photo — the same evidence the receipt editor takes. */}
+            <div className="col-span-2">
+              <span className="font-body uppercase block" style={{ fontSize: 11, letterSpacing: "0.12em", color: palette.mutedGreige, marginBottom: 4 }}>Bill photo (optional)</span>
+              <input ref={billCameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pickBill(f); e.target.value = ""; }} />
+              <input ref={billGalleryRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pickBill(f); e.target.value = ""; }} />
+              <div className="flex items-center gap-2 flex-wrap">
+                {billPreview ? (
+                  <ZoomImage src={billPreview} alt="Vendor bill" width={44} height={56} />
+                ) : (
+                  <span className="flex items-center justify-center flex-shrink-0" style={{ width: 44, height: 56, background: palette.ivoryDeep }}><ImageOff size={14} color={palette.mutedGreige} /></span>
+                )}
+                <button type="button" onClick={() => billCameraRef.current?.click()} className="flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.08em", border: `1px solid ${palette.black}`, color: palette.black, minHeight: 44, padding: "0 11px" }}>
+                  <Camera size={14} color={palette.goldDeep} /> {billFile ? "Retake" : "Camera"}
+                </button>
+                <button type="button" onClick={() => billGalleryRef.current?.click()} className="flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.08em", border: `1px solid ${palette.black}`, color: palette.black, minHeight: 44, padding: "0 11px" }}>
+                  <ImageIcon size={14} color={palette.goldDeep} /> Gallery
+                </button>
+                {billFile && (
+                  <button type="button" onClick={() => pickBill(null)} aria-label="Remove bill photo" className="flex items-center justify-center" style={{ width: 44, height: 44 }}>
+                    <X size={16} color={palette.mutedGreige} />
+                  </button>
+                )}
+              </div>
+            </div>
             <div className="col-span-2 flex flex-wrap items-center gap-1.5">
               {(["kaccha", "pakka"] as const).map((m) => (
                 <button key={m} type="button" onClick={() => setGst((g) => ({ ...g, mode: g.mode === m ? null : m }))} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", padding: "6px 10px", background: gst.mode === m ? palette.black : "transparent", color: gst.mode === m ? palette.ivory : palette.black, border: gst.mode === m ? "none" : "1px solid rgba(26,26,26,0.2)" }}>
@@ -447,7 +498,7 @@ export function DeliveryIntake({
         <button type="button" onClick={() => setHeaderOpen(true)} className="w-full flex items-center gap-2 p-3 text-left" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
           <Package size={14} color={palette.goldDeep} />
           <span className="font-body flex-1" style={{ fontSize: 12.5, color: palette.black }}>
-            {vendor?.name ?? "—"} · {receiptDate}{billNum > 0 ? ` · ${formatINR(billNum)}` : ""}
+            {vendor?.name ?? "—"} · {receiptDate}{billNum > 0 ? ` · ${formatINR(billNum)}` : ""}{billFile ? " · bill attached" : ""}
           </span>
           <ChevronDown size={14} color={palette.mutedGreige} />
         </button>
