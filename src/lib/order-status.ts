@@ -24,12 +24,19 @@ export const ORDER_STATUS_HEADING: Record<OrderStatus, string> = {
   cancelled: "Order cancelled",
 };
 
-export type OrderTimelineInput = Pick<Order, "submitted_at" | "confirmed_at" | "packed_at" | "out_for_delivery_at" | "delivered_at">;
+export type OrderTimelineInput = Pick<Order, "submitted_at" | "confirmed_at" | "packed_at" | "out_for_delivery_at" | "delivered_at"> &
+  Partial<Pick<Order, "status">>;
 
 export interface OrderTimelineStep {
   status: OrderStatus;
   label: string;
   at: string;
+  /**
+   * The step the order is at now. The last stamped step is not always it: a
+   * cancelled order's trail is history (no step is current), and a legacy
+   * 'fulfilled' order has no delivered stamp, so its trail stops short.
+   */
+  current: boolean;
 }
 
 const TIMELINE: { status: OrderStatus; key: keyof OrderTimelineInput }[] = [
@@ -47,10 +54,11 @@ const TIMELINE: { status: OrderStatus; key: keyof OrderTimelineInput }[] = [
  * under the old 'fulfilled' status never got a delivered_at.
  */
 export function orderTimeline(o: OrderTimelineInput): OrderTimelineStep[] {
+  const now = o.status === "fulfilled" ? "delivered" : o.status;
   const steps: OrderTimelineStep[] = [];
   for (const { status, key } of TIMELINE) {
     const at = o[key];
-    if (at) steps.push({ status, label: ORDER_STATUS_LABEL[status], at });
+    if (at) steps.push({ status, label: ORDER_STATUS_LABEL[status], at, current: status === now });
   }
   return steps;
 }

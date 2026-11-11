@@ -33,7 +33,8 @@ describe("order status words", () => {
 
 describe("orderTimeline", () => {
   it("a new order has the one step", () => {
-    expect(orderTimeline(none)).toEqual([{ status: "submitted", label: "Submitted", at: none.submitted_at }]);
+    expect(orderTimeline(none)).toEqual([{ status: "submitted", label: "Submitted", at: none.submitted_at, current: false }]);
+    expect(orderTimeline({ ...none, status: "submitted" })[0].current).toBe(true);
   });
 
   it("lists every stamped step in lifecycle order", () => {
@@ -63,5 +64,24 @@ describe("orderTimeline", () => {
   it("treats an empty string like a missing stamp", () => {
     const steps = orderTimeline({ ...none, packed_at: "" });
     expect(steps.map((s) => s.status)).toEqual(["submitted"]);
+  });
+
+  it("marks the step the order is at now", () => {
+    const steps = orderTimeline({ ...none, status: "packed", confirmed_at: "2026-10-02T05:00:00Z", packed_at: "2026-10-03T05:00:00Z" });
+    expect(steps.map((s) => s.current)).toEqual([false, false, true]);
+  });
+
+  it("a cancelled order's trail has no current step", () => {
+    // Cancelled after confirming: the trail must not read as still Confirmed.
+    const steps = orderTimeline({ ...none, status: "cancelled", confirmed_at: "2026-10-02T05:00:00Z" });
+    expect(steps.map((s) => s.status)).toEqual(["submitted", "confirmed"]);
+    expect(steps.some((s) => s.current)).toBe(false);
+  });
+
+  it("a legacy fulfilled order counts as at the delivered step", () => {
+    const stampless = orderTimeline({ ...none, status: "fulfilled", confirmed_at: "2026-10-02T05:00:00Z" });
+    expect(stampless.some((s) => s.current)).toBe(false);
+    const stamped = orderTimeline({ ...none, status: "fulfilled", confirmed_at: "2026-10-02T05:00:00Z", delivered_at: "2026-10-03T05:00:00Z" });
+    expect(stamped.map((s) => s.current)).toEqual([false, false, true]);
   });
 });

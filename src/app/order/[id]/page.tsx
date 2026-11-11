@@ -149,13 +149,16 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
                 {steps.map((s, i) => {
                   const last = i === steps.length - 1;
                   return (
-                    <li key={s.status} className="flex gap-3">
+                    <li key={s.status} className="flex gap-3" aria-current={s.current ? "step" : undefined}>
                       <div className="flex flex-col items-center flex-shrink-0" style={{ width: 9 }}>
-                        <span aria-hidden style={{ width: 9, height: 9, borderRadius: 9, marginTop: 5, background: last ? palette.gold : palette.goldDeep }} />
+                        {/* Highlight the step the order is AT, not merely the
+                            last stamped one: a cancelled order's trail stops at
+                            Confirmed or Packed, and must not read as still there. */}
+                        <span aria-hidden style={{ width: 9, height: 9, borderRadius: 9, marginTop: 5, background: s.current ? palette.gold : palette.goldDeep }} />
                         {!last && <span aria-hidden className="flex-1" style={{ width: 1, background: palette.goldDeep, opacity: 0.45 }} />}
                       </div>
                       <div className="flex-1 flex items-baseline justify-between gap-3 font-body" style={{ fontSize: 13, lineHeight: 1.5, paddingBottom: last ? 0 : 10 }}>
-                        <span style={{ color: palette.black, fontWeight: last ? 600 : 400 }}>{s.label}</span>
+                        <span style={{ color: palette.black, fontWeight: s.current ? 600 : 400 }}>{s.label}</span>
                         <span style={{ color: palette.mutedGreige }}>{fmtDate(s.at)}</span>
                       </div>
                     </li>
