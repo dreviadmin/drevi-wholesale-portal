@@ -71,12 +71,12 @@ export function CredentialModal({
       <div className="w-full max-w-md" style={{ background: palette.ivory, padding: 24 }}>
         <div className="flex items-start justify-between">
           <div>
-            <div className="font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.22em", color: palette.gold }}>Set Credentials</div>
+            <div className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.22em", color: palette.gold }}>Set Credentials</div>
             <div className="font-display mt-1" style={{ fontSize: 16, fontWeight: 600, color: palette.black }}>
               {[buyer.business_name, buyer.owner_name].filter(Boolean).join(" · ")}
             </div>
           </div>
-          <button type="button" onClick={() => onClose(!!activated)} aria-label="Close" style={{ color: palette.mutedGreige }}><X size={18} /></button>
+          <button type="button" onClick={() => onClose(!!activated)} aria-label="Close" className="flex items-center justify-center shrink-0 -mt-3 -mr-3" style={{ color: palette.mutedGreige, width: 44, height: 44 }}><X size={18} /></button>
         </div>
 
         {activated ? (
@@ -96,18 +96,18 @@ export function CredentialModal({
                 <MessageCircle size={12} /> Share login on WhatsApp
               </button>
             </div>
-            <button type="button" onClick={() => onClose(true)} className="w-full mt-5 font-body uppercase" style={{ background: palette.gold, color: palette.black, fontSize: 11, letterSpacing: "0.2em", padding: "12px 0" }}>Done</button>
+            <button type="button" onClick={() => onClose(true)} className="w-full mt-5 font-body uppercase" style={{ background: palette.gold, color: palette.black, fontSize: 11, letterSpacing: "0.2em", padding: "12px 0", minHeight: 44 }}>Done</button>
           </div>
         ) : (
           <div className="mt-5 flex flex-col gap-4">
             <label className="flex flex-col gap-1.5">
-              <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>Username (email)</span>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} className="font-body bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "7px 2px", fontSize: 13 }} />
+              <span className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.18em", color: palette.softBlack }}>Username (email)</span>
+              <input value={email} onChange={(e) => setEmail(e.target.value)} className="font-body bg-transparent outline-none" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "7px 2px", fontSize: 16 }} />
             </label>
 
             <div className="flex flex-col gap-2">
-              <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>Password</span>
-              <label className="flex items-center gap-2 font-body" style={{ fontSize: 12 }}>
+              <span className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.18em", color: palette.softBlack }}>Password</span>
+              <label className="flex items-center gap-2 font-body" style={{ fontSize: 12, minHeight: 44 }}>
                 <input type="radio" checked={mode === "auto"} onChange={() => setMode("auto")} /> Auto-generate a password (first name + 3 digits)
               </label>
               {mode === "auto" && (
@@ -116,19 +116,19 @@ export function CredentialModal({
                   <button type="button" onClick={suggest} disabled={suggesting} aria-label="Regenerate" className="flex items-center justify-center disabled:opacity-50" style={{ color: palette.goldDeep, width: 44, height: 44 }}><RefreshCw size={13} /></button>
                 </div>
               )}
-              <label className="flex items-center gap-2 font-body" style={{ fontSize: 12 }}>
+              <label className="flex items-center gap-2 font-body" style={{ fontSize: 12, minHeight: 44 }}>
                 <input type="radio" checked={mode === "custom"} onChange={() => setMode("custom")} /> Set a custom password
               </label>
               {mode === "custom" && (
                 <div className="flex items-center gap-2 ml-5" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)" }}>
-                  <input type={showCustom ? "text" : "password"} value={custom} onChange={(e) => setCustom(e.target.value)} className="font-body bg-transparent outline-none flex-1" style={{ padding: "6px 2px", fontSize: 13 }} />
-                  <button type="button" onClick={() => setShowCustom((v) => !v)} style={{ color: palette.mutedGreige }}>{showCustom ? <EyeOff size={14} /> : <Eye size={14} />}</button>
+                  <input type={showCustom ? "text" : "password"} value={custom} onChange={(e) => setCustom(e.target.value)} className="font-body bg-transparent outline-none flex-1" style={{ padding: "6px 2px", fontSize: 16 }} />
+                  <button type="button" onClick={() => setShowCustom((v) => !v)} aria-label={showCustom ? "Hide password" : "Show password"} className="flex items-center justify-center shrink-0" style={{ color: palette.mutedGreige, width: 44, height: 44 }}>{showCustom ? <EyeOff size={14} /> : <Eye size={14} />}</button>
                 </div>
               )}
             </div>
 
             <div className="flex flex-col gap-2 mt-1">
-              <label className="flex items-center gap-2 font-body" style={{ fontSize: 12 }}>
+              <label className="flex items-center gap-2 font-body" style={{ fontSize: 12, minHeight: 44 }}>
                 <input type="checkbox" checked={openWa} onChange={(e) => setOpenWa(e.target.checked)} /> Open WhatsApp share sheet
               </label>
             </div>
