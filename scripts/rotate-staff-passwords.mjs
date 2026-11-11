@@ -9,27 +9,31 @@
  *   node scripts/rotate-staff-passwords.mjs                 # DEV, dry run
  *   node scripts/rotate-staff-passwords.mjs --prod          # PROD, dry run
  *   node scripts/rotate-staff-passwords.mjs --prod --write --kill-sessions
- *   ... --only rakesh@drevifashion.com,jyoti@drevifashion.com
- *   ... --except ansh@drevifashion.com
+ *   ... --only rakesh@drevifashion.com,jyoti@drevifashion.com   (or --only=…)
+ *   ... --except ansh@drevifashion.com                          (or --except=…)
+ *
+ * An unknown argument, or --only / --except without a list, stops the run.
  *
  * New passwords are NEVER printed. They go to .local/staff-passwords-<target>-
  * <timestamp>.txt (gitignored, mode 600) for the owner to hand out in person
- * or on WhatsApp, then delete. Each rotation writes credential_changed to
- * auth_audit_log. --kill-sessions deletes the user's rows in auth.sessions and
- * auth.refresh_tokens through the Supabase Management API (needs
- * SUPABASE_ACCESS_TOKEN, as scripts/apply-migration.mjs does).
+ * or on WhatsApp, then delete. The file is created before the first rotation
+ * and each password is added to it the moment it is set, so a run that is
+ * interrupted keeps every password it changed. Each rotation writes
+ * credential_changed to auth_audit_log. --kill-sessions deletes the user's
+ * rows in auth.sessions and auth.refresh_tokens through the Supabase
+ * Management API (needs SUPABASE_ACCESS_TOKEN, as scripts/apply-migration.mjs
+ * does).
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import { generateMemorablePassword } from "./lib/password.mjs";
+import { openPasswordFile, parseRotateArgs } from "./lib/rotate-args.mjs";
 
-const argv = process.argv.slice(2);
-const has = (f) => argv.includes(`--${f}`);
-const flag = (f) => { const i = argv.indexOf(`--${f}`); return i >= 0 ? argv[i + 1] : null; };
-const list = (v) => (v ? v.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean) : null);
+const args = parseRotateArgs(process.argv.slice(2));
+if (!args.ok) { console.error(args.error); process.exit(1); }
 
-const target = has("prod") ? "prod" : "dev";
+const target = args.prod ? "prod" : "dev";
 const envFile = target === "prod" ? ".env.local" : ".env.development.local";
 // Refuse rather than fall back: a missing dev file must never mean "use prod".
 if (!existsSync(envFile)) {
@@ -44,10 +48,7 @@ const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!url || !service) { console.error("Missing NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY."); process.exit(1); }
 const ref = url.match(/https:\/\/([a-z0-9]+)\.supabase\.co/)?.[1];
-const write = has("write");
-const kill = has("kill-sessions");
-const only = list(flag("only"));
-const except = list(flag("except")) ?? [];
+const { write, kill, only, except } = args;
 
 console.log(`Target: ${target.toUpperCase()} (${ref}) · ${write ? "WRITING" : "dry run"}${kill ? " · ending sessions" : ""}`);
 if (kill && !process.env.SUPABASE_ACCESS_TOKEN) {
@@ -84,7 +85,13 @@ async function endSessions(userId) {
   if (!res.ok) throw new Error(`end sessions: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
 }
 
-const lines = [`Staff passwords (${target}, ${new Date().toISOString()}) — hand out, then delete this file.`, ""];
+// Created before anyone is rotated, so a folder or permission problem stops
+// the run while every password is still the old one.
+if (!existsSync(".local")) mkdirSync(".local");
+const file = openPasswordFile(
+  `.local/staff-passwords-${target}-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`,
+  `Staff passwords (${target}, ${new Date().toISOString()}) — hand out, then delete this file.`,
+);
 let done = 0, failed = 0, stillSignedIn = 0;
 for (const s of chosen) {
   try {
@@ -95,9 +102,16 @@ for (const s of chosen) {
     const { error: upErr } = await admin.auth.admin.updateUserById(id, { password });
     if (upErr) throw upErr;
     // The login password has changed from here on, so it goes in the file
-    // before anything else can fail. Otherwise a failed session end would
-    // leave this person with a password nobody knows.
-    lines.push(`${s.name ?? s.email}  ${s.email}  ${password}`);
+    // now, before sessions are ended or anything else can fail or hang.
+    // Otherwise a failed session end, a Ctrl-C or a crash would leave this
+    // person with a password nobody knows. If even that write fails, stop:
+    // nobody else gets rotated into the same hole.
+    try {
+      file.add(`${s.name ?? s.email}  ${s.email}  ${password}`);
+    } catch (e) {
+      console.error(`  ${s.email}: the password WAS changed but could not be written to ${file.path} (${e.message}). Stopping — fix the file, then rerun with --only=${s.email}.`);
+      process.exit(1);
+    }
     done++;
     let endErr = null;
     if (kill) {
@@ -120,8 +134,5 @@ for (const s of chosen) {
     failed++;
   }
 }
-if (!existsSync(".local")) mkdirSync(".local");
-const out = `.local/staff-passwords-${target}-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
-writeFileSync(out, lines.join("\n") + "\n", { mode: 0o600 });
 const openNote = stillSignedIn ? `, ${stillSignedIn} still signed in (sessions not ended)` : "";
-console.log(`\n${done} rotated, ${failed} failed${openNote}. New passwords: ${out} (not printed).`);
+console.log(`\n${done} rotated, ${failed} failed${openNote}. New passwords: ${file.path} (not printed).`);

@@ -1,6 +1,8 @@
 /**
  * Merge one buyer row into another. The loser's orders and audit trail move to
- * the keeper; the loser's login is revoked and its row deleted.
+ * the keeper; the loser's login is revoked (unless a staff member or another
+ * buyer signs in with the same email) and its row deleted. The keeper's notes
+ * record what actually happened to that login.
  *
  *   node scripts/merge-buyers.mjs --keep <id> --drop <id> [--prod] [--dry-run]
  *
@@ -94,16 +96,16 @@ for (const p of plan) {
   }
 }
 
-const note = [keep.notes, `[merge ${new Date().toISOString().slice(0, 10)}] "${drop.business_name}" <${drop.email}> merged into this buyer; its orders and audit trail moved here, its login revoked.`]
-  .filter(Boolean).join("\n");
-await admin.from("buyers").update({ ...patch, notes: note }).eq("id", KEEP);
-console.log("  keeper updated (carried fields + merge note)");
-
 // Buyer logins are keyed by email in the one auth pool staff share, and
 // duplicate rows usually share an email (that is why 0007 allowed it). So the
 // auth user under drop.email is only the LOSER's login when the loser actually
 // had one and nobody else signs in with that email — otherwise deleting it
-// would lock out the keeper, another buyer, or a staff member.
+// would lock out another buyer or a staff member. The keeper needs no check of
+// its own: at most one row per email can hold a login
+// (buyers_email_credentialed_unique, 0048), and here that row is the loser, so
+// a keeper on the same email has none. If it ever did, the buyerRows query
+// (every row but the loser) would find it.
+let login = drop.encrypted_password ? "its login removed with the row" : "it had no login of its own";
 const dropEmail = (drop.email ?? "").trim().toLowerCase();
 if (dropEmail && drop.encrypted_password) {
   const { data: staffRows, error: sErr } = await admin.from("staff_users").select("email").ilike("email", dropEmail);
@@ -111,13 +113,14 @@ if (dropEmail && drop.encrypted_password) {
     .ilike("email", dropEmail).neq("id", DROP).not("encrypted_password", "is", null);
   const same = (r) => (r.email ?? "").trim().toLowerCase() === dropEmail;
   const keptBecause =
-    dropEmail === (keep.email ?? "").trim().toLowerCase() ? "shared with the keeper"
-    : sErr || bErr ? `could not check who else uses it (${(sErr ?? bErr).message.slice(0, 40)})`
+    sErr || bErr ? `could not check who else uses it (${(sErr ?? bErr).message.slice(0, 40)})`
     : (staffRows ?? []).some(same) ? "shared with a staff member"
     : (buyerRows ?? []).some(same) ? "shared with another buyer"
     : null;
-  if (keptBecause) console.log(`  auth user ${drop.email}: kept — ${keptBecause}`);
-  else {
+  if (keptBecause) {
+    console.log(`  auth user ${drop.email}: kept — ${keptBecause}`);
+    login = `its login removed with the row, but the auth user under that email was kept (${keptBecause})`;
+  } else {
     let hit = null;
     for (let p = 1; p <= 20 && !hit; p++) {
       const { data: page } = await admin.auth.admin.listUsers({ page: p, perPage: 200 });
@@ -125,10 +128,24 @@ if (dropEmail && drop.encrypted_password) {
       hit = users.find((u) => (u.email || "").toLowerCase() === dropEmail) ?? null;
       if (users.length < 200) break;
     }
-    if (hit) { const { error } = await admin.auth.admin.deleteUser(hit.id); console.log(`  auth user ${drop.email}: ${error ? error.message : "deleted"}`); }
-    else console.log(`  auth user ${drop.email}: not found`);
+    if (hit) {
+      const { error } = await admin.auth.admin.deleteUser(hit.id);
+      console.log(`  auth user ${drop.email}: ${error ? error.message : "deleted"}`);
+      login = error
+        ? `its login was NOT revoked (${error.message.slice(0, 60)}) — delete the auth user by hand`
+        : "its login revoked (set a login on this row if the shop should keep signing in)";
+    } else {
+      console.log(`  auth user ${drop.email}: not found`);
+      login = "its login removed with the row (no auth user was found for it)";
+    }
   }
 } else if (dropEmail) console.log(`  auth user ${drop.email}: kept — the loser had no login of its own`);
+
+// Written after the login step, so the note says what happened to it.
+const note = [keep.notes, `[merge ${new Date().toISOString().slice(0, 10)}] "${drop.business_name}" <${drop.email}> merged into this buyer; its orders and audit trail moved here; ${login}.`]
+  .filter(Boolean).join("\n");
+await admin.from("buyers").update({ ...patch, notes: note }).eq("id", KEEP);
+console.log("  keeper updated (carried fields + merge note)");
 
 const { error: dErr } = await admin.from("buyers").delete().eq("id", DROP);
 console.log(`  loser row: ${dErr ? "FAILED " + dErr.message : "deleted"}`);
