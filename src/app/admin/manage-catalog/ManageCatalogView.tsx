@@ -309,6 +309,13 @@ function EditModal({ product, hsnOptions, onClose, onSaved }: { product: Wholesa
             <button type="button" onClick={toggleSellable} disabled={isPending} className="mt-1.5 flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.14em", color: product.wholesale_visible ? palette.crimsonText : palette.goldDeep }}>
               {product.wholesale_visible ? <><EyeOff size={12} /> Withdraw from billing</> : <><Eye size={12} /> Make sellable at the counter</>}
             </button>
+            {/* Withdrawing touches billing only: buyers can still browse and
+                order it until it is hidden from the buyer catalog too. */}
+            {!product.wholesale_visible && product.buyer_visible && (
+              <p className="font-body mt-1.5" style={{ fontSize: 11, lineHeight: 1.5, color: palette.crimsonText }}>
+                Still visible to buyers. Use Hide from buyer catalog to remove it there too.
+              </p>
+            )}
           </div>
         </div>
 
