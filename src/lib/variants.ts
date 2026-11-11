@@ -20,6 +20,20 @@ export function variantLabelOf(sku: string): string {
   return parts.length >= 5 ? `${parts[parts.length - 2]} · ${parts[parts.length - 1]}` : sku;
 }
 
+/**
+ * "DD-LEH-FLR-010-XL-RED" → { head: "DD-LEH-FLR-010-", tail: "XL-RED" }: the
+ * part every size of a design shares, and the size and colour that tell its
+ * rows apart. The Master editor's size rows show the tail whole and let the
+ * head shorten; at laptop width the row left the SKU about 74px, and cutting
+ * it from the end made every size read "DD-LEH-FL…" (click test, Nov). A SKU
+ * without a size and colour is all tail.
+ */
+export function splitSkuVariant(sku: string): { head: string; tail: string } {
+  const parts = sku.split("-");
+  if (parts.length < 5) return { head: "", tail: sku };
+  return { head: `${parts.slice(0, -2).join("-")}-`, tail: parts.slice(-2).join("-") };
+}
+
 // ── Buyer-facing variants (Oct review) ──────────────────────────────────────
 // Catalog chips showed the raw codes in whatever order the query returned.
 // Buyers get names from the static vocabulary and the size ladder; a code

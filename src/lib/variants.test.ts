@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buyerVariantLabel, sizeRankOf, sortVariantsForBuyer, variantLabelOf } from "./variants";
+import { buyerVariantLabel, sizeRankOf, sortVariantsForBuyer, splitSkuVariant, variantLabelOf } from "./variants";
 
 const base = "DD-SUT-PLZ-008";
 const v = (size: string, color = "CRM") => ({ sku: `${base}-${size}-${color}` });
@@ -48,5 +48,22 @@ describe("sizeRankOf", () => {
     expect(sizeRankOf(v("M").sku)).toBeLessThan(sizeRankOf(v("L").sku));
     expect(sizeRankOf(v("Q9").sku)).toBeGreaterThan(sizeRankOf(v("OTH").sku));
     expect(sizeRankOf("CUSTOM-1")).toBe(sizeRankOf(v("Q9").sku));
+  });
+});
+
+// The Master editor's size rows (click test, Nov): about 74px for the SKU at
+// 1280, cut from the end, so every row read "DD-LEH-FL…".
+describe("splitSkuVariant", () => {
+  it("keeps the size and colour apart from the part every size shares", () => {
+    expect(splitSkuVariant("DD-LEH-FLR-010-XL-RED")).toEqual({ head: "DD-LEH-FLR-010-", tail: "XL-RED" });
+    expect(splitSkuVariant("DD-SUT-PLZ-008-FS-MRN")).toEqual({ head: "DD-SUT-PLZ-008-", tail: "FS-MRN" });
+  });
+  it("puts the pieces back together as the SKU", () => {
+    const { head, tail } = splitSkuVariant("DD-LEH-FLR-0101-XXXL-MUL");
+    expect(head + tail).toBe("DD-LEH-FLR-0101-XXXL-MUL");
+  });
+  it("leaves a SKU without a size and colour whole", () => {
+    expect(splitSkuVariant("DD-LEH-001")).toEqual({ head: "", tail: "DD-LEH-001" });
+    expect(splitSkuVariant("CUSTOM")).toEqual({ head: "", tail: "CUSTOM" });
   });
 });

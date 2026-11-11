@@ -9,6 +9,7 @@ import { formatINR } from "@/lib/format";
 import { useDraft } from "@/lib/useDraft";
 import { withFrom } from "@/components/BackLink";
 import { supplyAge } from "@/lib/availability";
+import { splitSkuVariant } from "@/lib/variants";
 import { autoMrpFrom, autoWholesaleFrom, clampMultiplier, DEFAULT_MARKUP_MULTIPLIER, DEFAULT_WHOLESALE_MULTIPLIER } from "@/lib/pricing";
 import { effectiveCompareAt, specsMrp } from "@/lib/retail-price-core";
 import { ORIGIN_OPTIONS, STYLE_OPTIONS } from "@/lib/studio/copy-prompt";
@@ -501,8 +502,13 @@ export function MasterEditor({ board, design, variants, lastCost, lastCostLocked
           <div key={v.sku} className="flex items-center gap-2 p-2.5 flex-wrap" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
             {/* w-full on phones: the fixed-width inputs used to squeeze the
                 SKU to nothing in the flex-wrap (Ansh, 4 Sep) — give it its own
-                line below sm and let it share the row on wider screens. */}
-            <span className="font-mono w-full sm:w-auto sm:flex-1 sm:min-w-0 truncate" style={{ fontSize: 11, fontWeight: 600, color: palette.black }}>{v.sku}</span>
+                line below sm and let it share the row on wider screens. There
+                it gets about 74px at 1280, so the shared start shortens and
+                the size and colour stay whole; the tooltip has it all. */}
+            <span title={v.sku} className="font-mono flex w-full sm:w-auto sm:flex-1 min-w-0" style={{ fontSize: 11, fontWeight: 600, color: palette.black }}>
+              <span className="truncate min-w-0">{splitSkuVariant(v.sku).head}</span>
+              <span className="flex-shrink-0">{splitSkuVariant(v.sku).tail}</span>
+            </span>
             <label className="font-body" style={{ fontSize: 9, color: palette.mutedGreige }}>
               qty <input type="number" min="0" value={v.qty} onChange={(e) => setRow(v, { qty: e.target.value })} className="font-body ml-1" style={{ ...inputStyle, width: 64, padding: "5px 7px" }} />
             </label>
