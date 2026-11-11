@@ -55,10 +55,12 @@ export function DriftReport({ checked, rows }: { checked: number; rows: DriftRow
           ? `All ${checked} SKUs agree with the movement ledger.`
           : `${rows.length} of ${checked} SKUs disagree with the movement ledger.`}
       </p>
-      <p className="font-body mt-2" style={{ fontSize: 11, lineHeight: 1.6, color: palette.mutedGreige }}>
-        These SKUs had their stored quantity changed outside the ledger, so the two disagree.
-        Correct them with a count, not a guess.
-      </p>
+      {rows.length > 0 && (
+        <p className="font-body mt-2" style={{ fontSize: 11, lineHeight: 1.6, color: palette.mutedGreige }}>
+          These SKUs had their stored quantity changed outside the ledger, so the two disagree.
+          Correct them with a count, not a guess.
+        </p>
+      )}
 
       {rows.map((r) => (
         <div key={r.sku} className="mt-3 p-3.5" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
