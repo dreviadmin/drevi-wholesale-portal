@@ -240,7 +240,7 @@ export function RetailCheckClient({ products, retail, pricesAsOf, drivePhotos }:
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="font-body truncate" style={{ fontSize: 13, color: palette.black }}>{p.title || "Untitled design"}</div>
-                    <div className="font-body" style={{ fontSize: 8.5, color: palette.mutedGreige, letterSpacing: "0.08em" }}>{p.sku}</div>
+                    <div className="font-body" style={{ fontSize: 11, color: palette.mutedGreige, letterSpacing: "0.08em" }}>{p.sku}</div>
                   </div>
                   <span className="font-display" style={{ fontSize: 13, fontWeight: 600, color: palette.black }}>{price > 0 ? formatINR(price) : "—"}</span>
                 </button>
@@ -274,7 +274,7 @@ export function RetailCheckClient({ products, retail, pricesAsOf, drivePhotos }:
               {current.product ? current.product.title || "Untitled design" : current.sku}
             </div>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
-              <span className="font-body" style={{ fontSize: 9, color: palette.mutedGreige, letterSpacing: "0.12em" }}>{current.sku}</span>
+              <span className="font-body" style={{ fontSize: 11, color: palette.mutedGreige, letterSpacing: "0.12em" }}>{current.sku}</span>
               <button
                 type="button"
                 onClick={() => doCopy(current.sku)}
