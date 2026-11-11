@@ -20,6 +20,7 @@ import { inRuns } from "@/lib/chunk";
 const WRITE_RUN = 150;
 const READ_RUN = 100; // six angles a design, so a run reads at most 600 angle rows
 const BATCH_CAP = 2000;
+const APPROVE_RUN = 200; // approveAllBatch, per call
 const overCap = (ids: string[]) =>
   ids.length > BATCH_CAP ? `Select at most ${BATCH_CAP.toLocaleString("en-IN")} designs at a time.` : null;
 
@@ -201,10 +202,15 @@ export async function approveAllBatch(candidateIds: string[]): Promise<{ ok: boo
     return { ok: false, error: "Not authorized" };
   }
   if (candidateIds.length === 0) return { ok: false, error: "Nothing to approve" };
+  // Each candidate is several round trips, so one call takes at most
+  // APPROVE_RUN. The board feeds it in runs of that size (StudioBoard
+  // APPROVE_CHUNK); a longer list is refused whole rather than quietly cut,
+  // which used to promote the first 200 and drop the rest of "Use all shown".
+  if (candidateIds.length > APPROVE_RUN) return { ok: false, error: `Use at most ${APPROVE_RUN} candidates in one call.` };
   const admin = createAdminClient();
   let approved = 0;
   const flippedDesigns = new Set<string>();
-  for (const id of candidateIds.slice(0, 200)) {
+  for (const id of candidateIds) {
     const { data: cand } = await admin.from("design_images").select("id, angle_id, status").eq("id", id).maybeSingle();
     if (!cand || cand.status !== "active") continue;
     const { data: angle } = await admin

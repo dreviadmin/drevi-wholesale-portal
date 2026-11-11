@@ -36,6 +36,8 @@ const COPY_CHUNK = 10;
 const PUSH_CHUNK = 20;
 // Smaller: discontinuing makes a Shopify call for every design live there.
 const RETIRE_CHUNK = 12;
+// approveAllBatch's APPROVE_RUN: Use candidates promotes this many per call.
+const APPROVE_CHUNK = 200;
 
 const CHIP_ORDER: (DesignBadge | "all")[] = ["all", "awaiting_specs", "needs_photos", "in_review", "needs_copy", "ready", "live", "changes_pending"];
 
@@ -1248,7 +1250,25 @@ export function StudioBoard({
                 <button
                   type="button"
                   disabled={pending}
-                  onClick={() => { const idsToApprove = confirm.items.map((i) => i.candidateId); setConfirm(null); runBatch(() => approveAllBatch(idsToApprove).then((r) => ({ ok: r.ok, error: r.error })), "Candidates set as production"); }}
+                  onClick={() => {
+                    const idsToApprove = confirm.items.map((i) => i.candidateId);
+                    setConfirm(null);
+                    // "Use all shown" means every one shown: the action takes
+                    // APPROVE_CHUNK a call, so it is fed in runs, as the copy
+                    // and push batches are.
+                    runBatch(async () => {
+                      let approved = 0;
+                      for (let i = 0; i < idsToApprove.length; i += APPROVE_CHUNK) {
+                        const r = await approveAllBatch(idsToApprove.slice(i, i + APPROVE_CHUNK));
+                        if (!r.ok) {
+                          if (approved > 0) router.refresh();
+                          return { ok: false, error: approved > 0 ? `${approved} set as production, then: ${r.error ?? "failed"}` : r.error };
+                        }
+                        approved += r.approved ?? 0;
+                      }
+                      return { ok: true };
+                    }, "Candidates set as production");
+                  }}
                   className="mt-4 w-full font-body uppercase disabled:opacity-50"
                   style={{ fontSize: 10.5, letterSpacing: "0.18em", background: "#1F6B45", color: "#fff", fontWeight: 600, padding: "12px 0" }}
                 >

@@ -466,6 +466,24 @@ describe("A large Studio selection is acted on in full", () => {
     expect(longestIn()).toBeLessThanOrEqual(100);
   });
 
+  it("Use all shown: a run past 200 is refused whole, and runs of 200 promote every candidate", async () => {
+    const ids = many(250);
+    db.design_angles = ids.map((id) => ({ id: `${id}-front`, design_id: id, angle: "front", approved_image_id: null }));
+    db.design_images = db.design_angles.map((a) => ({ id: `img-${a.id}`, angle_id: a.id, role: "candidate", file_ref: `ref-${a.id}`, status: "active", created_at: "2026-11-01T00:00:00Z" }));
+    const pre = await studio.approveAllPreflight(ids);
+    const cands = pre.items!.map((i) => i.candidateId);
+    expect(cands).toHaveLength(250);
+
+    // Before: the first 200 were promoted and the other 50 dropped without a word.
+    expect(await studio.approveAllBatch(cands)).toEqual({ ok: false, error: "Use at most 200 candidates in one call." });
+    expect(db.design_angles.every((a) => a.approved_image_id === null)).toBe(true);
+
+    // The board's loop: runs of 200 (StudioBoard APPROVE_CHUNK).
+    expect(await studio.approveAllBatch(cands.slice(0, 200))).toEqual({ ok: true, approved: 200 });
+    expect(await studio.approveAllBatch(cands.slice(200))).toEqual({ ok: true, approved: 50 });
+    expect(db.design_angles.every((a) => a.approved_image_id === `img-${a.id}`)).toBe(true);
+  });
+
   it("Print labels finds the tags of every design past the old 200", async () => {
     const ids = many(250);
     db.sku_registry = db.designs.flatMap((d) => ["S", "M"].map((s) => ({ variant_sku: `${d.base_sku}-${s}-GRN` })));
