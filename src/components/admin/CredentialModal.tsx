@@ -88,7 +88,7 @@ export function CredentialModal({
               <div>{login.label}: {login.value}</div>
               <div style={{ fontWeight: 600, marginTop: 4 }}>Password: {activated.password}</div>
             </div>
-            <div className="flex gap-2 mt-4">
+            <div className="flex gap-2 mt-4 flex-wrap">
               <button type="button" onClick={() => navigator.clipboard?.writeText(`${login.label}: ${login.value}\nPassword: ${activated.password}`)} className="flex items-center gap-1.5 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 11, letterSpacing: "0.15em", padding: "8px 14px", minHeight: 44 }}>
                 <Copy size={12} /> Copy
               </button>
@@ -136,8 +136,8 @@ export function CredentialModal({
             {error && <p className="font-body" style={{ fontSize: 11, color: palette.crimsonText }}>{error}</p>}
 
             <div className="flex gap-2 mt-2">
-              <button type="button" onClick={() => onClose(false)} className="flex-1 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 10, letterSpacing: "0.18em", padding: "11px 0" }}>Cancel</button>
-              <button type="button" onClick={save} disabled={isPending || !password || (mode === "auto" && suggesting)} className="flex-1 font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.18em", padding: "11px 0" }}>
+              <button type="button" onClick={() => onClose(false)} className="flex-1 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 11, letterSpacing: "0.18em", padding: "11px 0", minHeight: 44 }}>Cancel</button>
+              <button type="button" onClick={save} disabled={isPending || !password || (mode === "auto" && suggesting)} className="flex-1 font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 11, letterSpacing: "0.18em", padding: "11px 0", minHeight: 44 }}>
                 {isPending ? "Saving…" : "Save & Activate"}
               </button>
             </div>
