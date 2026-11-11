@@ -1,16 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { RefreshCw, Eye, EyeOff, Copy, MessageCircle, X } from "lucide-react";
-import { setCredentials } from "@/app/admin/buyers/actions";
+import { setCredentials, suggestBuyerPassword } from "@/app/admin/buyers/actions";
 import { buildWhatsAppMessage, loginDisplay, shareWhatsApp } from "@/lib/share";
 import { palette } from "@/lib/palette";
-
-const WORDS = ["Tulip","Lotus","Jasmine","Marigold","Saffron","Indigo","Amber","Coral","Maroon","Ivory","Crimson","Emerald","Champagne","Velvet","Silk","Brocade","Mirror","Pearl","Mango","Peacock","Lantern","Monsoon","Henna","Paisley","Garnet","Topaz","Lilac","Cobalt","Bronze","Copper","Mauve","Sage"];
-function memorable(): string {
-  const r = (n: number) => { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % n; };
-  return `${WORDS[r(WORDS.length)]}-${WORDS[r(WORDS.length)]}-${1000 + r(9000)}`;
-}
 
 export function CredentialModal({
   buyerId,
@@ -23,7 +17,11 @@ export function CredentialModal({
 }) {
   const [email, setEmail] = useState(buyer.email ?? "");
   const [mode, setMode] = useState<"auto" | "custom">("auto");
-  const [generated, setGenerated] = useState(memorable());
+  // The Auto password comes from the server — the buyer scheme in
+  // src/lib/password.ts, the same one Regenerate on the buyer page gives.
+  const [generated, setGenerated] = useState("");
+  const [suggesting, setSuggesting] = useState(true);
+  const suggestSeq = useRef(0);
   const [custom, setCustom] = useState("");
   const [showCustom, setShowCustom] = useState(false);
   const [openWa, setOpenWa] = useState(true);
@@ -35,6 +33,26 @@ export function CredentialModal({
   // Synthetic buyer-domain addresses must surface as the bare username — a
   // buyer should never receive "royal@buyers.drevifashion.com".
   const login = loginDisplay(email);
+
+  function suggest() {
+    // Only the latest request may fill the box (a double tap on refresh).
+    const seq = ++suggestSeq.current;
+    setSuggesting(true);
+    setGenerated("");
+    suggestBuyerPassword(buyerId)
+      .then((res) => {
+        if (seq !== suggestSeq.current) return;
+        if (res.ok && res.password) { setGenerated(res.password); setError(null); }
+        else setError(res.error ?? "Could not make a password — tap the refresh icon to try again.");
+      })
+      .catch(() => { if (seq === suggestSeq.current) setError("Could not make a password — tap the refresh icon to try again."); })
+      .finally(() => { if (seq === suggestSeq.current) setSuggesting(false); });
+  }
+
+  useEffect(() => {
+    suggest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buyerId]);
 
   function save() {
     setError(null);
@@ -90,12 +108,12 @@ export function CredentialModal({
             <div className="flex flex-col gap-2">
               <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>Password</span>
               <label className="flex items-center gap-2 font-body" style={{ fontSize: 12 }}>
-                <input type="radio" checked={mode === "auto"} onChange={() => setMode("auto")} /> Auto-generate a memorable password
+                <input type="radio" checked={mode === "auto"} onChange={() => setMode("auto")} /> Auto-generate a password (first name + 3 digits)
               </label>
               {mode === "auto" && (
                 <div className="flex items-center gap-2 ml-5">
-                  <span className="font-body" style={{ fontSize: 13, fontWeight: 600, color: palette.black }}>{generated}</span>
-                  <button type="button" onClick={() => setGenerated(memorable())} aria-label="Regenerate" style={{ color: palette.goldDeep }}><RefreshCw size={13} /></button>
+                  <span className="font-body" style={{ fontSize: 13, fontWeight: 600, color: suggesting ? palette.mutedGreige : palette.black }}>{suggesting ? "Making one…" : generated}</span>
+                  <button type="button" onClick={suggest} disabled={suggesting} aria-label="Regenerate" className="flex items-center justify-center disabled:opacity-50" style={{ color: palette.goldDeep, width: 44, height: 44 }}><RefreshCw size={13} /></button>
                 </div>
               )}
               <label className="flex items-center gap-2 font-body" style={{ fontSize: 12 }}>
@@ -119,7 +137,7 @@ export function CredentialModal({
 
             <div className="flex gap-2 mt-2">
               <button type="button" onClick={() => onClose(false)} className="flex-1 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 10, letterSpacing: "0.18em", padding: "11px 0" }}>Cancel</button>
-              <button type="button" onClick={save} disabled={isPending || !password} className="flex-1 font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.18em", padding: "11px 0" }}>
+              <button type="button" onClick={save} disabled={isPending || !password || (mode === "auto" && suggesting)} className="flex-1 font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.18em", padding: "11px 0" }}>
                 {isPending ? "Saving…" : "Save & Activate"}
               </button>
             </div>

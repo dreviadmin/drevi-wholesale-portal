@@ -65,6 +65,24 @@ async function loginUrlOrNull(buyerId: string, staffId: string): Promise<string 
 }
 
 /**
+ * The credential modal's Auto password: the buyer scheme (owner's first name +
+ * 3 digits, src/lib/password.ts), the same one Regenerate gives. Made here
+ * because the generator needs node:crypto. Sets nothing and logs nothing —
+ * Save & Activate (setCredentials) does both.
+ */
+export async function suggestBuyerPassword(buyerId: string): Promise<CredResult> {
+  try {
+    await requireAdmin();
+  } catch {
+    return { ok: false, error: "Not authorized." };
+  }
+  const admin = createAdminClient();
+  const { data: buyer } = await admin.from("buyers").select("owner_name, business_name").eq("id", buyerId).maybeSingle();
+  if (!buyer) return { ok: false, error: "Buyer not found." };
+  return { ok: true, password: generateBuyerPassword(buyer.owner_name, buyer.business_name) };
+}
+
+/**
  * Save & Activate (credential modal). Sets the buyer's password in Supabase
  * Auth AND the AES ciphertext in encrypted_password, activates the buyer, and
  * logs credential_created. Returns the plaintext so the UI can share it.
