@@ -324,7 +324,11 @@ export async function saveVariant(
       .eq("sku", sku.trim().toUpperCase())
       .order("created_at", { ascending: true });
     if (mvErr) return fail(`Could not read the stock ledger (${mvErr.message}) — retry`);
-    ledgerQty = canonicalFromMovements((mv ?? []) as Movement[]);
+    // A SKU the ledger has never seen stands at its shown count, which
+    // applyMovement seeds as its opening balance — so the movement is sized
+    // from that, or the typed number would land on top of it (shown 10,
+    // typed 12 → 22).
+    ledgerQty = (mv ?? []).length > 0 ? canonicalFromMovements(mv as Movement[]) : prevQty;
   }
 
   const locks = new Set<string>(Array.isArray(row.locked_fields) ? row.locked_fields : []);

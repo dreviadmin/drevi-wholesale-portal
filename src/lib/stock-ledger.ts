@@ -2,9 +2,9 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAll } from "@/lib/supabase/fetch-all";
-import { canonicalFromMovements, type Movement, type MovementReason } from "./stock-ledger-core";
+import { canonicalFromMovements, openingBalanceFor, type Movement, type MovementReason } from "./stock-ledger-core";
 
-export { canonicalFromMovements };
+export { canonicalFromMovements, openingBalanceFor };
 export type { Movement, MovementReason };
 
 // Retrofit R8 (§3.5, §10) — Supabase is authoritative for inventory.
@@ -35,6 +35,13 @@ export async function canonicalStock(sku: string): Promise<number> {
 /**
  * Write one movement and refresh the cached quantity to the canonical value.
  * Every stock mutation in the app goes through here (§10.1).
+ *
+ * A SKU's first-ever movement is preceded by its opening balance — the count
+ * the catalog row shows (openingBalanceFor) — so a sheet-born or hand-edited
+ * SKU's stock is not lost to the first sale. A reset needs none: it sets the
+ * count outright. `openingBalance: false` is for a caller that sized `delta`
+ * against the ledger itself to land on a target it already computed (a rename
+ * carrying a count over), where seeding the shown count too would add it twice.
  */
 export async function applyMovement(input: {
   sku: string;
@@ -45,12 +52,39 @@ export async function applyMovement(input: {
   refId?: string;
   note?: string;
   createdBy?: string;
+  openingBalance?: boolean;
 }): Promise<{ ok: boolean; error?: string; stock?: number }> {
   const admin = createAdminClient();
   const sku = input.sku.trim().toUpperCase();
   const isReset = input.reason === "reset";
   if (isReset && (input.snapshotQty == null || input.snapshotQty < 0)) {
     return { ok: false, error: "A reset needs a counted quantity" };
+  }
+  if (!isReset && input.openingBalance !== false) {
+    // Read failures refuse the movement: an unreadable ledger taken as empty
+    // would reset a SKU that has history back to its cached count.
+    const { data: prior, error: priorErr } = await admin
+      .from("stock_movements")
+      .select("id")
+      .eq("sku", sku)
+      .limit(1);
+    if (priorErr || !prior) return { ok: false, error: `Could not read the stock ledger (${priorErr?.message ?? "no answer"})` };
+    if (prior.length === 0) {
+      const { data: row, error: rowErr } = await admin.from("wholesale_products").select("current_qty").eq("sku", sku).maybeSingle();
+      if (rowErr) return { ok: false, error: `Could not read the catalog count (${rowErr.message})` };
+      const opening = openingBalanceFor(row?.current_qty);
+      if (opening) {
+        const { error: seedErr } = await admin.from("stock_movements").insert({
+          sku,
+          ...opening,
+          ref_type: "opening_balance",
+          ref_id: null,
+          note: "Opening balance — the count shown before this SKU's first movement",
+          created_by: input.createdBy ?? null,
+        });
+        if (seedErr) return { ok: false, error: seedErr.message };
+      }
+    }
   }
   const { error } = await admin.from("stock_movements").insert({
     sku,

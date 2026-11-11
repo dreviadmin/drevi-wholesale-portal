@@ -5,7 +5,7 @@ import { requireAdmin } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { uploadProductPhoto } from "@/lib/storage";
 import { writeAuditEvent } from "@/lib/audit";
-import { applyMovement, canonicalFromMovements, canonicalStock, movementsFor } from "@/lib/stock-ledger";
+import { applyMovement, canonicalFromMovements, movementsFor } from "@/lib/stock-ledger";
 
 // Fields an admin may edit by hand. Editing one LOCKS it, so the sheet sync
 // preserves the manual value until it is unlocked. `image_urls` is locked via
@@ -160,15 +160,24 @@ export async function renameProductSku(oldSku: string, newSkuRaw: string): Promi
   // since 0026 seeded the ledger) has only its cached count, so that is what
   // carries — the same opening balance 0026 gave every product. Carrying the
   // ledger's 0 there would leave the next sale to reset it to one delta.
+  //
+  // The carry IS the new SKU's opening balance, so applyMovement must not seed
+  // one of its own on top (openingBalance: false): the renamed row still
+  // shows the old count, and seeding it would count the stock twice. For the
+  // same reason a new SKU with no ledger gets its carry written even when it
+  // is 0 — left empty, its first movement would seed whatever the screen
+  // showed, not the ledger's figure this rename went by.
   const problems: string[] = [];
   const oldMoves = await movementsFor(oldSku);
   const shown = Math.trunc(Number(row.current_qty) || 0);
   const carried = oldMoves.length > 0 ? canonicalFromMovements(oldMoves) : shown;
-  const current = await canonicalStock(newSku);
-  if (carried !== current) {
+  const newMoves = await movementsFor(newSku);
+  const current = canonicalFromMovements(newMoves);
+  if (carried !== current || (newMoves.length === 0 && shown !== carried)) {
     const mv = await applyMovement({
       sku: newSku, delta: carried - current, reason: "correction", refType: "rename",
       note: `Carried over from rename of ${oldSku.toUpperCase()}`, createdBy: staff.email,
+      openingBalance: false,
     });
     if (!mv.ok) problems.push(`stock did NOT carry over (${mv.error ?? "movement failed"}) — set ${carried} pc in Stock take`);
   }

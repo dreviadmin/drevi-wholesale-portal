@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 type Row = Record<string, any>;
 let db: Record<string, Row[]> = {};
 let failInsert: ((table: string, row: Row) => string | null) | null = null;
+let failSelect: ((table: string) => string | null) | null = null;
 let nextId = 0;
 let clock = 0;
 const stamp = () => new Date(Date.UTC(2026, 10, 10, 6, 0, 0) + ++clock * 1000).toISOString();
@@ -65,6 +66,8 @@ function fakeAdmin() {
       });
       function run() {
         if (op === "select") {
+          const why = failSelect?.(table);
+          if (why) return { data: null, error: { message: why } };
           let list = match();
           if (sort) {
             const { key, asc } = sort;
@@ -153,6 +156,8 @@ vi.mock("@/lib/hsn-default", async () => await import("../../lib/hsn-default"));
 vi.mock("@/lib/sku/lov-code", async () => await import("../../lib/sku/lov-code"));
 vi.mock("@/lib/retail-price-core", async () => await import("../../lib/retail-price-core"));
 vi.mock("@/lib/dashboard/lines", async () => await import("../../lib/dashboard/lines"));
+vi.mock("@/lib/pricing", async () => await import("../../lib/pricing"));
+vi.mock("@/lib/studio/copy-prompt", async () => await import("../../lib/studio/copy-prompt"));
 
 const catalog = await import("./manage-catalog/actions");
 const retail = await import("./retail-bill/actions");
@@ -160,6 +165,8 @@ const exhibition = await import("./exhibition/actions");
 const lovs = await import("./lovs/actions");
 const scan = await import("../api/scan/resolve/route");
 const ledger = await import("../../lib/stock-ledger");
+const master = await import("./studio/master/[designId]/actions");
+const { canonicalBySku, sheetSyncQty } = await import("../../lib/stock-ledger-core");
 
 const OLD = "DD-LEH-FLR-010-M-RED";
 const NEW = "DD-LEH-FLR-011-M-RED";
@@ -181,6 +188,7 @@ const lastAudit = () => String(writeAuditEvent.mock.calls.at(-1)?.[0]?.notes ?? 
 beforeEach(() => {
   db = { wholesale_products: [], stock_movements: [], product_vendor_info: [], sync_ignored_skus: [], lovs: [], sku_registry: [], designs: [], retail_bills: [], orders: [], exhibition_sessions: [] };
   failInsert = null;
+  failSelect = null;
   nextId = 0;
   clock = 0;
   writeAuditEvent.mockClear();
@@ -231,6 +239,17 @@ describe("renameProductSku carries the stock ledger", () => {
     expect(productRow(NEW)?.current_qty).toBe(5);
     expect(lastAudit()).toContain("ledger 5 pc");
     expect(lastAudit()).toContain("screen showed 12 pc");
+  });
+
+  it("anchors the new SKU at the ledger's 0 when the screen showed more, so its first sale does not seed the screen's count", async () => {
+    db.wholesale_products = [product(OLD, { current_qty: 3 })];
+    db.stock_movements = [move(OLD, { reason: "reset", snapshot_qty: 0 })];
+    await catalog.renameProductSku(OLD, NEW);
+    expect(movesFor(NEW)).toEqual([expect.objectContaining({ delta: 0, reason: "correction", ref_type: "rename" })]);
+    expect(productRow(NEW)?.current_qty).toBe(0);
+    const sale = await ledger.applyMovement({ sku: NEW, delta: -1, reason: "order" });
+    expect(sale.stock).toBe(-1);
+    expect(movesFor(NEW).some((m) => m.ref_type === "opening_balance")).toBe(false);
   });
 
   it("writes no movement when there is nothing to carry", async () => {
@@ -305,6 +324,90 @@ describe("renameProductSku carries the stock ledger", () => {
     expect((await catalog.renameProductSku(OLD, "DD LEH")).error).toContain("letters, digits and hyphens");
     expect((await catalog.renameProductSku("DD-NOPE-001", "DD-NOPE-002")).error).toBe("Product not found.");
     expect(db.stock_movements).toHaveLength(0);
+  });
+});
+
+describe("a SKU's first movement keeps the count it showed", () => {
+  // The finding: Current Qty 10 from the sheet, no ledger rows. The first sale
+  // used to compute −1 from that one movement, and the next sync left it there.
+  it("a first sale nets off the shown count, and the next sync leaves it at that", async () => {
+    db.wholesale_products = [product(OLD, { current_qty: 10 })];
+    const sale = await ledger.applyMovement({ sku: OLD, delta: -1, reason: "order", refType: "order", createdBy: "rakesh@drevifashion.com" });
+    expect(sale).toEqual({ ok: true, stock: 9 });
+    expect(productRow(OLD)?.current_qty).toBe(9);
+    expect(movesFor(OLD)).toEqual([
+      expect.objectContaining({ reason: "reset", snapshot_qty: 10, delta: 0, ref_type: "opening_balance", created_by: "rakesh@drevifashion.com" }),
+      expect.objectContaining({ reason: "order", delta: -1 }),
+    ]);
+    // The sync now finds a ledger for it and writes nothing over the 9.
+    expect(sheetSyncQty(OLD, 10, true, canonicalBySku(movesFor(OLD) as never))).toBeNull();
+    // Ledger and cache agree, and both hold the real count.
+    expect(await ledger.canonicalStock(OLD)).toBe(9);
+  });
+
+  it("a first receipt adds to it: 10 + 3 = 13", async () => {
+    db.wholesale_products = [product(OLD, { current_qty: 10 })];
+    expect((await ledger.applyMovement({ sku: OLD, delta: 3, reason: "receipt" })).stock).toBe(13);
+  });
+
+  it("seeds only once: the second movement finds the ledger and adds no balance", async () => {
+    db.wholesale_products = [product(OLD, { current_qty: 10 })];
+    await ledger.applyMovement({ sku: OLD, delta: -1, reason: "order" });
+    expect((await ledger.applyMovement({ sku: OLD, delta: -2, reason: "order" })).stock).toBe(7);
+    expect(movesFor(OLD).filter((m) => m.ref_type === "opening_balance")).toHaveLength(1);
+  });
+
+  it("a reset sets the count outright and seeds nothing", async () => {
+    db.wholesale_products = [product(OLD, { current_qty: 10 })];
+    expect((await ledger.setStock({ sku: OLD, countedQty: 4, note: "counted", createdBy: "test" })).stock).toBe(4);
+    expect(movesFor(OLD)).toEqual([expect.objectContaining({ reason: "reset", snapshot_qty: 4, note: "counted" })]);
+  });
+
+  it("a SKU with history, a zero count or no catalog row gets no balance", async () => {
+    db.wholesale_products = [product(OLD, { current_qty: 10 }), product(NEW, { current_qty: 0 })];
+    db.stock_movements = [move(OLD, { reason: "reset", snapshot_qty: 5 })];
+    expect((await ledger.applyMovement({ sku: OLD, delta: -1, reason: "order" })).stock).toBe(4);
+    expect((await ledger.applyMovement({ sku: NEW, delta: 2, reason: "receipt" })).stock).toBe(2);
+    expect((await ledger.applyMovement({ sku: "DD-NOT-IN-CATALOG-1", delta: 2, reason: "receipt" })).stock).toBe(2);
+    expect(db.stock_movements.filter((m) => m.ref_type === "opening_balance")).toHaveLength(0);
+  });
+
+  it("a negative shown count carries as a correction", async () => {
+    db.wholesale_products = [product(OLD, { current_qty: -2 })];
+    expect((await ledger.applyMovement({ sku: OLD, delta: -1, reason: "order" })).stock).toBe(-3);
+    expect(movesFor(OLD)[0]).toMatchObject({ reason: "correction", delta: -2, snapshot_qty: null, ref_type: "opening_balance" });
+  });
+
+  it("a failed seed refuses the movement rather than posting it on an empty ledger", async () => {
+    db.wholesale_products = [product(OLD, { current_qty: 10 })];
+    failInsert = (table, row) => (table === "stock_movements" && row.ref_type === "opening_balance" ? "insert refused" : null);
+    expect(await ledger.applyMovement({ sku: OLD, delta: -1, reason: "order" })).toEqual({ ok: false, error: "insert refused" });
+    expect(movesFor(OLD)).toHaveLength(0);
+    expect(productRow(OLD)?.current_qty).toBe(10);
+  });
+
+  it("an unreadable ledger refuses the movement instead of treating the SKU as new", async () => {
+    db.wholesale_products = [product(OLD, { current_qty: 10 })];
+    db.stock_movements = [move(OLD, { reason: "reset", snapshot_qty: 4 })];
+    failSelect = (table) => (table === "stock_movements" ? "connection reset" : null);
+    const r = await ledger.applyMovement({ sku: OLD, delta: -1, reason: "order" });
+    expect(r).toEqual({ ok: false, error: "Could not read the stock ledger (connection reset)" });
+    expect(movesFor(OLD)).toHaveLength(1);
+  });
+
+  it("the master editor lands on the typed number, not the typed number on top of the shown one", async () => {
+    db.wholesale_products = [product(OLD, { current_qty: 10 })];
+    expect(await master.saveVariant(OLD, { currentQty: 12, wholesalePrice: 2500, stockNote: "found two more" })).toEqual({ ok: true });
+    expect(productRow(OLD)?.current_qty).toBe(12);
+    expect(movesFor(OLD)).toEqual([
+      expect.objectContaining({ reason: "reset", snapshot_qty: 10, ref_type: "opening_balance" }),
+      expect.objectContaining({ reason: "manual", delta: 2 }),
+    ]);
+
+    db.wholesale_products = [product(NEW, { current_qty: 10 })];
+    expect(await master.saveVariant(NEW, { currentQty: 0, wholesalePrice: 2500, stockNote: "sold out at the booth" })).toEqual({ ok: true });
+    expect(productRow(NEW)?.current_qty).toBe(0);
+    expect(await ledger.canonicalStock(NEW)).toBe(0);
   });
 });
 

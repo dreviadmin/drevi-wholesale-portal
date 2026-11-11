@@ -63,7 +63,9 @@ export function canonicalBySku(movements: Movement[]): Map<string, number> {
  *   - a SKU WITH movements is the ledger's: an existing row is not written at
  *     all (null), and a row the sync is about to create is seeded from it;
  *   - a SKU the ledger has never seen still takes the sheet's number, so new
- *     sheet-only SKUs are created exactly as before;
+ *     sheet-only SKUs are created exactly as before. That number is not lost
+ *     when the SKU first moves: applyMovement seeds it as the opening balance
+ *     (openingBalanceFor below), after which the SKU is the ledger's;
  *   - `ledger` null means the movements could not be read: no existing row is
  *     written (it may be the ledger's), and a new row takes the sheet's number,
  *     as it always did.
@@ -78,4 +80,28 @@ export function sheetSyncQty(
   const owned = ledger.get(sku.trim().toUpperCase());
   if (owned === undefined) return sheetQty;
   return rowExists ? null : owned;
+}
+
+/**
+ * The opening-balance row applyMovement writes before a SKU's FIRST movement
+ * (review fix, 11 Nov), or null when none is needed.
+ *
+ * A SKU the ledger has never seen still has a count: the sheet's Current Qty
+ * the sync wrote (sheetSyncQty), or a hand edit in Manage Catalog. The ledger
+ * held none of it, so the first sale of 1 on a SKU showing 10 computed −1 from
+ * that one movement, and from then on the sync left the column to the ledger:
+ * the 10 pieces were gone for good. Seeding the shown count first — the same
+ * opening balance 0026 gave every SKU that existed then — lets the movement net
+ * off it (10 − 1 = 9, 10 + 3 = 13).
+ *
+ * A zero count needs nothing. A positive one is a reset to it; a negative one
+ * cannot be a reset (a counted quantity is never below zero), so it is carried
+ * as a correction, which keeps the balance honest the way a rename's carry does.
+ */
+export function openingBalanceFor(
+  shownQty: number | null | undefined,
+): { reason: "reset"; delta: 0; snapshot_qty: number } | { reason: "correction"; delta: number; snapshot_qty: null } | null {
+  const shown = Math.trunc(Number(shownQty) || 0);
+  if (shown === 0) return null;
+  return shown > 0 ? { reason: "reset", delta: 0, snapshot_qty: shown } : { reason: "correction", delta: shown, snapshot_qty: null };
 }
