@@ -384,7 +384,7 @@ export function ReorderView({ nav, scope, ctx, sort, vendorPhone, empty, query, 
       csv: (r) => r.vendor?.name,
     },
     { key: "vendorSku", label: "Vendor SKU", render: (r) => (r.vendorSku ? <CopyCode code={r.vendorSku} /> : muted("—")), csv: (r) => r.vendorSku },
-    { key: "cost", label: "Sheet Cost", right: true, render: (r) => <span title="from sheet">{r.info && r.info.last_cost > 0 ? formatINR(r.info.last_cost) : "—"}</span>, csv: (r) => r.info?.last_cost },
+    { key: "cost", label: "Cost basis (ex-GST)", right: true, render: (r) => <span title="latest cost from deliveries or Product Master">{r.info && r.info.last_cost > 0 ? formatINR(r.info.last_cost) : "—"}</span>, csv: (r) => r.info?.last_cost },
     { key: "grCost", label: "Last Bought", right: true, render: (r) => <span title="from deliveries" style={{ color: r.gr && r.gr.cost > 0 ? palette.goldDeep : palette.mutedGreige }}>{r.gr && r.gr.cost > 0 ? formatINR(r.gr.cost) : "—"}</span>, csv: (r) => r.gr?.cost },
     { key: "grDate", label: "Bought On", defaultDir: "desc", render: (r) => <span title="from deliveries" style={{ color: palette.mutedGreige, fontSize: 11 }}>{r.gr ? fmtDay(r.gr.date) : "—"}</span>, csv: (r) => r.gr?.date },
   ];

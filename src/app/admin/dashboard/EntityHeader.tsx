@@ -121,7 +121,7 @@ function DesignHeader({ nav, design, ctx, title, image, profileByKey, startOpen 
   const leadKey = lead?.sku.trim().toUpperCase() ?? "";
   const info = ctx.infoBySku.get(leadKey) ?? null;
   const gr = (design?.variants ?? []).map((p) => ctx.grBySku[p.sku.trim().toUpperCase()]).filter(Boolean).sort((a, b) => b.date.localeCompare(a.date))[0];
-  const sheetDate = normaliseSheetDate(info?.last_receipt_date);
+  const costDate = normaliseSheetDate(info?.last_receipt_date);
   const vendorCode = (design?.variants ?? []).map((p) => ctx.vendorBySku[p.sku.trim().toUpperCase()]?.vendorSku).find(Boolean);
 
   return (
@@ -153,7 +153,7 @@ function DesignHeader({ nav, design, ctx, title, image, profileByKey, startOpen 
             </div>
             <div className="font-body flex gap-x-3 flex-wrap items-center" style={FACT}>
               {gr && <span>{gr.cost > 0 ? `Last bought ${formatINR(gr.cost)} on ${fmtDayYear(gr.date)}` : `Last bought on ${fmtDayYear(gr.date)}, no cost entered`}</span>}
-              {info && info.last_cost > 0 && <span>Sheet cost {formatINR(info.last_cost)}{sheetDate ? ` (${fmtDay(sheetDate)})` : ""}</span>}
+              {info && info.last_cost > 0 && <span>Cost basis {formatINR(info.last_cost)}{costDate ? ` (${fmtDay(costDate)})` : ""}</span>}
               {vendorCode && <span>Vendor SKU <CopyCode code={vendorCode} /></span>}
               {lead && <span>{lead.restockable ? "Restockable" : "Not restockable"}</span>}
             </div>
