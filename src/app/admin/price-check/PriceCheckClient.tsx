@@ -37,7 +37,7 @@ async function copyText(text: string): Promise<boolean> {
   } catch { return false; }
 }
 
-export function PriceCheckClient({ products, drivePhotos }: { products: WholesaleProduct[]; drivePhotos: boolean }) {
+export function PriceCheckClient({ products, withdrawnSkus, drivePhotos }: { products: WholesaleProduct[]; withdrawnSkus: string[]; drivePhotos: boolean }) {
   const [scanning, setScanning] = useState(false);
   const [current, setCurrent] = useState<Result | null>(null);
   const [recent, setRecent] = useState<Result[]>([]);
@@ -66,6 +66,7 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
     () => new Map(products.map((p) => [p.sku.trim().toUpperCase(), p])),
     [products],
   );
+  const withdrawn = useMemo(() => new Set(withdrawnSkus.map((s) => s.trim().toUpperCase())), [withdrawnSkus]);
 
   function show(r: Result) {
     setCurrent(r);
@@ -90,7 +91,7 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
     setTimeout(() => setCopied((c) => (c === sku ? null : c)), 1500);
     return p
       ? { ok: true, message: p.wholesale_price > 0 ? `${formatINR(p.wholesale_price)} — ${p.title ?? p.sku}` : `${p.title ?? sku} — price not set · SKU copied · set it in Studio → Specs` }
-      : { ok: true, message: `${sku} · copied` }; // not on portal, but SKU captured
+      : { ok: true, message: withdrawn.has(sku) ? `${sku} — withdrawn from billing · copied` : `${sku} · copied` }; // not on portal, but SKU captured
   }
 
   const matches = useMemo(() => {
@@ -266,8 +267,8 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
             </div>
           </div>
         ) : (
-          // Not on the portal yet — the missing-price items. Photo (for
-          // tagging) + big SKU + copy (for pricing).
+          // Not on the portal yet — the missing-price items — or withdrawn
+          // from billing. Photo (for tagging) + big SKU + copy (for pricing).
           <div className="mt-6 flex gap-4" style={{ background: palette.ivoryDeep, padding: 16 }}>
             {drivePhotos && drivePhotoBox(current.sku, 132, 165)}
             <div className="min-w-0 flex-1">
@@ -275,7 +276,9 @@ export function PriceCheckClient({ products, drivePhotos }: { products: Wholesal
               <div className="font-display mt-1" style={{ fontSize: 20, fontWeight: 700, color: palette.black, wordBreak: "break-all" }}>{current.sku}</div>
               <div className="mt-3">{copyBtn(current.sku, true)}</div>
               <p className="font-body mt-3" style={{ fontSize: 11, color: palette.mutedGreige, lineHeight: 1.5 }}>
-                Not on the portal yet — copy the SKU; once its delivery is logged, set the price in Studio → Specs.
+                {withdrawn.has(current.sku)
+                  ? "Withdrawn from billing: an admin can make it sellable again in Manage Catalog."
+                  : "Not on the portal yet — copy the SKU; once its delivery is logged, set the price in Studio → Specs."}
               </p>
             </div>
           </div>

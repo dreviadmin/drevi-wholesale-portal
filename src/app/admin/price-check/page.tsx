@@ -12,11 +12,22 @@ export const dynamic = "force-dynamic";
 export default async function PriceCheckPage() {
   await requireStaffOrRedirect();
   const admin = createAdminClient();
-  const { data: products } = await admin
-    .from("wholesale_products")
-    .select("sku, title, category, color, primary_fabric, wholesale_price, min_order_qty, restockable, restock_days, current_qty, image_urls")
-    .eq("wholesale_visible", true)
-    .order("title", { nullsFirst: false });
+  const [{ data: products }, { data: withdrawn }] = await Promise.all([
+    admin
+      .from("wholesale_products")
+      .select("sku, title, category, color, primary_fabric, wholesale_price, min_order_qty, restockable, restock_days, current_qty, image_urls")
+      .eq("wholesale_visible", true)
+      .order("title", { nullsFirst: false }),
+    // Withdrawn from billing (Manage Catalog): SKUs only, so a scan of one
+    // says so instead of "Not on the portal yet". No prices leave here.
+    admin.from("wholesale_products").select("sku").eq("wholesale_visible", false),
+  ]);
 
-  return <PriceCheckClient products={(products ?? []) as WholesaleProduct[]} drivePhotos={drivePhotosEnabled()} />;
+  return (
+    <PriceCheckClient
+      products={(products ?? []) as WholesaleProduct[]}
+      withdrawnSkus={(withdrawn ?? []).map((w) => w.sku as string)}
+      drivePhotos={drivePhotosEnabled()}
+    />
+  );
 }
