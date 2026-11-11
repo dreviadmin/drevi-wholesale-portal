@@ -278,7 +278,7 @@ export function StudioBoard({
     const label = discontinued ? "Discontinuing" : "Restoring";
     startTransition(async () => {
       startRun();
-      let done = 0, skipped = 0, failed = 0, archived = 0, unarchived = 0, stuck = 0, seen = 0;
+      let done = 0, skipped = 0, failed = 0, archived = 0, unarchived = 0, stuck = 0, inCatalog = 0, seen = 0;
       let firstError: string | undefined;
       runProgress(label, 0, targetIds.length, discontinued ? "each one on Shopify is archived" : "archived Shopify products go back to draft");
       for (let i = 0; i < targetIds.length; i += RETIRE_CHUNK) {
@@ -297,6 +297,7 @@ export function StudioBoard({
         }
         done += r.done ?? 0; skipped += r.skipped ?? 0; failed += r.failed ?? 0;
         archived += r.shopifyArchived ?? 0; unarchived += r.shopifyUnarchived ?? 0; stuck += r.shopifyStuck ?? 0;
+        inCatalog += r.catalogStuck ?? 0;
         if (!firstError && r.firstError) firstError = r.firstError;
         seen += chunk.length;
         const tally = `${done} done${skipped ? ` · ${skipped} already` : ""}${failed ? ` · ${failed} failed` : ""}`;
@@ -304,10 +305,13 @@ export function StudioBoard({
         flash(`${label} ${seen}/${targetIds.length} · ${tally}`);
       }
       // A product left outside the archive is the one outcome worth leading with.
-      const tail = stuck
+      // One still in the buyer catalog is the other: its card keeps Unpublish
+      // wholesale for exactly that.
+      const tail = (stuck
         ? ` · ${stuck} NOT ARCHIVED IN SHOPIFY${firstError ? ` — ${firstError}` : ""}`
         : archived ? ` · ${archived} archived in Shopify`
-        : unarchived ? ` · ${unarchived} back to draft in Shopify` : "";
+        : unarchived ? ` · ${unarchived} back to draft in Shopify` : "") +
+        (inCatalog ? ` · ${inCatalog} STILL IN THE BUYER CATALOG — use Unpublish wholesale` : "");
       // "3 failed" alone leaves nothing to act on, so the reason sits beside that
       // count: after the Shopify tally it would read as a verdict on the whole run.
       const reason = !stuck && firstError ? ` (${firstError})` : "";

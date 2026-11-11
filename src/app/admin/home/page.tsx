@@ -34,7 +34,10 @@ export default async function HomePage() {
   const [today, attention, { data: syncRow }, { data: todayOrdersCount }] = await Promise.all([
     computeToday(),
     computeAttention(),
-    admin.from("wholesale_products").select("synced_at").order("synced_at", { ascending: false }).limit(1).maybeSingle(),
+    // max(synced_at). NULLs last: Postgres sorts them FIRST in a descending
+    // order, and rows the sheet sync never stamps (a custom line added to the
+    // catalog) would otherwise make the stamp read "—" and "looks stuck".
+    admin.from("wholesale_products").select("synced_at").order("synced_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle(),
     Promise.resolve({ data: null }),
   ]);
   void todayOrdersCount;

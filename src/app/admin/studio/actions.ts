@@ -416,7 +416,7 @@ export async function setDiscontinued(
   designId: string,
   discontinued: boolean,
   note?: string,
-): Promise<{ ok: boolean; error?: string; hiddenSkus?: number; shopifyArchived?: boolean; shopifyUnarchived?: boolean; shopifyError?: string }> {
+): Promise<{ ok: boolean; error?: string; hiddenSkus?: number; shopifyArchived?: boolean; shopifyUnarchived?: boolean; shopifyError?: string; catalogError?: string }> {
   let staff;
   try {
     staff = await requireAdmin();
@@ -480,27 +480,36 @@ export async function setDiscontinued(
   if (error) return { ok: false, error: error.message };
 
   let hiddenSkus = 0;
+  let catalogError: string | undefined;
   if (discontinued) {
-    const { data: variants } = await admin
+    const { data: variants, error: readErr } = await admin
       .from("wholesale_products")
       .select("sku")
       .like("sku", `${design.base_sku}-%`);
+    if (readErr) catalogError = readErr.message;
     const skus = (variants ?? [])
       .map((v) => v.sku)
       .filter((s) => s.toUpperCase().endsWith(`-${design.color.toUpperCase()}`));
-    if (skus.length) {
-      await admin.from("wholesale_products").update({ buyer_visible: false }).in("sku", skus);
-      hiddenSkus = skus.length;
+    if (!catalogError && skus.length) {
+      const { error: hideErr } = await admin.from("wholesale_products").update({ buyer_visible: false }).in("sku", skus);
+      if (hideErr) catalogError = hideErr.message;
+      else hiddenSkus = skus.length;
     }
     // And say so on the target, the way unpublish() does: left at 'live', the
     // board read "Live · WS" for a garment buyers cannot see, and after Restore
     // nobody pushed it back because the badge claimed it was already out there.
-    await admin
-      .from("publish_targets")
-      .update({ state: "ready", error: null })
-      .eq("design_id", designId)
-      .eq("portal", "wholesale")
-      .in("state", ["live", "changes_pending"]);
+    // Only once the hide has worked, though: over sizes buyers can still see,
+    // 'live' is the truth, and it keeps Unpublish wholesale on the card — the
+    // Studio's way to take the product down (unpublish() hides with its own
+    // error checks).
+    if (!catalogError) {
+      await admin
+        .from("publish_targets")
+        .update({ state: "ready", error: null })
+        .eq("design_id", designId)
+        .eq("portal", "wholesale")
+        .in("state", ["live", "changes_pending"]);
+    }
   } else {
     // Restore never puts the product back in the catalog, so the Wholesale
     // card must not say Live over hidden rows. A product retired before the
@@ -530,6 +539,7 @@ export async function setDiscontinued(
     notes: discontinued
       ? `DISCONTINUED ${design.base_sku}·${design.color} by ${staff.email}${note?.trim() ? ` — ${note.trim()}` : ""}` +
         `${hiddenSkus ? ` (${hiddenSkus} variant(s) out of the catalog)` : ""}` +
+        `${catalogError ? `, CATALOG NOT HIDDEN: ${catalogError}` : ""}` +
         `${shopifyArchived ? ", Shopify set to ARCHIVED" : ""}${shopifyError ? `, SHOPIFY NOT ARCHIVED: ${shopifyError}` : ""}`
       : `RESTORED ${design.base_sku}·${design.color} by ${staff.email}${shopifyUnarchived ? ", Shopify back to DRAFT" : ""}`,
   });
@@ -537,7 +547,7 @@ export async function setDiscontinued(
   revalidatePath("/admin/studio");
   revalidatePath(`/admin/studio/${designId}`);
   revalidatePath(`/admin/studio/master/${designId}`);
-  return { ok: true, hiddenSkus, shopifyArchived, shopifyUnarchived, ...(shopifyError ? { shopifyError } : {}) };
+  return { ok: true, hiddenSkus, shopifyArchived, shopifyUnarchived, ...(shopifyError ? { shopifyError } : {}), ...(catalogError ? { catalogError } : {}) };
 }
 
 /**
@@ -558,7 +568,7 @@ export async function setDiscontinuedBatch(
 ): Promise<{
   ok: boolean; error?: string;
   done?: number; skipped?: number; failed?: number;
-  shopifyArchived?: number; shopifyUnarchived?: number; shopifyStuck?: number; firstError?: string;
+  shopifyArchived?: number; shopifyUnarchived?: number; shopifyStuck?: number; catalogStuck?: number; firstError?: string;
 }> {
   try {
     await requireAdmin();
@@ -567,7 +577,7 @@ export async function setDiscontinuedBatch(
   }
   if (designIds.length === 0) return { ok: false, error: "Nothing selected" };
 
-  let done = 0, skipped = 0, failed = 0, shopifyArchived = 0, shopifyUnarchived = 0, shopifyStuck = 0;
+  let done = 0, skipped = 0, failed = 0, shopifyArchived = 0, shopifyUnarchived = 0, shopifyStuck = 0, catalogStuck = 0;
   let firstError: string | undefined;
   for (const id of designIds.slice(0, 12)) {
     const res = await setDiscontinued(id, discontinued);
@@ -579,6 +589,7 @@ export async function setDiscontinuedBatch(
         shopifyStuck++;
         if (!firstError) firstError = res.shopifyError;
       }
+      if (res.catalogError) catalogStuck++;
       continue;
     }
     // "Already discontinued" / "not discontinued" is a no-op, not a failure —
@@ -593,5 +604,5 @@ export async function setDiscontinuedBatch(
   }
 
   revalidatePath("/admin/studio");
-  return { ok: true, done, skipped, failed, shopifyArchived, shopifyUnarchived, shopifyStuck, ...(firstError ? { firstError } : {}) };
+  return { ok: true, done, skipped, failed, shopifyArchived, shopifyUnarchived, shopifyStuck, catalogStuck, ...(firstError ? { firstError } : {}) };
 }

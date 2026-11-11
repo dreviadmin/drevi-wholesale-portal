@@ -797,9 +797,15 @@ export function Workbench({ board, buckets: serverBuckets, angles, copy, pool, a
                 if (!res.ok) { flash(res.error ?? "Failed"); return; }
                 // A Shopify failure does not stop the retirement, so it has to
                 // be the thing the message leads with.
+                // Nor does a failed catalog hide: buyers can still see it, and
+                // Unpublish wholesale (left on the card) takes it down.
+                const halfDone = [
+                  res.shopifyError ? `NOT ARCHIVED IN SHOPIFY — ${res.shopifyError}. Use Archive in Shopify on the Shopify panel.` : null,
+                  res.catalogError ? `STILL IN THE BUYER CATALOG — ${res.catalogError}. Use Unpublish wholesale, or hide its sizes in Manage Catalog.` : null,
+                ].filter(Boolean);
                 flash(
-                  res.shopifyError
-                    ? `Discontinued, but NOT ARCHIVED IN SHOPIFY — ${res.shopifyError}. Use Archive in Shopify on the Shopify panel.`
+                  halfDone.length
+                    ? `Discontinued, but ${halfDone.join(" And ")}`
                     : `Discontinued${res.hiddenSkus ? ` · ${res.hiddenSkus} variant(s) out of the catalog` : ""}${res.shopifyArchived ? " · Archived in Shopify" : ""}`,
                 );
                 router.refresh();

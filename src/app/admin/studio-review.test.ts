@@ -15,6 +15,8 @@ let nextId = 0;
 /** Runs just before a write reaches the table: lets a test play another writer. */
 let beforeWrite: ((table: string, op: string) => void) | null = null;
 let failSelect: ((table: string) => string | null) | null = null;
+/** Makes a write fail with this message (the table is left as it was). */
+let failWrite: ((table: string, op: string) => string | null) | null = null;
 
 const UNIQUE: Record<string, string[]> = {
   designs: ["base_sku", "color"],
@@ -98,6 +100,8 @@ function fakeAdmin() {
           return shape(list);
         }
         beforeWrite?.(table, op);
+        const writeErr = failWrite?.(table, op);
+        if (writeErr) return { data: null, error: { message: writeErr } };
         if (op === "update") {
           const hit = match();
           for (const r of hit) Object.assign(r, structuredClone(payload));
@@ -238,6 +242,7 @@ beforeEach(() => {
   nextId = 0;
   beforeWrite = null;
   failSelect = null;
+  failWrite = null;
   signedIn = STAFF;
   images = {};
   db = {
@@ -290,6 +295,24 @@ describe("Discontinue and Restore leave the wholesale target honest", () => {
     target(OTHER, "wholesale")!.error = "variant failed";
     await studio.setDiscontinued(OTHER, true);
     expect(target(OTHER, "wholesale")).toMatchObject({ state: "error", error: "variant failed" });
+  });
+
+  it("keeps the target 'live' (and Unpublish wholesale with it) when hiding the sizes fails, and says so", async () => {
+    failWrite = (t, op) => (t === "wholesale_products" && op === "update" ? "statement timeout" : null);
+    const r = await studio.setDiscontinued(DESIGN, true, "end of season");
+    expect(r).toMatchObject({ ok: true, hiddenSkus: 0, catalogError: "statement timeout" });
+    expect(target(DESIGN, "wholesale")!.state).toBe("live");
+    expect(db.wholesale_products.filter((p) => p.sku.endsWith("-GRN")).every((p) => p.buyer_visible)).toBe(true);
+    expect(String(writeAuditEvent.mock.calls.at(-1)?.[0]?.notes)).toContain("CATALOG NOT HIDDEN: statement timeout");
+    // Retired all the same — the design row says so.
+    expect(db.designs.find((d) => d.id === DESIGN)!.discontinued_at).toBeTruthy();
+  });
+
+  it("keeps the target 'live' when the sizes cannot even be read", async () => {
+    failSelect = (t) => (t === "wholesale_products" ? "connection reset" : null);
+    const r = await studio.setDiscontinued(DESIGN, true);
+    expect(r).toMatchObject({ ok: true, hiddenSkus: 0, catalogError: "connection reset" });
+    expect(target(DESIGN, "wholesale")!.state).toBe("live");
   });
 
   it("after Discontinue then Restore, the Wholesale card reads ready (asks for a push), and Shopify is back to draft", async () => {

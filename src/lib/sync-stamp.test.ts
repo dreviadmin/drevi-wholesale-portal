@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import { describeSync, SYNC_STALE_MS } from "./sync-stamp";
 
 // Audit round 2: Home printed only the clock time of the last sync, so a sync
@@ -45,5 +47,23 @@ describe("describeSync", () => {
   it("no sync on record is stale, not a blank", () => {
     expect(describeSync(null, NOW)).toEqual({ when: "—", stale: true, ago: null });
     expect(describeSync("not a date", NOW)).toEqual({ when: "—", stale: true, ago: null });
+  });
+});
+
+// The stamp is only as honest as the row Home feeds it. Postgres sorts NULLs
+// FIRST in a descending order, and wholesale_products rows the sheet sync never
+// stamps (a custom line added to the catalog from a retail bill or exhibition)
+// keep synced_at NULL for good — so a plain `order desc limit 1` handed
+// describeSync(null) and Home read "the sync looks stuck" while it ran fine.
+// A guard on the query, the house pattern for an invariant between files.
+describe("Home's sync stamp query", () => {
+  const code = fs.readFileSync(path.join(process.cwd(), "src/app/admin/home/page.tsx"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const query = code.slice(code.indexOf('.select("synced_at")'), code.indexOf(".maybeSingle()", code.indexOf('.select("synced_at")')));
+
+  it("reads max(synced_at), with unstamped rows sorted last or left out", () => {
+    expect(query).toContain('.order("synced_at"');
+    expect(query).toContain("ascending: false");
+    expect(/nullsFirst:\s*false/.test(query) || query.includes('.not("synced_at", "is", null)')).toBe(true);
   });
 });
