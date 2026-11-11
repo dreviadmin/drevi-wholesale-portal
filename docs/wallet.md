@@ -252,7 +252,7 @@ npx --yes vercel logs --environment production --since 72h --query "wallet-expir
 | `[wallet-webhook] GAVE UP <topic> <order gid> delivery <id> after <n> min — replay by hand: <error>` | Still failing after 3 hours. Shopify will not resend it; replay it (see [A webhook GAVE UP](#a-webhook-gave-up)). |
 | `[wallet] SHORTFALL #<order name> { requested, debited }` | Shopify took off more than the wallet held. The order is tagged `wallet-shortfall`. |
 | `[wallet] SHORTFALL #<order name> { requested, debited: 0, reason: 'no wallet' }` **(Nov 2026)** | The order used a wallet discount but matches no wallet. The order is tagged `wallet-shortfall`. |
-| `[wallet] would tag #<order name> <tag> (not production)` **(Nov 2026)** | A dev or local run would have tagged the order. Only prod (`VERCEL_ENV=production`) writes order tags, because dev shares the live store. |
+| `[wallet] would tag #<order name> <tag> (not production)` or `(not the prod ledger)` **(Nov 2026)** | A local, preview or dev run would have tagged the order. Only the prod portal writes order tags: a production deploy (`VERCEL_ENV=production`) whose `NEXT_PUBLIC_SUPABASE_URL` is the prod Supabase project. Every deploy shares the live store, and the dev project's deploys are production deploys too, so `not the prod ledger` is what the dev deploy logs. |
 | `[wallet] tag #<order name> <tag>: <error>` **(Nov 2026)** | Tagging the order failed. The webhook or cron still succeeded; find the order from this line instead of by tag. |
 | `[wallet-expire] <account id>: <error>` **(Nov 2026)** | That wallet could not be lapsed tonight. The others still were, and the run answered 500 with `failed` > 0. The next night tries again. |
 | `[wallet-expire] read wallets: <error>` **(Nov 2026)** | The expired-wallet query failed; nothing was lapsed. The discount sweep and reconciliation still ran. |
@@ -451,14 +451,23 @@ Replay only an event the receiver should have handled, normally one with a
 cut-off: replaying `orders/paid` for an order placed before the webhooks
 existed (26 Sep 2026) credits a 10% it was never given. Use `--dry` first.
 
+It refuses a topic the order's state says Shopify never sent, so a mistyped
+order number or topic stops before anything is posted:
+`orders/cancelled` for an order that is not cancelled (that would hand back
+the credit spent on an order that stands, and take back its 10%),
+`orders/paid` unless the order is `PAID`, `orders/fulfilled` unless it is
+`FULFILLED`, and `refunds/create` for an order with no refund. The
+`orders/cancelled` handler also checks for itself and answers
+`not cancelled` without posting anything.
+
 Run it from the repo root (the env file path is relative to where you run
 it):
 
 ```bash
 cd /Users/anshsarawagi/Documents/drevi/wholesale-portal-main
 export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh"
-node scripts/wallet-replay.mjs --order '#1091' --topic orders/create --dry   # shows what it would send
-node scripts/wallet-replay.mjs --order '#1091' --topic orders/create         # sends it to prod
+node scripts/wallet-replay.mjs --prod --order '#1091' --topic orders/create --dry   # shows what it would send
+node scripts/wallet-replay.mjs --prod --order '#1091' --topic orders/create         # sends it to prod
 ```
 
 - `--order` takes `'#1091'` (quote it: the shell treats `#` as a comment),
@@ -466,10 +475,11 @@ node scripts/wallet-replay.mjs --order '#1091' --topic orders/create         # s
 - `--topic` is one of `orders/create`, `orders/paid`, `orders/fulfilled`,
   `orders/cancelled`, `refunds/create`. For `refunds/create` it sends one
   delivery per refund on the order.
-- The default receiver is prod. `--dev` sends to
+- There is no default receiver: say `--prod` (the prod receiver, which
+  moves money on the live ledger), `--dev` (sends to
   `http://localhost:3000/api/wallet/webhooks/shopify` and reads
-  `.env.development.local`; `--url` names another receiver; `--env <file>`
-  names the env file.
+  `.env.development.local`) or `--url <receiver>`. A `--url` on the prod
+  host still needs `--prod`. `--env <file>` names the env file.
 - It needs `SHOPIFY_STORE_DOMAIN`, `WALLET_SHOPIFY_CLIENT_ID` and
   `WALLET_SHOPIFY_CLIENT_SECRET` in that env file. It does not fall back to
   `SHOPIFY_CLIENT_*`: the receiver would refuse that signature (401).
@@ -527,8 +537,9 @@ two devices before the first order's webhook ran; or the balance lapsed or
 was clawed back while a reservation was open.
 
 **(Nov 2026.)** Since then the order is also tagged `wallet-shortfall` (prod
-only; a dev run logs `would tag`), so Shopify admin → Orders, filtered by that
-tag, lists every one. A failed tag logs `[wallet] tag … :` and never fails
+portal only, see the order tags under [Environment](#environment); any other
+run logs `would tag`), so Shopify admin → Orders, filtered by that tag, lists
+every one. A failed tag logs `[wallet] tag … :` and never fails
 the webhook.
 
 A second kind: `[wallet] SHORTFALL #1091 { requested: 100000, debited: 0, reason: 'no wallet' }`,
@@ -562,7 +573,7 @@ the cron by hand and read `reconcile.mismatches`), then:
 | `redeem expected 0 got Y` | A debit on an order that no longer shows a wallet discount (it was edited in Shopify, say) | Look at the order's history in Shopify admin and ask Ansh. |
 | `earn expected X got 0` | Paid and fulfilled, but the 10% never landed (a `GAVE UP` on `orders/paid` or `orders/fulfilled`) | Replay `orders/fulfilled` (or `orders/paid`). |
 | `earn expected X got Y`, Y ≠ X | The order changed after the credit (an edit, a line refunded while still `PAID`) | Check the order; usually nothing to do. Ask Ansh before posting an `adjust`. |
-| `reverse_redeem expected X got Y` | A cancel whose `orders/cancelled` webhook never finished | Replay `orders/cancelled`. |
+| `reverse_redeem expected X got Y` | A cancel whose `orders/cancelled` webhook never finished | Replay `orders/cancelled` (the script refuses an order that is not cancelled). |
 
 After the fix, the next night's run no longer reports the order; then remove
 the `wallet-check` tag from it.
@@ -592,7 +603,7 @@ webhook handlers:
 
 Each disagreement logs
 `[wallet-reconcile] MISMATCH <order> <kind> expected X got Y` and tags the
-order `wallet-check` (prod only). It never posts or changes a movement. It
+order `wallet-check` (prod portal only). It never posts or changes a movement. It
 reads at most 250 orders and stops after about 40 seconds; `truncated: true`
 in the answer means it stopped early.
 
@@ -741,9 +752,16 @@ Customer tags the wallet writes:
 | `phone-review` | See [A phone-review tag appears](#a-phone-review-tag-appears). |
 | `wallet-relinked` | The wallet moved off this record to a signed-in account. |
 
-Order tags the wallet writes **(Nov 2026)**, only on prod
-(`VERCEL_ENV=production`; dev and local runs share the live store, so they
-log `would tag` instead):
+Order tags the wallet writes **(Nov 2026)**, only from the prod portal: a
+production deploy (`VERCEL_ENV=production`) whose `NEXT_PUBLIC_SUPABASE_URL`
+is the prod Supabase project (`cofarxgywnrdjbizxbxw`). Both are needed. Every
+deploy and local run shares the live store, but only prod holds the ledger
+those orders belong to, and the dev project (`drevi-wholesale-dev`) deploys to
+its own production target, so it has `VERCEL_ENV=production` as well. If it
+ever gets the wallet's Shopify app keys, its nightly cron compares live orders
+with the dev ledger and finds nearly all of them "wrong"; the Supabase check
+keeps those tags off the live orders. Every other run logs `would tag`
+instead (`orderTagBlocker` in `wallet-core.ts`):
 
 | Tag | Set when |
 |---|---|
@@ -754,10 +772,12 @@ The app already holds `write_orders`, so no scope change was needed.
 
 ## Test before prod
 
-- Unit tests (on 11 Nov: 4 files, 79 tests, all pass). They cover
+- Unit tests (on 11 Nov: 4 files, 89 tests, all pass). They cover
   `wallet-core.ts`, the token, the CORS helper and, with Supabase and Shopify
   mocked, the parts of `wallet.ts` changed in Nov 2026 (shortfall tag, the
-  dev guard, the reconciliation, `/join` for a member). The routes have no
+  tag guard including the dev project's production deploy, the
+  reconciliation, `/join` for a member, `orders/cancelled` for an order that
+  is not cancelled). The routes have no
   tests in the repo.
 
   ```bash
@@ -791,7 +811,7 @@ The app already holds `write_orders`, so no scope change was needed.
   wallet env). The October bag test harness (`wallet-harness/`) was not
   rebuilt; test the bag by hand as below.
 - After a deploy that touches the webhooks or the cron: replay `orders/paid`
-  for an order that already earned (expect `already earned`, statement
+  (`--prod`) for an order that already earned (expect `already earned`, statement
   unchanged), and run the cron by hand (expect `ok: true` and 0 mismatches,
   or a short list you can explain).
 - By hand, at phone and laptop widths:
@@ -917,10 +937,15 @@ them.
   wallet unchanged and writes nothing, so a stale page or a copied token can
   no longer rewrite their Shopify phone or WhatsApp choice. A shortfall, and
   a wallet discount on an order with no wallet, now tag the order
-  `wallet-shortfall` (prod only). The nightly cron keeps going past a wallet
+  `wallet-shortfall`. The nightly cron keeps going past a wallet
   it can't lapse, always runs the discount sweep, and then checks the last
   72 hours of orders against the ledger (`wallet-check`, report only; no new
-  cron schedule). `scripts/wallet-replay.mjs` re-sends a lost webhook. The
+  cron schedule). Only the prod portal tags: a production deploy on the prod
+  Supabase project, because the dev project's deploys are production deploys
+  too. `scripts/wallet-replay.mjs` re-sends a lost webhook; it needs `--prod`
+  to reach prod and refuses a topic the order's state rules out (above all
+  `orders/cancelled` for an order that stands), and the cancel handler
+  ignores an order that is not cancelled. The
   end-to-end check is in the repo (`scripts/wallet-e2e/`), with throwaway
   customers that join with WhatsApp consent off and a number checked to be
   unused. The October runs joined with consent on and random numbers, so
