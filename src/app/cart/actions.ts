@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DEFAULT_HSN } from "@/lib/hsn-default";
-import { getRawCart, getDetailedCart, type RawCartItem } from "@/lib/cart";
+import { getRawCart, getDetailedCart, detailCartItems, type RawCartItem } from "@/lib/cart";
 import { cartPieces } from "@/lib/cart-count";
 import { getStockState, qtyCap } from "@/lib/stock";
 import { finalizeOrder } from "@/lib/order-finalize";
@@ -60,6 +60,18 @@ async function loadProduct(sku: string): Promise<WholesaleProduct | undefined> {
   return (data as WholesaleProduct) ?? undefined;
 }
 
+/**
+ * The pieces every cart badge shows: the orderable lines, Limited ones held to
+ * stock, as getDetailedCart counts them for Home, the catalog and the cart.
+ * Not the stored rows: a sold-out row the buyer has not opened the cart since
+ * still sits there, and the product page's badge jumped from 4 to 15 on one
+ * Add while every other screen said 5 (Nov review).
+ */
+async function orderablePieces(items: RawCartItem[]): Promise<number> {
+  const cart = await detailCartItems(items);
+  return cart.readFailed ? cartPieces(items.map((i) => i.qty)) : cart.totalQty;
+}
+
 // `count` is lines; `pieces` is what the buyer's cart badge shows (Oct review).
 export async function addToCart(sku: string, qtyToAdd = 1): Promise<{ ok: boolean; count: number; pieces: number; message?: string }> {
   const buyer = await resolveActiveBuyer();
@@ -69,13 +81,13 @@ export async function addToCart(sku: string, qtyToAdd = 1): Promise<{ ok: boolea
   const desired = (existing?.qty ?? 0) + qtyToAdd;
   const clamped = clampQty(product, desired);
   if (clamped == null) {
-    return { ok: false, count: items.length, pieces: cartPieces(items.map((i) => i.qty)), message: "This item is no longer available." };
+    return { ok: false, count: items.length, pieces: await orderablePieces(items), message: "This item is no longer available." };
   }
 
   if (existing) existing.qty = clamped;
   else items.push({ sku, qty: clamped });
   await saveCart(buyer.id, items);
-  return { ok: true, count: items.length, pieces: cartPieces(items.map((i) => i.qty)) };
+  return { ok: true, count: items.length, pieces: await orderablePieces(items) };
 }
 
 export async function setQty(sku: string, qty: number): Promise<{ qty: number }> {

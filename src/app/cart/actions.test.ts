@@ -100,6 +100,29 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
+describe("addToCart counts pieces the way every other screen does (Nov review)", () => {
+  it("leaves out a stored row that has sold out since, so 4 + 1 reads 5, not 15", async () => {
+    db.wholesale_products = [product("OK"), product("GONE", { current_qty: 0, restockable: false })];
+    db.carts = [{ buyer_id: "b1", items: [{ sku: "GONE", qty: 10 }, { sku: "OK", qty: 4 }] }];
+    const res = await actions.addToCart("OK", 1);
+    expect(res).toMatchObject({ ok: true, pieces: 5 });
+  });
+
+  it("counts a Limited row stored above its stock at what is on hand", async () => {
+    db.wholesale_products = [product("LTD", { current_qty: 3, restockable: false }), product("OK")];
+    db.carts = [{ buyer_id: "b1", items: [{ sku: "LTD", qty: 8 }, { sku: "OK", qty: 2 }] }];
+    const res = await actions.addToCart("OK", 1);
+    expect(res).toMatchObject({ ok: true, pieces: 3 + 3 });
+  });
+
+  it("says the same count when it refuses a size that is gone", async () => {
+    db.wholesale_products = [product("OK"), product("GONE", { current_qty: 0, restockable: false })];
+    db.carts = [{ buyer_id: "b1", items: [{ sku: "GONE", qty: 10 }, { sku: "OK", qty: 4 }] }];
+    const res = await actions.addToCart("GONE", 1);
+    expect(res).toMatchObject({ ok: false, pieces: 4 });
+  });
+});
+
 describe("a failed read is never an empty cart (Nov review)", () => {
   it("submit says the cart could not be loaded, orders nothing and clears nothing", async () => {
     db.wholesale_products = [product("A")];
