@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { exGstCost, landedCost, expectedBillTotal, billMismatch } from "./gst";
+import { exGstCost, landedCost, expectedBillTotal, billMismatch } from "./receipt-gst";
 
 describe("receipt GST semantics (2 Aug)", () => {
   it("kaccha: entered price is both the ex-GST and landed cost", () => {

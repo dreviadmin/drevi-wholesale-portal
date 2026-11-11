@@ -11,7 +11,7 @@ import { unknownMintCode } from "@/lib/sku/mint-codes";
 import { applyMovement } from "@/lib/stock-ledger";
 import { storeDesignImage } from "@/lib/design-image-store";
 import { ensureDesignImagery } from "@/lib/design-imagery";
-import { exGstCost } from "@/lib/gst";
+import { exGstCost } from "@/lib/receipt-gst";
 import { isOriginValue } from "@/lib/studio/copy-prompt";
 import { ensureCatalogRow } from "@/lib/catalog-row";
 import { syncCatalogFrontQuietly } from "@/lib/studio/catalog-front";

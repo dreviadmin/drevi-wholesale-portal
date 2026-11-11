@@ -19,7 +19,7 @@ import { ORIGIN_OPTIONS } from "@/lib/studio/copy-prompt";
 import { palette } from "@/lib/palette";
 import { uuid } from "@/lib/uuid";
 import { formatINR } from "@/lib/format";
-import { billMismatch } from "@/lib/gst";
+import { billMismatch } from "@/lib/receipt-gst";
 import type { LiveVocab } from "@/lib/sku/vocab-live";
 import { queueTray } from "@/app/admin/sku-generator/labels";
 import { resolveGarmentDesign, uploadIdentPhoto, saveDelivery, quickAddVendor, type SupplyBlock, type SavedDesign } from "./delivery-actions";
@@ -208,7 +208,7 @@ export function DeliveryIntake({
     return { designs: garments.length, pieces, value, tags };
   }, [garments]);
   const billNum = Number(billAmount) || 0;
-  // Against the total WITH GST when it was paid on top (see lib/gst).
+  // Against the total WITH GST when it was paid on top (see lib/receipt-gst).
   const mismatch = billMismatch(billNum, totals.value, gst) != null;
   // The footer buttons look as usable as they are; onSave keeps its own checks.
   const canSave = !!vendorId && garments.length > 0;

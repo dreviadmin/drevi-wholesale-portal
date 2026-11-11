@@ -11,7 +11,7 @@ import { ReceiptEditor, type VendorOption, type EditorLine } from "../ReceiptEdi
 import { deleteReceipt } from "../actions";
 import { uuid } from "@/lib/uuid";
 import { formatINR, formatUnitINR } from "@/lib/format";
-import { billMismatch } from "@/lib/gst";
+import { billMismatch } from "@/lib/receipt-gst";
 import { palette } from "@/lib/palette";
 
 interface ReceiptHeader {
@@ -47,7 +47,7 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus, designs }
   const incomplete = designs.filter((d) => !d.specsVerified || !d.priceSet);
   const here = `/admin/receipts/${receipt.id}`;
   const totals = lines.reduce((t, l) => ({ pieces: t.pieces + l.qty, value: t.value + l.qty * l.unitCost }), { pieces: 0, value: 0 });
-  // Against the total WITH GST when it was paid on top (see lib/gst).
+  // Against the total WITH GST when it was paid on top (see lib/receipt-gst).
   const mismatch = billMismatch(receipt.billAmount, totals.value, { mode: receipt.gstMode, rate: receipt.gstRate, inclusive: receipt.gstInclusive });
 
   function printTags() {

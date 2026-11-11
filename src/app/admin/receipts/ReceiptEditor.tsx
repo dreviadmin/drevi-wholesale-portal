@@ -13,7 +13,7 @@ import { uuid } from "@/lib/uuid";
 import { createReceipt, updateReceipt, uploadReceiptBill, type ReceiptInput } from "./actions";
 import { quickAddVendor } from "@/app/admin/vendors/actions";
 import { formatINR } from "@/lib/format";
-import { billMismatch } from "@/lib/gst";
+import { billMismatch } from "@/lib/receipt-gst";
 import { downscalePhoto } from "@/lib/downscale-photo";
 import { palette } from "@/lib/palette";
 
@@ -179,7 +179,7 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku, onCa
     return { pieces, value };
   }, [lines]);
   const billNum = num(billAmount);
-  // Against the total WITH GST when it was paid on top (see lib/gst).
+  // Against the total WITH GST when it was paid on top (see lib/receipt-gst).
   const mismatch = billMismatch(billNum, totals.value, gst);
 
   async function save() {
