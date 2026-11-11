@@ -627,6 +627,7 @@ export async function reconcileRecent(opts: { hours?: number; graceMinutes?: num
         walletAllocatedPaise: walletAllocatedPaise(order.codeAllocations, order.walletAutoPaise),
         expectedEarnPaise: earnAmountPaise(base, earnPercent),
         walletReachable: !!account || order.phones.some((p) => !!normalizePhone(p)),
+        createdAt: o.createdAt,
       }, rows);
       if (found.length) {
         report.mismatched++;

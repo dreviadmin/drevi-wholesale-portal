@@ -359,12 +359,12 @@ export async function addOrderTags(orderGid: string, tags: string[]): Promise<vo
 }
 
 /** Orders whose updated_at falls in [sinceIso, untilIso], oldest change first, at most `max`. */
-export async function listOrdersUpdatedBetween(sinceIso: string, untilIso: string, max = 250): Promise<{ orders: Array<{ id: string; name: string }>; more: boolean }> {
-  const orders: Array<{ id: string; name: string }> = [];
+export async function listOrdersUpdatedBetween(sinceIso: string, untilIso: string, max = 250): Promise<{ orders: Array<{ id: string; name: string; createdAt: string }>; more: boolean }> {
+  const orders: Array<{ id: string; name: string; createdAt: string }> = [];
   let after: string | null = null;
   for (;;) {
-    const d: { orders: { nodes: Array<{ id: string; name: string }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await walletGql(
-      `query($q:String!, $after:String){ orders(first:50, after:$after, sortKey:UPDATED_AT, query:$q){ nodes{ id name } pageInfo{ hasNextPage endCursor } } }`,
+    const d: { orders: { nodes: Array<{ id: string; name: string; createdAt: string }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await walletGql(
+      `query($q:String!, $after:String){ orders(first:50, after:$after, sortKey:UPDATED_AT, query:$q){ nodes{ id name createdAt } pageInfo{ hasNextPage endCursor } } }`,
       { q: `updated_at:>='${sinceIso}' AND updated_at:<='${untilIso}'`, after });
     for (const o of d.orders.nodes) {
       if (orders.length >= max) return { orders, more: true };

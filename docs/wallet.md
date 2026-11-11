@@ -444,8 +444,15 @@ with `WALLET_SHOPIFY_CLIENT_SECRET` the way Shopify signs it, with a fresh
 `replay-…` delivery id so the receiver doesn't skip it as handled. Repeating
 it is safe: every balance change goes through `wallet_post_movement`, so an
 event that already got through answers `already debited` or
-`already earned` and changes nothing. Run it from the repo root (the env
-file path is relative to where you run it):
+`already earned` and changes nothing.
+
+Replay only an event the receiver should have handled, normally one with a
+`GAVE UP` line or a `wallet-check` mismatch. The handlers have no date
+cut-off: replaying `orders/paid` for an order placed before the webhooks
+existed (26 Sep 2026) credits a 10% it was never given. Use `--dry` first.
+
+Run it from the repo root (the env file path is relative to where you run
+it):
 
 ```bash
 cd /Users/anshsarawagi/Documents/drevi/wholesale-portal-main
@@ -573,9 +580,12 @@ webhook handlers:
 - Not cancelled: the `redeem` rows must add up to what the wallet discounts
   took off the order (the automatic `Drevi Wallet · …` line plus any legacy
   `WLT-` code).
-- Paid and fulfilled, with a wallet or a usable phone on the order: the
-  `earn` rows must add up to 10% of what was paid for merchandise, as it
-  stands now.
+- Paid and fulfilled, with a wallet or a usable phone on the order, and
+  placed on or after 26 Sep 2026 15:59 UTC (`WALLET_EARNING_SINCE_ISO`, when
+  the five order webhooks were registered): the `earn` rows must add up to
+  10% of what was paid for merchandise, as it stands now. Older orders were
+  paid and fulfilled before the wallet existed and never earned, so an edit
+  to one does not flag it.
 - Cancelled after a debit: the `reverse_redeem` rows must give it all back.
 - Refund claw-backs are not checked (a refunded order is no longer `PAID`,
   and claw-backs clamp by design).

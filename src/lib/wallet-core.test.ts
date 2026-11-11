@@ -31,6 +31,7 @@ import {
   reconcileOrderMovements,
   walletAllocatedPaise,
   eachSettled,
+  WALLET_EARNING_SINCE_ISO,
   type ReconcileOrderFacts } from "./wallet-core";
 
 describe("normalizePhone", () => {
@@ -352,6 +353,17 @@ describe("reconciling an order against the ledger", () => {
   it("earn of the wrong amount", () => {
     expect(reconcileOrderMovements(facts({ paid: true, fulfilled: true, expectedEarnPaise: 77900 }), [{ kind: "earn", amount_paise: 70000 }]))
       .toEqual([{ kind: "earn", expectedPaise: 77900, gotPaise: 70000 }]);
+  });
+  it("no earn expected on an order placed before the wallet's webhooks existed", () => {
+    const due = { paid: true, fulfilled: true, expectedEarnPaise: 150000 };
+    expect(reconcileOrderMovements(facts({ ...due, createdAt: "2026-09-24T19:13:23Z" }), [])).toEqual([]);
+    expect(reconcileOrderMovements(facts({ ...due, createdAt: "2026-09-26T15:59:11Z" }), [])).toEqual([]);
+    expect(reconcileOrderMovements(facts({ ...due, createdAt: WALLET_EARNING_SINCE_ISO }), [])).toEqual([{ kind: "earn", expectedPaise: 150000, gotPaise: 0 }]);
+    expect(reconcileOrderMovements(facts({ ...due, createdAt: "2026-10-02T12:01:38Z" }), [])).toEqual([{ kind: "earn", expectedPaise: 150000, gotPaise: 0 }]);
+    expect(reconcileOrderMovements(facts({ ...due, createdAt: null }), [])).toEqual([{ kind: "earn", expectedPaise: 150000, gotPaise: 0 }]);
+  });
+  it("an old order's wallet debit is still checked", () => {
+    expect(reconcileOrderMovements(facts({ createdAt: "2026-09-20T00:00:00Z" }), [{ kind: "redeem", amount_paise: -30000 }])).toEqual([{ kind: "redeem", expectedPaise: 0, gotPaise: 30000 }]);
   });
   it("no earn expected when there is no wallet and no phone to open one", () => {
     expect(reconcileOrderMovements(facts({ paid: true, fulfilled: true, expectedEarnPaise: 77900, walletReachable: false }), [])).toEqual([]);

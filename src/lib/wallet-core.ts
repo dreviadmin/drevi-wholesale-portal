@@ -185,7 +185,18 @@ export interface ReconcileOrderFacts {
   expectedEarnPaise: number;
   /** a wallet matches the order, or the order carries a usable phone */
   walletReachable: boolean;
+  /** when the order was placed; one placed before WALLET_EARNING_SINCE_ISO is not expected to have earned */
+  createdAt?: string | null;
 }
+
+/**
+ * When the five order webhooks were registered on the store (Admin API
+ * webhookSubscriptions createdAt). An order placed before then was, as a
+ * rule, paid and fulfilled before the wallet existed and never earned, so the
+ * reconciliation does not expect a 10% on it. (One fulfilled after this did
+ * earn; skipping it only means that one is not checked.)
+ */
+export const WALLET_EARNING_SINCE_ISO = "2026-09-26T15:59:12Z";
 
 export interface WalletMismatch { kind: "redeem" | "earn" | "reverse_redeem"; expectedPaise: number; gotPaise: number }
 
@@ -216,7 +227,8 @@ export function reconcileOrderMovements(facts: ReconcileOrderFacts, rows: OrderM
   }
   const allocated = Math.max(0, facts.walletAllocatedPaise);
   if ((allocated > 0 || redeemed !== 0) && redeemed !== allocated) out.push({ kind: "redeem", expectedPaise: allocated, gotPaise: redeemed });
-  if (facts.paid && facts.fulfilled && facts.walletReachable && facts.expectedEarnPaise > 0 && earned !== facts.expectedEarnPaise) {
+  const placedBeforeEarning = !!facts.createdAt && Date.parse(facts.createdAt) < Date.parse(WALLET_EARNING_SINCE_ISO);
+  if (facts.paid && facts.fulfilled && facts.walletReachable && !placedBeforeEarning && facts.expectedEarnPaise > 0 && earned !== facts.expectedEarnPaise) {
     out.push({ kind: "earn", expectedPaise: facts.expectedEarnPaise, gotPaise: earned });
   }
   return out;
