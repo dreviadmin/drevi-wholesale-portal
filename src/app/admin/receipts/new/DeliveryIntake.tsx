@@ -563,10 +563,10 @@ export function DeliveryIntake({
           </div>
           {saveHint && <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige }}>{saveHint}</div>}
           <div className="flex gap-2 mt-2">
-            <button type="button" disabled={pending || !canSave} onClick={() => onSave(true)} className="flex-1 font-body uppercase disabled:opacity-50" style={{ fontSize: 10.5, letterSpacing: "0.16em", background: palette.gold, color: palette.black, fontWeight: 600, padding: "13px 0" }}>
+            <button type="button" disabled={pending || !canSave} onClick={() => onSave(true)} className="flex-1 font-body uppercase disabled:opacity-50" style={{ fontSize: 11, letterSpacing: "0.16em", background: palette.gold, color: palette.black, fontWeight: 600, padding: "13px 0", minHeight: 44 }}>
               Save &amp; print tags
             </button>
-            <button type="button" disabled={pending || !canSave} onClick={() => onSave(false)} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 10, letterSpacing: "0.14em", border: `1px solid ${palette.champagne}`, color: palette.ivory, padding: "13px 14px" }}>
+            <button type="button" disabled={pending || !canSave} onClick={() => onSave(false)} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 11, letterSpacing: "0.14em", border: `1px solid ${palette.champagne}`, color: palette.ivory, padding: "13px 14px", minHeight: 44 }}>
               Save only
             </button>
           </div>
