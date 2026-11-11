@@ -99,6 +99,7 @@ const STAFF = { id: "staff-1", email: "rakesh@drevifashion.com", name: "Rakesh",
 const writeAuditEvent = vi.fn(async (e: Record<string, unknown>) => { void e; });
 const finalizeOrder = vi.fn(async (id: string, o?: unknown) => { void id; void o; return { pdfUrl: "https://example.test/o.pdf" }; });
 const renderAndStoreBillPdf = vi.fn(async (...a: unknown[]) => { void a; return { url: "https://example.test/b.pdf" }; });
+const applyMovement = vi.fn(async (m: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> => { void m; return { ok: true }; });
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -110,8 +111,8 @@ vi.mock("@/lib/staff", () => ({
 vi.mock("@/lib/audit", () => ({ writeAuditEvent: (e: Record<string, unknown>) => writeAuditEvent(e) }));
 vi.mock("@/lib/catalog-row", () => ({ ensureCatalogRow: async () => ({ ok: true }) }));
 vi.mock("@/lib/order-finalize", () => ({ finalizeOrder: (id: string, o?: unknown) => finalizeOrder(id, o) }));
-vi.mock("@/lib/stock-ledger", () => ({ postOrderMovements: async () => ({ ok: true }), applyMovement: async () => ({ ok: true }) }));
-vi.mock("@/lib/stock", () => ({ getStockState: async () => "ready" }));
+vi.mock("@/lib/stock-ledger", () => ({ postOrderMovements: async () => ({ ok: true }), applyMovement: (m: Record<string, unknown>) => applyMovement(m) }));
+vi.mock("@/lib/stock", () => ({ getStockState: () => "ready" }));
 vi.mock("@/lib/design-image-store", () => ({ storeAuxPhoto: async () => ({ ok: false }) }));
 vi.mock("@/lib/bill-pdf", () => ({ renderAndStoreBillPdf: (...a: unknown[]) => renderAndStoreBillPdf(...a) }));
 vi.mock("@/lib/buyer-snapshot", () => ({
@@ -197,6 +198,7 @@ beforeEach(() => {
   writeAuditEvent.mockClear();
   finalizeOrder.mockClear();
   renderAndStoreBillPdf.mockClear();
+  applyMovement.mockClear();
 });
 
 afterEach(() => {
@@ -256,6 +258,190 @@ describe("Modify Order on a billed order", () => {
     const r = await orders.updateOrderItems("o1", [keep(0, 5), keep(1, 3)], { ...editorTerms, discountValue: 2500 });
     expect(r.ok).toBe(true);
     expect(orderRow().discount_value).toBe(2500);
+  });
+});
+
+describe("Modify Order around an order-anchored credit note", () => {
+  const A = "DD-LEH-FLR-001-M-RED", B = "DD-KUR-PLN-002-L-BLU", X = "DD-SAR-SLK-003-F-GRN";
+  const noTerms = { discountType: null, discountValue: null, taxMode: "none" as const, taxRate: null, advanceAmount: 0, paymentMethod: null, paymentNotes: null };
+  const keep = (index: number, qty: number, unitPrice = 2000) => ({ kind: "keep" as const, index, qty, unitPrice, actualQty: null });
+  // CN1 returned 2 of A, which sits at order line 1.
+  const orderNote = (over: Row = {}): Row => ({
+    id: "cn-1", order_id: "o1", order_bill_id: null, status: "issued", kind: "return",
+    items: [{ sku: A, qty: 2, bill_line_index: 1, order_line_index: 1 }], ...over,
+  });
+
+  function returnedOrder(over: Row = {}) {
+    seedOrder({
+      items: [
+        line({ sku: X, title: "Silk saree", qty: 1 }),
+        line({ sku: A, qty: 5, returned_qty: 2 } as Partial<OrderItem>),
+        line({ sku: B, title: "Plain kurta", qty: 4 }),
+      ],
+      ...over,
+    });
+  }
+
+  it("refuses removing an earlier line, which would shift the note onto the wrong piece", async () => {
+    returnedOrder();
+    db.credit_notes = [orderNote()];
+    const r = await orders.updateOrderItems("o1", [keep(1, 5), keep(2, 4)], noTerms);
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("points at its lines by position");
+    expect(writes.some((w) => w.table === "orders")).toBe(false);
+    expect(orderRow().items.map((it: OrderItem) => it.sku)).toEqual([X, A, B]);
+  });
+
+  it("refuses reordering the lines too", async () => {
+    returnedOrder();
+    db.credit_notes = [orderNote()];
+    const r = await orders.updateOrderItems("o1", [keep(0, 1), keep(2, 4), keep(1, 5)], noTerms);
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("points at its lines by position");
+  });
+
+  it("still allows edits that keep every line where it is: a qty change and a trailing removal", async () => {
+    returnedOrder();
+    db.credit_notes = [orderNote()];
+    const r = await orders.updateOrderItems("o1", [keep(0, 2), keep(1, 5)], noTerms);
+    expect(r).toMatchObject({ ok: true });
+    expect(orderRow().items.map((it: OrderItem) => [it.sku, it.qty])).toEqual([[X, 2], [A, 5]]);
+  });
+
+  it("lets the lines move once the note is void, or when the only note is on a bill", async () => {
+    returnedOrder();
+    db.credit_notes = [orderNote({ status: "void" })];
+    expect((await orders.updateOrderItems("o1", [keep(1, 5), keep(2, 4)], noTerms)).ok).toBe(true);
+
+    returnedOrder();
+    db.credit_notes = [orderNote({ order_bill_id: "bill-1" })];
+    expect((await orders.updateOrderItems("o1", [keep(1, 5), keep(2, 4)], noTerms)).ok).toBe(true);
+  });
+
+  describe("under an absolute ₹ discount", () => {
+    const absTerms = { ...noTerms, discountType: "absolute" as const, discountValue: 2000 };
+    // A ₹10,000 + B ₹10,000 + C ₹20,000, ₹2,000 off. CN1 returned A at a
+    // ₹500 share (10,000 × 2,000 / 40,000).
+    function discounted(withNote: Row | null) {
+      seedOrder({
+        discount_type: "absolute", discount_value: 2000, discount_amount: 2000, total_amount: 38000,
+        items: [
+          line({ sku: A, qty: 1, unit_price: 10000, returned_qty: 1 } as Partial<OrderItem>),
+          line({ sku: B, title: "Plain kurta", qty: 1, unit_price: 10000 }),
+          line({ sku: X, title: "Silk saree", qty: 1, unit_price: 20000 }),
+        ],
+      });
+      db.credit_notes = withNote ? [withNote] : [];
+    }
+    const note = orderNote({ items: [{ sku: A, qty: 1, bill_line_index: 0, order_line_index: 0 }] });
+
+    it("refuses removing a line, which would hand the next note a bigger share of the discount", async () => {
+      discounted(note);
+      const r = await orders.updateOrderItems("o1", [keep(0, 1, 10000), keep(1, 1, 10000)], absTerms);
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain("shares this order's ₹2,000 discount");
+      expect(writes.some((w) => w.table === "orders")).toBe(false);
+      expect(orderRow().total_amount).toBe(38000);
+    });
+
+    it("refuses resizing or repricing a line, which moves the subtotal the same way", async () => {
+      discounted(note);
+      for (const edit of [
+        [keep(0, 1, 10000), keep(1, 2, 10000), keep(2, 1, 20000)],
+        [keep(0, 1, 10000), keep(1, 1, 9000), keep(2, 1, 20000)],
+      ]) {
+        const r = await orders.updateOrderItems("o1", edit, absTerms);
+        expect(r.ok).toBe(false);
+        expect(r.error).toContain("discount across its current lines");
+      }
+    });
+
+    it("still saves an edit that leaves the subtotal alone, and any edit with no order-anchored note", async () => {
+      discounted(note);
+      const same = await orders.updateOrderItems("o1", [keep(0, 1, 10000), keep(1, 1, 10000), keep(2, 1, 20000)], { ...absTerms, paymentNotes: "paid by cheque" });
+      expect(same).toMatchObject({ ok: true });
+
+      discounted(null);
+      const r = await orders.updateOrderItems("o1", [keep(0, 1, 10000), keep(1, 1, 10000)], absTerms);
+      expect(r).toMatchObject({ ok: true, total: 18000 });
+    });
+
+    it("leaves a percent discount alone: its share does not move with the subtotal", async () => {
+      discounted(note);
+      Object.assign(orderRow(), { discount_type: "percent", discount_value: 5 });
+      const r = await orders.updateOrderItems("o1", [keep(0, 1, 10000), keep(1, 1, 10000), keep(2, 2, 20000)], { ...noTerms, discountType: "percent", discountValue: 5 });
+      expect(r).toMatchObject({ ok: true });
+    });
+  });
+});
+
+describe("Modify Order cannot take the advance below what live bills applied", () => {
+  const terms = { discountType: null, discountValue: null, taxMode: "none" as const, taxRate: null, paymentMethod: "UPI", paymentNotes: null };
+  const keep = (index: number, qty: number) => ({ kind: "keep" as const, index, qty, unitPrice: 2000, actualQty: null });
+
+  function billedWithAdvance(cancelled = false) {
+    seedOrder({
+      advance_amount: 10000, payment_method: "UPI", total_amount: 30000,
+      items: [
+        line({ qty: 10, line_state: "confirmed", billed_in: cancelled ? undefined : "bill-1" }),
+        line({ sku: "DD-KUR-PLN-002-L-BLU", qty: 5, line_state: "pending" }),
+      ],
+    });
+    db.order_bills = [bill({ items: [line({ qty: 10 })], total: 20000, advance_applied: 10000, cancelled_at: cancelled ? "2026-10-03T10:00:00Z" : null })];
+  }
+
+  it("refuses an advance below the bills' share, and writes nothing", async () => {
+    billedWithAdvance();
+    const r = await orders.updateOrderItems("o1", [keep(0, 10), keep(1, 6)], { ...terms, advanceAmount: 5000 });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("₹10,000 of the advance is already shown on this order's bills");
+    expect(writes.some((w) => w.table === "orders")).toBe(false);
+    expect(orderRow().advance_amount).toBe(10000);
+  });
+
+  it("saves the same advance, a higher one, and a lower one once the bill is cancelled", async () => {
+    billedWithAdvance();
+    expect(await orders.updateOrderItems("o1", [keep(0, 10), keep(1, 6)], { ...terms, advanceAmount: 10000 })).toMatchObject({ ok: true });
+    expect(await orders.updateOrderItems("o1", [keep(0, 10), keep(1, 6)], { ...terms, advanceAmount: 12000 })).toMatchObject({ ok: true });
+    expect(orderRow().advance_amount).toBe(12000);
+
+    billedWithAdvance(true);
+    expect(await orders.updateOrderItems("o1", [keep(0, 10), keep(1, 6)], { ...terms, advanceAmount: 5000 })).toMatchObject({ ok: true });
+    expect(orderRow().advance_amount).toBe(5000);
+  });
+});
+
+describe("Modify Order: a line added after submit", () => {
+  const NEW_SKU = "DD-LEH-FLR-050-M-GLD";
+  const keep = (index: number, qty: number) => ({ kind: "keep" as const, index, qty, unitPrice: 2000, actualQty: null });
+  const add = { kind: "add" as const, sku: NEW_SKU, qty: 2 };
+  beforeEach(() => {
+    seedOrder({ status: "confirmed", items: [line({ stock_moved: true })] });
+    db.wholesale_products = [{ sku: NEW_SKU, title: "Gold lehenga", wholesale_price: 3000, wholesale_visible: true, image_urls: [], restock_days: null }];
+  });
+
+  it("takes its stock and stays marked as taken when the movement posts", async () => {
+    const r = await orders.updateOrderItems("o1", [keep(0, 5), add]);
+    expect(r).toEqual({ ok: true, total: 16000, overpaidBy: undefined });
+    expect(applyMovement).toHaveBeenCalledWith(expect.objectContaining({ sku: NEW_SKU, delta: -2, reason: "order", refId: "o1" }));
+    expect(orderRow().items[1]).toMatchObject({ sku: NEW_SKU, stock_moved: true });
+  });
+
+  it("comes off stock_moved when its movement fails, so a later cancel cannot put back pieces that never left", async () => {
+    applyMovement.mockResolvedValueOnce({ ok: false, error: "insert refused" });
+    const r = await orders.updateOrderItems("o1", [keep(0, 5), add]);
+    expect(r.ok).toBe(true);
+    expect(r.warning).toContain(`${NEW_SKU}: stock was not taken (insert refused)`);
+    expect(orderRow().items[1]).toMatchObject({ sku: NEW_SKU, stock_moved: false });
+    // The line that already had its stock out keeps its flag.
+    expect(orderRow().items[0].stock_moved).toBe(true);
+  });
+
+  it("reports a failed correction for a resized line instead of swallowing it", async () => {
+    applyMovement.mockResolvedValueOnce({ ok: false, error: "timeout" });
+    const r = await orders.updateOrderItems("o1", [keep(0, 3)]);
+    expect(r.ok).toBe(true);
+    expect(r.warning).toContain("DD-LEH-FLR-001-M-RED: the +2 stock movement failed (timeout)");
   });
 });
 

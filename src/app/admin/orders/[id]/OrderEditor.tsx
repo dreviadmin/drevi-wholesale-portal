@@ -461,6 +461,8 @@ export function OrderEditor({
     start(async () => {
       const res = await updateOrderItems(orderId, payload, terms);
       if (!res.ok) { setError(res.error ?? "Failed to save"); return; }
+      // Saved, but a stock movement behind it failed — staff must fix stock.
+      if (res.warning) alert(res.warning);
       if (res.overpaidBy && res.overpaidBy > 0) {
         // Non-blocking: the edit saved, but staff need to know a refund is owed.
         alert(`Saved. Note: the buyer has now overpaid by ${formatINR(res.overpaidBy)} (advance exceeds the new total) — record a refund.`);

@@ -230,7 +230,7 @@ export async function updateOrderItems(
   orderId: string,
   lines: OrderEditLine[],
   terms?: OrderEditTerms,
-): Promise<{ ok: boolean; error?: string; total?: number; overpaidBy?: number }> {
+): Promise<{ ok: boolean; error?: string; total?: number; overpaidBy?: number; warning?: string }> {
   try {
     await requireAdmin();
   } catch {
@@ -291,7 +291,9 @@ export async function updateOrderItems(
   // NOT stored as 'pending' instead: setLineState refuses on delivered and
   // fulfilled orders, so such a line could never be confirmed or billed.
   const postSubmit = addedLineTakesStock(order.status);
-  const addedStockOut: { sku: string; delta: number; why: string }[] = [];
+  // `idx` is the added line's position in the saved items, so a movement that
+  // fails can take its stock_moved flag back off (see the loop after the write).
+  const addedStockOut: { sku: string; delta: number; why: string; idx?: number }[] = [];
 
   const items: OrderItem[] = [];
   let subtotal = 0;
@@ -367,7 +369,7 @@ export async function updateOrderItems(
         ...(postSubmit ? { stock_moved: true } : {}),
       });
       // Billed units, as every other order movement posts them.
-      if (postSubmit) addedStockOut.push({ sku: p.sku, delta: -qty, why: "line added in edit" });
+      if (postSubmit) addedStockOut.push({ sku: p.sku, delta: -qty, why: "line added in edit", idx: items.length - 1 });
       subtotal += qty * unitPrice;
     }
   }
@@ -432,8 +434,61 @@ export async function updateOrderItems(
     }
   }
 
+  // An ORDER-anchored credit note (a return against the order itself, no bill
+  // behind it) reads the order's live lines, so the 4 Oct relaxation above
+  // must not let the lines move under it either:
+  //  · each of its lines names an order line by POSITION (order_line_index).
+  //    Removing or reordering an earlier line shifts every later one, and the
+  //    note's returned count then lands on the wrong piece — the void finds a
+  //    different SKU there and leaves the real line locked for good;
+  //  · its discount share is the order's ₹ discount over the order's current
+  //    subtotal. With an ABSOLUTE discount that ratio moves whenever the
+  //    subtotal does, so the next note takes a bigger or smaller share than
+  //    this one did, and the credits can add up to more than the invoice.
+  // Still allowed: qty/price edits that keep the subtotal (or any, under a
+  // percent discount), added lines on a percent or no-discount order, and
+  // removing trailing lines. Bill-anchored notes price off the bill's own
+  // snapshot and find lines by billed_in, so they are not affected.
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const movesLines = lines.some((l, j) => l.kind === "keep" && l.index !== j);
+  const storedSubtotal = r2((order.items ?? []).reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unit_price) || 0), 0));
+  const movesDiscountBase = discountType === "absolute" && discountAmount > 0 && r2(subtotal) !== storedSubtotal;
+  if (movesLines || movesDiscountBase) {
+    const { count: orderNotes, error: notesErr } = await admin
+      .from("credit_notes")
+      .select("id", { count: "exact", head: true })
+      .eq("order_id", orderId)
+      .is("order_bill_id", null)
+      .eq("status", "issued");
+    if (notesErr) return { ok: false, error: `Could not check this order's credit notes (${notesErr.message}) — try again.` };
+    if ((orderNotes ?? 0) > 0) {
+      return {
+        ok: false,
+        error: movesLines
+          ? "A credit note on this order points at its lines by position — removing or reordering lines would move it onto the wrong piece. Void the note first, or keep the lines in place."
+          : `A credit note shares this order's ${formatINR(Number(order.discount_amount) || discountAmount)} discount across its current lines — adding, removing, resizing or repricing lines would change that share. Void the note first.`,
+      };
+    }
+  }
+
   const advanceAmount =
     terms && "advanceAmount" in terms ? Math.max(0, Number(terms.advanceAmount) || 0) : Number(order.advance_amount) || 0;
+  // A live bill prints the advance it applied, and the next bill only gets
+  // what is left. Lowering the advance below what live bills already show
+  // would leave the bills' dues and the order's balance disagreeing — the
+  // same documents-start-lying problem the term freeze above refuses.
+  if (advanceAmount < (Number(order.advance_amount) || 0)) {
+    const { data: liveBills, error: billsErr } = await admin
+      .from("order_bills")
+      .select("discount_amount, advance_applied, cancelled_at")
+      .eq("order_id", orderId)
+      .is("cancelled_at", null);
+    if (billsErr) return { ok: false, error: `Could not check this order's bills (${billsErr.message}) — try again.` };
+    const applied = priorBillsConsumed(liveBills ?? []).advanceApplied;
+    if (advanceAmount + 0.005 < applied) {
+      return { ok: false, error: `${formatINR(applied)} of the advance is already shown on this order's bills — cancel the bill before lowering the advance below that.` };
+    }
+  }
   const paymentMethod =
     terms && "paymentMethod" in terms ? terms.paymentMethod?.trim() || null : order.payment_method;
   const paymentNotes =
@@ -452,7 +507,7 @@ export async function updateOrderItems(
   // Seeded with the added lines' outgoing stock (see postSubmit above). A
   // negative delta posts as reason 'order', ref'd to this order, so
   // restockableFor counts it as stock this order took.
-  const stockAdjust: { sku: string; delta: number; why: string }[] = [...addedStockOut];
+  const stockAdjust: { sku: string; delta: number; why: string; idx?: number }[] = [...addedStockOut];
   for (let i = 0; i < order.items.length; i++) {
     const prev = order.items[i];
     if (!keptIdx.has(i)) {
@@ -520,13 +575,30 @@ export async function updateOrderItems(
   if (error) return { ok: false, error: error.message };
   if (!won) return { ok: false, error: "The order changed in another session — reload and retry." };
 
+  // The edit is saved, so a movement that fails here cannot undo it; it is
+  // reported instead. An ADDED line was saved as stock_moved, and a later
+  // cancel, un-confirm or removal would put back pieces that never left — so
+  // its flag comes off (the same compensation setLineState makes). A removal
+  // or resize has no flag to fix, so it is only reported.
+  const stockProblems: string[] = [];
   for (const adj of stockAdjust) {
     if (adj.delta === 0) continue;
-    await applyMovement({
+    const res = await applyMovement({
       sku: adj.sku, delta: adj.delta, reason: adj.delta > 0 ? "correction" : "order",
       refType: "order", refId: orderId,
       note: `Order ${order.order_number} — ${adj.why}`,
     });
+    if (res.ok) continue;
+    if (adj.idx != null) {
+      const undo = await patchOrderLine(orderId, adj.idx, { stock_moved: false }, (fresh) =>
+        fresh.sku !== adj.sku || !fresh.stock_moved ? "The order changed under you — reload and retry." : null,
+      );
+      stockProblems.push(undo.ok
+        ? `${adj.sku}: stock was not taken (${res.error ?? "movement failed"}) — the line is marked as not taken; adjust stock by hand`
+        : `${adj.sku}: stock was not taken (${res.error ?? "movement failed"}) and the line could not be marked (${undo.error}) — fix both by hand`);
+    } else {
+      stockProblems.push(`${adj.sku}: the ${adj.delta > 0 ? "+" : ""}${adj.delta} stock movement failed (${res.error ?? "movement failed"}) — adjust stock by hand`);
+    }
   }
 
   // Silent regenerate — do NOT re-notify the buyer for a staff edit.
@@ -539,7 +611,10 @@ export async function updateOrderItems(
   const creditApplied = Number((order as { credit_applied?: number }).credit_applied) || 0;
   const collected = advanceAmount + creditApplied;
   const overpaidBy = collected > total ? Math.round((collected - total) * 100) / 100 : undefined;
-  return { ok: true, total, overpaidBy };
+  return {
+    ok: true, total, overpaidBy,
+    ...(stockProblems.length ? { warning: `Saved, but ${stockProblems.join("; ")}.` } : {}),
+  };
 }
 
 // Re-fire the PDF generation + Interakt confirmation send. Used by the
