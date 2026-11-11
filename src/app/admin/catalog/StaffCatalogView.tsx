@@ -9,9 +9,8 @@ import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { resyncCatalog } from "./actions";
 import { groupByBase } from "@/lib/variants";
 import { palette } from "@/lib/palette";
+import { orderCategories } from "@/lib/sku/vocab";
 import type { WholesaleProduct } from "@/lib/types";
-
-const PREFERRED = ["Lehenga", "Saree", "Indo-Western Set", "Suit Set", "Separates"];
 
 export function StaffCatalogView({ products, hiddenSkus = [], lastSynced = null }: { products: WholesaleProduct[]; hiddenSkus?: string[]; lastSynced?: string | null }) {
   const router = useRouter();
@@ -56,10 +55,7 @@ export function StaffCatalogView({ products, hiddenSkus = [], lastSynced = null 
     return { ok: true, message: p.title ?? p.sku };
   }
 
-  const categories = useMemo(() => {
-    const present = new Set(products.map((p) => p.category).filter((c): c is string => !!c));
-    return ["All", ...PREFERRED.filter((c) => present.has(c)), ...Array.from(present).filter((c) => !PREFERRED.includes(c)).sort()];
-  }, [products]);
+  const categories = useMemo(() => orderCategories(products.map((p) => p.category)), [products]);
 
   const filtered = useMemo(() => {
     let list = category === "All" ? products : products.filter((p) => p.category === category);

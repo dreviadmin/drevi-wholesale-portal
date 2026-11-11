@@ -54,3 +54,19 @@ export function isValidCatSub(cat: string, sub: string): boolean {
 }
 
 export const BASE_SKU_RE = /^DD-[A-Z]{2,4}-[A-Z0-9]{2,4}-\d{3}$/;
+
+// The order staff screens show category chips in (staff catalog and the
+// exhibition / in-store wizard). These are the real category names above —
+// the wizard once listed plural names ("Sarees", "Lehengas") that matched no
+// category, so its chips always fell back to A–Z. The buyer catalog orders by
+// design count on purpose and does not use this.
+export const STAFF_CATEGORY_ORDER: readonly string[] = ["Lehenga", "Saree", "Indo-Western Set", "Suit Set", "Separates"];
+
+/** "All" first, then the listed categories that are present, then the rest A–Z. */
+export function orderCategories(present: Iterable<string | null | undefined>): string[] {
+  const have = new Set<string>();
+  for (const c of present) if (c && c !== "All") have.add(c);
+  const listed = STAFF_CATEGORY_ORDER.filter((c) => have.has(c));
+  const rest = Array.from(have).filter((c) => !STAFF_CATEGORY_ORDER.includes(c)).sort();
+  return ["All", ...listed, ...rest];
+}

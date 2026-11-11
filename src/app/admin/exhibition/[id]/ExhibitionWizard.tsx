@@ -19,6 +19,7 @@ import { uuid } from "@/lib/uuid";
 import { getStockState, qtyCap } from "@/lib/stock";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { orderCategories } from "@/lib/sku/vocab";
 import { downscalePhoto } from "@/lib/downscale-photo";
 import { useDraft } from "@/lib/useDraft";
 import type { WholesaleProduct, SessionType, TaxMode, DiscountType } from "@/lib/types";
@@ -27,7 +28,6 @@ import { useToast } from "@/lib/use-toast";
 type Buyer = { id: string; business_name: string | null; owner_name: string | null; phone: string | null; city: string | null; status?: string };
 type Step = "buyer" | "catalog" | "cart" | "confirm";
 
-const PREFERRED = ["Sarees", "Lehengas", "Indo-Western", "Co-ords", "Drape Skirts", "Jackets"];
 const GST_SLABS = [5, 12, 18];
 const PAY_METHODS = ["Cash", "UPI", "Bank", "Other"];
 
@@ -294,10 +294,7 @@ export function ExhibitionWizard({
     () => new Map([...products, ...customProducts].map((p) => [p.sku, p])),
     [products, customProducts],
   );
-  const categories = useMemo(() => {
-    const present = new Set(products.map((p) => p.category).filter((c): c is string => !!c));
-    return ["All", ...PREFERRED.filter((c) => present.has(c)), ...Array.from(present).filter((c) => !PREFERRED.includes(c)).sort()];
-  }, [products]);
+  const categories = useMemo(() => orderCategories(products.map((p) => p.category)), [products]);
   const filtered = useMemo(() => (category === "All" ? products : products.filter((p) => p.category === category)), [category, products]);
   const catalogFiltered = useMemo(() => {
     const q = catalogQuery.trim().toLowerCase();
