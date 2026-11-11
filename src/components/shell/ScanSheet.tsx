@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { X, QrCode, Printer, Tag, PackageCheck, SlidersHorizontal, PlusCircle, ShoppingBag, Palette as PaletteIcon, BarChart3 } from "lucide-react";
@@ -9,6 +9,7 @@ import { palette } from "@/lib/palette";
 import { t } from "@/lib/strings";
 import { useToast } from "@/lib/use-toast";
 import { queueTray } from "@/app/admin/sku-generator/labels";
+import { mrpLabel, scanVerdict, stockLabel, type ScanResolved } from "@/lib/scan-sheet-core";
 
 // Global scan action sheet (build guide §6.5). The FAB opens the existing
 // QrScanner; a decode resolves via /api/scan/resolve (server-side, role-gated
@@ -16,14 +17,8 @@ import { queueTray } from "@/app/admin/sku-generator/labels";
 // "Add to current bill" (only when a wizard draft with items exists in
 // localStorage) and "Add to print sheet" (writes the Stage 1 tray).
 
-interface Resolved {
-  sku: string;
-  known: boolean;
-  title?: string | null;
-  thumb?: string | null;
-  retail_price_set?: boolean;
-  actions: { key: string; label: string; href?: string }[];
-}
+// Long enough to see the scanner's verdict before the sheet replaces it.
+const VERDICT_HOLD_MS = 400;
 
 const ACTION_ICONS: Record<string, typeof Tag> = {
   retail_check: Tag,
@@ -57,19 +52,30 @@ function findWizardDraft(): { href: string } | null {
 
 export function ScanSheet({ onClose }: { onClose: () => void }) {
   const router = useRouter();
-  const [resolved, setResolved] = useState<Resolved | null>(null);
+  const [resolved, setResolved] = useState<ScanResolved | null>(null);
   const [scanning, setScanning] = useState(true);
   const [toast, flash] = useToast();
+  const scanReq = useRef(0);
 
-  function handleScan(text: string): ScanFeedback {
+  // Answers with a Promise, so the scanner shows "checking…" and only beeps
+  // once the resolver has said whether the tag is known — it used to beep
+  // success for every code, unknown ones included. A failed request rejects,
+  // which the scanner shows as "could not check; retry" with the camera open.
+  function handleScan(text: string): ScanFeedback | Promise<ScanFeedback> {
     const sku = text.trim().toUpperCase();
     if (!sku) return { ok: false, message: "Empty code" };
-    setScanning(false);
-    fetch(`/api/scan/resolve?sku=${encodeURIComponent(sku)}`)
+    const req = ++scanReq.current;
+    return fetch(`/api/scan/resolve?sku=${encodeURIComponent(sku)}`)
       .then((r) => r.json())
-      .then((d) => setResolved(d.error ? { sku, known: false, actions: [] } : d))
-      .catch(() => setResolved({ sku, known: false, actions: [] }));
-    return { ok: true, message: sku };
+      .then((d) => {
+        const res: ScanResolved = d.error ? { sku, known: false, actions: [] } : d;
+        // A later scan overtook this one: beep for it, but show the latest.
+        if (req === scanReq.current) {
+          setResolved(res);
+          setTimeout(() => { if (req === scanReq.current) setScanning(false); }, VERDICT_HOLD_MS);
+        }
+        return scanVerdict(res);
+      });
   }
 
   function addToPrintTray(sku: string) {
@@ -127,9 +133,14 @@ export function ScanSheet({ onClose }: { onClose: () => void }) {
               )}
               <div className="min-w-0">
                 <div className="font-mono" style={{ fontSize: 13, fontWeight: 700, color: palette.black }}>{resolved.sku}</div>
-                <div className="font-body truncate" style={{ fontSize: 12, color: palette.softBlack }}>
+                <div className="font-body truncate" style={{ fontSize: 13, color: palette.softBlack }}>
                   {resolved.known ? resolved.title ?? "—" : t("scan.unknown")}
                 </div>
+                {resolved.known && (
+                  <div className="font-body" style={{ fontSize: 13, color: palette.black, fontWeight: 600 }}>
+                    {[mrpLabel(resolved), stockLabel(resolved)].filter(Boolean).join(" · ")}
+                  </div>
+                )}
               </div>
             </div>
 

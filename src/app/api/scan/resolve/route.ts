@@ -65,7 +65,7 @@ export async function GET(request: Request) {
   const [{ data: product }, { data: vendorInfo }, { data: design }, { data: minted }] = await Promise.all([
     admin
       .from("wholesale_products")
-      .select("sku, title, image_urls, wholesale_visible")
+      .select("sku, title, image_urls, wholesale_visible, current_qty")
       .eq("sku", sku)
       .maybeSingle(),
     admin.from("product_vendor_info").select("sku, retail_price").eq("sku", sku).maybeSingle(),
@@ -107,13 +107,18 @@ export async function GET(request: Request) {
   }
   actions.push({ key: "add_to_print", label: "Add to print sheet" }); // client handles
 
+  // Same rule as the tag and the till: Specs MRP, else the sheet's. The MRP
+  // is open to every staff role (Retail Price Check already shows it).
+  const retailPrice = effectiveRetailPrice(design, vendorInfo?.retail_price);
   return NextResponse.json({
     sku,
     known: true,
     title: product?.title ?? null,
     thumb: (product?.image_urls as string[] | null)?.[0] ?? null,
-    // Same rule as the tag and the till: Specs MRP, else the sheet's.
-    retail_price_set: (effectiveRetailPrice(design, vendorInfo?.retail_price) ?? 0) > 0,
+    retail_price_set: (retailPrice ?? 0) > 0,
+    retail_price: retailPrice,
+    // Stock goes to admins only, as on every other screen that shows it.
+    ...(isAdmin && product ? { current_qty: Number(product.current_qty ?? 0) } : {}),
     actions,
   });
 }

@@ -119,6 +119,8 @@ function fakeAdmin() {
 }
 
 const STAFF = { id: "staff-1", email: "rakesh@drevifashion.com", name: "Rakesh", role: "super_admin" as const };
+// The scan resolver's role gate: null = STAFF as above.
+let scanRole: string | null = null;
 const writeAuditEvent = vi.fn(async (e: Record<string, unknown>) => { void e; });
 const uploadProductPhoto = vi.fn(async (sku: string) => `https://cdn.example.test/product-photos/${sku}/0.jpg`);
 
@@ -129,7 +131,7 @@ vi.mock("@/lib/supabase/server", () => ({ createServerSupabase: () => ({ auth: {
 vi.mock("@/lib/staff", () => ({
   requireAdmin: async () => STAFF,
   requireStaff: async () => STAFF,
-  getStaff: async () => STAFF,
+  getStaff: async () => (scanRole ? { ...STAFF, role: scanRole } : STAFF),
   isAdminRole: (r: string) => r === "admin" || r === "super_admin",
 }));
 vi.mock("@/lib/audit", () => ({ writeAuditEvent: (e: Record<string, unknown>) => writeAuditEvent(e) }));
@@ -194,6 +196,7 @@ beforeEach(() => {
   clock = 0;
   writeAuditEvent.mockClear();
   uploadProductPhoto.mockClear();
+  scanRole = null;
 });
 
 describe("renameProductSku carries the stock ledger", () => {
@@ -700,5 +703,36 @@ describe("global scan resolve", () => {
     const j = await get("DD-LEH-FLR-404-M-RED");
     expect(j.known).toBe(false);
     expect(keys(j)).toEqual(["create_sku"]);
+    expect(j).not.toHaveProperty("retail_price");
+    expect(j).not.toHaveProperty("current_qty");
+  });
+
+  it("sends the MRP the counter quotes (Specs first) and the stock to an admin", async () => {
+    db.wholesale_products = [product(OLD, { current_qty: 3 })];
+    db.product_vendor_info = [{ sku: OLD, retail_price: 4200, locked_fields: [] }];
+    db.designs = [{ id: "d1", base_sku: "DD-LEH-FLR-010", color: "RED", mrp_override: 4500, auto_mrp: null }];
+    const j = await get(OLD);
+    expect(j.retail_price).toBe(4500);
+    expect(j.retail_price_set).toBe(true);
+    expect(j.current_qty).toBe(3);
+  });
+
+  it("sends the MRP but never the stock to a staff role", async () => {
+    scanRole = "staff";
+    db.wholesale_products = [product(OLD, { current_qty: 3 })];
+    db.product_vendor_info = [{ sku: OLD, retail_price: 4200, locked_fields: [] }];
+    const j = await get(OLD);
+    expect(j.retail_price).toBe(4200);
+    expect(j).not.toHaveProperty("current_qty");
+    expect(keys(j)).not.toContain("log_receipt");
+  });
+
+  it("sends no stock for a SKU without a catalog row, and a null MRP when none is set", async () => {
+    db.sku_registry = [{ variant_sku: OLD }];
+    const j = await get(OLD);
+    expect(j.known).toBe(true);
+    expect(j.retail_price).toBeNull();
+    expect(j.retail_price_set).toBe(false);
+    expect(j).not.toHaveProperty("current_qty");
   });
 });
