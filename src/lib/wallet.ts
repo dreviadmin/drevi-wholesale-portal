@@ -12,6 +12,7 @@ import {
   isExpired,
   isRedemptionCode,
   normalizePhone,
+  orderTagBlocker,
   orderWalletTotals,
   phoneClaimDecision,
   reconcileOrderMovements,
@@ -399,13 +400,16 @@ async function accountForOrder(order: WalletOrder): Promise<WalletAccount | null
 
 /**
  * Flag an order for a person to look at (Shopify admin → Orders, filter by
- * tag). Production only: dev and local runs share the live store, so they
- * just log what they would have tagged. Never throws, so a flag can never
- * fail a webhook or the nightly cron.
+ * tag). Only the prod portal tags: a production deploy on the prod Supabase
+ * ledger (orderTagBlocker). Dev, preview and local runs share the live store
+ * but not its ledger, and the dev project's deploys are production deploys
+ * too, so everything else just logs what it would have tagged. Never throws,
+ * so a flag can never fail a webhook or the nightly cron.
  */
 async function flagOrder(order: { id: string; name: string }, tag: "wallet-shortfall" | "wallet-check"): Promise<"tagged" | "would_tag" | "failed"> {
-  if (process.env.VERCEL_ENV !== "production") {
-    console.info(`[wallet] would tag ${order.name} ${tag} (not production)`);
+  const blocked = orderTagBlocker({ VERCEL_ENV: process.env.VERCEL_ENV, NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL });
+  if (blocked) {
+    console.info(`[wallet] would tag ${order.name} ${tag} (${blocked})`);
     return "would_tag";
   }
   try {

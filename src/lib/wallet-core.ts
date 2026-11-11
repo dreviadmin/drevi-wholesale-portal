@@ -438,3 +438,22 @@ export function isWalletApplication(app: { code?: string | null; title?: string 
   if (isRedemptionCode(app.code)) return true;
   return !app.code && isWalletTitle(app.title);
 }
+
+/** The prod Supabase project: the one ledger that matches the live store's orders. */
+export const PROD_SUPABASE_HOST = "cofarxgywnrdjbizxbxw.supabase.co";
+
+/**
+ * Why this deploy must not tag live Shopify orders, or null when it may.
+ * Every deploy shares the live store, but only the prod portal holds the
+ * ledger those orders belong to. VERCEL_ENV alone is not enough: the dev
+ * Vercel project (drevi-wholesale-dev) deploys to its own production target,
+ * so it has VERCEL_ENV=production too, next to a dev ledger that disagrees
+ * with nearly every live order. So both must hold: a production deploy, and
+ * the prod Supabase project.
+ */
+export function orderTagBlocker(env: { VERCEL_ENV?: string; NEXT_PUBLIC_SUPABASE_URL?: string }): "not production" | "not the prod ledger" | null {
+  if (env.VERCEL_ENV !== "production") return "not production";
+  let host = "";
+  try { host = new URL(env.NEXT_PUBLIC_SUPABASE_URL ?? "").hostname; } catch { /* no URL: not prod */ }
+  return host === PROD_SUPABASE_HOST ? null : "not the prod ledger";
+}

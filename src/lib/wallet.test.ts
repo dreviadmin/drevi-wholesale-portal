@@ -52,6 +52,10 @@ import { onOrderCreated, openWalletForCustomer, reconcileRecent, type WalletAcco
 
 const has = (c: Call, m: string, ...a: unknown[]) => c.ops.some((o) => o.m === m && a.every((x, i) => o.a[i] === x));
 const writes = () => db.calls.filter((c) => c.ops.some((o) => o.m === "insert" || o.m === "update" || o.m === "delete" || o.m === "upsert"));
+// The prod portal: a production deploy on the prod Supabase ledger. The dev
+// project's deploys are production deploys too, on the dev ledger.
+const asProdPortal = () => { vi.stubEnv("VERCEL_ENV", "production"); vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://cofarxgywnrdjbizxbxw.supabase.co"); };
+const asDevProjectDeploy = () => { vi.stubEnv("VERCEL_ENV", "production"); vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://qvnvxcdyvcsgxulbcmzm.supabase.co"); };
 
 const ME = "gid://shopify/Customer/111";
 const account = (over: Partial<WalletAccount> = {}): WalletAccount => ({
@@ -121,7 +125,7 @@ describe("orders/create: a shortfall tags the order", () => {
   };
 
   it("in production, a clamped debit is logged and tagged wallet-shortfall", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
+    asProdPortal();
     debitScene(40000);
     const r = await onOrderCreated("gid://shopify/Order/9001");
     expect(r).toBe("debited 40000 of 100000 (SHORTFALL 60000)");
@@ -137,8 +141,16 @@ describe("orders/create: a shortfall tags the order", () => {
     expect(console.info).toHaveBeenCalledWith("[wallet] would tag #1200 wallet-shortfall (not production)");
   });
 
+  it("the dev project's production deploy (dev Supabase) only says it would tag", async () => {
+    asDevProjectDeploy();
+    debitScene(40000);
+    expect(await onOrderCreated("gid://shopify/Order/9001")).toBe("debited 40000 of 100000 (SHORTFALL 60000)");
+    expect(shopify.addOrderTags).not.toHaveBeenCalled();
+    expect(console.info).toHaveBeenCalledWith("[wallet] would tag #1200 wallet-shortfall (not the prod ledger)");
+  });
+
   it("a tag that fails never fails the webhook", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
+    asProdPortal();
     debitScene(40000);
     shopify.addOrderTags.mockRejectedValueOnce(new Error("Throttled"));
     await expect(onOrderCreated("gid://shopify/Order/9001")).resolves.toContain("SHORTFALL 60000");
@@ -146,7 +158,7 @@ describe("orders/create: a shortfall tags the order", () => {
   });
 
   it("a full debit, or a replay of one already posted, tags nothing", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
+    asProdPortal();
     debitScene(100000);
     expect(await onOrderCreated("gid://shopify/Order/9001")).toBe("debited 100000");
     debitScene(null);
@@ -155,7 +167,7 @@ describe("orders/create: a shortfall tags the order", () => {
   });
 
   it("the wallet discount on an order with no wallet is a shortfall too", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
+    asProdPortal();
     shopify.fetchWalletOrder.mockResolvedValue(order());
     const r = await onOrderCreated("gid://shopify/Order/9001");
     expect(r).toBe("wallet discount on an order with no wallet (SHORTFALL 100000)");
@@ -177,7 +189,7 @@ describe("reconcileRecent", () => {
   };
 
   it("reports and tags mismatches in production, and never posts", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
+    asProdPortal();
     scene();
     const r = await reconcileRecent({ now: new Date("2026-11-10T03:30:00Z") });
     expect(r).toMatchObject({ ok: true, checked: 2, mismatched: 1, tagged: 1, would_tag: 0, failed: 1, truncated: false });
@@ -198,6 +210,15 @@ describe("reconcileRecent", () => {
     expect(shopify.addOrderTags).not.toHaveBeenCalled();
   });
 
+  it("on the dev project's production deploy (dev Supabase) it tags nothing", async () => {
+    asDevProjectDeploy();
+    scene();
+    const r = await reconcileRecent();
+    expect(r).toMatchObject({ mismatched: 1, tagged: 0, would_tag: 1 });
+    expect(shopify.addOrderTags).not.toHaveBeenCalled();
+    expect(console.info).toHaveBeenCalledWith("[wallet] would tag #1 wallet-check (not the prod ledger)");
+  });
+
   it("reads the ledger by order across every wallet", async () => {
     scene();
     await reconcileRecent();
@@ -212,3 +233,4 @@ describe("reconcileRecent", () => {
     expect(r).toMatchObject({ checked: 0, truncated: true });
   });
 });
+

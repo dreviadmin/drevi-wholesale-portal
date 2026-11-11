@@ -32,6 +32,7 @@ import {
   walletAllocatedPaise,
   eachSettled,
   WALLET_EARNING_SINCE_ISO,
+  orderTagBlocker,
   type ReconcileOrderFacts } from "./wallet-core";
 
 describe("normalizePhone", () => {
@@ -399,5 +400,26 @@ describe("eachSettled", () => {
   });
   it("an empty list does nothing", async () => {
     expect(await eachSettled([], async () => true, () => {})).toEqual({ done: 0, failed: 0 });
+  });
+});
+
+describe("orderTagBlocker", () => {
+  const PROD = "https://cofarxgywnrdjbizxbxw.supabase.co";
+  const DEV = "https://qvnvxcdyvcsgxulbcmzm.supabase.co";
+  it("a production deploy on the prod ledger may tag", () => {
+    expect(orderTagBlocker({ VERCEL_ENV: "production", NEXT_PUBLIC_SUPABASE_URL: PROD })).toBeNull();
+  });
+  it("the dev project's production deploy (VERCEL_ENV=production, dev Supabase) may not", () => {
+    expect(orderTagBlocker({ VERCEL_ENV: "production", NEXT_PUBLIC_SUPABASE_URL: DEV })).toBe("not the prod ledger");
+  });
+  it("a production deploy with no or a broken Supabase URL may not", () => {
+    expect(orderTagBlocker({ VERCEL_ENV: "production" })).toBe("not the prod ledger");
+    expect(orderTagBlocker({ VERCEL_ENV: "production", NEXT_PUBLIC_SUPABASE_URL: "not a url" })).toBe("not the prod ledger");
+    expect(orderTagBlocker({ VERCEL_ENV: "production", NEXT_PUBLIC_SUPABASE_URL: "https://cofarxgywnrdjbizxbxw.supabase.co.example.com" })).toBe("not the prod ledger");
+  });
+  it("preview, development and local runs may not, even on the prod ledger", () => {
+    expect(orderTagBlocker({ VERCEL_ENV: "preview", NEXT_PUBLIC_SUPABASE_URL: PROD })).toBe("not production");
+    expect(orderTagBlocker({ VERCEL_ENV: "development", NEXT_PUBLIC_SUPABASE_URL: PROD })).toBe("not production");
+    expect(orderTagBlocker({ NEXT_PUBLIC_SUPABASE_URL: PROD })).toBe("not production");
   });
 });
