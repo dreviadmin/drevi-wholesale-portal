@@ -56,8 +56,8 @@ const eqOf = (c: Call, k: string) => c.filters.find(([op, key]) => op === "eq" &
 
 const STAFF = { id: "staff-1", email: "rakesh@drevifashion.com", name: "Rakesh", role: "super_admin" as const };
 const requireAdmin = vi.fn(async () => STAFF);
-const writeAuditEvent = vi.fn(async (_e: Record<string, unknown>) => {});
-const signOut = vi.fn(async (_o?: unknown) => ({ error: null }));
+const writeAuditEvent = vi.fn(async (e: Record<string, unknown>) => { void e; });
+const signOut = vi.fn(async (o?: unknown) => { void o; return { error: null }; });
 const redirect = vi.fn();
 
 vi.mock("next/headers", () => ({ headers: () => new Map<string, string>() }));

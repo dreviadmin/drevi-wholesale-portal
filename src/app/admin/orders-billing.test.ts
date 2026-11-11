@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- the fake query builder is untyped on purpose */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { OrderItem } from "@/lib/types";
 
@@ -95,9 +96,9 @@ function fakeAdmin() {
 }
 
 const STAFF = { id: "staff-1", email: "rakesh@drevifashion.com", name: "Rakesh", role: "super_admin" as const };
-const writeAuditEvent = vi.fn(async (_e: Record<string, unknown>) => {});
-const finalizeOrder = vi.fn(async (_id: string, _o?: unknown) => ({ pdfUrl: "https://example.test/o.pdf" }));
-const renderAndStoreBillPdf = vi.fn(async (..._a: unknown[]) => ({ url: "https://example.test/b.pdf" }));
+const writeAuditEvent = vi.fn(async (e: Record<string, unknown>) => { void e; });
+const finalizeOrder = vi.fn(async (id: string, o?: unknown) => { void id; void o; return { pdfUrl: "https://example.test/o.pdf" }; });
+const renderAndStoreBillPdf = vi.fn(async (...a: unknown[]) => { void a; return { url: "https://example.test/b.pdf" }; });
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
