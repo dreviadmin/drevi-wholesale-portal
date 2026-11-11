@@ -11,11 +11,15 @@ import { writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
+import { refuseDevWithoutEnvFile } from "./lib/dev-env-guard.mjs";
 import { createClient } from "@supabase/supabase-js";
 
 const target = process.argv.includes("--prod") ? "prod" : "dev";
 const fix = process.argv.includes("--fix");
 const envFile = target === "prod" ? ".env.local" : ".env.development.local";
+// Refuse a dev run without .env.development.local: the loads below would
+// otherwise leave .env.local, which is PRODUCTION, in charge (audit round 2).
+refuseDevWithoutEnvFile(target);
 dotenv.config({ path: ".env.local" });
 dotenv.config({ path: envFile, override: true });
 

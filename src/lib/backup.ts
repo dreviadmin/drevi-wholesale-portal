@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { listAllObjectPaths } from "@/lib/storage-walk";
 
 // Full-table export used by the backup endpoint (and mirrored by
 // scripts/backup.mjs for local runs).
@@ -59,7 +60,8 @@ export const BACKUP_TABLES = [
   "entity_notes",
   "notify_me",
   "shopify_tokens",
-  // 0068 wallet (26 Sep) — store credit; the OTP table is short-lived but still ours to restore
+  // 0068/0071 wallet (26–28 Sep) — store credit accounts, ledger, sign-ups,
+  // redemptions and the webhook log
   "wallet_accounts",
   "wallet_ledger",
   "wallet_signups",
@@ -130,15 +132,14 @@ export async function exportStorage(): Promise<{ files: StorageBackup[]; warning
   const files: StorageBackup[] = [];
   const warnings: string[] = [];
   for (const bucket of STORAGE_BUCKETS) {
-    // Objects live at most one folder deep (ownerId/file) in every bucket.
-    const { data: top, error } = await admin.storage.from(bucket).list("", { limit: 1000 });
-    if (error) { warnings.push(`${bucket}: list failed — ${error.message}`); continue; }
-    const paths: string[] = [];
-    for (const entry of top ?? []) {
-      if (entry.id) { paths.push(entry.name); continue; } // a file at root
-      const { data: inner } = await admin.storage.from(bucket).list(entry.name, { limit: 1000 });
-      for (const f of inner ?? []) if (f.id) paths.push(`${entry.name}/${f.name}`);
-    }
+    // Recursive (audit round 2): this used to stop one folder down, and note
+    // photos sit two deep (<entityType>/<entityId>/<file>), so none of them
+    // were ever backed up. See storage-walk.ts.
+    const { paths, warnings: listWarnings } = await listAllObjectPaths(
+      (prefix) => admin.storage.from(bucket).list(prefix, { limit: 1000 }),
+      bucket,
+    );
+    warnings.push(...listWarnings);
     for (const path of paths) {
       const { data, error: dlErr } = await admin.storage.from(bucket).download(path);
       if (dlErr || !data) { warnings.push(`${bucket}/${path}: ${dlErr?.message ?? "empty"}`); continue; }

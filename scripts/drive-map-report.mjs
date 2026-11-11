@@ -12,7 +12,11 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { google } from "googleapis";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
+import { refuseDevWithoutEnvFile } from "./lib/dev-env-guard.mjs";
 
+// Dev-only, so .env.development.local must exist: without it the two loads
+// below quietly read .env.local, which is PRODUCTION (audit round 2).
+refuseDevWithoutEnvFile("dev", null);
 dotenv.config({ path: ".env.development.local" });
 dotenv.config({ path: ".env.local" });
 

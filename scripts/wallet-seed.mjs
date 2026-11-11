@@ -16,10 +16,14 @@
 import { createInterface } from "node:readline/promises";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
+import { refuseDevWithoutEnvFile } from "./lib/dev-env-guard.mjs";
 
 const args = new Set(process.argv.slice(2));
 const target = args.has("--prod") ? "prod" : "dev";
 const envFile = target === "prod" ? ".env.local" : ".env.development.local";
+// Refuse a dev run without .env.development.local: the loads below would
+// otherwise leave .env.local, which is PRODUCTION, in charge (audit round 2).
+refuseDevWithoutEnvFile(target);
 dotenv.config({ path: ".env.local" });
 dotenv.config({ path: envFile, override: true });
 const APPLY = args.has("--apply");

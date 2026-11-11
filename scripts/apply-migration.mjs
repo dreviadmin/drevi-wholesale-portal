@@ -1,21 +1,28 @@
 /**
- * Apply every SQL file in supabase/migrations (sorted). Two credential modes,
- * either works — set ONE in .env.local (both are ops-only, never committed):
+ * Apply SQL files from supabase/migrations (sorted). Two credential modes,
+ * either works (both are ops-only, never committed):
  *
- *   SUPABASE_ACCESS_TOKEN=sbp_...   Personal Access Token (Management API)
- *     Create at https://supabase.com/dashboard/account/tokens
+ *   SUPABASE_ACCESS_TOKEN=sbp_...   Personal Access Token (Management API),
+ *     in .env.local. Create at https://supabase.com/dashboard/account/tokens
  *
- *   SUPABASE_DB_URL=postgresql://... Direct/session-pooler connection string
- *     Dashboard → Connect → Session pooler
+ *   SUPABASE_DB_URL=postgresql://... Direct/session-pooler connection string,
+ *     in the TARGET's own env file. Dashboard → Connect → Session pooler
  *
- *   npm run db:migrate
+ *   npm run db:migrate -- --only=0075        just the named file(s) — the normal case
+ *   npm run db:migrate -- --all              the whole chain (see below)
+ *   … --prod (or DB_TARGET=prod)             production instead of dev
  *
- * Migrations are idempotent, so this is safe to re-run.
+ * A full replay is NOT harmless (audit round 2): old data backfills re-run and
+ * undo later staff decisions, and two files re-narrow CHECK constraints. So a
+ * bare run applies nothing and prints the usage; the whole chain needs --all.
+ * The rule lives in scripts/lib/migration-plan.mjs.
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
+import { refuseDevWithoutEnvFile } from "./lib/dev-env-guard.mjs";
+import { planMigrations, REPLAY_WARNING } from "./lib/migration-plan.mjs";
 
 // TARGET SELECTION — dev is the default, prod needs an explicit flag.
 //
@@ -24,6 +31,11 @@ import dotenv from "dotenv";
 // able to reach prod by accident. Pass --prod (or DB_TARGET=prod) to opt in.
 const target = process.argv.includes("--prod") || process.env.DB_TARGET === "prod" ? "prod" : "dev";
 const envFile = target === "prod" ? ".env.local" : ".env.development.local";
+
+// Audit round 2: with .env.development.local missing, the two loads below left
+// .env.local's PRODUCTION project in place — "Target: DEV" on screen, SQL sent
+// to prod. Refuse instead. Prod runs are unchanged.
+refuseDevWithoutEnvFile(target);
 
 // The Personal Access Token is account-level and lives in .env.local, so load
 // that first for credentials — then let the target file win on WHICH project.
@@ -35,6 +47,14 @@ dotenv.config({ path: envFile, override: true });
 const targetEnv = dotenv.config({ path: envFile, processEnv: {} }).parsed ?? {};
 if (!targetEnv.SUPABASE_DB_URL) delete process.env.SUPABASE_DB_URL;
 
+// Second rail: a dev file that exists but holds PRODUCTION values (copied from
+// .env.local and never edited) must not pass for dev either.
+const PROD_REF = "cofarxgywnrdjbizxbxw";
+if (target === "dev" && [targetEnv.NEXT_PUBLIC_SUPABASE_URL, targetEnv.SUPABASE_DB_URL].some((v) => v?.includes(PROD_REF))) {
+  console.error(`${envFile} points at the PRODUCTION project (${PROD_REF}) — refusing a DEV run. Fix the file, or pass --prod deliberately.`);
+  process.exit(1);
+}
+
 console.log(`Target: ${target.toUpperCase()} (${envFile})`);
 if (target === "prod") {
   console.log("⚠  PRODUCTION — this is the live portal. Ctrl-C now if that is not what you meant.");
@@ -42,38 +62,33 @@ if (target === "prod") {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(__dirname, "..", "supabase", "migrations");
-// --only=0054,0055 applies just those files, in sorted order.
-//
-// Re-applying all 55 every run is the default and stays the default — it is
-// what makes "idempotent" a guarantee rather than a hope. But it also means
-// ONE transient failure anywhere in the list blocks every file after it, which
-// is exactly what happened on 20 Sep: the Management API returned a 500
-// ("Failed to retrieve the requested resource") re-running 0053, an already
-// applied migration, and 0054/0055 behind it never ran. When you already know
-// which files are outstanding, naming them skips that exposure.
-const onlyArg = process.argv.find((a) => a.startsWith("--only="));
-const only = onlyArg ? onlyArg.slice("--only=".length).split(",").map((s) => s.trim()).filter(Boolean) : null;
-const files = readdirSync(migrationsDir)
-  .filter((f) => f.endsWith(".sql"))
-  .filter((f) => !only || only.some((o) => f === o || f.startsWith(`${o}_`) || f.startsWith(o)))
-  .sort();
-if (only && files.length === 0) {
-  console.error(`--only=${only.join(",")} matched no migration file.`);
+// --only=0054,0055 applies just those files, in sorted order; --all replays
+// the whole chain. Naming the files was already the safer habit before the
+// gate: ONE transient failure anywhere in a full replay blocks every file
+// after it, which is exactly what happened on 20 Sep — the Management API
+// returned a 500 re-running 0053, an already applied migration, and 0054/0055
+// behind it never ran. A full replay also re-runs old data backfills, so it
+// is no longer what a bare `npm run db:migrate` does.
+const plan = planMigrations(readdirSync(migrationsDir), process.argv);
+if ("error" in plan) {
+  console.error(plan.error);
   process.exit(1);
 }
-if (only) console.log(`--only: ${files.join(", ")}`);
-if (files.length === 0) {
-  console.error("No .sql files found in supabase/migrations.");
-  process.exit(1);
-}
+const { files } = plan;
+if (plan.mode === "only") console.log(`--only: ${files.join(", ")}`);
+else console.log(`--all: ${files.length} files (${files[0]} … ${files[files.length - 1]})\n${REPLAY_WARNING}`);
 
 const token = process.env.SUPABASE_ACCESS_TOKEN;
 const dbUrl = process.env.SUPABASE_DB_URL;
 
 async function viaManagementApi() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  // For a DEV run the project comes from the dev file only. Falling back to
+  // the merged process.env would let a dev file that lacks the URL inherit
+  // .env.local's — production — which is the bug the guard above closes.
+  // A prod run keeps its old lookup (its target file IS .env.local).
+  const supabaseUrl = targetEnv.NEXT_PUBLIC_SUPABASE_URL ?? (target === "prod" ? process.env.NEXT_PUBLIC_SUPABASE_URL : undefined) ?? "";
   const ref = supabaseUrl.match(/https:\/\/([a-z0-9]+)\.supabase\.co/)?.[1];
-  if (!ref) throw new Error("Could not derive project ref from NEXT_PUBLIC_SUPABASE_URL.");
+  if (!ref) throw new Error(`Could not derive project ref from NEXT_PUBLIC_SUPABASE_URL in ${envFile}.`);
   const endpoint = `https://api.supabase.com/v1/projects/${ref}/database/query`;
   console.log(`Applying ${files.length} migration(s) via Management API (project ${ref})…`);
   for (const file of files) {
@@ -115,9 +130,9 @@ try {
   else if (dbUrl) await viaConnectionString();
   else {
     console.error(
-      "\nNo DB credential found. Add ONE of these to .env.local:\n" +
-        "  SUPABASE_ACCESS_TOKEN=sbp_...   (Personal Access Token — easiest)\n" +
-        "  SUPABASE_DB_URL=postgresql://... (Session pooler connection string)\n",
+      "\nNo DB credential found. Add ONE of these:\n" +
+        "  SUPABASE_ACCESS_TOKEN=sbp_...   to .env.local (Personal Access Token — easiest)\n" +
+        `  SUPABASE_DB_URL=postgresql://... to ${envFile} (Session pooler connection string)\n`,
     );
     process.exit(1);
   }

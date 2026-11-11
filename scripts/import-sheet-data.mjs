@@ -21,6 +21,7 @@
  * records (grouped per supplier+date) so vendor history and costs are visible.
  */
 import dotenv from "dotenv";
+import { refuseDevWithoutEnvFile } from "./lib/dev-env-guard.mjs";
 import { createClient } from "@supabase/supabase-js";
 import { google } from "googleapis";
 import { createHash } from "node:crypto";
@@ -29,6 +30,9 @@ const args = process.argv.slice(2);
 const cmd = args.find((a) => !a.startsWith("--")) ?? "all";
 const WRITE = args.includes("--write");
 const target = args.includes("--prod") ? "prod" : "dev";
+// Refuse a dev run without .env.development.local: the loads below would
+// otherwise leave .env.local, which is PRODUCTION, in charge (audit round 2).
+refuseDevWithoutEnvFile(target);
 dotenv.config({ path: ".env.local" });
 if (target === "dev") dotenv.config({ path: ".env.development.local", override: true });
 

@@ -20,8 +20,11 @@ const nextConfig = {
     remotePatterns: [
       { protocol: "https", hostname: "cdn.shopify.com" },
       { protocol: "https", hostname: "*.myshopify.com" },
-      // Supabase Storage — custom-item photos snapped at the booth
-      { protocol: "https", hostname: "*.supabase.co" },
+      // Supabase Storage — custom-item photos snapped at the booth. Only
+      // this project's two hosts (prod and dev), the only places the
+      // portal's photos live.
+      { protocol: "https", hostname: "cofarxgywnrdjbizxbxw.supabase.co" }, // prod
+      { protocol: "https", hostname: "qvnvxcdyvcsgxulbcmzm.supabase.co" }, // dev
     ],
   },
 };

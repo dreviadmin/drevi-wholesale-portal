@@ -62,6 +62,8 @@ const STRINGS = {
     "home.action.log_receipt": "Log receipt",
     "home.action.price_check": "Price check",
     "home.synced": "Synced",
+    "home.sync_stale": "the sync looks stuck",
+    "home.sync_off": "Sheet sync off · last ran",
     // scan sheet
     "scan.title": "Scan a tag",
     "scan.unknown": "Not in the system",

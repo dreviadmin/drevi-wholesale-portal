@@ -128,16 +128,21 @@ export async function computeAttention(): Promise<AttentionItem[]> {
   } catch { /* ledger not migrated yet */ }
 
   // Retrofit §6.3 — specs queue, missing ident photos, stale supply data.
+  //
+  // Discontinued designs (discontinued_at, 0063) are left out of every count
+  // here (audit round 2): each item links to the Studio board, which hides
+  // them by default, so counting them promised work the link never showed.
   try {
     const staleDays = Number(process.env.SUPPLY_STALE_DAYS ?? 60);
     const staleBefore = new Date(Date.now() - staleDays * 86_400_000).toISOString();
     const [{ count: awaitingSpecs }, { count: noIdent }, { data: staleSupply }] = await Promise.all([
-      admin.from("designs").select("id", { count: "exact", head: true }).eq("specs_verified", false),
-      admin.from("designs").select("id", { count: "exact", head: true }).is("ident_image_id", null),
+      admin.from("designs").select("id", { count: "exact", head: true }).eq("specs_verified", false).is("discontinued_at", null),
+      admin.from("designs").select("id", { count: "exact", head: true }).is("ident_image_id", null).is("discontinued_at", null),
       admin
         .from("designs")
         .select("id, supply_updated_at, supply_mode")
         .in("supply_mode", ["made_to_order", "both"])
+        .is("discontinued_at", null)
         .or(`supply_updated_at.is.null,supply_updated_at.lt.${staleBefore}`),
     ]);
     if ((awaitingSpecs ?? 0) > 0) {
@@ -160,11 +165,12 @@ export async function computeAttention(): Promise<AttentionItem[]> {
     // garment's delivery, and the operator needs to know WHICH.
     try {
       const [designRows, productRows] = await Promise.all([
-        fetchAll<{ base_sku: string; color: string }>(admin, "designs", "base_sku, color"),
+        fetchAll<{ base_sku: string; color: string; discontinued_at: string | null }>(admin, "designs", "base_sku, color, discontinued_at"),
         fetchAll<{ sku: string }>(admin, "wholesale_products", "sku"),
       ]);
       const skus = productRows.map((r) => String(r.sku).toUpperCase());
       const sizeless = designRows.filter((d) => {
+        if (d.discontinued_at) return false; // hidden on the board this links to
         const prefix = `${String(d.base_sku).toUpperCase()}-`;
         const suffix = `-${String(d.color).toUpperCase()}`;
         return !skus.some((sku) => sku.startsWith(prefix) && sku.endsWith(suffix));

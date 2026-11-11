@@ -4,6 +4,7 @@ import { ReceiptText, QrCode, PackageCheck, Tag, ChevronRight, Store, Boxes, Bri
 import { getStaff, isAdminRole } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { computeAttention, computeToday } from "@/lib/attention";
+import { describeSync } from "@/lib/sync-stamp";
 import { spacesForRole } from "@/lib/nav";
 import { t } from "@/lib/strings";
 import { palette } from "@/lib/palette";
@@ -38,9 +39,14 @@ export default async function HomePage() {
   ]);
   void todayOrdersCount;
 
-  const syncStamp = syncRow?.synced_at
-    ? new Date(syncRow.synced_at).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit" })
-    : "—";
+  // Honest about age (audit round 2): past ~30 min — three missed 10-minute
+  // runs — the stamp says how long ago and turns red, instead of a bare clock
+  // time that looked fresh for days. SHEET_SYNC_ENABLED=false retires the
+  // sync on purpose (see the cron route), so then an old stamp is expected
+  // and reads "Sheet sync off", not stuck.
+  const sync = describeSync(syncRow?.synced_at);
+  const syncOff = (process.env.SHEET_SYNC_ENABLED ?? "true").toLowerCase() === "false";
+  const syncWarn = sync.stale && !syncOff;
 
   const quickActions = [
     { key: "new_bill", label: t("home.action.new_bill"), href: "/admin/in-store", icon: ReceiptText, show: true },
@@ -68,8 +74,9 @@ export default async function HomePage() {
               · {staff.role.replace("_", " ")}
             </span>
           </h1>
-          <div className="font-body mt-1" style={{ fontSize: 11, letterSpacing: "0.06em", color: palette.mutedGreige }}>
-            {t("home.synced")} {syncStamp} IST
+          <div className="font-body mt-1" style={{ fontSize: 11, letterSpacing: "0.06em", color: syncWarn ? SEVERITY_COLOR.high : palette.mutedGreige }}>
+            {syncOff ? t("home.sync_off") : t("home.synced")} {sync.when} IST
+            {syncWarn && <> · {sync.ago ? `${sync.ago} — ` : ""}{t("home.sync_stale")}</>}
           </div>
         </div>
       </div>
