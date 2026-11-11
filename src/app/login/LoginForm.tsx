@@ -38,31 +38,39 @@ export function LoginForm() {
         </div>
 
         <form action={formAction} className="flex flex-col gap-4" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)", padding: 28 }}>
-          <label className="flex flex-col gap-1.5">
-            <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>
-              Username or Email
+          {/* The hint sits outside the <label> so it is the field's
+              description, not part of its name. */}
+          <div className="flex flex-col gap-1.5">
+            <label className="flex flex-col gap-1.5">
+              <span className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.18em", color: palette.softBlack }}>
+                Username or Email
+              </span>
+              {/* type=text (not email): buyers sign in with a bare username (the
+                  first word of their business name) and staff with just their
+                  name. The server resolves a bare id lookup-first — staff domain
+                  when staff_users knows it, else the synthetic buyer domain —
+                  and full emails pass through as-is. */}
+              <input
+                type="text"
+                name="email"
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                inputMode="email"
+                required
+                aria-describedby="login-username-hint"
+                className="font-body bg-transparent outline-none"
+                style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "8px 2px", fontSize: 16, color: palette.black }}
+              />
+            </label>
+            <span id="login-username-hint" className="font-body" style={{ fontSize: 11, color: palette.mutedGreige, lineHeight: 1.5 }}>
+              The one-word username in Rakesh&apos;s WhatsApp message
             </span>
-            {/* type=text (not email): buyers sign in with a bare username (the
-                first word of their business name) and staff with just their
-                name. The server resolves a bare id lookup-first — staff domain
-                when staff_users knows it, else the synthetic buyer domain —
-                and full emails pass through as-is. */}
-            <input
-              type="text"
-              name="email"
-              autoComplete="username"
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              inputMode="email"
-              required
-              className="font-body bg-transparent outline-none"
-              style={{ borderBottom: "1px solid rgba(26,26,26,0.25)", padding: "8px 2px", fontSize: 14, color: palette.black }}
-            />
-          </label>
+          </div>
 
           <label className="flex flex-col gap-1.5">
-            <span className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.softBlack }}>
+            <span className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.18em", color: palette.softBlack }}>
               Password
             </span>
             <div className="flex items-center gap-2" style={{ borderBottom: "1px solid rgba(26,26,26,0.25)" }}>
@@ -72,7 +80,7 @@ export function LoginForm() {
                 autoComplete="current-password"
                 required
                 className="font-body bg-transparent outline-none flex-1"
-                style={{ padding: "8px 2px", fontSize: 14, color: palette.black }}
+                style={{ padding: "8px 2px", fontSize: 16, color: palette.black }}
               />
               <button
                 type="button"
@@ -96,10 +104,20 @@ export function LoginForm() {
 
           <Link
             href="/forgot-password"
-            className="font-body uppercase text-center mt-1"
-            style={{ fontSize: 9, letterSpacing: "0.18em", color: palette.mutedGreige }}
+            className="font-body uppercase flex items-center justify-center"
+            style={{ minHeight: 44, fontSize: 11, letterSpacing: "0.18em", color: palette.mutedGreige }}
           >
             Forgot Password
+          </Link>
+
+          {/* /wholesale is public (middleware) and is the request-access form;
+              nothing linked to it, so a new buyer landing here had no way in. */}
+          <Link
+            href="/wholesale"
+            className="font-body flex items-center justify-center"
+            style={{ minHeight: 44, fontSize: 13, color: palette.softBlack, borderTop: "1px solid rgba(26,26,26,0.08)" }}
+          >
+            New buyer?&nbsp;<span style={{ color: palette.goldDeep, textDecoration: "underline" }}>Request access</span>
           </Link>
         </form>
       </div>
