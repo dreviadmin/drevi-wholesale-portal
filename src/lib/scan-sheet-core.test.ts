@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mrpLabel, stockLabel, scanVerdict } from "./scan-sheet-core";
+import { mrpLabel, stockLabel, scanVerdict, readResolved } from "./scan-sheet-core";
 
 describe("scan sheet: MRP line", () => {
   it("shows the MRP in rupees", () => {
@@ -39,5 +39,21 @@ describe("scan sheet: scanner verdict", () => {
       ok: false,
       message: "DD-LEH-FLR-404-M-RED — Not in the system",
     });
+  });
+});
+
+describe("scan sheet: reading the resolver's reply", () => {
+  it("passes a known or unknown answer through", () => {
+    const known = { sku: "DD-LEH-FLR-010-M-RED", known: true, retail_price: 4200, actions: [{ key: "retail_check", label: "Check retail price" }] };
+    expect(readResolved(true, known)).toEqual(known);
+    expect(readResolved(true, { sku: "DD-LEH-FLR-404-M-RED", known: false })).toEqual({ sku: "DD-LEH-FLR-404-M-RED", known: false, actions: [] });
+  });
+
+  it("throws on an error reply, so a signed-out or failed lookup is not called an unknown tag", () => {
+    expect(() => readResolved(false, { error: "Not authorized" })).toThrow("Not authorized");
+    expect(() => readResolved(true, { error: "sku required" })).toThrow("sku required");
+    expect(() => readResolved(false, { sku: "X", known: false, actions: [] })).toThrow();
+    expect(() => readResolved(true, null)).toThrow();
+    expect(() => readResolved(true, { sku: "X" })).toThrow();
   });
 });

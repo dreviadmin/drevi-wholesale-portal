@@ -9,7 +9,7 @@ import { palette } from "@/lib/palette";
 import { t } from "@/lib/strings";
 import { useToast } from "@/lib/use-toast";
 import { queueTray } from "@/app/admin/sku-generator/labels";
-import { mrpLabel, scanVerdict, stockLabel, type ScanResolved } from "@/lib/scan-sheet-core";
+import { mrpLabel, readResolved, scanVerdict, stockLabel, type ScanResolved } from "@/lib/scan-sheet-core";
 
 // Global scan action sheet (build guide §6.5). The FAB opens the existing
 // QrScanner; a decode resolves via /api/scan/resolve (server-side, role-gated
@@ -59,16 +59,16 @@ export function ScanSheet({ onClose }: { onClose: () => void }) {
 
   // Answers with a Promise, so the scanner shows "checking…" and only beeps
   // once the resolver has said whether the tag is known — it used to beep
-  // success for every code, unknown ones included. A failed request rejects,
-  // which the scanner shows as "could not check; retry" with the camera open.
+  // success for every code, unknown ones included. A failed request or an
+  // error reply (signed out, server error) rejects, which the scanner shows
+  // as "could not check; retry" with the camera open.
   function handleScan(text: string): ScanFeedback | Promise<ScanFeedback> {
     const sku = text.trim().toUpperCase();
     if (!sku) return { ok: false, message: "Empty code" };
     const req = ++scanReq.current;
     return fetch(`/api/scan/resolve?sku=${encodeURIComponent(sku)}`)
-      .then((r) => r.json())
-      .then((d) => {
-        const res: ScanResolved = d.error ? { sku, known: false, actions: [] } : d;
+      .then(async (r) => readResolved(r.ok, await r.json()))
+      .then((res) => {
         // A later scan overtook this one: beep for it, but show the latest.
         if (req === scanReq.current) {
           setResolved(res);

@@ -18,6 +18,20 @@ export interface ScanResolved {
   actions: { key: string; label: string; href?: string }[];
 }
 
+/**
+ * The resolver's answer, or a throw when there is none: an error reply (a
+ * signed-out session's 401, a server error) is a failed check, not proof the
+ * tag is unknown, so the scanner says "could not check; retry" instead of
+ * giving the unknown-tag tone.
+ */
+export function readResolved(ok: boolean, body: unknown): ScanResolved {
+  const d = (body ?? {}) as Partial<ScanResolved> & { error?: unknown };
+  if (!ok || d.error || typeof d.sku !== "string" || typeof d.known !== "boolean") {
+    throw new Error(typeof d.error === "string" ? d.error : "scan lookup failed");
+  }
+  return { ...d, actions: Array.isArray(d.actions) ? d.actions : [] } as ScanResolved;
+}
+
 /** The MRP line under the title: the price Retail Price Check quotes. */
 export function mrpLabel(r: Pick<ScanResolved, "retail_price">): string {
   return r.retail_price != null && r.retail_price > 0 ? `MRP ${formatINR(r.retail_price)}` : "MRP not set";
