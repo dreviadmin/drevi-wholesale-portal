@@ -451,7 +451,8 @@ export function StudioBoard({
   };
 
   const rowCard = (r: BoardRow) => (
-    <div key={r.id} className="p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
+    // Retired designs read as retired on a phone too, as the laptop row does.
+    <div key={r.id} className="p-3" style={{ background: r.discontinuedAt ? "rgba(156,58,49,0.05)" : palette.ivory, border: "1px solid rgba(26,26,26,0.08)", opacity: r.discontinuedAt ? 0.6 : 1 }}>
     <div className="flex items-center gap-3">
       <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleRow(r.id)} aria-label={`Select ${r.baseSku}`} style={{ accentColor: palette.goldDeep }} />
       <button type="button" onClick={() => openRow(r.id)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
@@ -465,10 +466,11 @@ export function StudioBoard({
         <span className="min-w-0 flex-1">
           <span className="font-mono block truncate" style={{ fontSize: 12, fontWeight: 700, color: palette.black }}>
             {r.baseSku} · {r.color} {r.tier === "hero" && <Crown size={11} className="inline" color={palette.goldDeep} />}
-            {r.discontinuedAt && (
-              <span className="font-body uppercase" style={{ marginLeft: 6, fontSize: 8, letterSpacing: "0.12em", color: "#9C3A31", border: "1px solid #9C3A31", padding: "2px 5px" }}>Discontinued</span>
-            )}
           </span>
+          {/* Own line: inside the truncated SKU line above it was cut off at phone width. */}
+          {r.discontinuedAt && (
+            <span className="font-body uppercase inline-block my-0.5" style={{ fontSize: 10, letterSpacing: "0.12em", color: "#9C3A31", border: "1px solid #9C3A31", padding: "1px 5px" }}>Discontinued</span>
+          )}
           <span className="font-body block truncate" style={{ fontSize: 11.5, color: palette.softBlack }}>{r.title ?? "—"}</span>
           <span className="font-mono block mt-0.5" style={{ fontSize: 9.5, color: palette.mutedGreige }}>
             {dot(r.specsVerified)} specs · ◑ {r.filledCount}/6 · {dot(r.copyPresent)} copy ·{" "}
