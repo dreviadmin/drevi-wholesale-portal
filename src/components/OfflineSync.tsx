@@ -6,6 +6,7 @@ import {
   getQueue, removeQueued, updateQueued, resetQueuedAttempts, getMeta, setMeta,
   type CapturePayload, type OrderPayload, type QueueItem,
 } from "@/lib/offline";
+import { retryingCaptureRefs, unsyncedBuyerCountsAttempt, ordersWaitingOn } from "@/lib/offline-queue-core";
 import { captureBuyer, submitExhibitionOrder } from "@/app/admin/exhibition/actions";
 import { palette } from "@/lib/palette";
 
@@ -48,19 +49,35 @@ export function OfflineSync() {
       const q = await getQueue();
       const refMap: Record<string, string> = (await getMeta("refMap")) ?? {};
 
-      for (const item of q.filter((i) => i.type === "capture")) {
+      const captures = q.filter((i) => i.type === "capture");
+      // Each failed capture's attempt count after this pass — what decides
+      // whether an order waiting on it is still just waiting (below).
+      const captureAttempts = new Map<number, number>();
+      for (const item of captures) {
         if (item.attempts >= MAX_ATTEMPTS) continue;
         const cap = item.payload as CapturePayload;
         const res = await captureBuyer({ ...cap.form, clientRef: cap.clientRef });
         if (res.ok) { refMap[cap.clientRef] = res.id!; await setMeta("refMap", refMap); await removeQueued(item.id!); }
-        else await updateQueued({ ...item, attempts: item.attempts + 1, lastError: res.error });
+        else {
+          await updateQueued({ ...item, attempts: item.attempts + 1, lastError: res.error });
+          captureAttempts.set(item.id!, item.attempts + 1);
+        }
       }
+      const retrying = retryingCaptureRefs(captures, captureAttempts, MAX_ATTEMPTS);
 
       for (const item of q.filter((i) => i.type === "order")) {
         if (item.attempts >= MAX_ATTEMPTS) continue;
         const o = item.payload as OrderPayload;
         const buyerId = o.buyerId ?? (o.buyerClientRef ? refMap[o.buyerClientRef] : undefined);
-        if (!buyerId) { await updateQueued({ ...item, attempts: item.attempts + 1, lastError: "buyer not synced yet" }); continue; }
+        if (!buyerId) {
+          // Waiting on a capture that is still retrying is not this order
+          // failing — it must not burn the order's attempts and show Failed
+          // beside a capture that may yet go through (audit fix, 4 Oct). Once
+          // the capture caps or is discarded, the order counts again as before.
+          if (!unsyncedBuyerCountsAttempt(o, retrying)) { await updateQueued({ ...item, lastError: "waiting for its buyer to sync" }); continue; }
+          await updateQueued({ ...item, attempts: item.attempts + 1, lastError: "buyer not synced yet" });
+          continue;
+        }
         const res = await submitExhibitionOrder({
           // Drained from the offline queue — see fromQueue in the action.
           fromQueue: true,
@@ -104,6 +121,10 @@ export function OfflineSync() {
 
   async function retryItem(item: QueueItem) {
     await resetQueuedAttempts(item.id!);
+    // Retrying a capture re-arms the orders waiting on it too — if they had
+    // capped alongside it, the capture syncing would otherwise leave them
+    // Failed until each was found and retried by hand (audit fix, 4 Oct).
+    for (const id of ordersWaitingOn(await getQueue(), item)) await resetQueuedAttempts(id);
     await refresh();
     drain();
   }

@@ -9,7 +9,7 @@ import { postOrderMovements, applyMovement } from "@/lib/stock-ledger";
 import { getStockState } from "@/lib/stock";
 import { storeAuxPhoto } from "@/lib/design-image-store";
 import { refreshOrderFromCatalog } from "@/lib/order-catalog-sync";
-import { billableLines, computeBillTotals, priorBillsConsumed, billingTermsChanged, validateBillDate, billDateToIso, effectiveLineState, emptyBillReason } from "@/lib/order-lines-core";
+import { billableLines, computeBillTotals, priorBillsConsumed, billingTermsChanged, validateBillDate, billDateToIso, effectiveLineState, emptyBillReason, addedLineTakesStock } from "@/lib/order-lines-core";
 import { renderAndStoreBillPdf, type BillForPdf } from "@/lib/bill-pdf";
 import { writeAuditEvent } from "@/lib/audit";
 import { formatINR } from "@/lib/format";
@@ -282,6 +282,17 @@ export async function updateOrderItems(
       n != null && Number.isFinite(n) && n >= 1 && Math.floor(n) < qty ? Math.floor(n) : null,
   };
 
+  // A catalog line ADDED to an order already past submitted is confirmed the
+  // moment it lands (it carries no line_state, so effectiveLineState derives
+  // it), and nothing else will ever move its stock: the whole-order confirm
+  // has already happened. So it leaves the shelf here, posted after the
+  // lines_rev CAS with the rest of stockAdjust, and is flagged stock_moved so
+  // a later cancel, un-confirm, removal or qty edit nets it back correctly.
+  // NOT stored as 'pending' instead: setLineState refuses on delivered and
+  // fulfilled orders, so such a line could never be confirmed or billed.
+  const postSubmit = addedLineTakesStock(order.status);
+  const addedStockOut: { sku: string; delta: number; why: string }[] = [];
+
   const items: OrderItem[] = [];
   let subtotal = 0;
   for (const line of lines) {
@@ -353,7 +364,10 @@ export async function updateOrderItems(
         image_url: p.image_urls?.[0] ?? null,
         ...(unitPrice !== p.wholesale_price && p.wholesale_price > 0 ? { original_price: p.wholesale_price } : {}),
         ...(actualQty != null ? { actual_qty: actualQty } : {}),
+        ...(postSubmit ? { stock_moved: true } : {}),
       });
+      // Billed units, as every other order movement posts them.
+      if (postSubmit) addedStockOut.push({ sku: p.sku, delta: -qty, why: "line added in edit" });
       subtotal += qty * unitPrice;
     }
   }
@@ -435,7 +449,10 @@ export async function updateOrderItems(
   const keptIdx = new Set(
     lines.filter((l): l is Extract<OrderEditLine, { kind: "keep" }> => l.kind === "keep").map((l) => l.index),
   );
-  const stockAdjust: { sku: string; delta: number; why: string }[] = [];
+  // Seeded with the added lines' outgoing stock (see postSubmit above). A
+  // negative delta posts as reason 'order', ref'd to this order, so
+  // restockableFor counts it as stock this order took.
+  const stockAdjust: { sku: string; delta: number; why: string }[] = [...addedStockOut];
   for (let i = 0; i < order.items.length; i++) {
     const prev = order.items[i];
     if (!keptIdx.has(i)) {
@@ -776,6 +793,15 @@ export async function generateOrderBill(
   const todayIst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   const billDate = opts.billDate ? validateBillDate(opts.billDate, todayIst) : todayIst;
   if (!billDate) return { ok: false, error: "Bill date must be a valid date, today or earlier." };
+  // The same lower bound setBillDate holds a correction to (audit fix, 4 Oct):
+  // a tax invoice dated before the sale it bills is a state the correction
+  // tools refuse, so creating one here left a bill nothing could repair. Past
+  // dates on or after the order's own day still go through. If the order's
+  // recorded day is itself wrong, setOrderDate moves it first.
+  const orderDay = istDay(o.submitted_at);
+  if (billDate < orderDay) {
+    return { ok: false, error: `${o.order_number} is dated ${orderDay} — a bill cannot be dated before its own sale.` };
+  }
 
   // Every bill — cancelled ones included — for the seq, so numbering carries on
   // past a cancelled B1; only the LIVE ones for what the pots have given out.
@@ -1232,7 +1258,13 @@ export async function recordPayment(
   const today = new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" });
   const clean = (input.note ?? "").trim().slice(0, 200);
   const line = `${today} · ${formatINR(amount)} by ${method}${clean ? ` · ${clean}` : ""} · recorded by ${staff.email}`;
-  const notes = [o.payment_notes?.trim(), line].filter(Boolean).join("\n").slice(0, 2000);
+  // This text is the order's only per-payment history, so the receipt just
+  // recorded must survive the cap (audit fix, 4 Oct). slice(0, 2000) kept the
+  // HEAD: past ~15 instalments each new line was cut or dropped while
+  // advance_amount still moved. The cap is raised well past any real order
+  // (the column is unbounded text) so the terms note at the top stays too, and
+  // it trims from the top if it is ever reached, never the newest line.
+  const notes = [o.payment_notes?.trim(), line].filter(Boolean).join("\n").slice(-20000);
 
   const nextAdvance = Math.round((advance + amount) * 100) / 100;
   const { data: won, error } = await admin

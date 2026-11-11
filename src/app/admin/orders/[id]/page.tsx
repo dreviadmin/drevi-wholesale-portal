@@ -37,7 +37,10 @@ export const maxDuration = 60;
 
 const SOURCE_LABEL: Record<string, string> = { portal_self_service: "Portal", exhibition: "Exhibition", in_store: "In-store" };
 
-function fmt(iso: string) { return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }); }
+// Pinned to IST (audit fix, 4 Oct): this is a server component and Vercel runs
+// in UTC, so every submitted / packed / delivered time read 5h30 behind — an
+// order placed at 00:42 IST on 25 Sep showed 24 Sep beside a number saying 25.
+function fmt(iso: string) { return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" }); }
 
 // The IST day a document belongs to — what the date controls edit, and what
 // every report buckets on. Never UTC's day.

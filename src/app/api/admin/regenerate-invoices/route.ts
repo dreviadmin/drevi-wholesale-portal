@@ -17,22 +17,30 @@ export async function POST() {
     return NextResponse.json({ error: "Not authorized" }, { status: 401 });
   }
   const admin = createAdminClient();
-  const { data: orders } = await admin
+  const { data: orders, error } = await admin
     .from("orders")
     .select("id, order_number")
     .not("pdf_url", "is", null)
     .neq("status", "cancelled")
     .limit(300);
+  // An unreadable list is not "nothing to regenerate" (audit fix, 4 Oct).
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   let done = 0;
   const failed: string[] = [];
   for (const o of orders ?? []) {
     try {
-      await finalizeOrder(o.id, { notify: false });
-      done++;
+      // finalizeOrder swallows its own failures and RETURNS the reason (a PDF
+      // over the bucket cap, a render error) — counting every await as done
+      // reported failed: [] for runs where uploads had failed (audit fix, 4 Oct).
+      const r = await finalizeOrder(o.id, { notify: false });
+      if (r.error) failed.push(o.order_number);
+      else done++;
     } catch {
       failed.push(o.order_number);
     }
   }
-  return NextResponse.json({ ok: true, regenerated: done, failed });
+  // The 300 cap stays (one batch has to fit inside maxDuration), but a run
+  // that hit it says so instead of looking like it covered every order.
+  return NextResponse.json({ ok: true, regenerated: done, failed, truncated: (orders?.length ?? 0) >= 300 });
 }

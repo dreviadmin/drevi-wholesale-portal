@@ -22,6 +22,21 @@ export function effectiveLineState(item: { billed_in?: string | null; line_state
   return "pending";
 }
 
+/**
+ * Does a catalog line that Modify Order ADDS take its stock off the shelf on
+ * save? (Audit fix, 4 Oct.) An added line carries no line_state, so on a
+ * post-submit order effectiveLineState derives it straight to 'confirmed' —
+ * billable at once — yet stock only ever left at the submitted→confirmed
+ * transition or a line confirm, neither of which happens again. The line sold
+ * pieces the shelf still counted. Keyed off the same POST_SUBMIT list so the
+ * two can never disagree: a line that reads confirmed is a line whose stock
+ * left. On a submitted order the add stays pending and the whole-order confirm
+ * moves it like any other line.
+ */
+export function addedLineTakesStock(orderStatus: OrderStatus): boolean {
+  return POST_SUBMIT.includes(orderStatus);
+}
+
 /** Confirmed-and-unbilled lines — what the next bill would contain. */
 export function billableLines(order: Pick<Order, "items" | "status">): { item: OrderItem; index: number }[] {
   return (order.items ?? [])

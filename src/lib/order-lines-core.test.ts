@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { effectiveLineState, billableLines, pendingLines, computeBillTotals, priorBillsConsumed, billingTermsChanged, validateBillDate, billDateToIso, emptyBillReason } from "./order-lines-core";
-import type { OrderItem } from "./types";
+import { effectiveLineState, billableLines, pendingLines, computeBillTotals, priorBillsConsumed, billingTermsChanged, validateBillDate, billDateToIso, emptyBillReason, addedLineTakesStock } from "./order-lines-core";
+import type { OrderItem, OrderStatus } from "./types";
 
 const line = (over: Partial<OrderItem> = {}): OrderItem => ({
   sku: "DD-TST-001-M-BLK",
@@ -25,6 +25,23 @@ describe("effectiveLineState", () => {
     expect(effectiveLineState(line(), "confirmed")).toBe("confirmed");
     expect(effectiveLineState(line(), "delivered")).toBe("confirmed");
     expect(effectiveLineState(line(), "cancelled")).toBe("pending");
+  });
+});
+
+describe("addedLineTakesStock — a line added by Modify Order leaves the shelf when it reads confirmed", () => {
+  const ALL: OrderStatus[] = ["submitted", "confirmed", "packed", "out_for_delivery", "delivered", "fulfilled", "cancelled"];
+  it("moves stock on every post-submit order, including delivered and fulfilled", () => {
+    for (const s of ["confirmed", "packed", "out_for_delivery", "delivered", "fulfilled"] as OrderStatus[]) {
+      expect(addedLineTakesStock(s)).toBe(true);
+    }
+  });
+  it("leaves a submitted order's add for the whole-order confirm to move", () => {
+    expect(addedLineTakesStock("submitted")).toBe(false);
+  });
+  it("agrees with effectiveLineState for a fresh added line (no line_state) on every status", () => {
+    for (const s of ALL) {
+      expect(addedLineTakesStock(s)).toBe(effectiveLineState(line(), s) === "confirmed");
+    }
   });
 });
 

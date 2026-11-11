@@ -290,6 +290,14 @@ export async function createReturnCreditNote(input: {
     };
   }
 
+  // A note cannot predate the document it reverses (audit fix, 4 Oct) — the
+  // same bound setBillDate refuses to cross from the other side. Checked
+  // before the reservation loop below, so a refused date reserves nothing.
+  // Both are IST YYYY-MM-DD strings; a same-day note still passes.
+  if (noteDate < doc.date) {
+    return { ok: false, error: `${doc.number} is dated ${doc.date} — a credit note cannot be dated before the document it reverses.` };
+  }
+
   const resolved: { line: BillLine; qty: number; restock: boolean; orderLineIndex: number; seenReturned: number }[] = [];
   for (const req of requested) {
     const idx = req.lineIndex;
