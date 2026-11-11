@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -11,6 +11,7 @@ import { useInAppBack } from "@/components/InAppHistory";
 import { QtyField } from "@/components/QtyField";
 import { setQty, setSpecialQty, removeFromCart, submitOrder, type SubmitState } from "./actions";
 import { cartPieces } from "@/lib/cart-count";
+import { CartQtySync } from "@/lib/cart-qty-sync";
 import { formatINR } from "@/lib/format";
 import { buyerVariantLabel } from "@/lib/variants";
 import { palette } from "@/lib/palette";
@@ -35,28 +36,28 @@ interface CartLineDTO {
   lineTotal: number;
 }
 
-function SubmitButton({ disabled }: { disabled: boolean }) {
+function SubmitButton({ saving }: { saving: boolean }) {
   const { pending } = useFormStatus();
   return (
     <button
       type="submit"
-      disabled={disabled || pending}
+      disabled={saving || pending}
       className="w-full font-body uppercase transition-opacity disabled:opacity-50"
       style={{ background: palette.black, color: palette.ivory, fontSize: 11, letterSpacing: "0.2em", padding: "14px 0" }}
     >
-      {pending ? "Submitting…" : "Submit Order Request"}
+      {pending ? "Submitting…" : saving ? "Saving your cart…" : "Submit Order Request"}
     </button>
   );
 }
 
 export function CartView({
   lines,
-  subtotal,
   changeNotice = null,
   droppedSkus = [],
   adjustedLines = [],
 }: {
   lines: CartLineDTO[];
+  /** The server's subtotal; the screen adds up its own numbers, which can be newer. */
   subtotal: number;
   /** What changed since the buyer added it; never states a quantity. */
   changeNotice?: string | null;
@@ -75,7 +76,6 @@ export function CartView({
   const router = useRouter();
   const back = useInAppBack("/catalog");
   const [menuOpen, setMenuOpen] = useState(false);
-  const [isPending, startTransition] = useTransition();
   const [state, formAction] = useFormState<SubmitState, FormData>(submitOrder, {});
   // One idempotency key per cart screen — retries of this submit resolve to
   // the same order server-side. uuid() and not a hand-rolled fallback: the old
@@ -84,39 +84,116 @@ export function CartView({
   // double-submit protection entirely.
   const clientRefRef = useRef<string>(uuid());
 
-  function editQty(sku: string, qty: number, special = false) {
-    startTransition(async () => {
-      if (special) await setSpecialQty(sku, qty);
-      else await setQty(sku, qty);
-      router.refresh();
+  // Quantities on screen, one per line (Nov review). − and + used to grey out
+  // for about two seconds while each save ran, and taps in that time were
+  // lost. Now every tap moves this number at once; CartQtySync sends a line's
+  // final number once the taps pause (~400 ms), one save at a time across the
+  // cart, and never lets a reply or a refresh put back an older number over a
+  // newer tap. Submit waits until everything is saved.
+  const [qtyBySku, setQtyBySku] = useState<Record<string, number>>(() => Object.fromEntries(lines.map((l) => [l.sku, l.qty])));
+  const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set());
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const mounted = useRef(true);
+  // Read by the save, which runs after the render that queued it.
+  const specialRef = useRef(new Map<string, boolean>());
+  specialRef.current = new Map(lines.map((l) => [l.sku, l.special]));
+
+  const [sync] = useState(
+    () =>
+      new CartQtySync({
+        // 0 removes the line. `special` still goes to setSpecialQty so a line a
+        // buyer flagged before keeps its exact quantity on edit.
+        save: async (sku, qty) =>
+          (qty > 0 && specialRef.current.get(sku) ? await setSpecialQty(sku, qty) : await setQty(sku, Math.max(0, qty))).qty,
+        onServerQty: (sku, qty) => { if (mounted.current) setQtyBySku((m) => ({ ...m, [sku]: qty })); },
+        onError: () => {
+          if (mounted.current) setSaveError("A change could not be saved. The cart now shows what is saved; please try again.");
+        },
+        onIdle: () => { if (mounted.current) router.refresh(); },
+        onBusyChange: (b) => { if (mounted.current) setSaving(b); },
+      }),
+  );
+
+  // A fresh cart from the server: take its numbers, except on a line the
+  // buyer has changed since and is still saving.
+  useEffect(() => {
+    setQtyBySku((prev) => {
+      const next: Record<string, number> = {};
+      for (const l of lines) next[l.sku] = sync.isDirty(l.sku) && prev[l.sku] != null ? prev[l.sku] : l.qty;
+      return next;
     });
+    setRemoved((prev) => {
+      const live = new Set(lines.map((l) => l.sku));
+      const keep = new Set([...prev].filter((sku) => live.has(sku)));
+      return keep.size === prev.size ? prev : keep;
+    });
+  }, [lines, sync]);
+
+  // Leaving the cart (Back, a product, closing the tab) sends a waiting
+  // number now rather than dropping it.
+  useEffect(() => {
+    mounted.current = true;
+    const flush = () => sync.flush();
+    const onHide = () => { if (document.visibilityState === "hidden") sync.flush(); };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onHide);
+      mounted.current = false;
+      sync.flush();
+    };
+  }, [sync]);
+
+  function editQty(sku: string, qty: number) {
+    const q = Math.max(0, qty);
+    setSaveError(null);
+    setQtyBySku((m) => ({ ...m, [sku]: q }));
+    sync.set(sku, q);
   }
   function remove(sku: string) {
-    startTransition(async () => {
-      await removeFromCart(sku);
-      router.refresh();
+    setSaveError(null);
+    setRemoved((r) => new Set(r).add(sku));
+    sync.cancel(sku);
+    void sync.run(async () => {
+      try {
+        await removeFromCart(sku);
+      } catch (err) {
+        // Put the line back; the refresh shows what is really saved.
+        if (mounted.current) setRemoved((r) => { const n = new Set(r); n.delete(sku); return n; });
+        throw err;
+      }
     });
   }
 
+  const shown = lines
+    .filter((l) => !removed.has(l.sku))
+    .map((l) => {
+      const qty = qtyBySku[l.sku] ?? l.qty;
+      return { ...l, qty, lineTotal: qty * l.unitPrice };
+    });
+  const shownSubtotal = shown.reduce((s, l) => s + l.lineTotal, 0);
+
   // Say once what changed, then make the stored cart match what is shown so
   // the notice does not return on the next visit. Ordering already used the
-  // shown lines, so nothing about the order changes. One call at a time, and
-  // inside the transition so the steppers wait: each call rewrites the whole
-  // cart row, and two at once would lose one.
+  // shown lines, so nothing about the order changes. In the same one-at-a-time
+  // line as the quantity saves: each call rewrites the whole cart row, and two
+  // at once would lose one.
   const [notice] = useState(changeNotice);
   const settled = useRef(false);
   useEffect(() => {
     if (settled.current) return;
     settled.current = true;
     if (droppedSkus.length === 0 && adjustedLines.length === 0) return;
-    startTransition(async () => {
+    void sync.run(async () => {
       try {
         for (const sku of droppedSkus) await removeFromCart(sku);
         for (const a of adjustedLines) await setQty(a.sku, a.qty);
       } catch {
         // Nothing to undo: the notice simply shows again next visit.
       }
-    });
+    }, { refresh: false });
     // Once per visit, from the props the page was rendered with.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -125,7 +202,7 @@ export function CartView({
     <div className="min-h-screen flex flex-col" style={{ background: palette.ivory }}>
       {/* The menu takes the slot the layout already held open opposite the
           back arrow, so the bar keeps its balance. */}
-      <BuyerNavDrawer open={menuOpen} onClose={() => setMenuOpen(false)} cartCount={cartPieces(lines.map((l) => l.qty))} className="sticky top-0 z-10">
+      <BuyerNavDrawer open={menuOpen} onClose={() => setMenuOpen(false)} cartCount={cartPieces(shown.map((l) => l.qty))} className="sticky top-0 z-10">
         <div
           className="flex items-center justify-between px-4 py-3.5"
           style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.08)" }}
@@ -154,7 +231,7 @@ export function CartView({
         </div>
       )}
 
-      {lines.length === 0 ? (
+      {shown.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
           <p className="font-body" style={{ color: palette.mutedGreige, fontSize: 12, letterSpacing: "0.1em", lineHeight: 1.8 }}>
             Your cart is empty.
@@ -164,9 +241,9 @@ export function CartView({
           </Link>
         </div>
       ) : (
-        <div className={`flex-1 px-4 py-4 ${isPending ? "opacity-90" : ""}`}>
+        <div className="flex-1 px-4 py-4">
           <div className="flex flex-col gap-3 max-w-2xl mx-auto">
-            {lines.map((l) => (
+            {shown.map((l) => (
               <div key={l.sku} className="flex gap-3 p-3" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
                 <Link href={`/product/${encodeURIComponent(l.sku)}`} className="relative flex-shrink-0" style={{ width: 96, height: 171, background: palette.ivoryDeep }}>
                   {l.image && <Image src={l.image} alt={l.title} fill sizes="96px" className="object-cover" />}
@@ -192,25 +269,22 @@ export function CartView({
                     {l.sku}
                   </div>
 
-                  {/* The stepper runs free in both directions. `l.special` is
-                      still forwarded so a line a buyer flagged before this
-                      change keeps its exact quantity on edit. Disabled while a
-                      change is in flight: l.qty only moves after the refresh,
-                      so three quick taps on 5 each sent 6 and the line ended
-                      at 6, not 8. The number can be typed too (24 pieces was
-                      23 taps); typing 0 removes the line. */}
+                  {/* The stepper runs free in both directions and never waits
+                      for a save: l.qty is the number on screen, which every
+                      tap moves at once (see CartQtySync above). − to 0 removes
+                      the line once the taps pause. The number can be typed
+                      too (24 pieces was 23 taps); typing 0 removes the line. */}
                   <div className="flex items-center justify-between mt-2">
                     <div className="flex items-center" style={{ border: `1px solid rgba(26,26,26,0.2)` }}>
-                      <button type="button" disabled={isPending} onClick={() => editQty(l.sku, l.qty - 1, l.special)} aria-label="Decrease" className="flex items-center justify-center disabled:opacity-50" style={{ color: palette.black, width: 40, height: 40 }}>
+                      <button type="button" disabled={l.qty <= 0} onClick={() => editQty(l.sku, l.qty - 1)} aria-label="Decrease" className="flex items-center justify-center disabled:opacity-50" style={{ color: palette.black, width: 40, height: 40 }}>
                         <Minus size={13} strokeWidth={2} />
                       </button>
                       <QtyField
                         value={l.qty}
                         min={0}
-                        disabled={isPending}
-                        onCommit={(n) => (n === 0 ? remove(l.sku) : editQty(l.sku, n, l.special))}
+                        onCommit={(n) => (n === 0 ? remove(l.sku) : editQty(l.sku, n))}
                       />
-                      <button type="button" disabled={isPending} onClick={() => editQty(l.sku, l.qty + 1, l.special)} aria-label="Increase" className="flex items-center justify-center disabled:opacity-50" style={{ color: palette.black, width: 40, height: 40 }}>
+                      <button type="button" onClick={() => editQty(l.sku, l.qty + 1)} aria-label="Increase" className="flex items-center justify-center disabled:opacity-50" style={{ color: palette.black, width: 40, height: 40 }}>
                         <Plus size={13} strokeWidth={2} />
                       </button>
                     </div>
@@ -227,7 +301,7 @@ export function CartView({
           <div className="max-w-2xl mx-auto mt-6">
             <div className="flex items-baseline justify-between">
               <span className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.18em", color: palette.softBlack }}>Subtotal</span>
-              <span className="font-display" style={{ fontSize: 20, fontWeight: 600, color: palette.black }}>{formatINR(subtotal)}</span>
+              <span className="font-display" style={{ fontSize: 20, fontWeight: 600, color: palette.black }}>{formatINR(shownSubtotal)}</span>
             </div>
 
             <form action={formAction} className="mt-5">
@@ -243,6 +317,9 @@ export function CartView({
                 />
               </label>
 
+              {saveError && (
+                <p role="alert" className="font-body mt-2" style={{ fontSize: 11, color: palette.crimsonText }}>{saveError}</p>
+              )}
               {state?.error && (
                 <p className="font-body mt-2" style={{ fontSize: 11, color: palette.crimsonText }}>{state.error}</p>
               )}
@@ -255,7 +332,7 @@ export function CartView({
                 </p>
               </div>
               <div className="mt-3">
-                <SubmitButton disabled={isPending} />
+                <SubmitButton saving={saving} />
               </div>
             </form>
           </div>
