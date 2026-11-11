@@ -11,6 +11,13 @@
 //    a server reply never puts back an older number over a newer tap. A reply
 //    for the newest number is passed on, so a server clamp still shows.
 //  · flush() sends every waiting number now (leaving the page, unmount).
+//  · A failed save puts its line back to the number the server still holds
+//    (noteSaved, then every save's reply), unless a newer tap is on its way.
+//    The screen then never offers Submit beside a number that was not saved.
+//  · onIdle says whether anything failed. A save's reply already carries the
+//    fresh page (revalidatePath), so the cart reloads only after a failure: a
+//    reload after every save let Next drop the next save when the buyer left
+//    while it ran (Nov review; see src/lib/catalog-card-saves.ts for how).
 //
 // No React here, so vitest can drive it with fake timers.
 
@@ -19,12 +26,19 @@ export type CartSaveFn = (sku: string, qty: number) => Promise<number>;
 export interface CartQtySyncOptions {
   /** Sends one line's quantity; resolves with the quantity the server stored. */
   save: CartSaveFn;
-  /** The server stored a different number for the newest tap (a clamp). */
+  /**
+   * Show this number for the line: the server stored a different number for
+   * the newest tap (a clamp), or the newest tap's save failed and this is what
+   * the server still holds.
+   */
   onServerQty?: (sku: string, qty: number) => void;
-  /** A save or task failed. The screen should reload the server's cart. */
+  /** A save or task failed. */
   onError?: (sku: string | null, err: unknown) => void;
-  /** Nothing is waiting or in flight any more, after a save or a refreshing task. */
-  onIdle?: () => void;
+  /**
+   * Nothing is waiting or in flight any more, after a save or a refreshing
+   * task. `failed` is true when any of them failed since the last idle.
+   */
+  onIdle?: (failed: boolean) => void;
   /** Becomes true on the first waiting change, false when all are done. */
   onBusyChange?: (busy: boolean) => void;
   delayMs?: number;
@@ -40,9 +54,12 @@ export class CartQtySync {
   private readonly timers = new Map<string, { handle: ReturnType<typeof setTimeout>; qty: number; v: number }>();
   /** Saves queued or running, per line. */
   private readonly inFlight = new Map<string, number>();
+  /** The number the server holds for each line, as far as this screen knows. */
+  private readonly saved = new Map<string, number>();
   private chain: Promise<void> = Promise.resolve();
   private tasks = 0;
   private wantsRefresh = false;
+  private failedSinceIdle = false;
   private wasBusy = false;
 
   constructor(opts: CartQtySyncOptions) {
@@ -85,6 +102,16 @@ export class CartQtySync {
     });
   }
 
+  /** What the server holds for a line, from the page it rendered. A failed save goes back to it. */
+  noteSaved(sku: string, qty: number): void {
+    this.saved.set(sku, qty);
+  }
+
+  /** The number the server holds for the line, if known (noteSaved or a save's reply). */
+  savedQty(sku: string): number | undefined {
+    return this.saved.get(sku);
+  }
+
   /** True while the line has a number waiting or a save queued or running. */
   isDirty(sku: string): boolean {
     return this.timers.has(sku) || (this.inFlight.get(sku) ?? 0) > 0;
@@ -111,7 +138,17 @@ export class CartQtySync {
       try {
         // Overtaken while it waited in line: the newer number goes instead.
         if (this.version.get(sku) !== v) return;
-        const stored = await this.opts.save(sku, qty);
+        let stored: number;
+        try {
+          stored = await this.opts.save(sku, qty);
+        } catch (err) {
+          // Still the newest number for the line: show what the server holds
+          // again, in the same tick that ends the busy state.
+          const back = this.saved.get(sku);
+          if (this.version.get(sku) === v && back !== undefined && back !== qty) this.opts.onServerQty?.(sku, back);
+          throw err;
+        }
+        this.saved.set(sku, stored);
         this.wantsRefresh = true;
         if (this.version.get(sku) === v && stored !== qty) this.opts.onServerQty?.(sku, stored);
       } finally {
@@ -128,6 +165,7 @@ export class CartQtySync {
         await job();
       } catch (err) {
         this.wantsRefresh = true;
+        this.failedSinceIdle = true;
         this.opts.onError?.(sku, err);
       } finally {
         this.tasks--;
@@ -141,8 +179,10 @@ export class CartQtySync {
   private settle(): void {
     this.busyChanged();
     if (this.busy || !this.wantsRefresh) return;
+    const failed = this.failedSinceIdle;
     this.wantsRefresh = false;
-    this.opts.onIdle?.();
+    this.failedSinceIdle = false;
+    this.opts.onIdle?.(failed);
   }
 
   private busyChanged(): void {

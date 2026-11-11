@@ -89,7 +89,8 @@ export function CartView({
   // lost. Now every tap moves this number at once; CartQtySync sends a line's
   // final number once the taps pause (~400 ms), one save at a time across the
   // cart, and never lets a reply or a refresh put back an older number over a
-  // newer tap. Submit waits until everything is saved.
+  // newer tap. Submit waits until everything is saved. A failed save puts its
+  // line back to the saved number in the same tick Submit comes back.
   const [qtyBySku, setQtyBySku] = useState<Record<string, number>>(() => Object.fromEntries(lines.map((l) => [l.sku, l.qty])));
   const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set());
   const [saving, setSaving] = useState(false);
@@ -110,14 +111,20 @@ export function CartView({
         onError: () => {
           if (mounted.current) setSaveError("A change could not be saved. The cart now shows what is saved; please try again.");
         },
-        onIdle: () => { if (mounted.current) router.refresh(); },
+        // Only after a failure. Each save's reply already carries the fresh
+        // cart (revalidatePath), and a refresh after every save sat in Next's
+        // router queue: the next save queued behind it unsent, and Back or a
+        // link then dropped it without a word (Nov review).
+        onIdle: (failed) => { if (mounted.current && failed) router.refresh(); },
         onBusyChange: (b) => { if (mounted.current) setSaving(b); },
       }),
   );
 
   // A fresh cart from the server: take its numbers, except on a line the
-  // buyer has changed since and is still saving.
+  // buyer has changed since and is still saving. They are also what a failed
+  // save goes back to.
   useEffect(() => {
+    for (const l of lines) if (!sync.isDirty(l.sku)) sync.noteSaved(l.sku, l.qty);
     setQtyBySku((prev) => {
       const next: Record<string, number> = {};
       for (const l of lines) next[l.sku] = sync.isDirty(l.sku) && prev[l.sku] != null ? prev[l.sku] : l.qty;

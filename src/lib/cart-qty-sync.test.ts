@@ -10,6 +10,9 @@ function harness(delayMs = CART_SAVE_DELAY_MS) {
   const serverQty: [string, number][] = [];
   const errors: [string | null, unknown][] = [];
   const busy: boolean[] = [];
+  const idles: boolean[] = [];
+  // Every callback in the order it came, for "before Submit is back" checks.
+  const log: string[] = [];
   let idle = 0;
   const sync = new CartQtySync({
     delayMs,
@@ -17,10 +20,10 @@ function harness(delayMs = CART_SAVE_DELAY_MS) {
       sent.push([sku, qty]);
       return new Promise<number>((resolve, reject) => pending.push({ sku, qty, resolve, reject }));
     },
-    onServerQty: (sku, qty) => serverQty.push([sku, qty]),
-    onError: (sku, err) => errors.push([sku, err]),
-    onIdle: () => { idle++; },
-    onBusyChange: (b) => busy.push(b),
+    onServerQty: (sku, qty) => { serverQty.push([sku, qty]); log.push(`show ${sku}=${qty}`); },
+    onError: (sku, err) => { errors.push([sku, err]); log.push(`error ${sku}`); },
+    onIdle: (failed) => { idle++; idles.push(failed); log.push(`idle ${failed}`); },
+    onBusyChange: (b) => { busy.push(b); log.push(`busy ${b}`); },
   });
   // Resolve the oldest save still running, then let the queue move on.
   const reply = async (stored?: number) => {
@@ -35,7 +38,7 @@ function harness(delayMs = CART_SAVE_DELAY_MS) {
     p.reject(err);
     await vi.advanceTimersByTimeAsync(0);
   };
-  return { sync, pending, sent, serverQty, errors, busy, reply, fail, idle: () => idle };
+  return { sync, pending, sent, serverQty, errors, busy, idles, log, reply, fail, idle: () => idle };
 }
 
 beforeEach(() => { vi.useFakeTimers(); });
@@ -189,5 +192,79 @@ describe("CartQtySync", () => {
     expect(h.sync.busy).toBe(false);
     expect(h.sync.isDirty("A")).toBe(false);
     expect(h.busy).toEqual([true, false]);
+  });
+
+  // Nov review: CartView refreshed the page after every save. That refresh
+  // sat in Next's router queue, the next save queued behind it unsent, and
+  // Back or a link then dropped it. Each save's reply already carries the
+  // fresh cart, so the screen only reloads when something failed.
+  it("says nothing failed when it goes idle after good saves, so the cart does not reload", async () => {
+    const h = harness();
+    h.sync.set("A", 2);
+    await vi.advanceTimersByTimeAsync(CART_SAVE_DELAY_MS);
+    await h.reply();
+    await h.sync.run(async () => {});
+    expect(h.idles).toEqual([false, false]);
+  });
+
+  it("says something failed when any save since the last idle failed, even if a later one went through", async () => {
+    const h = harness();
+    h.sync.set("A", 2);
+    h.sync.set("B", 3);
+    await vi.advanceTimersByTimeAsync(CART_SAVE_DELAY_MS);
+    await h.fail(new Error("offline"));
+    await h.reply();
+    expect(h.idles).toEqual([true]);
+    h.sync.set("A", 4);
+    await vi.advanceTimersByTimeAsync(CART_SAVE_DELAY_MS);
+    await h.reply();
+    expect(h.idles).toEqual([true, false]);
+  });
+
+  // Nov review: after a failed save the line kept the unsaved number while
+  // Submit came back, so a buyer could order 5 under a screen showing 6.
+  it("puts a line back to what the server holds when its save fails, before it stops being busy", async () => {
+    const h = harness();
+    h.sync.noteSaved("A", 5);
+    h.sync.set("A", 6);
+    await vi.advanceTimersByTimeAsync(CART_SAVE_DELAY_MS);
+    await h.fail(new Error("Cart save failed"));
+    expect(h.serverQty).toEqual([["A", 5]]);
+    expect(h.log.indexOf("show A=5")).toBeLessThan(h.log.indexOf("busy false"));
+    expect(h.sync.isDirty("A")).toBe(false);
+  });
+
+  it("goes back to the last number a save stored, not the page's older one", async () => {
+    const h = harness();
+    h.sync.noteSaved("A", 5);
+    h.sync.set("A", 6);
+    await vi.advanceTimersByTimeAsync(CART_SAVE_DELAY_MS);
+    await h.reply();
+    expect(h.sync.savedQty("A")).toBe(6);
+    h.sync.set("A", 7);
+    await vi.advanceTimersByTimeAsync(CART_SAVE_DELAY_MS);
+    await h.fail(new Error("offline"));
+    expect(h.serverQty).toEqual([["A", 6]]);
+  });
+
+  it("leaves a line alone when its failed save was overtaken by a newer tap", async () => {
+    const h = harness();
+    h.sync.noteSaved("A", 5);
+    h.sync.set("A", 6);
+    await vi.advanceTimersByTimeAsync(CART_SAVE_DELAY_MS);
+    h.sync.set("A", 7); // tapped again while 6 is being saved
+    await h.fail(new Error("offline"));
+    expect(h.serverQty).toEqual([]);
+    await vi.advanceTimersByTimeAsync(CART_SAVE_DELAY_MS);
+    expect(h.sent).toEqual([["A", 6], ["A", 7]]);
+  });
+
+  it("leaves a line alone when it does not know what the server holds", async () => {
+    const h = harness();
+    h.sync.set("A", 3);
+    await vi.advanceTimersByTimeAsync(CART_SAVE_DELAY_MS);
+    await h.fail(new Error("offline"));
+    expect(h.serverQty).toEqual([]);
+    expect(h.errors).toHaveLength(1);
   });
 });
