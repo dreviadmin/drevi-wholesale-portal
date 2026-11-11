@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { palette } from "@/lib/palette";
 
 // The app's confirm sheet (review fix, Nov), lifted from CancelBillButton: a
@@ -8,6 +9,11 @@ import { palette } from "@/lib/palette";
 // confirm / prompt / alert, which phones show as a bare system box with no
 // context. The caller renders it only while open and owns pending and error,
 // so a refused action keeps the sheet up with the reason shown inside it.
+//
+// Portalled to <body>: callers mount it inside list rows, and a voided retail
+// bill's row is drawn at opacity 0.5. Rendered in place, the "stock did NOT
+// return" notice shown after a void would inherit that fade, and the row's
+// stacking context would let later rows paint over it.
 export function ConfirmSheet({
   title,
   children,
@@ -47,15 +53,18 @@ export function ConfirmSheet({
     return () => window.removeEventListener("keydown", onKey);
   }, [pending, onClose]);
 
-  return (
+  // Only ever mounted after a tap (never during SSR), so <body> is there.
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end md:items-center md:justify-center" style={{ background: "rgba(20,20,20,0.6)" }} onClick={() => !pending && onClose()}>
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         className="w-full md:max-w-md max-h-modal overflow-y-auto text-left"
-        // text-left / normal wrapping: it is often mounted inside a right-aligned,
-        // nowrap table cell or action row, and would inherit both.
+        // text-left / normal wrapping stated outright, so the sheet reads the
+        // same wherever it is used (its callers sit in right-aligned, nowrap
+        // table cells and action rows).
         style={{ background: palette.ivory, whiteSpace: "normal", padding: "20px 18px", paddingBottom: "calc(20px + var(--kb-inset, 0px) + env(safe-area-inset-bottom, 0px))" }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -96,6 +105,7 @@ export function ConfirmSheet({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
