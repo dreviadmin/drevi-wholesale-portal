@@ -193,6 +193,9 @@ export function DeliveryIntake({
   const billNum = Number(billAmount) || 0;
   // Against the total WITH GST when it was paid on top (see lib/gst).
   const mismatch = billMismatch(billNum, totals.value, gst) != null;
+  // The footer buttons look as usable as they are; onSave keeps its own checks.
+  const canSave = !!vendorId && garments.length > 0;
+  const saveHint = canSave ? null : !vendorId && garments.length === 0 ? "Pick a vendor and add a garment to save" : !vendorId ? "Pick a vendor to save" : "Add a garment to save";
 
   function upsertGarment(g: Garment) {
     setGarments((list) => {
@@ -411,7 +414,8 @@ export function DeliveryIntake({
           </div>
           <div className="grid grid-cols-2 gap-2 mt-3">
             <div>{label("Receipt date (vendor's bill)")}<input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} className="font-body" style={input} /></div>
-            <div>{label("Entry date")}<div className="font-body" style={{ ...input, background: palette.ivoryDeep, color: palette.mutedGreige }}>{entryDate}</div></div>
+            {/* A date field too, read-only, so both dates read in the phone's own format. */}
+            <div>{label("Entry date")}<input type="date" value={entryDate} disabled readOnly aria-label="Entry date" className="font-body" style={{ ...input, background: palette.ivoryDeep, color: palette.mutedGreige }} /></div>
             <div>{label("Bill amount (optional)")}<input type="number" min="0" value={billAmount} onChange={(e) => setBillAmount(e.target.value)} className="font-body" style={input} /></div>
             <div className="col-span-2 flex flex-wrap items-center gap-1.5">
               {(["kaccha", "pakka"] as const).map((m) => (
@@ -506,11 +510,12 @@ export function DeliveryIntake({
             </span>
             {mismatch && <span className="font-body" style={{ fontSize: 9.5, color: "#E4A1A1" }}>bill {formatINR(billNum)}</span>}
           </div>
+          {saveHint && <div className="font-body mt-1" style={{ fontSize: 11, color: palette.mutedGreige }}>{saveHint}</div>}
           <div className="flex gap-2 mt-2">
-            <button type="button" disabled={pending} onClick={() => onSave(true)} className="flex-1 font-body uppercase disabled:opacity-50" style={{ fontSize: 10.5, letterSpacing: "0.16em", background: palette.gold, color: palette.black, fontWeight: 600, padding: "13px 0" }}>
+            <button type="button" disabled={pending || !canSave} onClick={() => onSave(true)} className="flex-1 font-body uppercase disabled:opacity-50" style={{ fontSize: 10.5, letterSpacing: "0.16em", background: palette.gold, color: palette.black, fontWeight: 600, padding: "13px 0" }}>
               Save &amp; print tags
             </button>
-            <button type="button" disabled={pending} onClick={() => onSave(false)} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 10, letterSpacing: "0.14em", border: `1px solid ${palette.champagne}`, color: palette.ivory, padding: "13px 14px" }}>
+            <button type="button" disabled={pending || !canSave} onClick={() => onSave(false)} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 10, letterSpacing: "0.14em", border: `1px solid ${palette.champagne}`, color: palette.ivory, padding: "13px 14px" }}>
               Save only
             </button>
           </div>
