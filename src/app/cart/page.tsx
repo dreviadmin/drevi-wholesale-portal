@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getDetailedCart } from "@/lib/cart";
-import { cartChangeNotice, changedItemNames } from "@/lib/cart-lines";
+import { cartSettlement } from "@/lib/cart-lines";
 import { CartView } from "./CartView";
 
 export const dynamic = "force-dynamic";
@@ -25,18 +25,11 @@ export default async function CartPage() {
     .limit(1);
   const buyer = rows?.[0] ?? null;
   const cart = buyer ? await getDetailedCart(buyer.id) : null;
-
   // What changed since the buyer added it (Oct review): named once, then
-  // settled by CartView so the notice does not come back on every visit.
-  const lineOf = new Map((cart?.lines ?? []).map((l) => [l.product.sku, l]));
-  const dropped = cart?.dropped ?? [];
-  const adjusted = (cart?.adjusted ?? []).flatMap((sku) => {
-    const l = lineOf.get(sku);
-    return l ? [{ sku, title: l.product.title ?? null, qty: l.qty }] : [];
-  });
-  // Named across both lists, so two sizes of one design get their sizes.
-  const names = changedItemNames([...dropped, ...adjusted]);
-  const changeNotice = cartChangeNotice(names.slice(0, dropped.length), names.slice(dropped.length));
+  // settled by CartView so the notice does not come back on every visit. A
+  // cart that could not be read throws here, to the error page, before any of
+  // it is named as dropped (see cartSettlement).
+  const { changeNotice, droppedSkus, adjustedLines } = cartSettlement(cart);
 
   return (
     <CartView
@@ -57,8 +50,8 @@ export default async function CartPage() {
       subtotal={cart?.subtotal ?? 0}
       maxLeadDays={cart?.maxLeadDays ?? 0}
       changeNotice={changeNotice}
-      droppedSkus={dropped.map((d) => d.sku)}
-      adjustedLines={adjusted.map(({ sku, qty }) => ({ sku, qty }))}
+      droppedSkus={droppedSkus}
+      adjustedLines={adjustedLines}
     />
   );
 }

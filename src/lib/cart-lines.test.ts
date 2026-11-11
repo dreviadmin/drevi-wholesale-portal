@@ -7,7 +7,7 @@ vi.mock("@/lib/stock", async () => await import("./stock"));
 vi.mock("@/lib/availability", async () => await import("./availability"));
 vi.mock("@/lib/variants", async () => await import("./variants"));
 
-const { buildCartLines, cartChangeNotice, changedItemNames } = await import("./cart-lines");
+const { buildCartLines, cartChangeNotice, changedItemNames, cartSettlement } = await import("./cart-lines");
 
 function product(sku: string, over: Partial<WholesaleProduct> = {}): WholesaleProduct {
   return {
@@ -120,5 +120,29 @@ describe("changedItemNames", () => {
   });
   it("is empty for nothing changed", () => {
     expect(changedItemNames([])).toEqual([]);
+  });
+});
+
+// The cart page's settle step deletes every row it is handed as dropped. A
+// failed product read used to hand it every row (Nov review).
+describe("cartSettlement", () => {
+  it("refuses a cart that could not be read rather than naming its rows dropped", () => {
+    expect(() => cartSettlement({ lines: [], dropped: [], adjusted: [], readFailed: true })).toThrow("could not be read");
+  });
+
+  it("settles what really changed: the dropped rows, and adjusted lines at the number shown", () => {
+    const out = buildCartLines(
+      [{ sku: "A", qty: 2 }, { sku: "GONE", qty: 1 }, { sku: "LTD", qty: 8 }],
+      by(product("A"), product("LTD", { current_qty: 3, restockable: false })),
+    );
+    const s = cartSettlement(out);
+    expect(s.droppedSkus).toEqual(["GONE"]);
+    expect(s.adjustedLines).toEqual([{ sku: "LTD", qty: 3 }]);
+    expect(s.changeNotice).toBe("Some items changed since you added them: GONE is no longer available and was removed. The quantity of Title LTD was adjusted.");
+  });
+
+  it("settles nothing for a cart with no changes, or no cart", () => {
+    expect(cartSettlement(buildCartLines([{ sku: "A", qty: 2 }], by(product("A"))))).toEqual({ changeNotice: null, droppedSkus: [], adjustedLines: [] });
+    expect(cartSettlement(null)).toEqual({ changeNotice: null, droppedSkus: [], adjustedLines: [] });
   });
 });

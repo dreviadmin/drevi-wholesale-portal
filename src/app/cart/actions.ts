@@ -151,6 +151,9 @@ export async function submitOrder(_prev: SubmitState, formData: FormData): Promi
   const clientRef = /^[0-9a-f-]{36}$/i.test(rawRef) ? rawRef : null;
 
   const cart = await getDetailedCart(buyer.id);
+  // Not "empty": the cart could not be read, and saying so sends the buyer
+  // off to add it all again.
+  if (cart.readFailed) return { error: "Your cart could not be loaded just now. Please try again." };
   if (cart.lines.length === 0) return { error: "Your cart is empty." };
   // NO MINIMUM-ORDER BLOCK. The buyer submits whatever quantity they actually
   // want and Rakesh takes it from there on the confirmation call (Ansh, 25 Sep).

@@ -82,3 +82,32 @@ export function cartChangeNotice(droppedTitles: string[], adjustedTitles: string
   else if (adjustedTitles.length > 1) parts.push(`The quantities of ${listOf(adjustedTitles)} were adjusted.`);
   return parts.join(" ");
 }
+
+/**
+ * What the cart page says changed, and what CartView then settles: it deletes
+ * each dropped row from the stored cart and saves each adjusted line at the
+ * number shown. Throws for a cart that could not be read (Nov review): that
+ * read says nothing about what is still orderable, and a failed product read
+ * used to name every row as dropped, so the whole stored cart was deleted.
+ * The cart page's error page reads it again instead; nothing is written.
+ */
+export function cartSettlement(cart: ({ lines: CartLine[]; readFailed?: boolean } & CartLineChanges) | null): {
+  changeNotice: string | null;
+  droppedSkus: string[];
+  adjustedLines: { sku: string; qty: number }[];
+} {
+  if (cart?.readFailed) throw new Error("The cart could not be read just now.");
+  const lineOf = new Map((cart?.lines ?? []).map((l) => [l.product.sku, l]));
+  const dropped = cart?.dropped ?? [];
+  const adjusted = (cart?.adjusted ?? []).flatMap((sku) => {
+    const l = lineOf.get(sku);
+    return l ? [{ sku, title: l.product.title ?? null, qty: l.qty }] : [];
+  });
+  // Named across both lists, so two sizes of one design get their sizes.
+  const names = changedItemNames([...dropped, ...adjusted]);
+  return {
+    changeNotice: cartChangeNotice(names.slice(0, dropped.length), names.slice(dropped.length)),
+    droppedSkus: dropped.map((d) => d.sku),
+    adjustedLines: adjusted.map(({ sku, qty }) => ({ sku, qty })),
+  };
+}
