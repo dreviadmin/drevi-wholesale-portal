@@ -357,8 +357,10 @@ export function BuyersTable({
         </div>
       )}
 
+      {/* With the batch bar up (three rows of 44px buttons on a phone) the
+          send-progress toast sits above it, not over the Send button. */}
       {toast && (
-        <div className="fixed bottom-32 md:bottom-20 inset-x-0 z-50 flex justify-center px-3 pointer-events-none">
+        <div className={`fixed ${selected.size > 0 ? "bottom-56 md:bottom-24" : "bottom-32 md:bottom-20"} inset-x-0 z-50 flex justify-center px-3 pointer-events-none`}>
           <div className="font-body" style={{ background: palette.black, color: palette.ivory, fontSize: 11, padding: "9px 14px", letterSpacing: "0.04em" }}>{toast}</div>
         </div>
       )}
