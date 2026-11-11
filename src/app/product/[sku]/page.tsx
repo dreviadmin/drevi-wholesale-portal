@@ -29,7 +29,6 @@ export default async function ProductPage({ params }: { params: { sku: string } 
 
   // No availability prop: the buyer surface shows no stock state, and passing it
   // anyway put the literal on-hand count ("Limited - 1 left") into the RSC
-  // payload where devtools can read it. Staff surfaces still use
-  // availabilityForSku directly.
+  // payload where devtools can read it.
   return <ProductDetailView product={p} initialCartCount={cart?.totalQty ?? 0} />;
 }

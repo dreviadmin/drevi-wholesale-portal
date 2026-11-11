@@ -28,7 +28,6 @@ export interface BuyerHomeData {
   activeOrder: { id: string; orderNumber: string; status: string; pieces: number } | null;
   reorder: ReorderItem[];
   newThisWeek: WholesaleProduct[];
-  backInStock: { sku: string; title: string | null; imageUrl: string | null }[];
   /** Every buyer-visible design, including the ones with no category yet. */
   totalDesigns: number;
   /** Category → sub-category tree, biggest first; nothing with 0 designs. */
@@ -37,7 +36,7 @@ export interface BuyerHomeData {
 
 export async function loadBuyerHome(buyerId: string): Promise<BuyerHomeData> {
   const admin = createAdminClient();
-  const [{ data: orders }, { data: products }, { data: notifies }] = await Promise.all([
+  const [{ data: orders }, { data: products }] = await Promise.all([
     admin
       .from("orders")
       .select("id, order_number, status, items, submitted_at")
@@ -53,7 +52,9 @@ export async function loadBuyerHome(buyerId: string): Promise<BuyerHomeData> {
       // on 2 Aug, which is why BUYER_PRODUCT_COLUMNS exists.
       .select(BUYER_PRODUCT_COLUMNS)
       .eq("buyer_visible", true),
-    admin.from("notify_me").select("sku_base, color").eq("buyer_id", buyerId).is("fulfilled_at", null),
+    // No notify_me read: nothing on Home renders back-in-stock any more (the
+    // strip went with the Notify-me button). Studio still reads the table as
+    // a demand signal.
   ]);
 
   const bySku = new Map((products ?? []).map((p) => [p.sku.toUpperCase(), p as WholesaleProduct]));
@@ -126,21 +127,7 @@ export async function loadBuyerHome(buyerId: string): Promise<BuyerHomeData> {
   }
   const newThisWeek = [...tileByGroup.values()];
 
-  // Back-in-stock: this buyer's open notify requests whose group now has stock.
-  const backInStock: BuyerHomeData["backInStock"] = [];
-  for (const n of notifies ?? []) {
-    const match = (products ?? []).find((p) => {
-      const parts = p.sku.toUpperCase().split("-");
-      return (
-        parts.slice(0, 4).join("-") === n.sku_base.toUpperCase() &&
-        parts[parts.length - 1] === n.color.toUpperCase() &&
-        (p.current_qty ?? 0) > 0
-      );
-    });
-    if (match) backInStock.push({ sku: match.sku, title: match.title, imageUrl: (match.image_urls as string[] | null)?.[0] ?? null });
-  }
-
   const { totalDesigns, categories } = buildCategoryTree((products ?? []) as WholesaleProduct[]);
 
-  return { activeOrder, reorder, newThisWeek: newThisWeek.slice(0, 8), backInStock, totalDesigns, categories };
+  return { activeOrder, reorder, newThisWeek: newThisWeek.slice(0, 8), totalDesigns, categories };
 }

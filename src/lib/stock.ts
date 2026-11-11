@@ -22,8 +22,8 @@ export interface StockInput {
 export function getStockState(p: StockInput): StockState {
   // Retrofit R7 (§9.1): ONE implementation. The four-state model the cart and
   // PDF speak is now a projection of computeAvailability, not a second copy.
-  // `restockable` is the pre-supply-data stand-in — a design with real supply
-  // fields goes through availabilityForSkus instead.
+  // `restockable` is the pre-supply-data stand-in; nothing feeds this model
+  // the vendor supply fields, and buyer screens show no stock state at all.
   const supply: SupplyInput = {
     supplyMode: p.restockable ? "made_to_order" : "",
     vendorStockQty: null,
