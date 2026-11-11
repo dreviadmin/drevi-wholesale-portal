@@ -54,6 +54,7 @@ function fakeAdmin() {
         upsert(p: Row | Row[], o?: { onConflict?: string; ignoreDuplicates?: boolean }) { op = "upsert"; payload = p; upsertOpts = o ?? {}; return b; },
         delete() { op = "delete"; return b; },
         eq(k: string, v: unknown) { tests.push((r) => r[k] === v); return b; },
+        neq(k: string, v: unknown) { tests.push((r) => r[k] !== v); return b; },
         is(k: string, v: unknown) { tests.push((r) => (r[k] ?? null) === v); return b; },
         in(k: string, vs: unknown[]) { inSizes.push(vs.length); tests.push((r) => vs.includes(r[k])); return b; },
         // Only the shape the tray lookup sends: col.ilike.pattern, OR-ed.
@@ -450,9 +451,24 @@ describe("A large Studio selection is acted on in full", () => {
 
   it("Shopify off reaches every selected design", async () => {
     const ids = many(620);
-    expect(await studio.togglePortalBatch(ids, "shopify", false)).toEqual({ ok: true });
+    expect(await studio.togglePortalBatch(ids, "shopify", false)).toEqual({ ok: true, changed: 620, unchanged: 0 });
     expect(db.publish_targets.every((t) => !t.enabled)).toBe(true);
     expect(longestIn()).toBeLessThanOrEqual(150);
+  });
+
+  it("SH off counts the designs it changed, apart from those already off", async () => {
+    const ids = many(5);
+    db.publish_targets[1].enabled = false;
+    db.publish_targets.push({ design_id: ids[0], portal: "wholesale", enabled: true, state: "live" });
+    expect(await studio.togglePortalBatch(ids.slice(0, 3), "shopify", false)).toEqual({ ok: true, changed: 2, unchanged: 1 });
+    // Only the three selected Shopify targets are off; the rest and the
+    // wholesale target are untouched.
+    expect(db.publish_targets.filter((t) => t.portal === "shopify").map((t) => t.enabled)).toEqual([false, false, false, true, true]);
+    expect(db.publish_targets.find((t) => t.portal === "wholesale")?.enabled).toBe(true);
+    expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "studio_portal_toggled", notes: "shopify disabled on 3 design(s), 2 changed" }));
+
+    expect(await studio.togglePortalBatch(ids.slice(0, 3), "shopify", true)).toEqual({ ok: true, changed: 3, unchanged: 0 });
+    expect(db.publish_targets.filter((t) => t.portal === "shopify").every((t) => t.enabled)).toBe(true);
   });
 
   it("Use candidates lists every angle, past the 1,000-row cap on one read", async () => {

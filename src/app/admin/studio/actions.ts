@@ -55,7 +55,7 @@ export async function togglePortalBatch(
   designIds: string[],
   portal: "wholesale" | "shopify",
   enabled: boolean,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; changed?: number; unchanged?: number }> {
   let staff;
   try {
     staff = await requireAdmin();
@@ -66,21 +66,26 @@ export async function togglePortalBatch(
   const capErr = overCap(designIds);
   if (capErr) return { ok: false, error: capErr };
   const admin = createAdminClient();
-  const { error, done } = await inRuns(designIds, WRITE_RUN, (ids) =>
-    admin.from("publish_targets").update({ enabled }).eq("portal", portal).in("design_id", ids),
+  // Only targets not already in the asked-for state are written (rewriting the
+  // same value changes nothing), and the written rows come back, so the toast
+  // can say how many designs actually changed. One target per design and
+  // portal (the primary key), so a row is a design.
+  const { data, error, done } = await inRuns(designIds, WRITE_RUN, (ids) =>
+    admin.from("publish_targets").update({ enabled }).eq("portal", portal).neq("enabled", enabled).in("design_id", ids).select("design_id"),
   );
+  const changed = data.length;
   if (error && done === 0) return { ok: false, error: error.message };
   await writeAuditEvent({
     eventType: "studio_portal_toggled",
     staffUserId: staff.id,
-    notes: `${portal} ${enabled ? "enabled" : "disabled"} on ${error ? `${done} of ${designIds.length}` : designIds.length} design(s)${error ? `, then failed: ${error.message}` : ""}`,
+    notes: `${portal} ${enabled ? "enabled" : "disabled"} on ${error ? `${done} of ${designIds.length}` : designIds.length} design(s), ${changed} changed${error ? `, then failed: ${error.message}` : ""}`,
   });
   if (error) {
     revalidatePath("/admin/studio");
     return { ok: false, error: `Changed on ${done} of ${designIds.length} designs, then: ${error.message}` };
   }
   revalidatePath("/admin/studio");
-  return { ok: true };
+  return { ok: true, changed, unchanged: designIds.length - changed };
 }
 
 // ---- Stage 5 batch actions (§9) ------------------------------------------

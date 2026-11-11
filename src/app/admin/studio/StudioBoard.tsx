@@ -14,6 +14,7 @@ import { MISSING_FIELDS, type MissingKey } from "@/lib/studio/missing";
 import { DEFAULT_BOARD_SORT, boardPath, parseBoardQuery } from "@/lib/studio/board-url";
 import { BatchProgress, type BatchProgressState } from "@/components/admin/BatchProgress";
 import { BADGE_LABEL, type DesignBadge } from "@/lib/studio/state";
+import { portalToggleToast } from "@/lib/studio/batch-toast";
 import type { BoardRow } from "@/lib/studio/load";
 import { setTierBatch, togglePortalBatch, runFashnBatch, approveAllPreflight, approveAllBatch, generateCopyBatch, pushWholesaleBatch, pushShopifyBatch, traySkusForDesigns, setDiscontinuedBatch } from "./actions";
 import { changeDesignBuckets, removeStudioBucket } from "./bucket-actions";
@@ -344,10 +345,12 @@ export function StudioBoard({
     });
   }
 
-  function runBatch(fn: () => Promise<{ ok: boolean; error?: string }>, done: string) {
+  // `done` is the toast on success: fixed text, or built from the result when
+  // the action reports a count (SH on / SH off).
+  function runBatch<R extends { ok: boolean; error?: string }>(fn: () => Promise<R>, done: string | ((res: R) => string)) {
     startTransition(async () => {
       const res = await fn();
-      if (res.ok) { flash(done); setSelected(new Set()); router.refresh(); }
+      if (res.ok) { flash(typeof done === "function" ? done(res) : done); setSelected(new Set()); router.refresh(); }
       else flash(res.error ?? "Failed");
     });
   }
@@ -943,8 +946,8 @@ export function StudioBoard({
             />
             <button type="button" disabled={pending} onClick={() => runBatch(() => setTierBatch(ids, "hero"), "Tier set to hero")} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.black, background: palette.gold, padding: "8px 10px" }}>Set hero</button>
             <button type="button" disabled={pending} onClick={() => runBatch(() => setTierBatch(ids, "standard"), "Tier set to standard")} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}>Set standard</button>
-            <button type="button" disabled={pending} onClick={() => runBatch(() => togglePortalBatch(ids, "shopify", false), "Shopify disabled")} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}>SH off</button>
-            <button type="button" disabled={pending} onClick={() => runBatch(() => togglePortalBatch(ids, "shopify", true), "Shopify enabled")} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}>SH on</button>
+            <button type="button" disabled={pending} onClick={() => runBatch(() => togglePortalBatch(ids, "shopify", false), (r) => portalToggleToast("shopify", false, r.changed ?? 0, r.unchanged))} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}>SH off</button>
+            <button type="button" disabled={pending} onClick={() => runBatch(() => togglePortalBatch(ids, "shopify", true), (r) => portalToggleToast("shopify", true, r.changed ?? 0, r.unchanged))} className="font-body uppercase disabled:opacity-50" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.ivory, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}>SH on</button>
             {/* Model swap is PARKED (FASHN_ENABLED, 19 Sep) and 0053 moved
                 every angle off the fashn engine, so while parked this gold
                 button could only ever answer "No pending AI angles". It stays
