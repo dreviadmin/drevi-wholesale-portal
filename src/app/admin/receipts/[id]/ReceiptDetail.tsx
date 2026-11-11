@@ -11,6 +11,7 @@ import { ReceiptEditor, type VendorOption, type EditorLine } from "../ReceiptEdi
 import { deleteReceipt } from "../actions";
 import { uuid } from "@/lib/uuid";
 import { formatINR, formatUnitINR } from "@/lib/format";
+import { billMismatch } from "@/lib/gst";
 import { palette } from "@/lib/palette";
 
 interface ReceiptHeader {
@@ -46,7 +47,8 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus, designs }
   const incomplete = designs.filter((d) => !d.specsVerified || !d.priceSet);
   const here = `/admin/receipts/${receipt.id}`;
   const totals = lines.reduce((t, l) => ({ pieces: t.pieces + l.qty, value: t.value + l.qty * l.unitCost }), { pieces: 0, value: 0 });
-  const mismatch = receipt.billAmount != null && receipt.billAmount > 0 && Math.abs(receipt.billAmount - totals.value) > 0.5;
+  // Against the total WITH GST when it was paid on top (see lib/gst).
+  const mismatch = billMismatch(receipt.billAmount, totals.value, { mode: receipt.gstMode, rate: receipt.gstRate, inclusive: receipt.gstInclusive });
 
   function printTags() {
     // Exactly this receipt's tags — the save path may already have queued
@@ -171,9 +173,9 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus, designs }
           {receipt.billAmount != null && receipt.billAmount > 0 && (
             <div className="mt-1" style={{ fontSize: 11.5 }}>
               Bill amount {formatINR(receipt.billAmount)}
-              {mismatch && (
+              {mismatch != null && (
                 <span className="ml-2 px-2 py-0.5" style={{ background: palette.amberSoft, color: palette.goldDeep, fontSize: 10 }}>
-                  differs by {formatINR(Math.abs(receipt.billAmount - totals.value))}
+                  differs by {formatINR(mismatch)}
                 </span>
               )}
             </div>

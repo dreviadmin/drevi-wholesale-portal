@@ -146,6 +146,7 @@ vi.mock("@/lib/stock", () => ({
 // Vitest here does not resolve the @/ alias, so the real modules are loaded
 // by relative path.
 vi.mock("@/lib/stock-ledger", async () => await import("../../lib/stock-ledger"));
+vi.mock("@/lib/supabase/fetch-all", async () => await import("../../lib/supabase/fetch-all"));
 vi.mock("@/lib/order-lines-core", async () => await import("../../lib/order-lines-core"));
 vi.mock("@/lib/custom-catalog", async () => await import("../../lib/custom-catalog"));
 vi.mock("@/lib/hsn-default", async () => await import("../../lib/hsn-default"));

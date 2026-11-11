@@ -26,3 +26,26 @@ export function landedCost(entered: number, terms: GstTerms): number {
   if (terms.inclusive) return entered;
   return Math.round(entered * (1 + terms.rate / 100) * 100) / 100;
 }
+
+/**
+ * The bill total the itemised lines imply. With "GST paid on top" the entered
+ * costs are ex-GST while the vendor's bill prints the total WITH tax, so the
+ * raw comparison flagged every such receipt as differing by the GST itself.
+ * Applied to the total rather than per unit (landedCost), so per-unit rounding
+ * cannot trip the tolerance.
+ */
+export function expectedBillTotal(linesValue: number, terms: GstTerms): number {
+  if (terms.mode !== "pakka" || !terms.rate || terms.inclusive) return linesValue;
+  return linesValue * (1 + terms.rate / 100);
+}
+
+/**
+ * How far the bill amount is from the itemised total, or null when it is not
+ * worth a badge (no bill entered, or within ₹1 — bills round to the rupee).
+ * One rule for Log delivery, the receipt editor and the receipt page.
+ */
+export function billMismatch(bill: number | null | undefined, linesValue: number, terms: GstTerms): number | null {
+  if (bill == null || !(bill > 0)) return null;
+  const diff = Math.abs(bill - expectedBillTotal(linesValue, terms));
+  return diff > 1 ? diff : null;
+}

@@ -451,7 +451,7 @@ async function pricedSiblingPrice(baseSku: string, color: string): Promise<numbe
 }
 
 /** §5.7 — save the whole delivery. */
-export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean; error?: string; receiptId?: string; receiptNumber?: string; skus?: string[]; designs?: SavedDesign[] }> {
+export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean; error?: string; receiptId?: string; receiptNumber?: string; skus?: string[]; designs?: SavedDesign[]; warnings?: string[] }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return fail("Not authorized"); }
   const admin = createAdminClient();
@@ -507,6 +507,11 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
 
   const allSkus: string[] = [];
   const savedDesigns = new Map<string, SavedDesign>();
+  // Side writes that failed AFTER their line was saved. Collected, not
+  // returned as a failure: aborting mid-loop would leave a half-saved receipt
+  // that a retry then replays as "already saved". Each names what to fix by hand.
+  const warnings: string[] = [];
+  const warn = (m: string) => { if (!warnings.includes(m)) warnings.push(m); };
   let position = 0;
   for (const g of input.garments) {
     if (!g.designId || !g.baseSku) return fail("A garment is missing its design — re-open the card");
@@ -535,7 +540,8 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
       ...supplyPatch(g.supply, staff.email),
       updated_at: new Date().toISOString(),
     };
-    await admin.from("designs").update(designPatch).eq("id", g.designId);
+    const { error: dErr } = await admin.from("designs").update(designPatch).eq("id", g.designId);
+    if (dErr) warn(`${design.base_sku}·${design.color}: vendor and supply details not saved (${dErr.message})`);
 
     const observation = supplyObservation(g.supply);
     for (const s of g.sizes) {
@@ -572,7 +578,7 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
       const hsnValue = g.hsn?.trim() && /^[0-9]{2,8}$/.test(g.hsn.trim()) ? g.hsn.trim() : null;
       const { data: existingProduct } = await admin.from("wholesale_products").select("sku").eq("sku", sku).maybeSingle();
       if (!existingProduct) {
-        await admin.from("wholesale_products").insert({
+        const { error: pErr } = await admin.from("wholesale_products").insert({
           sku,
           hsn: hsnValue,
           title: g.description?.trim() || null,
@@ -587,10 +593,12 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
           locked_fields: siblingPrice > 0 ? ["wholesale_visible", "wholesale_price"] : ["wholesale_visible"],
           synced_at: new Date().toISOString(),
         });
+        if (pErr) warn(`${sku}: catalog row not created (${pErr.message}) — not billable until it is`);
       } else if (hsnValue) {
         // Reorder path: fill the code if the product has none; a differing
         // existing value is Manage Catalog's to change.
-        await admin.from("wholesale_products").update({ hsn: hsnValue }).eq("sku", sku).is("hsn", null);
+        const { error: hErr } = await admin.from("wholesale_products").update({ hsn: hsnValue }).eq("sku", sku).is("hsn", null);
+        if (hErr) warn(`${sku}: HSN not saved (${hErr.message})`);
       }
 
       // Specs captured on the intake form (22 Sep). Applied per SKU because
@@ -614,23 +622,31 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
         if (sp.specsVerified) designPatch.specs_verified = true;
         if (Object.keys(designPatch).length) {
           designPatch.updated_at = new Date().toISOString();
-          await admin.from("designs").update(designPatch).eq("id", g.designId);
+          const { error: sErr } = await admin.from("designs").update(designPatch).eq("id", g.designId);
+          if (sErr) warn(`${design.base_sku}·${design.color}: specs not saved (${sErr.message})`);
         }
         if (Number(sp.wholesalePrice) > 0) {
           // Locked, like every other app-set price: the sheet sync would
           // otherwise put the sheet's number back on the next run.
-          const { data: pr } = await admin.from("wholesale_products").select("locked_fields").eq("sku", sku).maybeSingle();
-          const locks = new Set<string>(Array.isArray(pr?.locked_fields) ? pr.locked_fields : []);
-          locks.add("wholesale_price");
-          await admin.from("wholesale_products")
-            .update({ wholesale_price: Number(sp.wholesalePrice), locked_fields: [...locks] })
-            .eq("sku", sku);
+          const { data: pr, error: lkErr } = await admin.from("wholesale_products").select("locked_fields").eq("sku", sku).maybeSingle();
+          // An unread lock list must not be written back as just this one
+          // lock — that would drop wholesale_visible and let the sync hide it.
+          if (lkErr) {
+            warn(`${sku}: wholesale price not saved (${lkErr.message})`);
+          } else {
+            const locks = new Set<string>(Array.isArray(pr?.locked_fields) ? pr.locked_fields : []);
+            locks.add("wholesale_price");
+            const { error: wpErr } = await admin.from("wholesale_products")
+              .update({ wholesale_price: Number(sp.wholesalePrice), locked_fields: [...locks] })
+              .eq("sku", sku);
+            if (wpErr) warn(`${sku}: wholesale price not saved (${wpErr.message})`);
+          }
         }
       }
 
       // §5.7 — receipts now set last_cost and INCREMENT stock, through the
       // ledger so the cache can never drift (§10.1).
-      await applyMovement({
+      const mv = await applyMovement({
         sku,
         delta: qty,
         reason: "receipt",
@@ -639,11 +655,13 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
         note: `${receiptNumber} · ${qty} pc`,
         createdBy: staff.email,
       });
-      await admin.from("product_vendor_info").upsert(
+      if (!mv.ok) warn(`${sku}: stock not posted (${mv.error ?? "unknown error"}) — use Set stock`);
+      const { error: vErr } = await admin.from("product_vendor_info").upsert(
         // Pricing runs on the EX-GST cost (2 Aug) — input credit is claimed.
         { sku, vendor_id: input.vendorId, last_cost: exGstCost(Number(g.unitCost) || 0, { mode: input.gst?.mode ?? null, rate: input.gst?.rate ?? null, inclusive: input.gst?.inclusive ?? null }), last_receipt_date: receiptDate, updated_at: new Date().toISOString() },
         { onConflict: "sku" },
       );
+      if (vErr) warn(`${sku}: last cost not saved (${vErr.message})`);
     }
   }
 
@@ -654,7 +672,7 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
   });
   revalidatePath("/admin/receipts");
   revalidatePath("/admin/studio");
-  return { ok: true, receiptId: receipt.id, receiptNumber, skus: allSkus, designs: Array.from(savedDesigns.values()) };
+  return { ok: true, receiptId: receipt.id, receiptNumber, skus: allSkus, designs: Array.from(savedDesigns.values()), warnings };
 }
 
 /** Inline "+ New vendor" from the delivery screen (§5.2). */

@@ -44,6 +44,13 @@ export function PrintTab({ tray, setTray, bases, flash }: {
   // Any tray change invalidates fetched price data.
   const trayKey = tray.map((t) => t.sku).join(",");
   useEffect(() => { setPriceData(null); }, [trayKey]);
+  // The tray as of NOW, for a fetch that resolves after later scans — its own
+  // closure only ever sees the tray it started with.
+  const trayKeyRef = useRef(trayKey);
+  trayKeyRef.current = trayKey;
+  // Bumped when a response is thrown away as stale, so the auto-fetch below
+  // runs again for the current tray once that call has settled.
+  const [staleTick, setStaleTick] = useState(0);
 
   const totalLabels = tray.reduce((n, t) => n + t.copies, 0);
   const registrySkus = useMemo(() => new Set((bases ?? []).flatMap((b) => b.variants.map((v) => v.sku))), [bases]);
@@ -98,8 +105,11 @@ export function PrintTab({ tray, setTray, bases, flash }: {
       const d = await res.json();
       if (!res.ok) { flash(d.error ?? "Price fetch failed"); return; }
       // A tray edited mid-fetch invalidates this response — otherwise a SKU
-      // added during the fetch would silently print with dashes.
-      if (fetchId !== fetchIdRef.current || snapshot !== trayKey) return;
+      // added during the fetch would silently print with dashes. Compared
+      // against the ref: `trayKey` here is this render's, which is always the
+      // snapshot, so scanning B while A's fetch was out printed B as "Rs -".
+      if (fetchId !== fetchIdRef.current) return;
+      if (snapshot !== trayKeyRef.current) { setStaleTick((n) => n + 1); return; }
       setPriceData(new Map((d.items as PrintDatum[]).map((i) => [i.sku, i])));
     } finally {
       setFetching(false);
@@ -109,16 +119,20 @@ export function PrintTab({ tray, setTray, bases, flash }: {
   // With price on, the data fetches itself: the manual "Fetch price data"
   // step was the easy one to miss, and without it the roll printed dashes.
   // Keyed on the tray, so an edit re-fetches; the button stays as Refetch.
+  // staleTick (not `fetching`) is the retry trigger: keying on fetching would
+  // re-fire on every failed fetch and loop against a server that keeps refusing.
   useEffect(() => {
     if (withPrice && tray.length > 0 && priceData === null && !fetching) void fetchPrices();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [withPrice, trayKey, priceData]);
+  }, [withPrice, trayKey, priceData, staleTick]);
 
   const missing = useMemo(
     () => (priceData ? tray.filter((t) => priceData.get(t.sku)?.found === false).map((t) => t.sku) : []),
     [priceData, tray],
   );
-  const readyToPrint = tray.length > 0 && (!withPrice || priceData !== null);
+  // Every tag needs its own row: a SKU with no entry at all is not flagged by
+  // `missing` (found is undefined, not false) and would print dashes.
+  const readyToPrint = tray.length > 0 && (!withPrice || (priceData !== null && tray.every((t) => priceData.has(t.sku))));
 
   async function output(kind: "print" | "download") {
     setBuilding(true);

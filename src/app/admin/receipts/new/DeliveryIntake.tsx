@@ -16,6 +16,7 @@ import { ORIGIN_OPTIONS } from "@/lib/studio/copy-prompt";
 import { palette } from "@/lib/palette";
 import { uuid } from "@/lib/uuid";
 import { formatINR } from "@/lib/format";
+import { billMismatch } from "@/lib/gst";
 import type { LiveVocab } from "@/lib/sku/vocab-live";
 import { queueTray } from "@/app/admin/sku-generator/labels";
 import { resolveGarmentDesign, uploadIdentPhoto, saveDelivery, quickAddVendor, type SupplyBlock, type SavedDesign } from "./delivery-actions";
@@ -188,7 +189,8 @@ export function DeliveryIntake({
     return { designs: garments.length, pieces, value, tags };
   }, [garments]);
   const billNum = Number(billAmount) || 0;
-  const mismatch = billNum > 0 && Math.abs(billNum - totals.value) > 1;
+  // Against the total WITH GST when it was paid on top (see lib/gst).
+  const mismatch = billMismatch(billNum, totals.value, gst) != null;
 
   function upsertGarment(g: Garment) {
     setGarments((list) => {
@@ -242,6 +244,9 @@ export function DeliveryIntake({
       // resetForNext() replaces it.
       draftMeta.clear();
       flash(`${res.receiptNumber} saved`);
+      // The receipt saved but a side write did not (stock, catalog row, specs).
+      // Said before anything navigates away — a flash would be gone by then.
+      if (res.warnings?.length) window.alert(`${res.receiptNumber} saved, but:\n\n${res.warnings.join("\n")}`);
       if (thenPrint) {
         router.push(`/admin/sku-generator?tab=print&receipt=${encodeURIComponent(res.receiptNumber ?? "")}`);
         return;

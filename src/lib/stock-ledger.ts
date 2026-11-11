@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 import { canonicalFromMovements, type Movement, type MovementReason } from "./stock-ledger-core";
 
 export { canonicalFromMovements };
@@ -76,15 +77,21 @@ export async function reconcile(): Promise<{
   drift: { sku: string; cached: number; ledger: number; lastReset: string | null; recent: Movement[] }[];
 }> {
   const admin = createAdminClient();
-  const { data: products } = await admin.from("wholesale_products").select("sku, current_qty");
-  const { data: all } = await admin.from("stock_movements").select("*").order("created_at", { ascending: true }).limit(20000);
+  // Paged: PostgREST caps an un-ranged select at 1000 rows whatever .limit()
+  // asks for, and movements read oldest-first lost the NEWEST ones — every SKU
+  // whose latest receipt or reset fell past row 1000 showed false drift. Both
+  // reads are ordered so pages are stable (id breaks created_at ties).
+  const products = await fetchAll<{ sku: string; current_qty: number | null }>(admin, "wholesale_products", "sku, current_qty", (q) => q.order("sku"));
+  const all = await fetchAll<Movement>(admin, "stock_movements", "*", (q) =>
+    q.order("created_at", { ascending: true }).order("id", { ascending: true }),
+  );
   const bySku = new Map<string, Movement[]>();
-  for (const m of (all ?? []) as Movement[]) {
+  for (const m of all) {
     const k = m.sku.toUpperCase();
     bySku.set(k, [...(bySku.get(k) ?? []), m]);
   }
   const drift: { sku: string; cached: number; ledger: number; lastReset: string | null; recent: Movement[] }[] = [];
-  for (const p of products ?? []) {
+  for (const p of products) {
     const movements = bySku.get(p.sku.toUpperCase()) ?? [];
     const ledger = canonicalFromMovements(movements);
     const cached = p.current_qty ?? 0;
@@ -99,7 +106,7 @@ export async function reconcile(): Promise<{
       });
     }
   }
-  return { checked: (products ?? []).length, drift };
+  return { checked: products.length, drift };
 }
 
 /**

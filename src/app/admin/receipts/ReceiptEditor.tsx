@@ -11,6 +11,8 @@ import { uuid } from "@/lib/uuid";
 import { createReceipt, updateReceipt, uploadReceiptBill, type ReceiptInput } from "./actions";
 import { quickAddVendor } from "@/app/admin/vendors/actions";
 import { formatINR } from "@/lib/format";
+import { billMismatch } from "@/lib/gst";
+import { downscalePhoto } from "@/lib/downscale-photo";
 import { palette } from "@/lib/palette";
 
 export interface VendorOption { id: string; name: string; city: string | null }
@@ -36,6 +38,10 @@ interface ReceiptDraft { vendorId: string; receiptDate: string; gst: Gst; billAm
 // (envelope-less, gst-less) draft on a shop device — kept so it restores.
 const NEW_DRAFT_KEY = "drevi_receipt_draft_v1";
 const istToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+// Bill photos: long edge after downscaling, and what an upload the server
+// never ran (too large, or a lapsed session) reports.
+const BILL_MAX_EDGE = 2000;
+const BILL_REFUSED = "the photo was not accepted (too large, or your session expired)";
 // "1,500" or "₹1500" must not silently become 0.
 const num = (v: string) => Number(String(v ?? "").replace(/[^\d.]/g, "")) || 0;
 const hasContent = (d: ReceiptDraft) => !!d.vendorId || d.lines.length > 0;
@@ -169,7 +175,8 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku, onCa
     return { pieces, value };
   }, [lines]);
   const billNum = num(billAmount);
-  const mismatch = billNum > 0 && Math.abs(billNum - totals.value) > 0.5;
+  // Against the total WITH GST when it was paid on top (see lib/gst).
+  const mismatch = billMismatch(billNum, totals.value, gst);
 
   async function save() {
     setError(null);
@@ -192,10 +199,14 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku, onCa
         if (res.notes?.length) window.alert(res.notes.join("\n"));
         draftMeta.clear();
         if (billFile) {
+          // Downscaled: a raw phone photo is often over the 4 MB server-action
+          // cap, and then the action never runs and resolves undefined — which
+          // used to throw here AFTER the receipt had saved, leaving staff on
+          // the edit form thinking nothing had. 2000px keeps a bill readable.
           const fd = new FormData();
-          fd.append("bill", billFile);
-          const up = await uploadReceiptBill(initial!.id!, fd);
-          if (!up.ok) window.alert(`Saved, but the bill photo failed to upload: ${up.error ?? "unknown error"}. Add it again from the receipt page.`);
+          fd.append("bill", await downscalePhoto(billFile, BILL_MAX_EDGE));
+          const up = await uploadReceiptBill(initial!.id!, fd).catch(() => undefined);
+          if (!up?.ok) window.alert(`Saved, but the bill photo failed to upload: ${up?.error ?? BILL_REFUSED}. Add it again from the receipt page.`);
         }
         // Keep the incoming ?from= so the back link still points where the
         // user came from after saving.
@@ -204,12 +215,13 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku, onCa
       } else {
         input.clientRef = clientRefRef.current ?? (clientRefRef.current = uuid());
         const res = await createReceipt(input);
+        if (!res) { setError("Your session has expired — sign in again, then save."); return; }
         if (!res.ok) { setError(res.error ?? "Failed"); return; }
         if (billFile && res.id) {
           const fd = new FormData();
-          fd.append("bill", billFile);
-          const up = await uploadReceiptBill(res.id, fd);
-          if (!up.ok) window.alert(`Receipt saved, but the bill photo failed to upload: ${up.error ?? "unknown error"}. Add it again from the receipt page.`);
+          fd.append("bill", await downscalePhoto(billFile, BILL_MAX_EDGE));
+          const up = await uploadReceiptBill(res.id, fd).catch(() => undefined);
+          if (!up?.ok) window.alert(`Receipt saved, but the bill photo failed to upload: ${up?.error ?? BILL_REFUSED}. Add it again from the receipt page.`);
         }
         draftMeta.clear();
         router.push(`/admin/receipts/${res.id}`);
@@ -394,9 +406,9 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku, onCa
       {lines.length > 0 && (
         <div className="mt-3 font-body" style={{ fontSize: 12.5, color: palette.softBlack }}>
           <div className="flex justify-between"><span>{totals.pieces} piece{totals.pieces === 1 ? "" : "s"}</span><b>{formatINR(totals.value)}</b></div>
-          {mismatch && (
+          {mismatch != null && (
             <div className="mt-1 inline-block px-2 py-1 font-body" style={{ background: palette.amberSoft, fontSize: 10.5, color: palette.goldDeep }}>
-              Bill shows {formatINR(billNum)} — itemised total differs by {formatINR(Math.abs(billNum - totals.value))}. Vendor bills legitimately differ; saving anyway is fine.
+              Bill shows {formatINR(billNum)} — itemised total differs by {formatINR(mismatch)}. Vendor bills legitimately differ; saving anyway is fine.
             </div>
           )}
         </div>
