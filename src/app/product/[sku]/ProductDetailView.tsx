@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ChevronLeft, ShoppingBag, Minus, Plus } from "lucide-react";
 import { ProductImage } from "@/components/ProductImage";
 import { useInAppBack } from "@/components/InAppHistory";
+import { QtyField } from "@/components/QtyField";
 import { addToCart } from "@/app/cart/actions";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -138,12 +139,13 @@ export function ProductDetailView({
 
           {/* Qty + add */}
           <div className="mt-6">
+            {/* Typed or stepped; the server clamps on Add exactly as before. */}
             <div className="flex items-center" style={{ border: `1px solid rgba(26,26,26,0.2)`, width: "fit-content" }}>
-              <button type="button" onClick={() => changeQty(-1)} aria-label="Decrease" className="px-3 py-2" style={{ color: palette.black }}>
+              <button type="button" onClick={() => changeQty(-1)} aria-label="Decrease" className="flex items-center justify-center" style={{ color: palette.black, width: 44, height: 44 }}>
                 <Minus size={14} strokeWidth={2} />
               </button>
-              <span className="font-body" style={{ minWidth: 32, textAlign: "center", fontSize: 14 }}>{qty}</span>
-              <button type="button" onClick={() => changeQty(1)} aria-label="Increase" className="px-3 py-2" style={{ color: palette.black }}>
+              <QtyField value={qty} min={1} onCommit={setQty} width={56} height={44} />
+              <button type="button" onClick={() => changeQty(1)} aria-label="Increase" className="flex items-center justify-center" style={{ color: palette.black, width: 44, height: 44 }}>
                 <Plus size={14} strokeWidth={2} />
               </button>
             </div>

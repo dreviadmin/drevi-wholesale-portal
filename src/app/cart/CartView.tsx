@@ -8,6 +8,7 @@ import { useFormState, useFormStatus } from "react-dom";
 import { ChevronLeft, Menu, Minus, Plus, X } from "lucide-react";
 import { BuyerNavDrawer } from "@/components/BuyerNavDrawer";
 import { useInAppBack } from "@/components/InAppHistory";
+import { QtyField } from "@/components/QtyField";
 import { setQty, setSpecialQty, removeFromCart, submitOrder, type SubmitState } from "./actions";
 import { cartPieces } from "@/lib/cart-count";
 import { formatINR } from "@/lib/format";
@@ -148,14 +149,20 @@ export function CartView({
                       change keeps its exact quantity on edit. Disabled while a
                       change is in flight: l.qty only moves after the refresh,
                       so three quick taps on 5 each sent 6 and the line ended
-                      at 6, not 8. */}
+                      at 6, not 8. The number can be typed too (24 pieces was
+                      23 taps); typing 0 removes the line. */}
                   <div className="flex items-center justify-between mt-2">
                     <div className="flex items-center" style={{ border: `1px solid rgba(26,26,26,0.2)` }}>
-                      <button type="button" disabled={isPending} onClick={() => editQty(l.sku, l.qty - 1, l.special)} aria-label="Decrease" className="px-2.5 py-1.5 disabled:opacity-50" style={{ color: palette.black }}>
+                      <button type="button" disabled={isPending} onClick={() => editQty(l.sku, l.qty - 1, l.special)} aria-label="Decrease" className="flex items-center justify-center disabled:opacity-50" style={{ color: palette.black, width: 40, height: 40 }}>
                         <Minus size={13} strokeWidth={2} />
                       </button>
-                      <span className="font-body" style={{ minWidth: 28, textAlign: "center", fontSize: 13 }}>{l.qty}</span>
-                      <button type="button" disabled={isPending} onClick={() => editQty(l.sku, l.qty + 1, l.special)} aria-label="Increase" className="px-2.5 py-1.5 disabled:opacity-50" style={{ color: palette.black }}>
+                      <QtyField
+                        value={l.qty}
+                        min={0}
+                        disabled={isPending}
+                        onCommit={(n) => (n === 0 ? remove(l.sku) : editQty(l.sku, n, l.special))}
+                      />
+                      <button type="button" disabled={isPending} onClick={() => editQty(l.sku, l.qty + 1, l.special)} aria-label="Increase" className="flex items-center justify-center disabled:opacity-50" style={{ color: palette.black, width: 40, height: 40 }}>
                         <Plus size={13} strokeWidth={2} />
                       </button>
                     </div>
