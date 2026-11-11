@@ -7,6 +7,7 @@ import { X, Plus, Search, ScanLine, Camera, Image as ImageIcon } from "lucide-re
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { ZoomImage } from "@/components/Lightbox";
 import { DraftNotice } from "@/components/DraftNotice";
+import { ConfirmSheet } from "@/components/admin/ConfirmSheet";
 import { updateOrderItems, findOrderableSku, type OrderEditLine, type OrderEditTerms } from "@/app/admin/orders/actions";
 import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
@@ -171,6 +172,10 @@ export function OrderEditor({
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  // A save that leaves the advance above the new total, or whose stock
+  // movement failed: the edit stands, and this sheet says a refund is owed
+  // and/or stock needs fixing by hand (both were browser alerts).
+  const [saveNotice, setSaveNotice] = useState<{ overpaidBy: number | null; warning: string | null } | null>(null);
   const [isPending, start] = useTransition();
   // Editable at every stage but cancelled (Ansh, 21 Sep). The protections that
   // matter are per-line and enforced server-side in updateOrderItems: a billed
@@ -461,13 +466,15 @@ export function OrderEditor({
     start(async () => {
       const res = await updateOrderItems(orderId, payload, terms);
       if (!res.ok) { setError(res.error ?? "Failed to save"); return; }
-      // Saved, but a stock movement behind it failed — staff must fix stock.
-      if (res.warning) alert(res.warning);
-      if (res.overpaidBy && res.overpaidBy > 0) {
-        // Non-blocking: the edit saved, but staff need to know a refund is owed.
-        alert(`Saved. Note: the buyer has now overpaid by ${formatINR(res.overpaidBy)} (advance exceeds the new total) — record a refund.`);
-      }
       closeEditor();
+      // Non-blocking: the edit saved, but staff need to know a refund is owed,
+      // or that a stock movement behind it failed and stock must be fixed by
+      // hand. The editor closes now; OK on the notice refreshes the page.
+      const owed = res.overpaidBy && res.overpaidBy > 0 ? res.overpaidBy : null;
+      if (owed != null || res.warning) {
+        setSaveNotice({ overpaidBy: owed, warning: res.warning ?? null });
+        return;
+      }
       router.refresh();
     });
   }
@@ -490,8 +497,27 @@ export function OrderEditor({
 
   if (status === "cancelled") return null;
 
+  const closeSaveNotice = () => { setSaveNotice(null); router.refresh(); };
+
   return (
     <>
+      {saveNotice && (
+        <ConfirmSheet
+          title={saveNotice.overpaidBy != null ? "Saved — a refund is owed" : "Saved — fix stock by hand"}
+          confirmLabel="OK"
+          tone="plain"
+          cancelLabel={null}
+          onConfirm={closeSaveNotice}
+          onClose={closeSaveNotice}
+        >
+          {saveNotice.warning && <p>{saveNotice.warning}</p>}
+          {saveNotice.overpaidBy != null && (
+            <p className={saveNotice.warning ? "mt-2" : undefined}>
+              The buyer has now overpaid by {formatINR(saveNotice.overpaidBy)} (advance exceeds the new total) — record a refund.
+            </p>
+          )}
+        </ConfirmSheet>
+      )}
       <button
         type="button"
         onClick={openEditor}

@@ -7,6 +7,7 @@ import { withFrom } from "@/components/BackLink";
 import { useSort, SortTh, type SortAccessor } from "@/components/sortable";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { ConfirmSheet } from "@/components/admin/ConfirmSheet";
 import { voidCreditNote } from "./actions";
 
 export interface CreditRegisterRow {
@@ -138,56 +139,58 @@ export function CreditRegister({ rows, query }: { rows: CreditRegisterRow[]; que
   );
 }
 
-/** Void with an explicit two-tap confirm — the credit comes back out of the
- *  party's wallet, the note and its number stay on record as voided. */
+/** Void through the confirm sheet, a reason required — the credit comes back
+ *  out of the party's wallet, the note and its number stay on record as voided.
+ *  The outcome is hoisted (onNotice): the row re-renders as voided and this
+ *  button goes with it. */
 function VoidNoteButton({ noteId, noteNumber, consumed, onNotice }: { noteId: string; noteNumber: string; consumed: number; onNotice: (m: string) => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [arm, setArm] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
-  // The message outlives the armed state: a void that succeeds WITH a stock
-  // warning must not disappear the moment the button disarms.
-  const note = msg && <span className="font-body" style={{ fontSize: 9, color: palette.crimsonText, whiteSpace: "normal", maxWidth: 260, display: "inline-block" }}>{msg}</span>;
-
-  if (!arm) {
-    return (
-      <span className="inline-flex items-center gap-1.5">
-        {note}
-        <button type="button" onClick={() => { setArm(true); setMsg(null); setTimeout(() => setArm(false), 5000); }} className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.1em", color: palette.mutedGreige }}>
-          Void
-        </button>
-      </span>
-    );
+  function submit(reason: string) {
+    if (!reason) { setErr("A reason is required"); return; }
+    setErr(null);
+    start(async () => {
+      const r = await voidCreditNote(noteId, reason);
+      if (!r.ok) { setErr(r.error ?? "Failed"); return; }
+      onNotice(r.warning ? `${noteNumber} voided. ${r.warning}` : `${noteNumber} voided.`);
+      setOpen(false);
+      router.refresh();
+    });
   }
+
   return (
-    <span className="inline-flex items-center gap-1.5">
-      {note}
+    <>
       <button
         type="button"
-        disabled={pending}
-        onClick={() => {
-          const reason = window.prompt(
-            consumed > 0
-              ? `${formatINR(consumed)} of ${noteNumber} has already been spent — undo those applications first if this void is refused.\n\nWhy is ${noteNumber} being voided? (recorded on the note)`
-              : `Why is ${noteNumber} being voided? (recorded on the note)`,
-          );
-          if (reason === null) return;
-          if (!reason.trim()) { setMsg("A reason is required"); return; }
-          start(async () => {
-            const r = await voidCreditNote(noteId, reason.trim());
-            if (!r.ok) { setMsg(r.error ?? "Failed"); return; }
-            onNotice(r.warning ? `${noteNumber} voided. ${r.warning}` : `${noteNumber} voided.`);
-            setArm(false);
-            router.refresh();
-          });
-        }}
-        className="font-body uppercase disabled:opacity-40"
-        style={{ fontSize: 8.5, letterSpacing: "0.1em", background: palette.crimsonText, color: palette.ivory, padding: "4px 8px" }}
+        onClick={() => { setErr(null); setOpen(true); }}
+        className="font-body uppercase"
+        style={{ fontSize: 11, letterSpacing: "0.1em", color: palette.crimsonText, minHeight: 44, padding: "0 6px" }}
         title={`Void ${noteNumber} — the credit leaves the wallet, the note stays on record`}
       >
-        Void {noteNumber}?
+        Void
       </button>
-    </span>
+      {open && (
+        <ConfirmSheet
+          title={`Void ${noteNumber}`}
+          confirmLabel="Void credit note"
+          pendingLabel="Voiding…"
+          reasonPlaceholder={`Why is ${noteNumber} being voided?`}
+          pending={pending}
+          error={err}
+          onConfirm={submit}
+          onClose={() => setOpen(false)}
+        >
+          {consumed > 0 && (
+            <p style={{ color: palette.crimsonText, marginBottom: 8 }}>
+              {formatINR(consumed)} of {noteNumber} has already been spent — undo those applications first if this void is refused.
+            </p>
+          )}
+          <p>The credit comes back out of the party&apos;s wallet. The note and its number stay on record as voided, with the reason below.</p>
+        </ConfirmSheet>
+      )}
+    </>
   );
 }

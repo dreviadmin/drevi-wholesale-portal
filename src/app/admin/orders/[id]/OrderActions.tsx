@@ -11,6 +11,7 @@ import { downscalePhoto } from "@/lib/downscale-photo";
 import type { OrderStatus } from "@/lib/types";
 import { setOrderAgent } from "@/app/admin/agents/actions";
 import { AgentPrompt, type AgentOption, type AgentChoice } from "./AgentPrompt";
+import { ConfirmSheet } from "@/components/admin/ConfirmSheet";
 import { useToast } from "@/lib/use-toast";
 
 export function OrderActions({
@@ -52,15 +53,26 @@ export function OrderActions({
   const [sheet, setSheet] = useState<File | null>(null);
   const sheetCameraRef = useRef<HTMLInputElement>(null);
   const sheetGalleryRef = useRef<HTMLInputElement>(null);
+  // Cancel asks in the app's own sheet, not a browser confirm (review fix).
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
-
-  function act(next: OrderStatus, opts?: { sendInvoice?: boolean; confirmMsg?: string; details?: StageDetails }) {
-    if (opts?.confirmMsg && !window.confirm(opts.confirmMsg)) return;
+  function act(next: OrderStatus, opts?: { sendInvoice?: boolean; details?: StageDetails }) {
     start(async () => {
       const res = await setOrderStatus(orderId, next, { sendInvoice: opts?.sendInvoice, details: opts?.details });
       router.refresh();
       if (!res.ok) flash(res.error ?? "Failed");
       else if (opts?.sendInvoice) flash(res.invoiceSent ? "Invoice sent" : "PDF generated · Interakt not configured");
+    });
+  }
+
+  function cancelOrder() {
+    setCancelError(null);
+    start(async () => {
+      const res = await setOrderStatus(orderId, "cancelled");
+      router.refresh();
+      if (!res.ok) { setCancelError(res.error ?? "Could not cancel the order"); return; }
+      setCancelOpen(false);
     });
   }
 
@@ -189,8 +201,21 @@ export function OrderActions({
         {pdfUrl && btn("Download PDF", downloadInvoice)}
         {pdfUrl && btn("Share PDF", shareInvoice)}
         {pdfUrl && btn("WhatsApp Buyer", shareWhatsAppDirect)}
-        {(status === "submitted" || status === "confirmed" || status === "packed") && btn("Cancel", () => act("cancelled", { confirmMsg: "Cancel this order? Stock returns to the shelf if it had left." }))}
+        {(status === "submitted" || status === "confirmed" || status === "packed") && btn("Cancel", () => { setCancelError(null); setCancelOpen(true); })}
       </div>
+      {cancelOpen && (
+        <ConfirmSheet
+          title={`Cancel ${orderNumber ?? "this order"}`}
+          confirmLabel="Cancel order"
+          pendingLabel="Cancelling…"
+          pending={isPending}
+          error={cancelError}
+          onConfirm={cancelOrder}
+          onClose={() => setCancelOpen(false)}
+        >
+          Cancel this order? Stock returns to the shelf if it had left.
+        </ConfirmSheet>
+      )}
       {toast && <span className="font-body" style={{ fontSize: 10, color: palette.goldDeep, letterSpacing: "0.04em" }}>{toast}</span>}
 
       {dispatchOpen && (
