@@ -445,8 +445,11 @@ export function DeliveryIntake({
             <div>{label("Receipt date (vendor's bill)")}<input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} className="font-body" style={input} /></div>
             {/* A date field too, read-only, so both dates read in the phone's own format.
                 iOS Safari draws a disabled input at 40% opacity with its own
-                text fill; opacity and the fill colour keep it readable. */}
-            <div>{label("Entry date")}<input type="date" value={entryDate} disabled readOnly aria-label="Entry date" className="font-body" style={{ ...input, background: palette.ivoryDeep, color: palette.mutedGreige, WebkitTextFillColor: palette.mutedGreige, opacity: 1 }} /></div>
+                text fill; opacity and the fill colour keep it readable.
+                softBlack on ivoryDeep is 12.2:1 (mutedGreige was 2.7:1, under
+                the 4.5:1 AA floor); the tinted fill and dashed border are
+                what mark it read-only, not faint text. */}
+            <div>{label("Entry date")}<input type="date" value={entryDate} disabled readOnly aria-label="Entry date" className="font-body" style={{ ...input, background: palette.ivoryDeep, border: "1px dashed rgba(26,26,26,0.25)", color: palette.softBlack, WebkitTextFillColor: palette.softBlack, opacity: 1, cursor: "default" }} /></div>
             <div>{label("Bill amount (optional)")}<input type="number" min="0" value={billAmount} onChange={(e) => setBillAmount(e.target.value)} className="font-body" style={input} /></div>
             {/* Bill photo — the same evidence the receipt editor takes. */}
             <div className="col-span-2">
