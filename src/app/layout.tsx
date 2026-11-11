@@ -62,7 +62,9 @@ export default function RootLayout({
     <html lang="en" className={`${playfair.variable} ${cormorant.variable} ${montserrat.variable}`}>
       <body className="font-body antialiased bg-page-bg text-black">
         <KeyboardInset />
-        {/* Counts the in-app pages behind this one, for the buyer Back buttons. */}
+        {/* Counts the in-app pages behind this one, for the buyer Back buttons
+            and the catalog's scroll restore. Ahead of {children} on purpose:
+            its effect has to run before the page's own. */}
         <InAppHistory />
         {children}
         <InstallPrompt />

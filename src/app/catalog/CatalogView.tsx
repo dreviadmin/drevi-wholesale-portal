@@ -1,18 +1,23 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Search, QrCode } from "lucide-react";
 import { DreviHeader } from "@/components/DreviHeader";
 import { FilterChips } from "@/components/FilterChips";
 import { GroupedProductCard } from "@/components/GroupedProductCard";
 import { QrScanner } from "@/components/QrScanner";
+import { arrivedByBackOrForward } from "@/components/InAppHistory";
 import { setQty as setCartQty } from "@/app/cart/actions";
 import { baseSkuOf, groupByBase } from "@/lib/variants";
 import { cartPieces } from "@/lib/cart-count";
+import { catalogFiltersFrom, catalogHref, savedScroll, scrollToRestore } from "@/lib/catalog-url";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
 import { toastDuration } from "@/lib/use-toast";
+
+// One slot: the scroll of the catalog URL a product was last opened from.
+const SCROLL_KEY = "drevi.catalog.scroll";
 
 // Chips in the same order as the buyer home's category tree: the category
 // with the most designs (SKU bases, i.e. cards) first, ties by name. One
@@ -49,19 +54,51 @@ export function CatalogView({
   initialCartBySku: Record<string, number>;
 }) {
   const router = useRouter();
-  const [category, setCategory] = useState("All");
+  // Filters live in the URL (?cat, ?sub, ?q) so Back from a product lands on
+  // the same chips and search, and the /home category links deep-link in.
+  // Seeded from the URL on mount, which is already the right URL on a fresh
+  // load and on Back alike, so the first paint is filtered.
+  const searchParams = useSearchParams();
+  const [initial] = useState(() => catalogFiltersFrom(searchParams));
+  const [category, setCategory] = useState(initial.category);
   // Sub-category within `category`; null = every design in the category.
-  const [sub, setSub] = useState<string | null>(null);
-  // Buyer-home category tree deep-links /catalog?cat=…&sub=…
+  const [sub, setSub] = useState<string | null>(initial.sub);
+  const [query, setQuery] = useState(initial.query);
+  // The search reaches the URL after a pause in typing; chips at once.
+  const [urlQuery, setUrlQuery] = useState(initial.query);
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const c = params.get("cat");
-    if (c) setCategory(c);
-    const s = params.get("sub");
-    if (c && s) setSub(s);
+    const t = setTimeout(() => setUrlQuery(query), 300);
+    return () => clearTimeout(t);
+  }, [query]);
+  // replaceState, not router.replace: no new history entry and no server
+  // round trip. Next 14.2 keeps useSearchParams in step with it.
+  function writeUrl(q: string) {
+    const href = catalogHref({ category, sub, query: q });
+    if (href !== window.location.pathname + window.location.search) window.history.replaceState(null, "", href);
+    return href;
+  }
+  useEffect(() => {
+    writeUrl(urlQuery);
+    // writeUrl reads category and sub, both listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, sub, urlQuery]);
+  // Opening a product: bring the URL up to date with the live search (the
+  // pause may not be over) and note the scroll for the way Back.
+  function onGridClick(e: React.MouseEvent) {
+    if (!(e.target as HTMLElement).closest('a[href^="/product/"]')) return;
+    const href = writeUrl(query);
+    try { sessionStorage.setItem(SCROLL_KEY, savedScroll(href, window.scrollY)); } catch { /* private mode: no restore */ }
+  }
+  // Back to the same URL: put the scroll back once, then forget it.
+  useEffect(() => {
+    let raw: string | null = null;
+    try {
+      raw = sessionStorage.getItem(SCROLL_KEY);
+      sessionStorage.removeItem(SCROLL_KEY);
+    } catch { /* storage blocked */ }
+    const y = scrollToRestore(raw, window.location.pathname + window.location.search, arrivedByBackOrForward());
+    if (y != null) requestAnimationFrame(() => window.scrollTo(0, y));
   }, []);
-  const [query, setQuery] = useState("");
   const [cart, setCart] = useState<Record<string, number>>(initialCartBySku);
   const [scanning, setScanning] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -174,7 +211,7 @@ export function CatalogView({
             Nothing matches.
           </div>
         ) : (
-          <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 ${isPending ? "opacity-95" : ""}`}>
+          <div onClickCapture={onGridClick} className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 ${isPending ? "opacity-95" : ""}`}>
             {groups.map((g) => (
               <GroupedProductCard
                 key={g.base}
