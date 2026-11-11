@@ -142,6 +142,9 @@ export async function renameProductSku(oldSku: string, newSkuRaw: string): Promi
   const { error } = await admin.from("wholesale_products").update({ sku: newSku, locked_fields: Array.from(locked) }).eq("sku", oldSku);
   if (error) return { ok: false, error: error.message };
   await admin.from("sync_ignored_skus").upsert({ sku: oldSku.toUpperCase(), reason: `renamed to ${newSku}` });
+  // The new SKU is live now. If an earlier rename put it on the ignore list
+  // (A → B, then back to A), take it off, or the sheet sync skips it for good.
+  await admin.from("sync_ignored_skus").delete().eq("sku", newSku);
 
   // Only the catalog row changes its key above. Nothing cascades: the stock
   // ledger and product_vendor_info are keyed by plain-text sku, so without

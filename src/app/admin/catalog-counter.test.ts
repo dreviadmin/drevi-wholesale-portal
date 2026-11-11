@@ -222,6 +222,15 @@ describe("renameProductSku carries the stock ledger", () => {
     expect(productRow(NEW)?.locked_fields).toContain("sku");
   });
 
+  it("renaming back takes the live SKU off the sync ignore list", async () => {
+    db.wholesale_products = [product(OLD, { current_qty: 4 })];
+    expect((await catalog.renameProductSku(OLD, NEW)).ok).toBe(true);
+    expect(db.sync_ignored_skus.map((r) => r.sku)).toEqual([OLD]);
+    expect((await catalog.renameProductSku(NEW, OLD)).ok).toBe(true);
+    // OLD is the live SKU again, so only NEW (now gone) stays ignored.
+    expect(db.sync_ignored_skus.map((r) => r.sku)).toEqual([NEW]);
+  });
+
   it("carries the shown count when the old SKU has no ledger history at all", async () => {
     db.wholesale_products = [product(OLD, { current_qty: 7 })];
     const r = await catalog.renameProductSku(OLD, NEW);
