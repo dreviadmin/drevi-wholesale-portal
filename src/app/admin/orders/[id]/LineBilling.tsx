@@ -4,7 +4,9 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, PauseCircle, RotateCcw, ReceiptText } from "lucide-react";
 import { palette } from "@/lib/palette";
+import { formatINR } from "@/lib/format";
 import { useToast } from "@/lib/use-toast";
+import { billPreviewRows, type BillTotals } from "@/lib/order-lines-core";
 import { setLineState, generateOrderBill } from "@/app/admin/orders/actions";
 import { billResultKey } from "./BillResultNote";
 
@@ -117,11 +119,15 @@ export function LineStateControls({
 }
 
 export function GenerateBillBar({
-  orderId, billableCount, billableTotal, orderClosed,
+  orderId, billableCount, billableTotal, breakdown, discountPercent, orderClosed,
 }: {
   orderId: string;
   billableCount: number;
   billableTotal: string; // pre-formatted ₹
+  // The figures the bill will carry (the page computes them with the same
+  // pots generateOrderBill uses), shown before Bill now commits.
+  breakdown?: BillTotals;
+  discountPercent?: number | null;
   // Delivered / fulfilled (14 Sep). Billing is not part of the logistics
   // lifecycle, so a closed order is still billable — it just needs to say why
   // the bar is here at all, since the rest of the page has gone read-only.
@@ -167,30 +173,52 @@ export function GenerateBillBar({
         <div className="font-body" style={{ fontSize: 12, color: palette.softBlack }}>
           <b>{billableCount}</b> confirmed line{billableCount === 1 ? "" : "s"} ready to bill · {billableTotal}
         </div>
-        {!open ? (
+        {!open && (
           <button type="button" onClick={() => setOpen(true)} className="flex items-center gap-1.5 font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "9px 14px" }}>
             <ReceiptText size={13} /> Generate bill
           </button>
-        ) : (
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <label className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.mutedGreige }}>Bill date</label>
+        )}
+      </div>
+      {open && (
+        <>
+          {breakdown && (
+            <dl className="font-body mt-3" style={{ fontSize: 13, color: palette.softBlack, maxWidth: 380 }}>
+              {billPreviewRows(breakdown, { discountPercent }).map((r) => (
+                <div
+                  key={r.label}
+                  className="flex justify-between gap-3"
+                  style={{
+                    marginTop: r.tone === "total" ? 6 : 3,
+                    color: r.tone === "minus" ? palette.goldDeep : r.tone === "note" ? palette.mutedGreige : palette.softBlack,
+                    fontWeight: r.tone === "total" ? 600 : 400,
+                  }}
+                >
+                  <dt>{r.label}</dt>
+                  <dd>{r.tone === "minus" ? "− " : ""}{formatINR(r.amount)}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          <div className="flex items-center gap-2 flex-wrap mt-3">
+            <label htmlFor={`bill-date-${orderId}`} className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.12em", color: palette.mutedGreige }}>Bill date</label>
             <input
+              id={`bill-date-${orderId}`}
               type="date"
               value={date}
               max={today}
               onChange={(e) => setDate(e.target.value)}
               className="font-body"
-              style={{ fontSize: 12, border: "1px solid rgba(26,26,26,0.25)", background: "#fff", color: palette.black, padding: "6px 8px" }}
+              style={{ fontSize: 16, minHeight: 44, border: "1px solid rgba(26,26,26,0.25)", background: "#fff", color: palette.black, padding: "6px 8px" }}
             />
-            <button type="button" disabled={pending} onClick={run} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 9.5, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "9px 14px" }}>
+            <button type="button" disabled={pending} onClick={run} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 11, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "0 18px", minHeight: 44 }}>
               {pending ? "Billing…" : "Bill now"}
             </button>
-            <button type="button" onClick={() => setOpen(false)} className="font-body uppercase" style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.mutedGreige, padding: "9px 4px" }}>
+            <button type="button" disabled={pending} onClick={() => setOpen(false)} className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.1em", color: palette.softBlack, padding: "0 12px", minHeight: 44 }}>
               Cancel
             </button>
           </div>
-        )}
-      </div>
+        </>
+      )}
       <div className="font-body mt-1" style={{ fontSize: 10, color: palette.mutedGreige }}>
         Bills only the confirmed lines — held and pending lines wait for their own bill. A past date is allowed; future dates are not.
       </div>

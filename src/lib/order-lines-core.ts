@@ -176,6 +176,35 @@ export function computeBillTotals(
   return { subtotal, discountAmount, taxMode, taxRate, taxAmount, total, advanceApplied };
 }
 
+export interface BillPreviewRow {
+  label: string;
+  amount: number;
+  /** minus: taken off · total: a total line · note: shown, not added (GST already in the prices). */
+  tone: "plain" | "minus" | "total" | "note";
+}
+
+/**
+ * The breakdown Generate bill shows before it commits (review fix, Nov): the
+ * very figures computeBillTotals hands the new bill, so what staff check is
+ * what the bill will say. Zero discount and zero advance rows are left out;
+ * "Balance on this bill" appears only when an advance is applied to it.
+ */
+export function billPreviewRows(t: BillTotals, opts: { discountPercent?: number | null } = {}): BillPreviewRow[] {
+  const rows: BillPreviewRow[] = [{ label: "Subtotal", amount: t.subtotal, tone: "plain" }];
+  if (t.discountAmount > 0) {
+    const pct = Number(opts.discountPercent) || 0;
+    rows.push({ label: pct > 0 ? `Discount (${pct}%)` : "Discount", amount: t.discountAmount, tone: "minus" });
+  }
+  if (t.taxMode === "exclusive") rows.push({ label: `GST @ ${t.taxRate ?? 0}% (added)`, amount: t.taxAmount, tone: "plain" });
+  rows.push({ label: "Bill total", amount: t.total, tone: "total" });
+  if (t.taxMode === "inclusive") rows.push({ label: `Includes GST @ ${t.taxRate ?? 0}%`, amount: t.taxAmount, tone: "note" });
+  if (t.advanceApplied > 0) {
+    rows.push({ label: "Advance applied", amount: t.advanceApplied, tone: "minus" });
+    rows.push({ label: "Balance on this bill", amount: r2(t.total - t.advanceApplied), tone: "total" });
+  }
+  return rows;
+}
+
 /**
  * Validate a user-chosen bill date (past-dated billing, Ansh 18 Aug).
  * Accepts YYYY-MM-DD; must not be in the future (IST) nor absurdly old.

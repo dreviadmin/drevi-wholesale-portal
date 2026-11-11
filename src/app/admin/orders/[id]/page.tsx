@@ -508,6 +508,8 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
           orderId={o.id}
           billableCount={billable.length}
           billableTotal={formatINR(billableTotals.total)}
+          breakdown={billableTotals}
+          discountPercent={o.discount_type === "percent" ? o.discount_value : null}
           orderClosed={lineEditLocked}
         />
       )}

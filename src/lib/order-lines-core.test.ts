@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { effectiveLineState, billableLines, pendingLines, computeBillTotals, priorBillsConsumed, billingTermsChanged, validateBillDate, billDateToIso, emptyBillReason, addedLineTakesStock } from "./order-lines-core";
+import { effectiveLineState, billableLines, pendingLines, computeBillTotals, billPreviewRows, priorBillsConsumed, billingTermsChanged, validateBillDate, billDateToIso, emptyBillReason, addedLineTakesStock } from "./order-lines-core";
 import type { OrderItem, OrderStatus } from "./types";
 
 const line = (over: Partial<OrderItem> = {}): OrderItem => ({
@@ -116,6 +116,47 @@ describe("computeBillTotals", () => {
     expect(computeBillTotals(items, o, none).advanceApplied).toBe(2500);
     expect(computeBillTotals(items, o, { discountApplied: 0, advanceApplied: 2500 }).advanceApplied).toBe(1500);
     expect(computeBillTotals(items, o, { discountApplied: 0, advanceApplied: 4000 }).advanceApplied).toBe(0);
+  });
+});
+
+describe("computeBillTotals + billPreviewRows — what Generate bill shows is what the bill gets", () => {
+  // 2 confirmed lines: 2 × ₹1,000 + 1 × ₹500 = ₹2,500; 10% off; 5% GST added; ₹1,000 advance.
+  const items = [line({ qty: 2, unit_price: 1000 }), line({ sku: "X", qty: 1, unit_price: 500 })];
+  const o = { discount_type: "percent" as const, discount_value: 10, tax_mode: "exclusive" as const, tax_rate: 5, advance_amount: 1000 };
+
+  it("percent discount, then GST on the discounted amount, then the advance", () => {
+    expect(computeBillTotals(items, o, priorBillsConsumed([]))).toEqual({
+      subtotal: 2500, discountAmount: 250, taxMode: "exclusive", taxRate: 5, taxAmount: 112.5, total: 2362.5, advanceApplied: 1000,
+    });
+  });
+
+  it("lists every figure the bill carries, with the balance after the advance", () => {
+    expect(billPreviewRows(computeBillTotals(items, o, priorBillsConsumed([])), { discountPercent: 10 })).toEqual([
+      { label: "Subtotal", amount: 2500, tone: "plain" },
+      { label: "Discount (10%)", amount: 250, tone: "minus" },
+      { label: "GST @ 5% (added)", amount: 112.5, tone: "plain" },
+      { label: "Bill total", amount: 2362.5, tone: "total" },
+      { label: "Advance applied", amount: 1000, tone: "minus" },
+      { label: "Balance on this bill", amount: 1362.5, tone: "total" },
+    ]);
+  });
+
+  it("leaves out a zero discount and a used-up advance; GST in the prices is a note, not an addition", () => {
+    const inc = { discount_type: null, discount_value: null, tax_mode: "inclusive" as const, tax_rate: 5, advance_amount: 1000 };
+    const rows = billPreviewRows(computeBillTotals(items, inc, { discountApplied: 0, advanceApplied: 1000 }));
+    expect(rows.map((r) => r.label)).toEqual(["Subtotal", "Bill total", "Includes GST @ 5%"]);
+    expect(rows[1].amount).toBe(2500);
+    expect(rows[2]).toMatchObject({ tone: "note" });
+    expect(rows[2].amount).toBeCloseTo(119.05, 2);
+  });
+
+  it("an absolute discount reads plainly, and no tax means no GST row", () => {
+    const abs = { discount_type: "absolute" as const, discount_value: 300, tax_mode: "none" as const, tax_rate: null, advance_amount: 0 };
+    expect(billPreviewRows(computeBillTotals(items, abs, priorBillsConsumed([])))).toEqual([
+      { label: "Subtotal", amount: 2500, tone: "plain" },
+      { label: "Discount", amount: 300, tone: "minus" },
+      { label: "Bill total", amount: 2200, tone: "total" },
+    ]);
   });
 });
 
