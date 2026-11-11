@@ -86,7 +86,7 @@ async function buildRetailItems(
 
     const sku = (line.sku ?? "").trim().toUpperCase();
     const p = prodBySku.get(sku);
-    if (!p) return { ok: false, error: `${sku || "(blank)"} is not in the catalog.` };
+    if (!p) return { ok: false, error: `${sku || "(blank)"} is not in the catalog. Bill it with + Add a custom item.` };
     const listPrice = prices?.priceOf(sku) ?? 0;
     const unitPrice =
       line.unitPrice != null && Number.isFinite(line.unitPrice)

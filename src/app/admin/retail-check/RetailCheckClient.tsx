@@ -10,8 +10,9 @@ import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
 
-// A scan/search result: a portal product, a sheet-only SKU (hidden from the
-// wholesale portal but hanging in the shop), or an unknown tag.
+// A scan/search result: a catalog product (shown to buyers or not — it still
+// hangs in the shop), a SKU with a retail price but no catalog row, or an
+// unknown tag.
 type Result = { sku: string; product: WholesaleProduct | null };
 
 async function copyText(text: string): Promise<boolean> {

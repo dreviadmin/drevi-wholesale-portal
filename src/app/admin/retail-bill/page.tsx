@@ -11,9 +11,10 @@ export const dynamic = "force-dynamic";
 
 // Retail billing (Ansh, 31 Aug) — sell at the retail price to walk-in
 // customers: the Specs MRP, else the sheet's Final MRP (retail-price-core.ts,
-// 3 Oct — the same price the tag prints). Every sheet row is billable, including garments hidden
-// from the wholesale portal (they still hang in the shop, same rule as the
-// retail price check). Past-dated bills carry the chosen day in their number.
+// 3 Oct — the same price the tag prints). Every catalog row is billable,
+// whether or not buyers see it (it still hangs in the shop, same rule as the
+// retail price check). A tag with no catalog row is billed as a custom item.
+// Past-dated bills carry the chosen day in their number.
 export default async function RetailBillPage({ searchParams }: { searchParams?: { edit?: string } }) {
   await requireStaffOrRedirect();
   const admin = createAdminClient();

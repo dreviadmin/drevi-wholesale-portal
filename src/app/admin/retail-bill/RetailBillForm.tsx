@@ -133,7 +133,7 @@ export function RetailBillForm({ catalog, editBill }: { catalog: CatalogRow[]; e
 
   function handleScan(text: string): ScanFeedback {
     const ok = addSku(text);
-    return ok ? { ok: true, message: text.trim().toUpperCase() } : { ok: false, message: `${text.trim().toUpperCase()} — not in the catalog` };
+    return ok ? { ok: true, message: text.trim().toUpperCase() } : { ok: false, message: `${text.trim().toUpperCase()} is not in the catalog. Bill it with + Add a custom item.` };
   }
 
   const matches = query.trim()
