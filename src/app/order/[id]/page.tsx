@@ -6,12 +6,13 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { currentCatalogImages, lineImage } from "@/lib/catalog-images";
 import { buyerBillLink } from "@/lib/invoice-link";
-import { ORDER_STATUS_LABEL } from "@/lib/order-status";
+import { ORDER_STATUS_HEADING, ORDER_STATUS_LABEL, orderTimeline } from "@/lib/order-status";
 import { formatINR, formatUnitINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { effectiveLineState } from "@/lib/order-lines-core";
 import { returnedByBillLine, type CreditNoteLike } from "@/lib/credit-core";
 import type { Order, OrderBill, OrderItem } from "@/lib/types";
+import { CopyButton } from "./CopyButton";
 
 /** Only what this page shows of a credit note — the note itself is staff-side. */
 type BuyerCreditNote = CreditNoteLike & { note_number: string };
@@ -108,6 +109,13 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
   // covers older orders that predate image snapshots.
   const currentImg = await currentCatalogImages(items.filter((i) => !i.custom).map((i) => i.sku));
 
+  // Where the order stands, from the stage stamps staff set as it moves. A
+  // lone "Submitted" step is the date line under the number already, so the
+  // trail shows once there is a second step. Courier and AWB are the buyer's
+  // own columns (RLS); the internal tracking note and sheet photo are not.
+  const steps = orderTimeline(o);
+  const hasTracking = !!(o.courier || o.tracking_number);
+
   return (
     <div className="min-h-screen" style={{ background: palette.ivory }}>
       {/* The left slot was an 18px spacer balancing an 18px icon. The sign-out
@@ -123,8 +131,8 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
 
       <div className="max-w-2xl mx-auto px-4 py-8">
         <div className="text-center">
-          <div className="font-body uppercase" style={{ fontSize: 10, letterSpacing: "0.25em", color: palette.gold }}>
-            Order Request Received
+          <div className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.25em", color: o.status === "cancelled" ? palette.crimsonText : palette.gold }}>
+            {ORDER_STATUS_HEADING[o.status] ?? ORDER_STATUS_LABEL[o.status] ?? o.status}
           </div>
           <div className="font-display mt-3" style={{ fontSize: 26, fontWeight: 600, color: palette.black }}>
             {o.order_number}
@@ -133,6 +141,50 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
             {fmtDate(o.submitted_at)} · {ORDER_STATUS_LABEL[o.status] ?? o.status}
           </div>
         </div>
+
+        {(steps.length > 1 || hasTracking) && (
+          <div className="mt-6 p-4" style={{ background: palette.ivoryDeep }}>
+            {steps.length > 1 && (
+              <ol aria-label="Order progress">
+                {steps.map((s, i) => {
+                  const last = i === steps.length - 1;
+                  return (
+                    <li key={s.status} className="flex gap-3">
+                      <div className="flex flex-col items-center flex-shrink-0" style={{ width: 9 }}>
+                        <span aria-hidden style={{ width: 9, height: 9, borderRadius: 9, marginTop: 5, background: last ? palette.gold : palette.goldDeep }} />
+                        {!last && <span aria-hidden className="flex-1" style={{ width: 1, background: palette.goldDeep, opacity: 0.45 }} />}
+                      </div>
+                      <div className="flex-1 flex items-baseline justify-between gap-3 font-body" style={{ fontSize: 13, lineHeight: 1.5, paddingBottom: last ? 0 : 10 }}>
+                        <span style={{ color: palette.black, fontWeight: last ? 600 : 400 }}>{s.label}</span>
+                        <span style={{ color: palette.mutedGreige }}>{fmtDate(s.at)}</span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+            {hasTracking && (
+              <div
+                className={steps.length > 1 ? "mt-3 pt-3" : ""}
+                style={steps.length > 1 ? { borderTop: "1px solid rgba(26,26,26,0.1)" } : undefined}
+              >
+                <div className="font-body uppercase" style={{ fontSize: 11, letterSpacing: "0.18em", color: palette.mutedGreige }}>
+                  {o.courier && o.tracking_number ? "Courier · tracking number" : o.courier ? "Courier" : "Tracking number"}
+                </div>
+                <div className="flex items-center justify-between gap-3 mt-1">
+                  <div className="font-body min-w-0" style={{ fontSize: 13, color: palette.black, wordBreak: "break-all" }}>
+                    {o.courier}
+                    {o.courier && o.tracking_number ? " · " : ""}
+                    {o.tracking_number && (
+                      <span id="order-awb" style={{ fontWeight: 600 }}>{o.tracking_number}</span>
+                    )}
+                  </div>
+                  {o.tracking_number && <CopyButton value={o.tracking_number} label="tracking number" selectId="order-awb" />}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="mt-8" style={{ borderTop: "1px solid rgba(26,26,26,0.1)" }}>
           {items.map((it, idx) => {
@@ -275,12 +327,16 @@ export default async function OrderConfirmationPage({ params }: { params: { id: 
           </div>
         )}
 
-        <div className="mt-8 p-4" style={{ background: palette.ivoryDeep }}>
-          <p className="font-body" style={{ fontSize: 12, color: palette.softBlack, lineHeight: 1.7 }}>
-            Thank you. Rakesh will confirm availability and pricing, and arrange billing offline. A confirmation
-            summary will follow shortly.
-          </p>
-        </div>
+        {/* Only while the request waits on Rakesh — a delivered or cancelled
+            order still promised a confirmation that had come and gone. */}
+        {o.status === "submitted" && (
+          <div className="mt-8 p-4" style={{ background: palette.ivoryDeep }}>
+            <p className="font-body" style={{ fontSize: 13, color: palette.softBlack, lineHeight: 1.7 }}>
+              Thank you. Rakesh will confirm availability and pricing, and arrange billing offline. A confirmation
+              summary will follow shortly.
+            </p>
+          </div>
+        )}
 
         <div className="flex gap-3 mt-8 justify-center flex-wrap">
           <a
