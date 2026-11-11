@@ -161,6 +161,7 @@ vi.mock("@/lib/retail-price-core", async () => await import("../../lib/retail-pr
 vi.mock("@/lib/dashboard/lines", async () => await import("../../lib/dashboard/lines"));
 vi.mock("@/lib/pricing", async () => await import("../../lib/pricing"));
 vi.mock("@/lib/studio/copy-prompt", async () => await import("../../lib/studio/copy-prompt"));
+vi.mock("@/lib/studio/shopify-facts", async () => await import("../../lib/studio/shopify-facts"));
 
 const catalog = await import("./manage-catalog/actions");
 const retail = await import("./retail-bill/actions");
