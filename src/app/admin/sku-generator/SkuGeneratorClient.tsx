@@ -38,7 +38,10 @@ export function SkuGeneratorClient({ isAdmin, vocab, initialTab }: { isAdmin: bo
   // ---- shared state ----
   const [counters, setCounters] = useState<Record<string, number>>({});
   const [history, setHistory] = useState<HistoryRow[]>([]);
-  const [totalSkus, setTotalSkus] = useState(0);
+  // null until /api/sku/state answers — "0 SKUs" while loading read as an
+  // empty registry. countFailed: the first load failed, so say so instead.
+  const [totalSkus, setTotalSkus] = useState<number | null>(null);
+  const [countFailed, setCountFailed] = useState(false);
   const [bases, setBases] = useState<BaseEntry[] | null>(null);
   const [tray, setTray] = useState<TrayItem[]>([]);
   const [toast, flash] = useToast();
@@ -87,8 +90,10 @@ export function SkuGeneratorClient({ isAdmin, vocab, initialTab }: { isAdmin: bo
   // ---- bootstrap ----
   useEffect(() => {
     fetch("/api/sku/state").then((r) => r.json()).then((d) => {
-      if (d.counters) { setCounters(d.counters); setHistory(d.history); setTotalSkus(d.totalSkus); }
-    }).catch(() => {});
+      if (d.counters) { setCounters(d.counters); setHistory(d.history); }
+      if (d.counters && typeof d.totalSkus === "number") setTotalSkus(d.totalSkus);
+      else setCountFailed(true);
+    }).catch(() => setCountFailed(true));
     try {
       const raw = localStorage.getItem(TRAY_KEY);
       if (raw) setTray(JSON.parse(raw));
@@ -236,7 +241,8 @@ export function SkuGeneratorClient({ isAdmin, vocab, initialTab }: { isAdmin: bo
       picksMeta.clear(); // minted — the picks stop being a draft; the next edit starts a new one
       // refresh state + bases
       fetch("/api/sku/state").then((r) => r.json()).then((s) => {
-        if (s.counters) { setCounters(s.counters); setHistory(s.history); setTotalSkus(s.totalSkus); }
+        if (s.counters) { setCounters(s.counters); setHistory(s.history); }
+        if (s.counters && typeof s.totalSkus === "number") { setTotalSkus(s.totalSkus); setCountFailed(false); }
       }).catch(() => {});
       setBases(null);
     } finally {
@@ -273,7 +279,9 @@ export function SkuGeneratorClient({ isAdmin, vocab, initialTab }: { isAdmin: bo
     <div className="px-4 md:px-6 py-5 max-w-3xl">
       <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>SKU Generator</h1>
       <p className="font-body mt-1" style={{ fontSize: 12, color: palette.mutedGreige }}>
-        {totalSkus} SKUs in the registry · every mint is recorded and mirrored to the sheet.
+        {totalSkus !== null
+          ? `${totalSkus} SKUs in the registry · every mint is recorded.`
+          : countFailed ? "Registry count unavailable" : "Loading registry…"}
       </p>
 
       {/* Tabs */}
