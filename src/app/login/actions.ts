@@ -8,6 +8,7 @@ import { writeAuditEvent } from "@/lib/audit";
 import { BUYER_LOGIN_DOMAIN } from "@/lib/share";
 import { WHOLESALE_PHONE } from "@/lib/contact";
 import { GATING_ROWS_FILTER, gatingStatusesAllow } from "@/lib/buyer-access";
+import { INVALID_LOGIN_MESSAGE, isRateLimited, loginErrorMessage } from "@/lib/login-error";
 
 export interface LoginState {
   error?: string;
@@ -54,14 +55,16 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
 
   if (error) {
     const { data: buyerRows } = await admin.from("buyers").select("id").eq("email", email).limit(1);
+    // A rate-limited attempt is still a failed login; the note keeps it apart
+    // from a wrong password without a new audit_event_type.
     await writeAuditEvent({
       eventType: "login_failed",
       buyerId: buyerRows?.[0]?.id ?? null,
       ipAddress: ip,
       userAgent,
-      notes: `email=${email}`,
+      notes: isRateLimited(error) ? `email=${email}; rate_limited` : `email=${email}`,
     });
-    return { error: "Invalid username or password." };
+    return { error: loginErrorMessage(error) };
   }
 
   // Auth succeeded. Decide destination by which table the email belongs to.
@@ -125,5 +128,5 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   if (buyer?.status === "suspended" || duplicateBlocks) {
     return { error: `Your account is inactive. Please contact Rakesh: ${WHOLESALE_PHONE}.` };
   }
-  return { error: "Invalid username or password." };
+  return { error: INVALID_LOGIN_MESSAGE };
 }
