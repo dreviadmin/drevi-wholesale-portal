@@ -45,7 +45,7 @@ CDN), or want an SLA once serious revenue flows through the portal.
                                      │  (once API key added)
                                      ▼
                      ┌─────────────────────────────────────────────┐
-                     │  INTERAKT — WhatsApp/email sends            │
+                     │  INTERAKT — WhatsApp sends                  │
                      └─────────────────────────────────────────────┘
 ```
 
@@ -206,8 +206,10 @@ qty 0+restockable → Made to Order (Nd) · qty 0+not → Sold Out.
 ### D · Data & messaging readiness
 11. Sheet: fill wholesale columns; publish products in Shopify; flip
     `STRICT_FILTER = true` in `src/lib/sync.ts`; push (auto-deploys).
-12. Interakt: submit the 5 templates for Meta approval (§10 of the spec), then add
-    `INTERAKT_API_KEY` in Vercel and test one order confirmation to a real number.
+12. Interakt: submit the 4 templates for Meta approval (§10 of the spec: the
+    inquiry, pending-review and order alerts and the order confirmation; the
+    welcome email was dropped), then add `INTERAKT_API_KEY` in Vercel and test
+    one order confirmation to a real number.
 
 ### E · Production verification (the beta checklist)
 13. Sync returns real counts (`curl -H "Authorization: Bearer $CRON_SECRET" https://wholesale.drevifashion.com/api/cron/sync-products`).

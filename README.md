@@ -679,6 +679,7 @@ required vars. Highlights:
 | `SHOPIFY_ENABLED` / `SHOPIFY_STORE_DOMAIN` | Shopify push. **Both portal environments point at the same single store**, so a push from dev creates a real product — there is no sandbox to hide behind |
 | `CRON_SECRET` | Bearer token for `/api/cron/*` |
 | `INTERAKT_API_KEY` | WhatsApp sends (degrades gracefully without it) |
+| `INTERAKT_ALERT_PHONE` | Optional: the number for the inquiry, pending-review and order alerts, digits with country code (unset keeps the built-in number) |
 | `SUPABASE_ACCESS_TOKEN` | Management API token — only for `npm run db:migrate` |
 | `SKU_REGISTRY_SHEET_ID` / `SKU_REGISTRY_TAB` / `SKU_DUAL_MODE` / `SKU_MIRROR_DISABLED` | Legacy SKU registry transition |
 | `AVAILABILITY_BUFFER_DAYS` / `HANDLING_DAYS` / `LIMITED_THRESHOLD` / `SUPPLY_STALE_DAYS` | Availability tuning |

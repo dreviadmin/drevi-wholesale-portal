@@ -114,9 +114,14 @@ dev; none of it touches production.
 
 ## WhatsApp / Interakt — what I need to turn it on (21 Sep)
 
-Bulk credential sending is **live on prod and doing nothing**: neither Vercel
-project has `INTERAKT_API_KEY`, so every send is a logged no-op and the bar
-says "not configured". Three things switch it on.
+> **Updated Nov 2026.** The bulk login send moved to AiSensy on 30 Sep (section
+> A above), and the unused Interakt credentials and welcome-email sends have
+> been deleted from the code. Interakt now carries only the four templates in
+> the table below: the three staff alerts and the buyer's order confirmation.
+> The alerts' number can be changed with `INTERAKT_ALERT_PHONE` (docs/GO-LIVE.md).
+
+Neither Vercel project has `INTERAKT_API_KEY`, so every Interakt send is a
+logged no-op. Two things switch it on.
 
 **1. The API key.** Interakt → Settings → Developer Setting → the Secret Key.
 It is already Base64 and goes into the `Authorization: Basic <key>` header
@@ -129,39 +134,19 @@ cd /Users/anshsarawagi/Documents/drevi/wholesale-portal && npx vercel env add IN
 
 **2. Approved templates — the names and the placeholder ORDER.** `bodyValues`
 are positional, so a template whose `{{1}}`/`{{2}}` are swapped sends the
-password where the business name should be. Six templates, all
+order total where the order number should be. Four templates, all
 `languageCode: "en"`:
 
 | Template name | Body placeholders, in order | Sent to |
 |---|---|---|
-| `wholesale_credentials` | business · portal link · login id · password | buyer |
-| `wholesale_welcome_email` | business | buyer |
 | `wholesale_order_confirmation` | order number · total (+ PDF URL as the header) | buyer |
 | `wholesale_inquiry_alert` | business · city | Rakesh |
 | `wholesale_pending_review` | count · event | Rakesh |
 | `wholesale_order_alert` | order number · business · total · source | Rakesh |
 
-For `wholesale_credentials`, word the third line **"Login ID: {{3}}"**, not
-"Username" — a buyer credentialed on their own email address gets that address
-there. Mirror the rest of the wording from the manual wa.me share
-(`buildWhatsAppMessage` in `src/lib/share.ts`) so the bulk send and the
-one-at-a-time share say the same thing.
-
-**3. Two things to confirm.**
-
-- **The sender number and opt-in.** Which WhatsApp Business number sends, and
-  whether these 158 buyers count as opted in — Meta allows utility templates
-  to contacts who have opted in, and a bulk send to 158 cold numbers is how a
-  number gets rate-limited or flagged. Worth starting with a handful.
-- **Passwords in plaintext over WhatsApp.** The message carries the actual
-  password, which is what you already do by hand through wa.me, so this only
-  changes the volume. Say the word if you would rather it sent a one-time
-  set-your-own-password link instead — that is a bigger change and I have not
-  built it.
-
-Where it stands right now on prod: **165 buyers, 165 active, 158 messageable**
-(7 have no phone). 122 came from the visiting-card import, 116 of them
-messageable.
+The 21 Sep questions about the bulk credentials send (sender number and
+opt-in, passwords in plaintext) now belong to the AiSensy send in section A,
+whose templates carry no password.
 
 ## Money / accounts
 
