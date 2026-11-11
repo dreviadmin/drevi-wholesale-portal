@@ -9,6 +9,8 @@ import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { KeyboardInset } from "@/components/KeyboardInset";
 import { HsnInput } from "@/components/admin/HsnInput";
 import { ColorCombobox } from "@/components/admin/ColorCombobox";
+import { QtyInput } from "@/components/admin/QtyInput";
+import { QTY_MAX } from "@/lib/qty-input";
 import { DraftNotice } from "@/components/DraftNotice";
 import { useDraft, isDraftOlderThan, DRAFT_NOTICE_AFTER_MS, type DraftMeta } from "@/lib/useDraft";
 import { DEFAULT_HSN } from "@/lib/hsn-default";
@@ -949,7 +951,8 @@ function GarmentSheet({
           </>
         )}
 
-        {/* c. Quantities & cost — steppers only for the sizes picked above */}
+        {/* c. Quantities & cost — steppers only for the sizes picked above;
+            the number between them can be typed (40 of a size is not 40 taps). */}
         <div className="font-body uppercase mt-5" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>Quantities &amp; cost</div>
         {g.sizes.length === 0 ? (
           <div className="font-body mt-2" style={{ fontSize: 10.5, color: palette.mutedGreige }}>Pick the sizes received above first.</div>
@@ -957,14 +960,13 @@ function GarmentSheet({
           <div className="flex flex-wrap gap-1.5 mt-2">
             {sizeOrder.filter((sz) => g.sizes.some((s) => s.size === sz)).map((size) => {
               const row = g.sizes.find((s) => s.size === size)!;
+              const setQty = (qty: number) => setG((s) => ({ ...s, sizes: s.sizes.map((x) => x.size === size ? { ...x, qty } : x) }));
               return (
                 <div key={size} className="flex items-center" style={{ border: `1px solid ${palette.black}`, background: palette.black }}>
-                  <span className="font-body" style={{ fontSize: 10.5, padding: "7px 9px", color: palette.ivory, fontWeight: 600 }}>{size}</span>
-                  <span className="flex items-center gap-1 pr-1.5">
-                    <button type="button" onClick={() => setG((s) => ({ ...s, sizes: s.sizes.map((x) => x.size === size ? { ...x, qty: Math.max(1, x.qty - 1) } : x) }))} aria-label="less"><Minus size={12} color={palette.champagne} /></button>
-                    <span className="font-mono" style={{ fontSize: 11, color: palette.ivory, minWidth: 14, textAlign: "center" }}>{row.qty}</span>
-                    <button type="button" onClick={() => setG((s) => ({ ...s, sizes: s.sizes.map((x) => x.size === size ? { ...x, qty: x.qty + 1 } : x) }))} aria-label="more"><Plus size={12} color={palette.champagne} /></button>
-                  </span>
+                  <span className="font-body" style={{ fontSize: 12, padding: "0 4px 0 10px", color: palette.ivory, fontWeight: 600 }}>{size}</span>
+                  <button type="button" onClick={() => setQty(Math.max(1, row.qty - 1))} aria-label={`One fewer ${size}`} className="flex items-center justify-center" style={{ width: 36, height: 44 }}><Minus size={14} color={palette.champagne} /></button>
+                  <QtyInput value={row.qty} onChange={setQty} label={`${size} quantity`} className="font-mono" style={{ color: palette.ivory, borderBottom: "1px solid rgba(232,213,183,0.35)" }} />
+                  <button type="button" onClick={() => setQty(Math.min(QTY_MAX, row.qty + 1))} aria-label={`One more ${size}`} className="flex items-center justify-center" style={{ width: 36, height: 44 }}><Plus size={14} color={palette.champagne} /></button>
                 </div>
               );
             })}

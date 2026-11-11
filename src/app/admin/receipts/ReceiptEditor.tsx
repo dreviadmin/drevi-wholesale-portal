@@ -6,6 +6,8 @@ import { Search, X, ScanLine, Minus, Plus, ImageOff } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
 import { ZoomImage } from "@/components/Lightbox";
 import { DraftNotice } from "@/components/DraftNotice";
+import { QtyInput } from "@/components/admin/QtyInput";
+import { QTY_MAX } from "@/lib/qty-input";
 import { useDraft, isDraftOlderThan, DRAFT_NOTICE_AFTER_MS } from "@/lib/useDraft";
 import { uuid } from "@/lib/uuid";
 import { createReceipt, updateReceipt, uploadReceiptBill, type ReceiptInput } from "./actions";
@@ -384,10 +386,11 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku, onCa
                     />
                   )}
                   <div className="flex items-center gap-4 mt-1.5 flex-wrap">
+                    {/* Typed or stepped — 40 pieces is not 40 taps. */}
                     <div className="flex items-center" style={{ border: "1px solid rgba(26,26,26,0.2)" }}>
-                      <button type="button" onClick={() => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, qty: Math.max(1, x.qty - 1) } : x)))} className="px-2.5 py-1.5" aria-label="Fewer"><Minus size={12} /></button>
-                      <span className="font-body" style={{ minWidth: 30, textAlign: "center", fontSize: 13, fontWeight: 600 }}>{l.qty}</span>
-                      <button type="button" onClick={() => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, qty: x.qty + 1 } : x)))} className="px-2.5 py-1.5" aria-label="More"><Plus size={12} /></button>
+                      <button type="button" onClick={() => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, qty: Math.max(1, x.qty - 1) } : x)))} className="flex items-center justify-center" style={{ width: 40, height: 44 }} aria-label={`One fewer ${l.sku}`}><Minus size={14} /></button>
+                      <QtyInput value={l.qty} onChange={(qty) => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, qty } : x)))} label={`${l.sku} quantity`} className="font-body" style={{ fontWeight: 600, color: palette.black }} />
+                      <button type="button" onClick={() => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, qty: Math.min(QTY_MAX, x.qty + 1) } : x)))} className="flex items-center justify-center" style={{ width: 40, height: 44 }} aria-label={`One more ${l.sku}`}><Plus size={14} /></button>
                     </div>
                     <label className="flex items-center gap-1.5 font-body" style={{ fontSize: 12 }}>
                       ₹/pc
