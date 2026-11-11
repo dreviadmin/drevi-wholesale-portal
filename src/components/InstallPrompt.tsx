@@ -153,7 +153,9 @@ export function InstallPrompt() {
   // while the card (which renders on /login only) was nowhere on screen, and
   // it was already spent by the time that buyer ever saw /login.
   useEffect(() => {
-    if (!LANDING_ROUTES.has(pathname) || !isIOS() || isStandalone() || alreadySeen()) return;
+    // typing / !roomy too: the card is not painted then, so the once-only flag
+    // must not be spent; the timer re-arms after blur or a resize.
+    if (!LANDING_ROUTES.has(pathname) || typing || !roomy || !isIOS() || isStandalone() || alreadySeen()) return;
     // WebKit fires no 'appinstalled' and the iOS card has no Install button,
     // so nothing would ever record that it had been shown — it would return on
     // every single visit. Showing it IS the event.
@@ -167,7 +169,7 @@ export function InstallPrompt() {
       });
     }, 2500);
     return () => clearTimeout(t);
-  }, [pathname]);
+  }, [pathname, typing, roomy]);
 
   // Never over the offline fallback — there is no network to install over.
   if (mode === "none" || typing || !roomy || !LANDING_ROUTES.has(pathname)) return null;

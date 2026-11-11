@@ -22,8 +22,10 @@ const NOT_A_NUMBER = Symbol("not a number");
 function coerce(field: EditableField, raw: string): unknown {
   const v = raw.trim();
   if (field === "wholesale_price") { const n = Number(v.replace(/[₹,\s]/g, "")); if (!Number.isFinite(n)) return NOT_A_NUMBER; return n >= 0 ? Math.round(n * 100) / 100 : 0; }
-  if (field === "min_order_qty" || field === "restock_days") { if (v === "") return null; const n = parseInt(v.replace(/[^\d]/g, ""), 10); return Number.isFinite(n) ? n : NOT_A_NUMBER; }
-  if (field === "current_qty") { if (v === "") return 0; const n = parseInt(v.replace(/[^\d-]/g, ""), 10); return Number.isFinite(n) ? n : NOT_A_NUMBER; }
+  // Digits only after dropping commas and spaces: stripping every non-digit
+  // turned "1O" (letter O) into 1 and "5-6" into 56, saved and locked.
+  if (field === "min_order_qty" || field === "restock_days") { if (v === "") return null; const s = v.replace(/[,\s]/g, ""); return /^\d+$/.test(s) ? parseInt(s, 10) : NOT_A_NUMBER; }
+  if (field === "current_qty") { if (v === "") return 0; const s = v.replace(/[,\s]/g, ""); return /^-?\d+$/.test(s) ? parseInt(s, 10) : NOT_A_NUMBER; }
   if (field === "restockable") return v === "true" || v.toUpperCase() === "Y" || v.toUpperCase() === "YES";
   return v || null;
 }
@@ -118,7 +120,7 @@ export async function uploadProductPhotoAction(sku: string, formData: FormData):
 
 // Rename a product's SKU. The old SKU is added to sync_ignored_skus so the
 // sheet (which still carries it) can't resurrect it as a duplicate.
-export async function renameProductSku(oldSku: string, newSkuRaw: string): Promise<{ ok: boolean; error?: string }> {
+export async function renameProductSku(oldSku: string, newSkuRaw: string): Promise<{ ok: boolean; error?: string; warning?: string }> {
   let staff;
   try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
   const newSku = newSkuRaw.trim().toUpperCase();
@@ -189,9 +191,11 @@ export async function renameProductSku(oldSku: string, newSkuRaw: string): Promi
     notes: `rename ${oldSku} → ${newSku} · ledger ${carried} pc${oldMoves.length === 0 ? " (no ledger yet, carried the shown count)" : shown !== carried ? ` (screen showed ${shown} pc)` : ""}${vendorCopied ? " · vendor info copied" : ""}${problems.length ? ` · ${problems.join("; ")}` : ""}`,
   });
   revalidatePath("/admin/manage-catalog");
-  // The rename itself stands; the modal only shows errors, so a half-carry
-  // must come back as one or nobody would know the ledger is short.
-  if (problems.length) return { ok: false, error: `Renamed to ${newSku}, but ${problems.join("; ")}.` };
+  // A half-carry must be reported or nobody would know the ledger is short.
+  // ok:true + warning, not ok:false: the rename itself DID happen, and the
+  // modal is unmounted by the revalidation, so the caller shows this as an
+  // alert.
+  if (problems.length) return { ok: true, warning: `Renamed to ${newSku}, but ${problems.join("; ")}.` };
   return { ok: true };
 }
 

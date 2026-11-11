@@ -1,8 +1,9 @@
 -- 0075 — bring generate_sku, next_order_number, order_counters and
 -- sync_ignored_skus in line with the house rule that security-definer RPCs and
 -- internal tables are service-role only (as in 0046, 0048, 0060).
--- A second, separately commented section at the end fixes the pipeline_jobs
--- staff-read policy (0017), which matched no one.
+-- Two separately commented sections at the end fix the pipeline_jobs
+-- staff-read policy (0017), which matched no one, and correct the wholesale
+-- target of designs discontinued before Discontinue reset it.
 --
 -- generate_sku (0013) and next_order_number (0008) predate that rule and kept
 -- the default EXECUTE grants. Every caller in src/ and scripts/ uses the
@@ -79,3 +80,59 @@ drop policy if exists pipeline_jobs_staff_read on public.pipeline_jobs;
 create policy pipeline_jobs_staff_read on public.pipeline_jobs
   for select to authenticated
   using (public.is_active_staff());
+
+-- ---------------------------------------------------------------------------
+-- Data fix: discontinued designs whose wholesale target still says live
+-- (review follow-up, 4 Oct; checked against main on 11 Nov).
+--
+-- Discontinue (setDiscontinued in src/app/admin/studio/actions.ts) now hides
+-- every size from the buyer catalog AND moves a 'live' or 'changes_pending'
+-- wholesale target to 'ready', the state Unpublish leaves. Designs retired
+-- before that second step existed kept 'live', so with "Show discontinued" on
+-- the Studio board and the Wholesale card still read "Live · WS" for products
+-- buyers cannot see. This gives those older rows the state Discontinue gives
+-- new ones.
+--
+-- Same guard as setDiscontinued's Restore branch: a design is left alone while
+-- any of its sizes is still in the buyer catalog (buyer_visible, e.g. shown
+-- again by hand in Manage Catalog), so "Live" stays true there and Unpublish
+-- wholesale still works on it. Sizes are matched as setDiscontinued matches
+-- them: the SKU starts with "<base_sku>-" and ends with "-<color>".
+--
+-- Only the wholesale target is written. The Shopify target (Discontinue
+-- archives the product there, and its error column is what marks a failed
+-- archive) and the bucket tables (0074, 0078) are not touched.
+--
+-- No code depends on this; it only corrects old rows, and the order relative
+-- to the code does not matter.
+--
+-- REVERSAL: the old states are not kept row by row. Only publish_targets
+-- changes (no size is shown or hidden here); a wholesale push, after Restore
+-- for a discontinued design, sets the target to 'live' again.
+--
+-- Idempotent: re-running changes nothing once those targets are 'ready'.
+-- Run the select below before to see what will change, and after to verify
+-- (0 rows):
+--   select d.base_sku, d.color, pt.state
+--     from public.publish_targets pt join public.designs d on d.id = pt.design_id
+--    where pt.portal = 'wholesale' and pt.state in ('live', 'changes_pending')
+--      and d.discontinued_at is not null
+--      and not exists (select 1 from public.wholesale_products wp
+--                       where wp.buyer_visible
+--                         and starts_with(wp.sku, d.base_sku || '-')
+--                         and right(upper(wp.sku), length(d.color) + 1) = '-' || upper(d.color));
+
+update public.publish_targets pt
+   set state = 'ready', error = null
+  from public.designs d
+ where pt.design_id = d.id
+   and pt.portal = 'wholesale'
+   and pt.state in ('live', 'changes_pending')
+   and d.discontinued_at is not null
+   and not exists (
+     select 1
+       from public.wholesale_products wp
+      where wp.buyer_visible
+        and starts_with(wp.sku, d.base_sku || '-')
+        and right(upper(wp.sku), length(d.color) + 1) = '-' || upper(d.color)
+   );

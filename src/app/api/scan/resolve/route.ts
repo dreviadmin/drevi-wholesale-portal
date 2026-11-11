@@ -101,8 +101,9 @@ export async function GET(request: Request) {
     actions.push({ key: "sales", label: "Sales and reorder", href: `/admin/dashboard?view=customers&f=${encodeURIComponent(`design:${designOf(sku)}`)}` });
     actions.push({ key: "log_receipt", label: "Log into a receipt", href: `/admin/receipts/new?sku=${encodeURIComponent(sku)}` });
     if (design?.id) actions.push({ key: "open_studio", label: "Open in studio", href: `/admin/studio/${design.id}` });
-    // Not for a registry-only mint: Manage Catalog has no row to open yet.
-    if (product || vendorInfo) actions.push({ key: "edit_master", label: "Edit product master", href: `/admin/manage-catalog?sku=${encodeURIComponent(sku)}` });
+    // Only where wholesale_products has a row — Manage Catalog cannot open a
+    // registry-only mint or a vendor-info-only SKU.
+    if (product) actions.push({ key: "edit_master", label: "Edit product master", href: `/admin/manage-catalog?sku=${encodeURIComponent(sku)}` });
   }
   actions.push({ key: "add_to_print", label: "Add to print sheet" }); // client handles
 

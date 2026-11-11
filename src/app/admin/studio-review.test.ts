@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- the fake query builder is untyped on purpose */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 // Studio, run against a small in-memory database that honours each query's
 // filters, PostgREST's 1000-row cap on an un-ranged select, and the tables'
@@ -322,6 +324,28 @@ describe("Discontinue and Restore leave the wholesale target honest", () => {
     const r = await studio.setDiscontinued(DESIGN, false);
     expect(r.ok).toBe(true);
     expect(target(DESIGN, "wholesale")!.state).toBe("live");
+  });
+});
+
+describe("0075 gives designs retired before the reset the state Discontinue gives new ones", () => {
+  const sql = readFileSync(join(__dirname, "..", "..", "..", "supabase", "migrations", "0075_lock_down_rpcs.sql"), "utf8");
+  const stmt = sql.slice(sql.indexOf("update public.publish_targets"));
+  const body = stmt.slice(0, stmt.indexOf(";") + 1);
+
+  it("is the one data update in the file, and writes only the wholesale target of a discontinued design", () => {
+    expect(sql.match(/^update /gm)).toHaveLength(1);
+    expect(body).toContain("set state = 'ready', error = null");
+    expect(body).toContain("pt.portal = 'wholesale'");
+    expect(body).toContain("pt.state in ('live', 'changes_pending')");
+    expect(body).toContain("d.discontinued_at is not null");
+    // The Shopify target (archive state and its error) and the buckets are not touched.
+    expect(body).not.toMatch(/shopify|bucket/i);
+  });
+
+  it("skips a design while a size is still in the buyer catalog, matching sizes as setDiscontinued does", () => {
+    expect(body).toMatch(/and not exists \(\s*select 1\s+from public\.wholesale_products wp\s+where wp\.buyer_visible/);
+    expect(body).toContain("starts_with(wp.sku, d.base_sku || '-')");
+    expect(body).toContain("right(upper(wp.sku), length(d.color) + 1) = '-' || upper(d.color)");
   });
 });
 

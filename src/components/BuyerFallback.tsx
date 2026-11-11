@@ -23,9 +23,12 @@ export function BuyerFallback({ message, onRetry }: { message: string; onRetry?:
             Try again
           </button>
         )}
-        <Link href="/home" className={`block w-full ${onRetry ? "mt-3" : "mt-5"} font-body uppercase`} style={onRetry ? outlined : solid}>
+        {/* A plain link, not <Link>: on /home's own error screen a soft
+            navigation to the same path keeps the error boundary up, so the
+            button did nothing. A full load mounts a fresh page. */}
+        <a href="/home" className={`block w-full ${onRetry ? "mt-3" : "mt-5"} font-body uppercase`} style={onRetry ? outlined : solid}>
           Back to home
-        </Link>
+        </a>
         <Link href="/login" className="inline-block mt-4 font-body" style={{ fontSize: 11, color: palette.mutedGreige, textDecoration: "underline" }}>
           Log in again
         </Link>

@@ -240,6 +240,8 @@ function EditModal({ product, hsnOptions, onClose, onSaved }: { product: Wholesa
     start(async () => {
       const res = await renameProductSku(product.sku, newSku);
       if (!res.ok) { setError(res.error ?? "Failed"); return; }
+      // An alert, not setError: the revalidation unmounts this modal.
+      if (res.warning) window.alert(res.warning);
       draft.clear(); // keyed by the old SKU — nothing carries over to the renamed row
       onSaved();
     });

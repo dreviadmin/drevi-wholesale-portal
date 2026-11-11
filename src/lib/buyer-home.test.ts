@@ -28,6 +28,9 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => fakeAdmin() })
 // relative path.
 vi.mock("@/lib/types", async () => await import("./types"));
 vi.mock("@/lib/category-tree", async () => await import("./category-tree"));
+// The real four-state stock model, so "sold out" means what it means in the app.
+vi.mock("@/lib/stock", async () => await import("./stock"));
+vi.mock("@/lib/availability", async () => await import("./availability"));
 
 const { loadBuyerHome } = await import("./buyer-home");
 
@@ -81,6 +84,38 @@ describe("loadBuyerHome: New this week", () => {
     tables.product_images = [{ sku_base: "DD-LEH-FLR-001", color: "RED", published_at: recently }];
     const home = await loadBuyerHome("buyer-1");
     expect(home.newThisWeek.map((p) => p.sku)).toEqual(["DD-LEH-FLR-001-M-RED"]);
+  });
+
+  it("picks a size that can still be ordered when the first one is sold out", async () => {
+    tables.wholesale_products = [
+      { ...product("DD-LEH-FLR-001-S-RED"), current_qty: 0, restockable: false },
+      { ...product("DD-LEH-FLR-001-M-RED"), current_qty: 0, restockable: false },
+      product("DD-LEH-FLR-001-L-RED"),
+      product("DD-LEH-FLR-002-M-BLU"),
+    ];
+    tables.product_images = [
+      { sku_base: "DD-LEH-FLR-001", color: "RED", published_at: recently },
+      { sku_base: "DD-LEH-FLR-002", color: "BLU", published_at: recently },
+    ];
+    const home = await loadBuyerHome("buyer-1");
+    // Still one tile per design, still in the order the designs first appear.
+    expect(home.newThisWeek.map((p) => p.sku)).toEqual(["DD-LEH-FLR-001-L-RED", "DD-LEH-FLR-002-M-BLU"]);
+  });
+
+  it("keeps the first size when every size is sold out, and prefers made-to-order over sold out", async () => {
+    tables.wholesale_products = [
+      { ...product("DD-LEH-FLR-001-S-RED"), current_qty: 0, restockable: false },
+      { ...product("DD-LEH-FLR-001-M-RED"), current_qty: 0, restockable: false },
+      { ...product("DD-LEH-FLR-002-S-BLU"), current_qty: 0, restockable: false },
+      { ...product("DD-LEH-FLR-002-M-BLU"), current_qty: 0, restockable: true },
+      product("DD-LEH-FLR-002-L-BLU"),
+    ];
+    tables.product_images = [
+      { sku_base: "DD-LEH-FLR-001", color: "RED", published_at: recently },
+      { sku_base: "DD-LEH-FLR-002", color: "BLU", published_at: recently },
+    ];
+    const home = await loadBuyerHome("buyer-1");
+    expect(home.newThisWeek.map((p) => p.sku)).toEqual(["DD-LEH-FLR-001-S-RED", "DD-LEH-FLR-002-M-BLU"]);
   });
 
   it("fills its 8 tiles with 8 different designs when more are fresh", async () => {

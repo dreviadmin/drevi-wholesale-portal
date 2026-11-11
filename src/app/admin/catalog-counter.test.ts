@@ -282,12 +282,21 @@ describe("renameProductSku carries the stock ledger", () => {
     db.stock_movements = [move(OLD, { reason: "reset", snapshot_qty: 5 })];
     failInsert = (table) => (table === "stock_movements" ? "insert refused" : null);
     const r = await catalog.renameProductSku(OLD, NEW);
-    expect(r.ok).toBe(false);
-    expect(r.error).toContain(`Renamed to ${NEW}`);
-    expect(r.error).toContain("stock did NOT carry over");
-    expect(r.error).toContain("set 5 pc in Stock take");
-    // The rename itself stands.
+    // The rename itself stands, so the result is ok with a warning (the modal
+    // shows it as an alert), not a failure that would keep the modal on the old SKU.
+    expect(r.ok).toBe(true);
+    expect(r.error).toBeUndefined();
+    expect(r.warning).toContain(`Renamed to ${NEW}`);
+    expect(r.warning).toContain("stock did NOT carry over");
+    expect(r.warning).toContain("set 5 pc in Stock take");
     expect(productRow(NEW)).toBeTruthy();
+    expect(productRow(OLD)).toBeUndefined();
+  });
+
+  it("gives no warning when everything carried", async () => {
+    db.wholesale_products = [product(OLD, { current_qty: 5 })];
+    db.stock_movements = [move(OLD, { reason: "reset", snapshot_qty: 5 })];
+    expect(await catalog.renameProductSku(OLD, NEW)).toEqual({ ok: true });
   });
 
   it("still refuses a clash, a bad shape and a missing product", async () => {
@@ -306,6 +315,13 @@ describe("updateProductFields refuses a number it cannot read", () => {
     ["min_order_qty", "six"],
     ["restock_days", "soon"],
     ["current_qty", "abc"],
+    // Letters and dashes inside a count used to be stripped into a different number.
+    ["min_order_qty", "1O"],
+    ["restock_days", "5-6"],
+    ["current_qty", "1O"],
+    ["current_qty", "4-2"],
+    ["min_order_qty", "-3"],
+    ["current_qty", "2.5"],
   ])("%s = %j is refused, not saved and locked", async (field, raw) => {
     db.wholesale_products = [product(OLD, { wholesale_price: 2500, min_order_qty: 2, restock_days: 10, current_qty: 4 })];
     const before = structuredClone(productRow(OLD));
@@ -322,6 +338,14 @@ describe("updateProductFields refuses a number it cannot read", () => {
     expect((await catalog.updateProductFields(OLD, { min_order_qty: "", current_qty: "", wholesale_price: "" })).ok).toBe(true);
     expect(productRow(OLD)).toMatchObject({ min_order_qty: null, current_qty: 0, wholesale_price: 0 });
     expect(productRow(OLD)?.locked_fields).toEqual(expect.arrayContaining(["wholesale_price", "min_order_qty", "current_qty"]));
+  });
+
+  it("still reads counts with commas or spaces, and a negative stock count", async () => {
+    db.wholesale_products = [product(OLD, { min_order_qty: 2, restock_days: 10, current_qty: 4 })];
+    expect((await catalog.updateProductFields(OLD, { min_order_qty: " 12 ", restock_days: "1,000", current_qty: "-3" })).ok).toBe(true);
+    expect(productRow(OLD)).toMatchObject({ min_order_qty: 12, restock_days: 1000, current_qty: -3 });
+    expect((await catalog.updateProductFields(OLD, { current_qty: "1 200" })).ok).toBe(true);
+    expect(productRow(OLD)?.current_qty).toBe(1200);
   });
 });
 
@@ -462,6 +486,14 @@ describe("global scan resolve", () => {
   it("offers Edit product master where Manage Catalog has the row", async () => {
     db.wholesale_products = [product(OLD)];
     expect(keys(await get(OLD))).toContain("edit_master");
+  });
+
+  it("knows a SKU with only vendor info, but offers no Edit product master for it", async () => {
+    db.product_vendor_info = [{ sku: OLD, vendor_name: "Surat Silks", retail_price: 4200, locked_fields: [] }];
+    const j = await get(OLD);
+    expect(j.known).toBe(true);
+    expect(keys(j)).not.toContain("edit_master");
+    expect(keys(j)).toContain("log_receipt");
   });
 
   it("still offers Create SKU for a code nobody knows", async () => {

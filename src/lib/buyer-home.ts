@@ -3,6 +3,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { BUYER_PRODUCT_COLUMNS, type WholesaleProduct } from "@/lib/types";
 import { buildCategoryTree, type CategoryNode } from "@/lib/category-tree";
+import { getStockState } from "@/lib/stock";
 
 export type { CategoryNode } from "@/lib/category-tree";
 
@@ -111,16 +112,19 @@ export async function loadBuyerHome(buyerId: string): Promise<BuyerHomeData> {
   const freshGroups = new Set((freshImages ?? []).map((f) => `${f.sku_base}|${f.color}`.toUpperCase()));
   // One tile per design + colour. Every size is its own row with the same
   // photo, title and price, so two fresh 4-size designs used to fill all 8
-  // tiles with copies of themselves.
-  const seenGroups = new Set<string>();
-  const newThisWeek = (products ?? []).filter((p) => {
+  // tiles with copies of themselves. The tile prefers a size that can still be
+  // ordered: rows come back in no fixed order, and a sold-out first size made
+  // the tile a dead end (the tile links to that one SKU).
+  const tileByGroup = new Map<string, WholesaleProduct>();
+  for (const p of (products ?? []) as WholesaleProduct[]) {
     const parts = p.sku.toUpperCase().split("-");
-    if (parts.length < 5 || !/^\d{2,4}$/.test(parts[3])) return false;
+    if (parts.length < 5 || !/^\d{2,4}$/.test(parts[3])) continue;
     const group = `${parts.slice(0, 4).join("-")}|${parts[parts.length - 1]}`;
-    if (!freshGroups.has(group) || seenGroups.has(group)) return false;
-    seenGroups.add(group);
-    return true;
-  }) as WholesaleProduct[];
+    if (!freshGroups.has(group)) continue;
+    const kept = tileByGroup.get(group);
+    if (!kept || (getStockState(kept) === "sold_out" && getStockState(p) !== "sold_out")) tileByGroup.set(group, p);
+  }
+  const newThisWeek = [...tileByGroup.values()];
 
   // Back-in-stock: this buyer's open notify requests whose group now has stock.
   const backInStock: BuyerHomeData["backInStock"] = [];
