@@ -121,7 +121,7 @@ export async function computeAttention(): Promise<AttentionItem[]> {
     if (drift.length > 0) {
       items.push({
         key: "stock_drift",
-        title: `${drift.length} SKU${drift.length === 1 ? "" : "s"} need a stock check`,
+        title: `${drift.length} SKU${drift.length === 1 ? " needs" : "s need"} a stock check`,
         sub: "The movement ledger and the cached quantity disagree",
         count: drift.length,
         severity: "medium",
