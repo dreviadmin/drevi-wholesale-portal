@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { validateCatSub } from "@/lib/sku/vocab-live";
-import { dualMode, sheetNumberFloor, knownSkuFloor } from "@/lib/sku/registry-sheet";
+import { numberFloor } from "@/lib/sku/registry-sheet";
 
 export const dynamic = "force-dynamic";
 
-// Display-only "Next #" preview (includes the dual-mode sheet floor). The
-// client shows its local estimate instantly and reconciles with this value.
+// Display-only "Next #" preview: the registry max, raised to the same floor
+// the mint uses (numberFloor — product tables, retail Master, dual-mode
+// sheet), so the preview is the number the mint gives. The client shows its
+// local estimate instantly and reconciles with this value.
 export async function GET(request: Request) {
   try {
     await requireStaff();
@@ -30,10 +32,6 @@ export async function GET(request: Request) {
     const m = r.base_sku.match(/(\d{3})$/);
     if (m) max = Math.max(max, parseInt(m[1], 10));
   }
-  max = Math.max(max, await knownSkuFloor(cat, sub));
-  if (dualMode()) {
-    const f = await sheetNumberFloor(cat, sub);
-    max = Math.max(max, f.floor);
-  }
+  max = Math.max(max, (await numberFloor(cat, sub)).floor);
   return NextResponse.json({ next: max + 1 });
 }

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { google, type sheets_v4 } from "googleapis";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAll } from "@/lib/supabase/fetch-all";
+import { combineFloors } from "@/lib/sku/number-floor-core";
 
 // Legacy SKU registry sheet interop (transition safety, spec §4).
 // - importer: sheet -> Supabase (rows minted via the old Apps Script tool)
@@ -286,4 +287,20 @@ export async function knownSkuFloor(cat: string, sub: string): Promise<number> {
     if (m) max = Math.max(max, parseInt(m[1], 10));
   }
   return max;
+}
+
+/**
+ * The one number floor for a new CAT-SUB design: the portal's product tables,
+ * the retail Master and (dual mode) the registry sheet. Both mint paths pass
+ * it to generate_sku and the "Next #" preview adds it to the registry max, so
+ * the preview shows the number the mint will give. Sheet floors fail soft
+ * into warnings; the Master read is cached, so the preview stays cheap.
+ */
+export async function numberFloor(cat: string, sub: string): Promise<{ floor: number; warnings: string[] }> {
+  const [known, master, sheet] = await Promise.all([
+    knownSkuFloor(cat, sub),
+    masterNumberFloor(cat, sub),
+    dualMode() ? sheetNumberFloor(cat, sub) : Promise.resolve({ floor: 0 }),
+  ]);
+  return combineFloors(known, master, sheet);
 }

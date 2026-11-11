@@ -152,15 +152,10 @@ async function mintSku(
   let floor = 0;
   const warnings: string[] = [];
   if (mode === "new" && opts.cat && opts.sub) {
-    const { knownSkuFloor, masterNumberFloor, sheetNumberFloor, dualMode } = await import("@/lib/sku/registry-sheet");
-    const [known, master, sheet] = await Promise.all([
-      knownSkuFloor(opts.cat, opts.sub),
-      masterNumberFloor(opts.cat, opts.sub),
-      dualMode() ? sheetNumberFloor(opts.cat, opts.sub) : Promise.resolve({ floor: 0, warning: undefined as string | undefined }),
-    ]);
-    floor = Math.max(known, master.floor, sheet.floor);
-    if (master.warning) warnings.push(master.warning);
-    if (sheet.warning) warnings.push(sheet.warning);
+    const { numberFloor } = await import("@/lib/sku/registry-sheet");
+    const f = await numberFloor(opts.cat, opts.sub);
+    floor = f.floor;
+    warnings.push(...f.warnings);
   }
   const { data, error } = await admin.rpc("generate_sku", {
     p_mode: mode,

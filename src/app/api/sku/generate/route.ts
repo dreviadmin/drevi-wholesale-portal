@@ -3,7 +3,7 @@ import { requireStaff } from "@/lib/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { BASE_SKU_RE } from "@/lib/sku/vocab";
 import { validateCatSub, validCodes } from "@/lib/sku/vocab-live";
-import { dualMode, sheetNumberFloor, masterNumberFloor, knownSkuFloor, mirrorOne } from "@/lib/sku/registry-sheet";
+import { numberFloor, mirrorOne } from "@/lib/sku/registry-sheet";
 
 export const dynamic = "force-dynamic";
 
@@ -52,14 +52,9 @@ export async function POST(request: Request) {
   const warnings: string[] = [];
   let floor = 0;
   if (mode === "new") {
-    const [known, master, sheet] = await Promise.all([
-      knownSkuFloor(cat, sub),
-      masterNumberFloor(cat, sub),
-      dualMode() ? sheetNumberFloor(cat, sub) : Promise.resolve({ floor: 0 as number, warning: undefined as string | undefined }),
-    ]);
-    floor = Math.max(known, master.floor, sheet.floor);
-    if (master.warning) warnings.push(master.warning);
-    if (sheet.warning) warnings.push(sheet.warning);
+    const f = await numberFloor(cat, sub);
+    floor = f.floor;
+    warnings.push(...f.warnings);
   }
 
   const admin = createAdminClient();
