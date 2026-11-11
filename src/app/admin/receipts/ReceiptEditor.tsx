@@ -163,8 +163,10 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku, onCa
     if (!newVendor.name.trim()) return;
     const res = await quickAddVendor(newVendor.name, newVendor.phone);
     if (!res.ok) { setError(res.error ?? "Vendor add failed"); return; }
-    setVendorList((v) => [...v, { id: res.id!, name: newVendor.name.trim(), city: null }]);
-    setVendorId(res.id!);
+    // An existing name comes back as that vendor — already listed unless it
+    // had been switched off.
+    setVendorList((v) => (v.some((x) => x.id === res.id) ? v : [...v, { id: res.id, name: res.name, city: null }]));
+    setVendorId(res.id);
     setShowVendorAdd(false);
     setNewVendor({ name: "", phone: "" });
   }

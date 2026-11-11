@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import type { AuditEventType } from "@/lib/types";
 import { storeAuxPhoto } from "@/lib/design-image-store";
+import { quickAddVendorCore, type QuickAddVendorResult } from "@/lib/vendors";
 
 export interface VendorForm {
   name: string;
@@ -61,9 +62,12 @@ export async function updateVendor(id: string, form: VendorForm & { active?: boo
   return { ok: true };
 }
 
-// Inline quick-add from the receipt form: name + phone only.
-export async function quickAddVendor(name: string, phone?: string): Promise<{ ok: boolean; id?: string; error?: string }> {
-  return createVendor({ name, phone });
+// Inline quick-add from the receipt form: name + phone only. Shared with Log
+// delivery (lib/vendors.ts): an existing name selects that vendor.
+export async function quickAddVendor(name: string, phone?: string): Promise<QuickAddVendorResult> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized." }; }
+  return quickAddVendorCore(name, phone, staff);
 }
 
 /**

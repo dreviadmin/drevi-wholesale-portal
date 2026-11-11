@@ -15,6 +15,7 @@ import { exGstCost } from "@/lib/gst";
 import { isOriginValue } from "@/lib/studio/copy-prompt";
 import { ensureCatalogRow } from "@/lib/catalog-row";
 import { syncCatalogFrontQuietly } from "@/lib/studio/catalog-front";
+import { quickAddVendorCore, type QuickAddVendorResult } from "@/lib/vendors";
 
 // Retrofit R3 (§5) — "Log delivery": one screen, one motion per garment.
 //
@@ -700,20 +701,9 @@ export async function saveDelivery(input: DeliveryInput): Promise<{ ok: boolean;
   return { ok: true, receiptId: receipt.id, receiptNumber, skus: allSkus, designs: Array.from(savedDesigns.values()), warnings };
 }
 
-/** Inline "+ New vendor" from the delivery screen (§5.2). */
-export async function quickAddVendor(name: string, phone?: string): Promise<{ ok: boolean; error?: string; id?: string; name?: string }> {
-  try { await requireAdmin(); } catch { return fail("Not authorized"); }
-  const clean = name.trim();
-  if (!clean) return fail("Vendor name required");
-  const admin = createAdminClient();
-  const { data: existing } = await admin.from("vendors").select("id, name").ilike("name", clean).maybeSingle();
-  if (existing) return { ok: true, id: existing.id, name: existing.name };
-  const { data, error } = await admin
-    .from("vendors")
-    .insert({ name: clean, phone: phone?.trim() || null, active: true })
-    .select("id, name")
-    .single();
-  if (error) return fail(error.message);
-  revalidatePath("/admin/vendors");
-  return { ok: true, id: data.id, name: data.name };
+/** Inline "+ New vendor" from the delivery screen (§5.2) — same as the receipt editor's. */
+export async function quickAddVendor(name: string, phone?: string): Promise<QuickAddVendorResult> {
+  let staff;
+  try { staff = await requireAdmin(); } catch { return { ok: false, error: "Not authorized" }; }
+  return quickAddVendorCore(name, phone, staff);
 }

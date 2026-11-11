@@ -396,8 +396,11 @@ export function DeliveryIntake({
                     const r = await quickAddVendor(newVendor.name, newVendor.phone);
                     if (!r) { flash("Session expired — sign in again"); return; }
                     if (!r.ok) { flash(r.error ?? "Failed"); return; }
-                    setVendors((vs) => [...vs, { id: r.id!, name: r.name!, city: null }].sort((a, b) => a.name.localeCompare(b.name)));
-                    setVendorId(r.id!); setNewVendor(null); flash(`${r.name} added`);
+                    // An existing name comes back as that vendor — already in
+                    // the list unless it had been switched off.
+                    setVendors((vs) => (vs.some((v) => v.id === r.id) ? vs : [...vs, { id: r.id, name: r.name, city: null }].sort((a, b) => a.name.localeCompare(b.name))));
+                    setVendorId(r.id); setNewVendor(null);
+                    flash(r.kind === "found" ? `${r.name} picked — already a vendor` : r.kind === "reactivated" ? `${r.name} switched back on` : `${r.name} added`);
                   })} className="font-body uppercase disabled:opacity-40" style={{ fontSize: 9.5, letterSpacing: "0.14em", background: palette.black, color: palette.ivory, padding: "9px 12px" }}>Save vendor</button>
                   <button type="button" onClick={() => setNewVendor(null)} className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.14em", color: palette.mutedGreige, padding: "9px 6px" }}>Cancel</button>
                 </div>
