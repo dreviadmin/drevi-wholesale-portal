@@ -39,8 +39,12 @@ const HONORIFICS = new Set(["mr", "mrs", "ms", "mx", "dr", "shri", "smt", "sri"]
  * only, lowercase, accents folded ("Réné" → "rene"). A first word shorter than
  * three letters pulls in the following words ("Om (Kolours)" → "omkolours",
  * "GJ4 Fashion" → "gjfashion") so the result always clears GoTrue's
- * six-character minimum; a buyer with no usable name at all gets "drevi".
- * Digits run 100–999 so the number always reads as three digits.
+ * six-character minimum. An owner name that is too short on its own ("Om",
+ * "Jo", "K. R.") carries on into the business name ("Om" of "Kolours" →
+ * "omkolours"), skipping a word that only repeats the last one ("Om" of
+ * "Om Tex" → "omtex"); whatever is still under three letters is finished with
+ * "drevi" ("Om" alone → "omdrevi"), and a buyer with no usable name at all
+ * gets "drevi". Digits run 100–999 so the number always reads as three digits.
  *
  * Mirrored in scripts/lib/password.mjs; password.test.ts pins the two copies.
  * Staff keep generateMemorablePassword(): an admin login gets the long form.
@@ -58,14 +62,16 @@ export function buyerPasswordStem(ownerName: string | null | undefined, business
     const named = all.filter((w) => !HONORIFICS.has(w));
     return named.length ? named : all;
   };
-  const owner = wordsOf(ownerName);
-  const words = owner.length ? owner : wordsOf(businessName);
+  const words = [...wordsOf(ownerName), ...wordsOf(businessName)];
   let stem = "";
+  let last = "";
   for (const w of words) {
     if (stem.length >= 3) break;
+    if (w === last) continue;
     stem += w;
+    last = w;
   }
-  return stem || "drevi";
+  return stem.length >= 3 ? stem : `${stem}drevi`;
 }
 
 export function generateBuyerPassword(ownerName: string | null | undefined, businessName: string | null | undefined): string {

@@ -31,8 +31,9 @@ const HONORIFICS = new Set(["mr", "mrs", "ms", "mx", "dr", "shri", "smt", "sri"]
 /**
  * Buyers: owner's first name (else the business's first word) + three digits,
  * e.g. `rakhi482`. Mirrors src/lib/password.ts exactly — read the rationale
- * there. Stems shorter than three letters pull in the next words so the
- * password always clears GoTrue's six-character minimum.
+ * there. Stems shorter than three letters pull in the next words (the owner's,
+ * then the business's, then "drevi") so the password always clears GoTrue's
+ * six-character minimum.
  */
 export function buyerPasswordStem(ownerName, businessName) {
   const wordsOf = (s) => {
@@ -47,14 +48,16 @@ export function buyerPasswordStem(ownerName, businessName) {
     const named = all.filter((w) => !HONORIFICS.has(w));
     return named.length ? named : all;
   };
-  const owner = wordsOf(ownerName);
-  const words = owner.length ? owner : wordsOf(businessName);
+  const words = [...wordsOf(ownerName), ...wordsOf(businessName)];
   let stem = "";
+  let last = "";
   for (const w of words) {
     if (stem.length >= 3) break;
+    if (w === last) continue;
     stem += w;
+    last = w;
   }
-  return stem || "drevi";
+  return stem.length >= 3 ? stem : `${stem}drevi`;
 }
 
 export function generateBuyerPassword(ownerName, businessName) {

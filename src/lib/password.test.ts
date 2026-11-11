@@ -28,6 +28,13 @@ const NAMES: [string | null, string | null][] = [
   ["", ""],
   [null, null],
   ["  ", "123 456"],
+  // Owner names too short to clear the floor on their own.
+  ["Om", "Kolours"],
+  ["Om", "Om Tex"],
+  ["Om", null],
+  ["Jo", "Amarra"],
+  ["K. R.", "KR Fashions"],
+  [null, "OM"],
 ];
 
 describe("generateMemorablePassword (staff)", () => {
@@ -66,6 +73,19 @@ describe("buyer passwords: first name + three digits (Ansh, 26 Sep)", () => {
     expect(buyerPasswordStem(null, "OM TEX")).toBe("omtex");
     expect(buyerPasswordStem("", "")).toBe("drevi");
     expect(buyerPasswordStem(null, "123 456")).toBe("drevi");
+  });
+
+  it("an owner name too short on its own carries on into the business name, then drevi", () => {
+    // Set Credentials' Auto box and Regenerate both use this, and setCredentials
+    // refuses anything under six characters — "om482" could never be saved.
+    expect(buyerPasswordStem("Om", "Kolours")).toBe("omkolours");
+    expect(buyerPasswordStem("Jo", "Amarra")).toBe("joamarra");
+    expect(buyerPasswordStem("Om", "Om Tex")).toBe("omtex");
+    expect(buyerPasswordStem("K. R.", "KR Fashions")).toBe("krkr");
+    expect(buyerPasswordStem("Om", null)).toBe("omdrevi");
+    expect(buyerPasswordStem(null, "OM")).toBe("omdrevi");
+    // A long enough first name still stands alone.
+    expect(buyerPasswordStem("Raj", "Amarra")).toBe("raj");
     for (const [o, b] of NAMES) expect(generateBuyerPassword(o, b).length).toBeGreaterThanOrEqual(6);
   });
 
