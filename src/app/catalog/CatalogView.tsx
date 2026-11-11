@@ -9,6 +9,7 @@ import { GroupedProductCard } from "@/components/GroupedProductCard";
 import { QrScanner } from "@/components/QrScanner";
 import { setQty as setCartQty } from "@/app/cart/actions";
 import { baseSkuOf, groupByBase } from "@/lib/variants";
+import { cartPieces } from "@/lib/cart-count";
 import { palette } from "@/lib/palette";
 import type { WholesaleProduct } from "@/lib/types";
 import { toastDuration } from "@/lib/use-toast";
@@ -83,7 +84,8 @@ export function CatalogView({
   }, [category, sub, query, products]);
   const groups = useMemo(() => groupByBase(filtered), [filtered]);
 
-  const cartCount = useMemo(() => Object.values(cart).filter((q) => q > 0).length, [cart]);
+  // Pieces, like the badge on Home and the cart menu (Oct review).
+  const cartCount = useMemo(() => cartPieces(Object.values(cart)), [cart]);
 
   function showToast(msg: string) {
     setToast(msg);

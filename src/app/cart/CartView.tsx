@@ -9,6 +9,7 @@ import { ChevronLeft, Menu, Minus, Plus, X } from "lucide-react";
 import { BuyerNavDrawer } from "@/components/BuyerNavDrawer";
 import { useInAppBack } from "@/components/InAppHistory";
 import { setQty, setSpecialQty, removeFromCart, submitOrder, type SubmitState } from "./actions";
+import { cartPieces } from "@/lib/cart-count";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
 import { uuid } from "@/lib/uuid";
@@ -90,7 +91,7 @@ export function CartView({
     <div className="min-h-screen flex flex-col" style={{ background: palette.ivory }}>
       {/* The menu takes the slot the layout already held open opposite the
           back arrow, so the bar keeps its balance. */}
-      <BuyerNavDrawer open={menuOpen} onClose={() => setMenuOpen(false)} cartCount={lines.length} className="sticky top-0 z-10">
+      <BuyerNavDrawer open={menuOpen} onClose={() => setMenuOpen(false)} cartCount={cartPieces(lines.map((l) => l.qty))} className="sticky top-0 z-10">
         <div
           className="flex items-center justify-between px-4 py-3.5"
           style={{ background: palette.ivory, borderBottom: "1px solid rgba(26,26,26,0.08)" }}

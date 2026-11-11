@@ -45,7 +45,7 @@ export function ProductDetailView({
     startTransition(async () => {
       const res = await addToCart(product.sku, qty);
       if (res.ok) {
-        setCount(res.count);
+        setCount(res.pieces);
         flash("Added to cart");
       } else {
         flash(res.message ?? "Could not add to cart");

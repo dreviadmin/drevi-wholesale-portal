@@ -6,6 +6,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DEFAULT_HSN } from "@/lib/hsn-default";
 import { getRawCart, getDetailedCart, type RawCartItem } from "@/lib/cart";
+import { cartPieces } from "@/lib/cart-count";
 import { getStockState, qtyCap } from "@/lib/stock";
 import { finalizeOrder } from "@/lib/order-finalize";
 import { captureBuyerSnapshot } from "@/lib/buyer-snapshot";
@@ -59,19 +60,22 @@ async function loadProduct(sku: string): Promise<WholesaleProduct | undefined> {
   return (data as WholesaleProduct) ?? undefined;
 }
 
-export async function addToCart(sku: string, qtyToAdd = 1): Promise<{ ok: boolean; count: number; message?: string }> {
+// `count` is lines; `pieces` is what the buyer's cart badge shows (Oct review).
+export async function addToCart(sku: string, qtyToAdd = 1): Promise<{ ok: boolean; count: number; pieces: number; message?: string }> {
   const buyer = await resolveActiveBuyer();
   const product = await loadProduct(sku);
   const items = await getRawCart(buyer.id);
   const existing = items.find((i) => i.sku === sku);
   const desired = (existing?.qty ?? 0) + qtyToAdd;
   const clamped = clampQty(product, desired);
-  if (clamped == null) return { ok: false, count: items.length, message: "This item is no longer available." };
+  if (clamped == null) {
+    return { ok: false, count: items.length, pieces: cartPieces(items.map((i) => i.qty)), message: "This item is no longer available." };
+  }
 
   if (existing) existing.qty = clamped;
   else items.push({ sku, qty: clamped });
   await saveCart(buyer.id, items);
-  return { ok: true, count: items.length };
+  return { ok: true, count: items.length, pieces: cartPieces(items.map((i) => i.qty)) };
 }
 
 export async function setQty(sku: string, qty: number): Promise<{ qty: number }> {

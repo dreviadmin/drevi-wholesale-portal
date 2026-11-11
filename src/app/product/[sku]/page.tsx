@@ -31,5 +31,5 @@ export default async function ProductPage({ params }: { params: { sku: string } 
   // anyway put the literal on-hand count ("Limited - 1 left") into the RSC
   // payload where devtools can read it. Staff surfaces still use
   // availabilityForSku directly.
-  return <ProductDetailView product={p} initialCartCount={cart?.count ?? 0} />;
+  return <ProductDetailView product={p} initialCartCount={cart?.totalQty ?? 0} />;
 }
