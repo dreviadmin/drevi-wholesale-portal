@@ -119,6 +119,7 @@ in production via **Vercel → Project → Settings → Environment Variables**.
 | `SHOPIFY_STORE_DOMAIN` | Shopify | `drevi-fashion.myshopify.com` (with hyphen!) |
 | `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET` | Shopify | Dev-Dashboard app, Client Credentials Grant |
 | `INTERAKT_API_KEY` | Interakt | optional until templates approved; sends no-op without it |
+| `INTERAKT_ALERT_PHONE` | Interakt | optional; the number that gets the inquiry, pending-review and order alerts, country code first (e.g. `91` + 10 digits). Unset keeps the number the code has always used |
 | `SUPABASE_ACCESS_TOKEN` / `SUPABASE_DB_URL` | Supabase management | ops-only (migrations); **not** needed on Vercel |
 
 ---

@@ -10,7 +10,6 @@ export interface InquiryState {
 }
 
 // Case A — public wholesale inquiry. Creates a pending/inquiry_form buyer.
-// (Rakesh's Interakt alert is wired in Phase 4.)
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function createInquiry(_prev: InquiryState, formData: FormData): Promise<InquiryState> {
