@@ -8,31 +8,27 @@ This page covers only the wallet. For the portal in general (checkouts, env
 files, deploys, Supabase access), read [HANDOVER.md](HANDOVER.md).
 
 Everything here was checked against the code and the live store on
-4 Oct 2026. Amounts in the code, the database and the logs are in paise
+4 Oct 2026, and again in November 2026 for the changes marked
+**(Nov 2026)**. Amounts in the code, the database and the logs are in paise
 (100000 = ₹1,000).
 
 ## What prod runs
 
-"The code" in this page is the working tree of
-`feature/wallet` in `/Users/anshsarawagi/Documents/drevi/wholesale-portal`.
-On 4 Oct it held the webhook and money fixes listed under
-[History](#history), uncommitted. They were not on `main`, and the newest
-prod deploy was from 3 Oct. Until they ship, prod behaves the old way:
+"The code" in this page is `main` of the portal repo. Prod deploys from
+`main`, from the checkout
+`/Users/anshsarawagi/Documents/drevi/wholesale-portal-main`. The webhook and
+money fixes of 4 Oct shipped on 6 Oct (`b9990d6`), and the replay fix on
+8 Oct (`a43a7b4`). So prod retries a failed webhook, logs `GAVE UP` and
+`SHORTFALL` lines, debits nothing on an `orders/create` that runs after a
+cancel, keeps the discount id when a Remove fails, and names orders by their
+#number.
 
-- A webhook whose handler fails is logged as
-  `[wallet-webhook] <topic> <order gid>: <error>`, answered 200 and never
-  retried. Treat every such line like a `GAVE UP` (see
-  [A webhook GAVE UP](#a-webhook-gave-up)).
-- There are no `GAVE UP` or `SHORTFALL` lines. A clamped debit still logs
-  `debited <amount Shopify took off>`.
-- An `orders/create` that runs after the order was cancelled still debits.
-- A failed Remove forgets the discount id, so the nightly sweep can't delete
-  that discount.
-- The statement names orders by the last 4 digits of the order id.
-
-To see what has shipped, run the `git log` command at the end of
-[History](#history), and list prod deploys with
-`npx --yes vercel ls --environment production` from
+The **(Nov 2026)** changes (the replay script, the order tags, the nightly
+reconciliation, the sturdier nightly cron, `/join` for an existing member,
+the end-to-end script) are described as the code does them. They reach prod
+only with the first deploy after they are merged. To check, run the
+`git log` command at the end of [History](#history), and list prod deploys
+with `npx --yes vercel ls --environment production` from
 `/Users/anshsarawagi/Documents/drevi/wholesale-portal-main`.
 
 ## The rules
@@ -89,6 +85,7 @@ set none of the overrides.
 | Just signed in | Nothing | `GET /api/wallet/me` finds their unclaimed sign-up by the email Shopify verified, opens the wallet with ₹1,000, and writes the phone, the name (only if the record has no first name) and tags (`drevi-wallet`, `source:wallet`, and `wa-opt-in` if ticked) onto the customer. |
 | Signed in, no sign-up, phone already on their Shopify record | Nothing | `me` opens the wallet from that phone. |
 | Signed in, no phone anywhere | Add their mobile in the popup (also opened from the bag) or My Account | `POST /api/wallet/join` opens the wallet. |
+| Signed in, already has a wallet | Nothing (the theme never offers them `/join`) | A `POST /api/wallet/join` anyway (a stale page, a copied token) returns their wallet unchanged with `created: false`. It writes nothing: not the phone, not the name, not the WhatsApp tag or consent **(Nov 2026)**. Before that, it rewrote the member's Shopify phone and WhatsApp choice from the request. |
 
 The public sign-up never changes an existing Shopify customer. It answers the
 same way whether or not an email or phone is known, so nobody can use it to
@@ -101,12 +98,13 @@ hidden honeypot field (`website`).
 |---|---|
 | Shopper taps **Use ₹X**, or **Use less** and an amount, on the bag's Drevi Wallet card | `POST /api/wallet/redeem` voids any earlier reservation, then creates a Shopify **automatic discount** for this one customer: title `Drevi Wallet · WLT-XXXXXXXX`, an amount off the order, a ₹5,000 minimum, and an end 2 hours later. It records an open row in `wallet_redemptions` and identifies the cart (see below). **Nothing is debited yet.** One open reservation per wallet (unique index, migration 0070). |
 | Shopper taps **Remove** | `DELETE /api/wallet/redeem` deletes the discount and marks the reservation `void`. If Shopify refuses the delete, the row keeps the discount id, and the nightly sweep deletes the discount after its 2-hour end. |
-| `orders/create`, the order carries the wallet discount | Debits what Shopify actually took off, never more than was reserved. Marks the reservation `used` and deletes the discount. If the order is already cancelled, it debits nothing. If the wallet held less than Shopify took off, the debit stops at zero and the log says `[wallet] SHORTFALL`. |
+| `orders/create`, the order carries the wallet discount | Debits what Shopify actually took off, never more than was reserved. Marks the reservation `used` and deletes the discount. If the order is already cancelled, it debits nothing. If the wallet held less than Shopify took off, the debit stops at zero, the log says `[wallet] SHORTFALL`, and the order is tagged `wallet-shortfall` **(Nov 2026)**. |
+| `orders/create`, the order carries the wallet discount but matches no wallet | Debits nothing (there is nothing to debit), logs `[wallet] SHORTFALL … reason: 'no wallet'` and tags the order `wallet-shortfall` **(Nov 2026)**. Shopify gave the credit away; this can happen when the customer id changed between Use and checkout. |
 | `orders/create`, no wallet on the order | Opens a wallet for the order's phone if none exists. |
 | `orders/paid` or `orders/fulfilled` | When the order is `PAID` and `FULFILLED` and not cancelled, credits the 10%. Once per order. |
 | `orders/cancelled` | Returns the credit spent on the order and reverses the 10%, net of anything a refund already did. |
 | `refunds/create` | Returns the wallet's share of the refunded pieces and reverses the 10% in proportion. Filed under `shopify_refund` / `<order>#<refund>`, so a later cancel or refund sees it. |
-| Nightly cron, 03:30 UTC (09:00 IST) | `/api/cron/wallet-expire` lapses up to 500 expired wallets and deletes up to 200 ended wallet discounts from Shopify. Reading a wallet also lapses it if its time is up. |
+| Nightly cron, 03:30 UTC (09:00 IST) | `/api/cron/wallet-expire` lapses up to 500 expired wallets and deletes up to 200 ended wallet discounts from Shopify. Reading a wallet also lapses it if its time is up. Then it checks recent orders against the ledger and reports what disagrees; it never moves money (see [The nightly reconciliation](#the-nightly-reconciliation), **Nov 2026**). |
 
 Every balance change goes through the Postgres function
 `wallet_post_movement` (migration 0068). It locks the account row. It returns
@@ -151,9 +149,6 @@ reservation it merely can't see. It does release one when the bag drops under
 
 ### Webhooks: delivery, retry and give-up
 
-This section describes the 4 Oct code. For what prod does until it ships,
-see [What prod runs](#what-prod-runs).
-
 Shopify posts five order topics to `/api/wallet/webhooks/shopify`. For each
 delivery the route:
 
@@ -173,8 +168,11 @@ ignores a movement it has already posted.
 
 To protect the subscription, a delivery that still fails 3 hours after
 Shopify first sent it (header `X-Shopify-Triggered-At`) is logged as
-`[wallet-webhook] GAVE UP …` and answered 200. That event is lost unless
-someone posts it by hand (see [A webhook GAVE UP](#a-webhook-gave-up)).
+`[wallet-webhook] GAVE UP …` and answered 200. Shopify will not send that
+event again. Once the cause is fixed, re-send it with
+`scripts/wallet-replay.mjs` **(Nov 2026)**, or post it by hand (see
+[A webhook GAVE UP](#a-webhook-gave-up)). The nightly reconciliation also
+flags the order if the ledger is missing what the event should have posted.
 
 So `wallet_webhook_events` lists only deliveries that were handled to the
 end. A failed delivery shows up only in the Vercel logs.
@@ -187,7 +185,11 @@ There is no staff screen for the retail wallet. These are the tools:
 |---|---|
 | `scripts/wallet-status.mjs` | Read wallets, statements, reservations and handled webhooks. Read-only. |
 | `scripts/wallet-register-webhooks.mjs` | List or re-create the five webhook subscriptions. |
-| Vercel logs (`npx --yes vercel logs`) | Find webhook results, errors, `GAVE UP` and `SHORTFALL` lines. |
+| `scripts/wallet-replay.mjs` **(Nov 2026)** | Re-send one order's webhook to the receiver, signed like Shopify, after a `GAVE UP`. See [Replay a webhook](#replay-a-webhook). |
+| `/api/cron/wallet-expire` by hand **(Nov 2026)** | Run the nightly sweep and reconciliation now, optionally over a wider window. See [The nightly reconciliation](#the-nightly-reconciliation). |
+| Shopify admin → Orders, filter by tag **(Nov 2026)** | `wallet-shortfall` and `wallet-check` mark orders for a person to look at. |
+| `scripts/wallet-e2e/` **(Nov 2026)** | The end-to-end check, see [Test before prod](#test-before-prod). |
+| Vercel logs (`npx --yes vercel logs`) | Find webhook results, errors, `GAVE UP`, `SHORTFALL` and `MISMATCH` lines. |
 | Supabase SQL editor, prod project | Look up ids. Post a ledger row by hand. |
 | Shopify admin → Discounts, Customers | See or delete wallet discounts. Review tagged customers. |
 | `scripts/drevi_admin.py` in the theme repo | Admin API queries. It signs in as the same Shopify app as the wallet (Drevi Admin Automation). That app can also write customers, discounts and orders, so use the helper here for read queries only. |
@@ -239,14 +241,25 @@ cd /Users/anshsarawagi/Documents/drevi/wholesale-portal-main
 npx --yes vercel logs --environment production --since 24h --query "wallet-webhook" -x
 npx --yes vercel logs --environment production --since 72h --query "GAVE UP" -x
 npx --yes vercel logs --environment production --since 72h --query "SHORTFALL" -x
+npx --yes vercel logs --environment production --since 72h --query "wallet-reconcile" -x
+npx --yes vercel logs --environment production --since 72h --query "wallet-expire" -x
 ```
 
 | Log line | Meaning |
 |---|---|
 | `[wallet-webhook] <topic> <order gid>: <result>` (info) | Handled. Results look like `debited 100000`, `earned 77900`, `waiting: paid=false fulfilled=true`, `no wallet on order`, `cancelled, nothing debited`, `already debited`. |
 | `[wallet-webhook] <topic> <order gid>: <error>` (error) | The handler failed. The route answered 500 and Shopify will retry. |
-| `[wallet-webhook] GAVE UP <topic> <order gid> delivery <id> after <n> min — replay by hand: <error>` | Still failing after 3 hours. The event is lost until someone posts it by hand. |
-| `[wallet] SHORTFALL #<order name> { requested, debited }` | Shopify took off more than the wallet held. |
+| `[wallet-webhook] GAVE UP <topic> <order gid> delivery <id> after <n> min — replay by hand: <error>` | Still failing after 3 hours. Shopify will not resend it; replay it (see [A webhook GAVE UP](#a-webhook-gave-up)). |
+| `[wallet] SHORTFALL #<order name> { requested, debited }` | Shopify took off more than the wallet held. The order is tagged `wallet-shortfall`. |
+| `[wallet] SHORTFALL #<order name> { requested, debited: 0, reason: 'no wallet' }` **(Nov 2026)** | The order used a wallet discount but matches no wallet. The order is tagged `wallet-shortfall`. |
+| `[wallet] would tag #<order name> <tag> (not production)` **(Nov 2026)** | A dev or local run would have tagged the order. Only prod (`VERCEL_ENV=production`) writes order tags, because dev shares the live store. |
+| `[wallet] tag #<order name> <tag>: <error>` **(Nov 2026)** | Tagging the order failed. The webhook or cron still succeeded; find the order from this line instead of by tag. |
+| `[wallet-expire] <account id>: <error>` **(Nov 2026)** | That wallet could not be lapsed tonight. The others still were, and the run answered 500 with `failed` > 0. The next night tries again. |
+| `[wallet-expire] read wallets: <error>` **(Nov 2026)** | The expired-wallet query failed; nothing was lapsed. The discount sweep and reconciliation still ran. |
+| `[wallet-expire] discount cleanup: <error>` | The discount sweep failed. The next night tries again. |
+| `[wallet-reconcile] MISMATCH #<order name> <kind> expected <X> got <Y>` **(Nov 2026)** | The ledger disagrees with the order. The order is tagged `wallet-check`. See [A wallet-check tag appears](#a-wallet-check-tag-appears). |
+| `[wallet-reconcile] #<order name>: <error>` **(Nov 2026)** | That order could not be read (a Shopify throttle, say). It was skipped and counted in `failed`. |
+| `[wallet-reconcile] failed: <error>` **(Nov 2026)** | The whole reconciliation failed. The lapse and sweep still ran. |
 | `[wallet] identify cart: …` | The Storefront call that identifies a cart failed. |
 | `[wallet] delete discount: …` | A Shopify discount delete failed. The nightly sweep tries again. |
 | `[wallet] delete used discount: …` | The discount of a placed order was not deleted. The sweep does not retry it; it stays live until its 2-hour end. Delete it in Shopify admin → Discounts. |
@@ -378,8 +391,7 @@ First ask where it went wrong: in the bag, at checkout, or on a placed order.
    not finish. Search the logs for the order id. If the order is less than
    about 4 hours old and the log shows only plain error lines, Shopify is
    still retrying; wait. A `GAVE UP` line means follow
-   [A webhook GAVE UP](#a-webhook-gave-up). (Until the 4 Oct fixes ship, a
-   plain error line also means that; see [What prod runs](#what-prod-runs).)
+   [A webhook GAVE UP](#a-webhook-gave-up).
 4. No discount on the order: the wallet was not used. Nothing was debited,
    and the reservation lapses after 2 hours. Any make-good (a partial refund
    in Shopify, or a goodwill `adjust` row) is Ansh's decision.
@@ -417,8 +429,47 @@ otherwise draws the deduction from the reservation. If it still misbehaves:
 2. Fix the cause the error names (Shopify throttling, a Supabase outage, a
    code bug). While the cause is there, new orders fail the same way.
 3. Check the subscriptions still exist (`--list`, above). Re-register if not.
-4. Post by hand what the handler would have posted, with the same references
-   (table below). A later automatic run then finds it and does nothing.
+4. Replay the event (see [Replay a webhook](#replay-a-webhook)). The
+   receiver runs the same handler again and prints its result.
+5. Only if the replay cannot work (the order changed since, say, and the
+   handler would now do something else), post by hand what the handler would
+   have posted, with the same references (table below). A later automatic
+   run then finds it and does nothing.
+
+##### Replay a webhook
+
+**(Nov 2026.)** `scripts/wallet-replay.mjs` reads the order from Shopify
+(read-only) and posts the topic's payload to the webhook receiver, signed
+with `WALLET_SHOPIFY_CLIENT_SECRET` the way Shopify signs it, with a fresh
+`replay-…` delivery id so the receiver doesn't skip it as handled. Repeating
+it is safe: every balance change goes through `wallet_post_movement`, so an
+event that already got through answers `already debited` or
+`already earned` and changes nothing. Run it from the repo root (the env
+file path is relative to where you run it):
+
+```bash
+cd /Users/anshsarawagi/Documents/drevi/wholesale-portal-main
+export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh"
+node scripts/wallet-replay.mjs --order '#1091' --topic orders/create --dry   # shows what it would send
+node scripts/wallet-replay.mjs --order '#1091' --topic orders/create         # sends it to prod
+```
+
+- `--order` takes `'#1091'` (quote it: the shell treats `#` as a comment),
+  the order gid, or its numeric id.
+- `--topic` is one of `orders/create`, `orders/paid`, `orders/fulfilled`,
+  `orders/cancelled`, `refunds/create`. For `refunds/create` it sends one
+  delivery per refund on the order.
+- The default receiver is prod. `--dev` sends to
+  `http://localhost:3000/api/wallet/webhooks/shopify` and reads
+  `.env.development.local`; `--url` names another receiver; `--env <file>`
+  names the env file.
+- It needs `SHOPIFY_STORE_DOMAIN`, `WALLET_SHOPIFY_CLIENT_ID` and
+  `WALLET_SHOPIFY_CLIENT_SECRET` in that env file. It does not fall back to
+  `SHOPIFY_CLIENT_*`: the receiver would refuse that signature (401).
+- Each line of output ends with the receiver's HTTP status and answer, for
+  example `HTTP 200 {"ok":true,"result":"already earned"}`. A non-200 exits 1.
+
+Afterwards, check the statement with `wallet-status.mjs`.
 
 | Topic that gave up | What to post |
 |---|---|
@@ -468,12 +519,97 @@ money given away at checkout. Usual causes: the same reservation was used on
 two devices before the first order's webhook ran; or the balance lapsed or
 was clawed back while a reservation was open.
 
-1. Note the order name and the amounts from the log.
+**(Nov 2026.)** Since then the order is also tagged `wallet-shortfall` (prod
+only; a dev run logs `would tag`), so Shopify admin → Orders, filtered by that
+tag, lists every one. A failed tag logs `[wallet] tag … :` and never fails
+the webhook.
+
+A second kind: `[wallet] SHORTFALL #1091 { requested: 100000, debited: 0, reason: 'no wallet' }`,
+with the webhook result `wallet discount on an order with no wallet (SHORTFALL 100000)`.
+The order carries a `Drevi Wallet · …` discount, but no wallet matches its
+customer id or phones, so nothing was debited. Usual cause: the wallet was
+relinked, or the buyer's customer record changed, between Use and checkout.
+It is tagged `wallet-shortfall` too.
+
+1. Note the order name and the amounts from the log (or open the tagged
+   order and read its `Drevi Wallet · …` line).
 2. Run `wallet-status.mjs` for the customer's phone to see their ledger rows
-   and reservations, with the order each one names.
+   and reservations, with the order each one names. For a `no wallet`
+   shortfall, look the wallet up by the code in the discount title
+   (`wallet_redemptions.code`) to find whose reservation it was.
 3. Do not try to take the balance below zero. The database refuses it.
 4. Send the order names and amounts to Ansh. Whether to accept the loss or
    contact the customer is his decision.
+5. When it is dealt with, remove the `wallet-shortfall` tag from the order.
+
+#### A wallet-check tag appears
+
+See [The nightly reconciliation](#the-nightly-reconciliation) for what was
+compared. Find the `[wallet-reconcile] MISMATCH` line for the order (or run
+the cron by hand and read `reconcile.mismatches`), then:
+
+| Mismatch | Usual cause | What to do |
+|---|---|---|
+| `redeem expected X got 0` | The `orders/create` webhook never finished (look for a `GAVE UP`) | [Replay](#replay-a-webhook) `orders/create`. |
+| `redeem expected X got Y`, Y < X | The debit was clamped (there is a `SHORTFALL` line) | Follow [A debit SHORTFALL](#a-debit-shortfall). Replaying changes nothing. |
+| `redeem expected 0 got Y` | A debit on an order that no longer shows a wallet discount (it was edited in Shopify, say) | Look at the order's history in Shopify admin and ask Ansh. |
+| `earn expected X got 0` | Paid and fulfilled, but the 10% never landed (a `GAVE UP` on `orders/paid` or `orders/fulfilled`) | Replay `orders/fulfilled` (or `orders/paid`). |
+| `earn expected X got Y`, Y ≠ X | The order changed after the credit (an edit, a line refunded while still `PAID`) | Check the order; usually nothing to do. Ask Ansh before posting an `adjust`. |
+| `reverse_redeem expected X got Y` | A cancel whose `orders/cancelled` webhook never finished | Replay `orders/cancelled`. |
+
+After the fix, the next night's run no longer reports the order; then remove
+the `wallet-check` tag from it.
+
+#### The nightly reconciliation
+
+**(Nov 2026.)** After the lapse and the discount sweep,
+`/api/cron/wallet-expire` runs `reconcileRecent` (`src/lib/wallet.ts`). It
+reads every order updated in the last 72 hours (except the last hour, whose
+webhooks may still be on their way), and compares each with the ledger rows
+filed under it and its refunds, on any wallet. The rules are
+`reconcileOrderMovements` in `src/lib/wallet-core.ts`, which mirror the
+webhook handlers:
+
+- Not cancelled: the `redeem` rows must add up to what the wallet discounts
+  took off the order (the automatic `Drevi Wallet · …` line plus any legacy
+  `WLT-` code).
+- Paid and fulfilled, with a wallet or a usable phone on the order: the
+  `earn` rows must add up to 10% of what was paid for merchandise, as it
+  stands now.
+- Cancelled after a debit: the `reverse_redeem` rows must give it all back.
+- Refund claw-backs are not checked (a refunded order is no longer `PAID`,
+  and claw-backs clamp by design).
+
+Each disagreement logs
+`[wallet-reconcile] MISMATCH <order> <kind> expected X got Y` and tags the
+order `wallet-check` (prod only). It never posts or changes a movement. It
+reads at most 250 orders and stops after about 40 seconds; `truncated: true`
+in the answer means it stopped early.
+
+The cron's JSON answer (with `?hours=N`, the window is N hours, up to 90
+days, for a by-hand re-check after an outage):
+
+```json
+{ "ok": true, "expired": 0, "failed": 0, "tidied": 0,
+  "reconcile": { "ok": true, "from": "…", "to": "…", "checked": 41, "mismatched": 0,
+                 "tagged": 0, "would_tag": 0, "failed": 0, "truncated": false, "mismatches": [] },
+  "at": "…" }
+```
+
+`expired` is how many wallets lapsed, `failed` how many could not be (each
+has a `[wallet-expire] <account id>` line; one bad wallet no longer stops the
+others, or the sweep after them), `tidied` how many ended discounts were
+deleted. `ok` is false (HTTP 500) when a wallet failed or the wallet query
+failed. If the reconciliation itself throws, `reconcile` is
+`{ "ok": false, "error": "…" }` and the rest still ran. Run it by hand with
+the cron secret (never paste the secret into a doc or chat):
+
+```bash
+curl -s -H "Authorization: Bearer $CRON_SECRET" "https://drevi-wholesale-portal-swart.vercel.app/api/cron/wallet-expire?hours=168"
+```
+
+Running it by hand is safe: lapsing and the discount sweep are idempotent,
+and the reconciliation only reads and tags.
 
 #### A phone-review tag appears
 
@@ -532,17 +668,18 @@ Portal (paths from the repo root):
 | `supabase/migrations/0068_wallet.sql` | Tables and the `wallet_post_movement` function. Its header is out of date; see [below](#out-of-date-comments-in-the-code). |
 | `supabase/migrations/0070_wallet_one_open_code.sql` | Unique index: one open reservation per wallet. |
 | `supabase/migrations/0071_wallet_signups.sql` | `wallet_signups`; drops the old `wallet_otps` table. |
-| `src/lib/wallet-core.ts` (+ test) | Pure rules: phones, emails, earning, redeemable amount, refund maths, phone-claim decision, statement labels, discount title. |
+| `src/lib/wallet-core.ts` (+ test) | Pure rules: phones, emails, earning, redeemable amount, refund maths, phone-claim decision, statement labels, discount title. **(Nov 2026)** also the shortfall amount (`debitShortfallPaise`), the order-vs-ledger comparison (`reconcileOrderMovements`, `walletAllocatedPaise`) and the keep-going loop of the nightly cron (`eachSettled`). |
 | `src/lib/wallet-token.ts` (+ test) | The storefront customer token. |
 | `src/lib/wallet-identity.ts` | Token from a request. |
 | `src/lib/wallet-http.ts` (+ test) | CORS allow-list and `guarded()`, so an error still answers with CORS headers. |
-| `src/lib/wallet.ts` | Accounts, sign-ups, joining, ledger, reservations, webhook handlers. |
-| `src/lib/wallet-shopify.ts` | Shopify calls as the Drevi Admin Automation app: customers, automatic discounts (create and delete), Storefront cart identity (`identifyCart`), order reads, webhook HMAC. |
+| `src/lib/wallet.ts` (+ test, Nov 2026) | Accounts, sign-ups, joining, ledger, reservations, webhook handlers, order tags (`flagOrder`), the nightly reconciliation (`reconcileRecent`). The test mocks Supabase and Shopify and covers the shortfall tag, the dev guard, the reconciliation and `/join` for a member. |
+| `src/lib/wallet-shopify.ts` | Shopify calls as the Drevi Admin Automation app: customers, automatic discounts (create and delete), Storefront cart identity (`identifyCart`), order reads, webhook HMAC. **(Nov 2026)** also order tags (`addOrderTags`) and the recent-orders list for the reconciliation (`listOrdersUpdatedBetween`). |
 | `src/app/api/wallet/{signup,join,me,redeem,cart}` | The storefront's API. |
 | `src/app/api/wallet/webhooks/shopify/route.ts` | The webhook receiver. |
-| `src/app/api/cron/wallet-expire/route.ts` | Nightly lapse and discount sweep. Schedule in `vercel.json`. |
+| `src/app/api/cron/wallet-expire/route.ts` | Nightly lapse, discount sweep and **(Nov 2026)** reconciliation. Schedule in `vercel.json`. |
 | `src/lib/backup.ts` | The hourly off-site backup (GitHub Actions, `.github/workflows/backup.yml`) includes `wallet_accounts`, `wallet_ledger`, `wallet_signups`, `wallet_redemptions`, `wallet_webhook_events`. |
-| `scripts/wallet-status.mjs`, `scripts/wallet-register-webhooks.mjs`, `scripts/wallet-seed.mjs` | See [Operations](#operations). |
+| `scripts/wallet-status.mjs`, `scripts/wallet-register-webhooks.mjs`, `scripts/wallet-seed.mjs`, `scripts/wallet-replay.mjs` (Nov 2026) | See [Operations](#operations). |
+| `scripts/wallet-e2e/wallet_e2e.py` + `README.md` (Nov 2026) | The end-to-end check. See [Test before prod](#test-before-prod). |
 
 Theme (`/Users/anshsarawagi/Documents/Drevi_Website/drevi-shopify-theme`):
 
@@ -590,15 +727,28 @@ Customer tags the wallet writes:
 | `drevi-wallet` | The customer has a wallet. The theme reads it, for example to stop offering the sign-up popup. |
 | `source:wallet` | The customer signed up or joined through the wallet. |
 | `wallet-signup` | The sign-up form created the customer. |
-| `wa-opt-in` | The WhatsApp box was ticked. Removed if they untick it when joining. |
+| `wa-opt-in` | The WhatsApp box was ticked. Removed if they untick it when they first join (a member's later `/join` changes nothing, Nov 2026). |
 | `phone-review` | See [A phone-review tag appears](#a-phone-review-tag-appears). |
 | `wallet-relinked` | The wallet moved off this record to a signed-in account. |
 
+Order tags the wallet writes **(Nov 2026)**, only on prod
+(`VERCEL_ENV=production`; dev and local runs share the live store, so they
+log `would tag` instead):
+
+| Tag | Set when |
+|---|---|
+| `wallet-shortfall` | `orders/create` debited less than the wallet discount took off, or found no wallet at all. See [A debit SHORTFALL](#a-debit-shortfall). |
+| `wallet-check` | The nightly reconciliation found the ledger disagreeing with the order. See [A wallet-check tag appears](#a-wallet-check-tag-appears). |
+
+The app already holds `write_orders`, so no scope change was needed.
+
 ## Test before prod
 
-- Unit tests (on 4 Oct: 3 files, 52 tests, all pass). They cover
-  `wallet-core.ts`, the token and the CORS helper. `wallet.ts` and the routes
-  have no tests in the repo.
+- Unit tests (on 11 Nov: 4 files, 79 tests, all pass). They cover
+  `wallet-core.ts`, the token, the CORS helper and, with Supabase and Shopify
+  mocked, the parts of `wallet.ts` changed in Nov 2026 (shortfall tag, the
+  dev guard, the reconciliation, `/join` for a member). The routes have no
+  tests in the repo.
 
   ```bash
   cd /Users/anshsarawagi/Documents/drevi/wholesale-portal
@@ -620,10 +770,20 @@ Customer tags the wallet writes:
   curl -s -o /dev/null -w "%{http_code}\n" -X POST -H 'Content-Type: application/json' -d '{}' https://drevi-wholesale-portal-swart.vercel.app/api/wallet/join
   ```
 
-- An end-to-end script (`wallet_auto_e2e.py dev|prod`) and a bag test harness
-  (`wallet-harness/`) exist only in a temporary Claude session folder,
-  `/private/tmp/claude-501/-Users-anshsarawagi-Documents-drevi-pipeline-scripts/76fd220e-b2af-434d-b95d-8fc1d711c0ec/scratchpad/`.
-  They are not in git. Move them into the repo before relying on them.
+- The end-to-end check, `scripts/wallet-e2e/wallet_e2e.py --target dev|prod`
+  **(Nov 2026)**. It was rebuilt from the session transcripts of the October
+  script (`wallet_auto_e2e.py`, whose temporary folder is gone) and now has
+  26 checks. It creates two throwaway customers and real wallet discounts in
+  the live store, joins with WhatsApp consent off and a number checked to be
+  unused, and deletes everything at the end; `--cleanup` sweeps leftovers.
+  Its `README.md` lists the checks, the side effects and the run commands.
+  For dev, run it against `npm run dev` on this Mac (the dev deploy has no
+  wallet env). The October bag test harness (`wallet-harness/`) was not
+  rebuilt; test the bag by hand as below.
+- After a deploy that touches the webhooks or the cron: replay `orders/paid`
+  for an order that already earned (expect `already earned`, statement
+  unchanged), and run the cron by hand (expect `ok: true` and 0 mismatches,
+  or a short list you can explain).
 - By hand, at phone and laptop widths:
   - Sign up signed out → land back signed in → the wallet shows ₹1,000, and
     the customer has the phone and the `drevi-wallet` tag.
@@ -661,8 +821,14 @@ Customer tags the wallet writes:
   logged as SHORTFALL. Preventing it needs a design change.
 - **A failed Remove.** If Shopify refuses the delete, the discount stays live
   until its 2-hour end.
-- **No replay tool.** A delivery that GAVE UP is only in the logs; post it by
-  hand.
+- **Replay is by hand.** A delivery that GAVE UP is in the logs and, if it
+  left the ledger short, in the next nightly reconciliation (tag
+  `wallet-check`). Nothing replays it automatically; run
+  `scripts/wallet-replay.mjs` (Nov 2026).
+- **The reconciliation's reach.** It reads at most 250 orders updated in the
+  last 72 hours, in about 40 seconds, and does not check refund claw-backs.
+  An order that disagrees for longer than the window is flagged only while
+  it is in it; widen it by hand with `?hours=N`.
 - **No retry on Shopify throttling.** The wallet's Shopify client retries
   only a rejected token. A throttled call makes Use fail with an error, makes
   Remove leave the discount live, and makes a webhook answer 500 (Shopify
@@ -734,11 +900,28 @@ them.
   Shortfall debits log `[wallet] SHORTFALL`. An `orders/create` that arrives
   after a cancel debits nothing. Remove keeps the Shopify discount id when
   the delete fails, so the sweep retries it. The statement names orders by
-  their #number. Unused WhatsApp-login constants were removed. When this doc
-  was written, these changes were uncommitted on `feature/wallet` and not yet
-  on `main`. Check before you rely on them in production:
+  their #number. Unused WhatsApp-login constants were removed. Shipped on
+  `main` on 6 Oct (`b9990d6`); the replay fix (a replayed movement reads as
+  already posted) followed on 8 Oct (`a43a7b4`).
+- **Nov 2026: health check.** The `/join` route returns an existing member's
+  wallet unchanged and writes nothing, so a stale page or a copied token can
+  no longer rewrite their Shopify phone or WhatsApp choice. A shortfall, and
+  a wallet discount on an order with no wallet, now tag the order
+  `wallet-shortfall` (prod only). The nightly cron keeps going past a wallet
+  it can't lapse, always runs the discount sweep, and then checks the last
+  72 hours of orders against the ledger (`wallet-check`, report only; no new
+  cron schedule). `scripts/wallet-replay.mjs` re-sends a lost webhook. The
+  end-to-end check is in the repo (`scripts/wallet-e2e/`), with throwaway
+  customers that join with WhatsApp consent off and a number checked to be
+  unused. The October runs joined with consent on and random numbers, so
+  their numbers may still be in the AiSensy WhatsApp app's contacts.
+  Planned separately: cutting the storefront token's lifetime from 24 hours
+  to 2, which waits for a theme change that reloads the page once on a 401.
 
-  ```bash
-  cd /Users/anshsarawagi/Documents/drevi/wholesale-portal-main
-  DEVELOPER_DIR=/Library/Developer/CommandLineTools git log --oneline -5 -- src/app/api/wallet/webhooks/shopify/route.ts
-  ```
+Check what has shipped before you rely on it in production:
+
+```bash
+cd /Users/anshsarawagi/Documents/drevi/wholesale-portal-main
+DEVELOPER_DIR=/Library/Developer/CommandLineTools git log --oneline -8 -- src/lib/wallet.ts src/app/api/wallet src/app/api/cron/wallet-expire
+npx --yes vercel ls --environment production
+```
