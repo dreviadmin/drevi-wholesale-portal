@@ -10,6 +10,7 @@ import { BuyerNavDrawer } from "@/components/BuyerNavDrawer";
 import { setQty, setSpecialQty, removeFromCart, submitOrder, type SubmitState } from "./actions";
 import { formatINR } from "@/lib/format";
 import { palette } from "@/lib/palette";
+import { uuid } from "@/lib/uuid";
 import type { StockState } from "@/lib/types";
 
 // cap / moq / stockState / restockDays / belowMoq are still sent by page.tsx
@@ -63,10 +64,11 @@ export function CartView({
   const [isPending, startTransition] = useTransition();
   const [state, formAction] = useFormState<SubmitState, FormData>(submitOrder, {});
   // One idempotency key per cart screen — retries of this submit resolve to
-  // the same order server-side.
-  const clientRefRef = useRef<string>(
-    typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-xxxx-4xxx-yxxx-xxxxxxxxxxxx`.replace(/[xy]/g, (c) => { const r = (Math.random() * 16) | 0; return (c === "x" ? r : (r & 0x3) | 0x8).toString(16); }),
-  );
+  // the same order server-side. uuid() and not a hand-rolled fallback: the old
+  // one was 41 characters, which submitOrder's 36-character check drops, so
+  // in-app browsers without randomUUID (WhatsApp, Instagram) lost the
+  // double-submit protection entirely.
+  const clientRefRef = useRef<string>(uuid());
 
   function editQty(sku: string, qty: number, special = false) {
     startTransition(async () => {

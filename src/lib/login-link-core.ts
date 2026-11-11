@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { sameEmailAllowsBuyer, type SameEmailRow } from "./buyer-access";
 
 // Pure rules for one-tap login links (/go/<token>). The database and auth
 // calls live in login-link.ts; everything decidable without them is here so it
@@ -42,16 +43,18 @@ export interface LinkFacts {
   /** The buyer the link was minted for. */
   buyer: { status: string; email: string | null; encrypted_password: string | null } | null;
   /** Every buyer row sharing that email (emails are not unique since 0007). */
-  sameEmailStatuses: string[];
+  sameEmail: SameEmailRow[];
   /** True when staff_users has the email — a buyer link must never open a staff session. */
   emailIsStaff: boolean;
 }
 
 /**
  * Whether a tap may sign in. Mirrors the gate the session then has to pass:
- * middleware lets a buyer through only when EVERY row with their email is
- * active, so a link that "worked" for a half-suspended duplicate would just
- * bounce to /login — refuse it here with an honest message instead.
+ * middleware lets a buyer through only when every row with their email that
+ * gates is active (src/lib/buyer-access.ts), so a link that "worked" for a
+ * half-suspended duplicate would just bounce to /login — refuse it here with an
+ * honest message instead. A pending row with no login (a public inquiry on the
+ * same email) does not gate, there or here.
  */
 export function linkRefusal(f: LinkFacts): LinkRefusal | null {
   if (!f.link || !f.buyer) return "unknown";
@@ -59,6 +62,6 @@ export function linkRefusal(f: LinkFacts): LinkRefusal | null {
   if (!f.buyer.email || !f.buyer.encrypted_password) return "no_login";
   if (f.emailIsStaff) return "staff";
   if (f.buyer.status !== "active") return "inactive";
-  if (f.sameEmailStatuses.length === 0 || f.sameEmailStatuses.some((s) => s !== "active")) return "inactive";
+  if (!sameEmailAllowsBuyer(f.sameEmail)) return "inactive";
   return null;
 }

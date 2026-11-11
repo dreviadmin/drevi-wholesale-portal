@@ -123,11 +123,13 @@ for (const s of shares) {
   else if (!sharedBefore.has(s.buyer_id)) sharedBefore.set(s.buyer_id, s.event_at);
 }
 
-const statusesByEmail = new Map();
+// Every row on each email, as linkRefusal's rule reads them (src/lib/buyer-access.ts):
+// the status, and only whether a login exists, never the ciphertext.
+const rowsByEmail = new Map();
 for (const b of everyBuyer) {
   if (!b.email) continue;
   const k = b.email.toLowerCase();
-  statusesByEmail.set(k, [...(statusesByEmail.get(k) ?? []), b.status]);
+  rowsByEmail.set(k, [...(rowsByEmail.get(k) ?? []), { status: b.status, hasLogin: !!b.encrypted_password }]);
 }
 
 const mask = (p) => (p ? `…${String(p).replace(/\D/g, "").slice(-4)}` : "—");
@@ -149,7 +151,7 @@ for (const b of candidates) {
   const refusal = linkRefusal({
     link: { revoked_at: null },
     buyer: b,
-    sameEmailStatuses: statusesByEmail.get((b.email ?? "").toLowerCase()) ?? [],
+    sameEmail: rowsByEmail.get((b.email ?? "").toLowerCase()) ?? [],
     emailIsStaff: staffEmails.has((b.email ?? "").toLowerCase()),
   });
   if (refusal) { held.push([name, `its link would be refused (${refusal})`]); continue; }

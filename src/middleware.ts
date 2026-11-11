@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { GATING_ROWS_FILTER, gatingStatusesAllow } from "@/lib/buyer-access";
 
 // Public paths — no auth required. Everything else is gated.
 const PUBLIC_PATHS = ["/", "/login", "/forgot-password", "/wholesale", "/~offline"];
@@ -73,9 +74,12 @@ export async function middleware(request: NextRequest) {
   // every request, which the transient-failure branch below turned into a
   // deterministic fail-open — a suspended buyer with a duplicate row kept
   // full access. Plain selects can't error on multiplicity.
+  // GATING_ROWS_FILTER leaves out pending rows with no login (a public
+  // /wholesale inquiry on the buyer's email), which must not lock them out —
+  // src/lib/buyer-access.ts.
   const [staffRes, buyerRes] = await Promise.all([
     supabase.from("staff_users").select("active").eq("email", email).limit(5),
-    supabase.from("buyers").select("status").eq("email", email).limit(5),
+    supabase.from("buyers").select("status").eq("email", email).or(GATING_ROWS_FILTER).limit(5),
   ]);
 
   // Transient DB failure (network blip, cold start) must NOT bounce a valid
@@ -89,10 +93,11 @@ export async function middleware(request: NextRequest) {
   }
 
   const staffActive = (staffRes.data ?? []).some((r) => r.active === true);
-  // Duplicates resolve to the MOST restrictive answer: every row must be
-  // active for the buyer to pass.
-  const buyerRows = buyerRes.data ?? [];
-  const buyerActive = buyerRows.length > 0 && buyerRows.every((r) => r.status === "active");
+  // Duplicates resolve to the MOST restrictive answer: every row that gates
+  // must be active for the buyer to pass, so a suspended or rejected duplicate
+  // still blocks. The same rule as resolveActiveRole, the login action and
+  // linkRefusal.
+  const buyerActive = gatingStatusesAllow((buyerRes.data ?? []).map((r) => r.status as string));
 
   if (isAdminRoute) {
     if (staffActive) return response;
@@ -118,5 +123,10 @@ export const config = {
   // they need the same treatment. These are static build artefacts with no
   // session to refresh, so skipping middleware entirely is both correct and
   // cheaper than adding them to PUBLIC_PATHS (which still costs a getUser()).
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest\\.json|sw\\.js|workbox-[^/]+\\.js|fallback-[^/]+\\.js|swe-worker-[^/]+\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
+  //
+  // robots.txt (src/app/robots.ts, disallow-all — golden rule 7) for the same
+  // reason: behind the gate a crawler asking for it got a 307 to /login. The
+  // trailing $ keeps it to that exact path, so nothing else slips past the
+  // gate by starting with "robots.txt".
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest\\.json|sw\\.js|robots\\.txt$|workbox-[^/]+\\.js|fallback-[^/]+\\.js|swe-worker-[^/]+\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
 };

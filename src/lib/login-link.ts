@@ -6,6 +6,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { encryptPassword, decryptPassword } from "@/lib/crypto";
 import { PORTAL_URL } from "@/lib/share";
 import { hashToken, isTokenShaped, linkRefusal, loginLinkUrl, newToken, type LinkRefusal } from "@/lib/login-link-core";
+import type { SameEmailRow } from "@/lib/buyer-access";
 
 // One-tap login links: https://<portal>/go/<token> signs one buyer in (0073).
 // The WhatsApp launch templates carry the token as their URL-button value
@@ -135,19 +136,20 @@ export async function resolveLoginToken(token: string): Promise<ResolvedLink> {
     .maybeSingle();
   if (buyerErr) return { ok: false, reason: "error" };
 
-  let sameEmailStatuses: string[] = [];
+  let sameEmail: SameEmailRow[] = [];
   let emailIsStaff = false;
   if (buyer?.email) {
     const [same, staff] = await Promise.all([
-      admin.from("buyers").select("status").eq("email", buyer.email).limit(20),
+      admin.from("buyers").select("status, encrypted_password").eq("email", buyer.email).limit(20),
       admin.from("staff_users").select("id").eq("email", buyer.email).limit(1),
     ]);
     if (same.error || staff.error) return { ok: false, reason: "error" };
-    sameEmailStatuses = (same.data ?? []).map((r) => r.status as string);
+    // Only whether a login exists is kept — never the ciphertext itself.
+    sameEmail = (same.data ?? []).map((r) => ({ status: r.status as string, hasLogin: !!r.encrypted_password }));
     emailIsStaff = (staff.data ?? []).length > 0;
   }
 
-  const refusal = linkRefusal({ link, buyer, sameEmailStatuses, emailIsStaff });
+  const refusal = linkRefusal({ link, buyer, sameEmail, emailIsStaff });
   if (refusal) return { ok: false, reason: refusal };
   return { ok: true, linkId: link.id, buyer: { id: buyer!.id, email: buyer!.email!, business_name: buyer!.business_name } };
 }

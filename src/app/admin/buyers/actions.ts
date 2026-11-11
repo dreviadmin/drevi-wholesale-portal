@@ -369,6 +369,23 @@ export async function addBuyer(form: {
     const { data: existing } = await admin.from("buyers").select("id").eq("client_ref", clientRef).maybeSingle();
     if (existing) return { ok: true, id: existing.id };
   }
+  // An email that is already an active buyer's login gets no second row. A
+  // duplicate that is later rejected or suspended blocks every row on the
+  // email, the active buyer's included (src/lib/buyer-access.ts). Uncredentialed
+  // captures may still share a placeholder email, as 0007 intended.
+  if (email) {
+    const { data: holder } = await admin
+      .from("buyers")
+      .select("business_name, owner_name")
+      .eq("email", email)
+      .eq("status", "active")
+      .not("encrypted_password", "is", null)
+      .limit(1);
+    if (holder && holder.length > 0) {
+      const name = holder[0].business_name || holder[0].owner_name || "an active buyer";
+      return { ok: false, error: `${email} is already the login for ${name}. Open that buyer instead of adding a new one.` };
+    }
+  }
   const { data, error } = await admin
     .from("buyers")
     .insert({

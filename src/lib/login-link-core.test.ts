@@ -4,7 +4,7 @@ import { hashToken, isTokenShaped, linkRefusal, loginLinkUrl, newToken, portalOr
 const ok: LinkFacts = {
   link: { revoked_at: null },
   buyer: { status: "active", email: "royal@buyers.drevifashion.com", encrypted_password: "x" },
-  sameEmailStatuses: ["active"],
+  sameEmail: [{ status: "active", hasLogin: true }],
   emailIsStaff: false,
 };
 
@@ -68,7 +68,34 @@ describe("linkRefusal", () => {
   it("refuses suspended, pending and half-suspended duplicates", () => {
     expect(linkRefusal({ ...ok, buyer: { ...ok.buyer!, status: "suspended" } })).toBe("inactive");
     expect(linkRefusal({ ...ok, buyer: { ...ok.buyer!, status: "pending" } })).toBe("inactive");
-    expect(linkRefusal({ ...ok, sameEmailStatuses: ["active", "suspended"] })).toBe("inactive");
-    expect(linkRefusal({ ...ok, sameEmailStatuses: [] })).toBe("inactive");
+    expect(linkRefusal({ ...ok, sameEmail: [...ok.sameEmail, { status: "suspended", hasLogin: false }] })).toBe("inactive");
+    expect(linkRefusal({ ...ok, sameEmail: [] })).toBe("inactive");
+  });
+
+  it("a suspended or rejected duplicate still blocks, login or not", () => {
+    for (const status of ["suspended", "rejected"]) {
+      for (const hasLogin of [true, false]) {
+        expect(linkRefusal({ ...ok, sameEmail: [...ok.sameEmail, { status, hasLogin }] }), `${status}/${hasLogin}`).toBe("inactive");
+      }
+    }
+  });
+
+  it("a pending duplicate with no login (a public inquiry) does not lock the buyer out", () => {
+    expect(linkRefusal({ ...ok, sameEmail: [...ok.sameEmail, { status: "pending", hasLogin: false }] })).toBeNull();
+    expect(
+      linkRefusal({ ...ok, sameEmail: [{ status: "pending", hasLogin: false }, ...ok.sameEmail, { status: "pending", hasLogin: false }] }),
+    ).toBeNull();
+  });
+
+  it("a pending duplicate that has a login still blocks", () => {
+    expect(linkRefusal({ ...ok, sameEmail: [...ok.sameEmail, { status: "pending", hasLogin: true }] })).toBe("inactive");
+  });
+
+  it("an active duplicate with no login is fine, as before", () => {
+    expect(linkRefusal({ ...ok, sameEmail: [...ok.sameEmail, { status: "active", hasLogin: false }] })).toBeNull();
+  });
+
+  it("no row that gates at all is not access", () => {
+    expect(linkRefusal({ ...ok, sameEmail: [{ status: "pending", hasLogin: false }] })).toBe("inactive");
   });
 });

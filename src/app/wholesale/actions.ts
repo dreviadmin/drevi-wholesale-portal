@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendInquiryAlert } from "@/lib/interakt";
+import { BUYER_LOGIN_DOMAIN } from "@/lib/share";
 
 export interface InquiryState {
   ok?: boolean;
@@ -29,11 +30,26 @@ export async function createInquiry(_prev: InquiryState, formData: FormData): Pr
   // to reply, and it later becomes the login username.
   if (!email) return { error: "Email is required so we can reply." };
   if (!EMAIL_RE.test(email)) return { error: "Please enter a valid email address." };
+  // The buyer login domain is synthetic: nobody receives mail there, so Rakesh
+  // could never reply, and the address is some buyer's username.
+  if (email.endsWith(`@${BUYER_LOGIN_DOMAIN}`)) return { error: "Please enter your own email address so we can reply." };
   if (!owner_name && !business_name) {
     return { error: "Tell us either your name or your business name." };
   }
 
   const admin = createAdminClient();
+
+  // An email that is already an active buyer's login gets no second row —
+  // treated as received, like the dedupe below, without saying the account
+  // exists. The gate ignores a pending row with no login, but a rejected or
+  // suspended one on the same email still blocks the buyer, and rejecting an
+  // unwanted inquiry is what staff would do with it (src/lib/buyer-access.ts),
+  // so none is created. No WhatsApp alert either: with no row there is nothing
+  // for the dedupe and burst cap below to count.
+  const { data: activeLogin } = await admin
+    .from("buyers").select("id")
+    .eq("email", email).eq("status", "active").not("encrypted_password", "is", null).limit(1);
+  if (activeLogin && activeLogin.length > 0) return { ok: true };
 
   // Cheap anti-flood without extra schema:
   // (a) dedupe — the same email inquiring twice within 10 min is treated as

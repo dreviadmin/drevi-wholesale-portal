@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { getEnv } from "@/lib/env";
+import { GATING_ROWS_FILTER, gatingStatusesAllow } from "@/lib/buyer-access";
 
 // Secure is gated on the environment rather than hardcoded: a hardcoded true
 // would make the auth cookie unsettable over http://localhost in dev, and every
@@ -44,8 +45,10 @@ export type ActiveRole = "staff" | "buyer" | null;
  * so "/" and /login can't disagree with the gate about where a user belongs —
  * keep the two in step. As there: plain selects (not maybeSingle(), which
  * errors on the duplicate buyer emails allowed since 0007) and duplicates
- * resolve to the MOST restrictive answer, every row must be active. Staff wins
- * a staff+buyer collision, matching what the login action does with one.
+ * resolve to the MOST restrictive answer, every row that gates must be active —
+ * a suspended or rejected duplicate still blocks, a pending row with no login
+ * (a public inquiry) does not (src/lib/buyer-access.ts). Staff wins a
+ * staff+buyer collision, matching what the login action does with one.
  *
  * A failed lookup returns null so the caller falls back to /login — unlike
  * middleware there is no page behind these routes to re-check authorization,
@@ -62,12 +65,11 @@ export async function resolveActiveRole(): Promise<ActiveRole> {
   // RLS lets a user read only their own staff/buyer row (or staff read all).
   const [staffRes, buyerRes] = await Promise.all([
     supabase.from("staff_users").select("active").eq("email", email).limit(5),
-    supabase.from("buyers").select("status").eq("email", email).limit(5),
+    supabase.from("buyers").select("status").eq("email", email).or(GATING_ROWS_FILTER).limit(5),
   ]);
   if (staffRes.error || buyerRes.error) return null;
 
   if ((staffRes.data ?? []).some((r) => r.active === true)) return "staff";
 
-  const buyerRows = buyerRes.data ?? [];
-  return buyerRows.length > 0 && buyerRows.every((r) => r.status === "active") ? "buyer" : null;
+  return gatingStatusesAllow((buyerRes.data ?? []).map((r) => r.status as string)) ? "buyer" : null;
 }

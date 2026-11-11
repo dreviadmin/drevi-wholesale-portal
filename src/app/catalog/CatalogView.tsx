@@ -121,6 +121,11 @@ export function CatalogView({
         else copy[product.sku] = res.qty;
         return copy;
       });
+      // The server dropped the line (sold out, or no longer in the catalog):
+      // replace the optimistic "Added to cart" rather than let the card quietly
+      // revert. Same words as addToCart, and no stock count — buyers aren't
+      // shown one.
+      if (next > 0 && res.qty === 0) showToast("This item is no longer available.");
     });
   }
 

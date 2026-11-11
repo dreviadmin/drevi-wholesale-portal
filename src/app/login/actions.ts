@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditEvent } from "@/lib/audit";
 import { BUYER_LOGIN_DOMAIN } from "@/lib/share";
 import { WHOLESALE_PHONE } from "@/lib/contact";
+import { GATING_ROWS_FILTER, gatingStatusesAllow } from "@/lib/buyer-access";
 
 export interface LoginState {
   error?: string;
@@ -85,9 +86,25 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     .limit(1);
   const buyer = buyerRows?.[0];
 
+  // Middleware checks every row with the email, not just this one: a suspended
+  // or rejected duplicate still blocks, a pending one with no login (a public
+  // inquiry) does not (src/lib/buyer-access.ts). Ask the same question here —
+  // a redirect to /home that the gate bounces straight back just showed this
+  // form again with no message. A failed read lets the login through; the gate
+  // decides on the next request, as it always has.
+  let duplicateBlocks = false;
   if (buyer?.status === "active") {
-    await writeAuditEvent({ eventType: "login_success", buyerId: buyer.id, ipAddress: ip, userAgent });
-    redirect("/home"); // Stage 9 storefront home (catalog stays reachable, D10)
+    const { data: gating, error: gatingErr } = await admin
+      .from("buyers")
+      .select("status")
+      .eq("email", email)
+      .or(GATING_ROWS_FILTER)
+      .limit(20);
+    duplicateBlocks = !gatingErr && !gatingStatusesAllow((gating ?? []).map((r) => r.status as string));
+    if (!duplicateBlocks) {
+      await writeAuditEvent({ eventType: "login_success", buyerId: buyer.id, ipAddress: ip, userAgent });
+      redirect("/home"); // Stage 9 storefront home (catalog stays reachable, D10)
+    }
   }
 
   // Valid credentials but no active access — sign back out and explain.
@@ -96,14 +113,16 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     buyerId: buyer?.id ?? null,
     ipAddress: ip,
     userAgent,
-    notes: buyer ? `blocked: status=${buyer.status}` : "no app row for authenticated user",
+    notes: buyer
+      ? duplicateBlocks ? "blocked: another buyer row on this email is not active" : `blocked: status=${buyer.status}`
+      : "no app row for authenticated user",
   });
   await supabase.auth.signOut();
 
   if (buyer?.status === "pending") {
     return { error: "Your account is awaiting approval. Rakesh will be in touch shortly." };
   }
-  if (buyer?.status === "suspended") {
+  if (buyer?.status === "suspended" || duplicateBlocks) {
     return { error: `Your account is inactive. Please contact Rakesh: ${WHOLESALE_PHONE}.` };
   }
   return { error: "Invalid username or password." };
