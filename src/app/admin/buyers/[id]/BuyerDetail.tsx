@@ -425,15 +425,15 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet, changeRe
               </select>
             </label>
             <div className="flex gap-2 flex-wrap justify-end">
-              <button type="button" onClick={openEdit} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
+              <button type="button" onClick={openEdit} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 11, letterSpacing: "0.15em", padding: "7px 11px", minHeight: 44 }}>
                 <Pencil size={12} /> Edit Details
               </button>
               {buyer.hasPassword && (
-                <button type="button" onClick={sendLoginLink} className="flex items-center gap-1.5 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
-                  <MessageCircle size={12} /> Send Login Link
+                <button type="button" onClick={sendLoginLink} className="flex items-center gap-1.5 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 11, letterSpacing: "0.15em", padding: "7px 11px", minHeight: 44 }}>
+                  <MessageCircle size={12} /> Share login on WhatsApp
                 </button>
               )}
-              <button type="button" onClick={saveVCard} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>Save to Contacts</button>
+              <button type="button" onClick={saveVCard} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 11, letterSpacing: "0.15em", padding: "7px 11px", minHeight: 44 }}>Save to Contacts</button>
             </div>
           </div>
         )}
@@ -682,10 +682,10 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet, changeRe
             </div>
           </div>
           <div className="flex gap-2 mt-3 flex-wrap">
-            <button type="button" onClick={() => share("Copy")} className="flex items-center gap-1.5 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}><Copy size={12} /> Copy</button>
-            <button type="button" onClick={() => share("WhatsApp")} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}><MessageCircle size={12} /> Share via WhatsApp</button>
-            <button type="button" onClick={regenerate} className="flex items-center gap-1.5 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}><RefreshCw size={12} /> Regenerate</button>
-            <button type="button" onClick={() => setChanging((v) => !v)} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>Change</button>
+            <button type="button" onClick={() => share("Copy")} className="flex items-center gap-1.5 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 11, letterSpacing: "0.15em", padding: "7px 11px", minHeight: 44 }}><Copy size={12} /> Copy</button>
+            <button type="button" onClick={() => share("WhatsApp")} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 11, letterSpacing: "0.15em", padding: "7px 11px", minHeight: 44 }}><MessageCircle size={12} /> Share login on WhatsApp</button>
+            <button type="button" onClick={regenerate} className="flex items-center gap-1.5 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 11, letterSpacing: "0.15em", padding: "7px 11px", minHeight: 44 }}><RefreshCw size={12} /> Regenerate</button>
+            <button type="button" onClick={() => setChanging((v) => !v)} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 11, letterSpacing: "0.15em", padding: "7px 11px", minHeight: 44 }}>Change</button>
           </div>
           <div className="mt-4 font-body" style={{ fontSize: 13, color: palette.black }}>
             <div className="flex items-center gap-2 flex-wrap">
@@ -697,7 +697,7 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet, changeRe
               <div className="font-mono mt-1.5" style={{ fontSize: 11, color: palette.goldDeep, wordBreak: "break-all", userSelect: "all" }}>{loginLink}</div>
             )}
             <p className="mt-1.5" style={{ fontSize: 11, color: palette.mutedGreige, lineHeight: 1.5 }}>
-              Opens this buyer&apos;s account with no password. Share via WhatsApp includes it.
+              Opens this buyer&apos;s account with no password. Share login on WhatsApp includes it.
             </p>
           </div>
           {changing && (

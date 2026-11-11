@@ -89,11 +89,11 @@ export function CredentialModal({
               <div style={{ fontWeight: 600, marginTop: 4 }}>Password: {activated.password}</div>
             </div>
             <div className="flex gap-2 mt-4">
-              <button type="button" onClick={() => navigator.clipboard?.writeText(`${login.label}: ${login.value}\nPassword: ${activated.password}`)} className="flex items-center gap-1.5 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 10, letterSpacing: "0.15em", padding: "8px 14px" }}>
+              <button type="button" onClick={() => navigator.clipboard?.writeText(`${login.label}: ${login.value}\nPassword: ${activated.password}`)} className="flex items-center gap-1.5 font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 11, letterSpacing: "0.15em", padding: "8px 14px", minHeight: 44 }}>
                 <Copy size={12} /> Copy
               </button>
-              <button type="button" onClick={() => shareWhatsApp(buildWhatsAppMessage(email, activated.password, activated.loginUrl), buyer.phone)} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 10, letterSpacing: "0.15em", padding: "8px 14px" }}>
-                <MessageCircle size={12} /> Share via WhatsApp
+              <button type="button" onClick={() => shareWhatsApp(buildWhatsAppMessage(email, activated.password, activated.loginUrl), buyer.phone)} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 11, letterSpacing: "0.15em", padding: "8px 14px", minHeight: 44 }}>
+                <MessageCircle size={12} /> Share login on WhatsApp
               </button>
             </div>
             <button type="button" onClick={() => onClose(true)} className="w-full mt-5 font-body uppercase" style={{ background: palette.gold, color: palette.black, fontSize: 11, letterSpacing: "0.2em", padding: "12px 0" }}>Done</button>

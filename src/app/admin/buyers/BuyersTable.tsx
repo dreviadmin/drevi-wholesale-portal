@@ -343,14 +343,14 @@ export function BuyersTable({
               disabled={pending || sendable.length === 0}
               onClick={sendCredentials}
               className="flex items-center gap-1.5 font-body uppercase disabled:opacity-40"
-              style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.black, background: palette.gold, padding: "8px 11px" }}
+              style={{ fontSize: 11, letterSpacing: "0.1em", color: palette.black, background: palette.gold, padding: "8px 11px", minHeight: 44 }}
               title={sendable.length === 0 ? "None of these are active with a phone and a password on file" : undefined}
             >
               <MessageCircle size={12} strokeWidth={2} />
-              {pending ? "Sending…" : `Send credentials (${sendable.length})`}
+              {pending ? "Sending…" : `Send WhatsApp login button (${sendable.length})`}
             </button>
             <button type="button" onClick={() => setSelected(new Set())} className="font-body uppercase"
-              style={{ fontSize: 9, letterSpacing: "0.1em", color: palette.champagne, border: `1px solid ${palette.champagne}`, padding: "8px 10px" }}>
+              style={{ fontSize: 11, letterSpacing: "0.1em", color: palette.champagne, border: `1px solid ${palette.champagne}`, padding: "8px 10px", minHeight: 44 }}>
               Clear
             </button>
           </div>
