@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Search, X, ScanLine, ImageOff, Check, Crown } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
-import { useSort, SortTh } from "@/components/sortable";
+import { useSort, SortTh, type SortState } from "@/components/sortable";
 import { withFrom } from "@/components/BackLink";
 import { palette } from "@/lib/palette";
 import { useToast } from "@/lib/use-toast";
 import { queueTray } from "@/app/admin/sku-generator/labels";
-import { MISSING_FIELDS, isMissingKey, type MissingKey } from "@/lib/studio/missing";
+import { MISSING_FIELDS, type MissingKey } from "@/lib/studio/missing";
+import { DEFAULT_BOARD_SORT, boardPath, parseBoardQuery } from "@/lib/studio/board-url";
 import { BatchProgress, type BatchProgressState } from "@/components/admin/BatchProgress";
 import { BADGE_LABEL, type DesignBadge } from "@/lib/studio/state";
 import type { BoardRow } from "@/lib/studio/load";
@@ -151,6 +152,11 @@ export function StudioBoard({
   // on is the only way to touch one (0063).
   const [showDiscontinued, setShowDiscontinued] = useState(false);
   const [query, setQuery] = useState("");
+  // Held here rather than inside useSort so the URL can seed it.
+  const [sortState, setSortState] = useState<SortState>(DEFAULT_BOARD_SORT);
+  // The view is written back to the address only once it has been read from
+  // it, or the first render would wipe a deep link before it was applied.
+  const [urlRead, setUrlRead] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [toast, flash, dismissToast] = useToast();
@@ -167,28 +173,20 @@ export function StudioBoard({
     | null
   >(null);
 
-  // Cockpit deep-links land pre-filtered: /admin/studio?state=needs_photos
+  // Cockpit deep-links land pre-filtered (/admin/studio?state=needs_photos),
+  // and Back from a design lands on the list it was opened from: chips,
+  // search, sort and Show discontinued (board-url.ts).
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const s = params.get("state");
-    if (s && (CHIP_ORDER as string[]).includes(s)) setChip(s as DesignBadge);
-    const sp = params.get("specs");
-    if (sp === "confirmed" || sp === "awaiting") setSpecsFilter(sp);
-    const ms = params.get("missing");
-    if (ms) {
-      const picked = ms.split(",").filter(isMissingKey);
-      if (picked.length) setMissingFilter(new Set(picked));
-    }
-    const ph = params.get("photos");
-    if (ph) {
-      const picked = ph.split(",").map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
-      if (picked.length) setPhotoCounts(new Set(picked));
-    }
-    const bk = params.get("bucket");
-    if (bk) {
-      const picked = bk.split(",").filter((k) => k === BUCKET_NONE || /^[a-z0-9_]{1,48}$/.test(k));
-      if (picked.length) setBucketFilter(new Set(picked));
-    }
+    const v = parseBoardQuery(new URLSearchParams(window.location.search));
+    setChip(v.chip);
+    setSpecsFilter(v.specs);
+    setPhotoCounts(new Set(v.photos));
+    setMissingFilter(new Set(v.missing));
+    setBucketFilter(new Set(v.buckets));
+    setQuery(v.query);
+    setSortState(v.sort);
+    setShowDiscontinued(v.showDiscontinued);
+    setUrlRead(true);
   }, []);
 
   // Every chip count below is over `live`, not `rows`: a board showing 287
@@ -257,7 +255,7 @@ export function StudioBoard({
     // Numeric on purpose: useSort compares strings with localeCompare({numeric:true}),
     // which mis-orders ISO fractional seconds of unequal length.
     added: (r) => (r.createdAt ? Date.parse(r.createdAt) : null),
-  }, { key: "added", dir: "desc" });
+  }, undefined, { sort: sortState, onSort: setSortState });
 
   // Progress lives beside the toast, not inside it: a toast answers "what just
   // happened", the meter answers "how much longer". A 17-minute copy run needs
@@ -432,18 +430,19 @@ export function StudioBoard({
     remember({ ...b, active: false });
     flash(`Removed "${b.label}"`);
   }
-  // Carry the active filters so the workbench's back link lands on the same
+  // Carry the whole view so the workbench's back link lands on the same
   // list — Grishma works down her filtered set one design at a time.
-  const boardHref = (() => {
-    const p = new URLSearchParams();
-    if (chip !== "all") p.set("state", chip);
-    if (specsFilter !== "any") p.set("specs", specsFilter);
-    if (photoCounts.size > 0) p.set("photos", [...photoCounts].sort((a, b) => a - b).join(","));
-    if (missingFilter.size > 0) p.set("missing", MISSING_FIELDS.filter((f) => missingFilter.has(f.key)).map((f) => f.key).join(","));
-    if (bucketFilter.size > 0) p.set("bucket", [...bucketFilter].sort().join(","));
-    const q = p.toString();
-    return q ? `/admin/studio?${q}` : "/admin/studio";
-  })();
+  const boardHref = boardPath({
+    chip, specs: specsFilter, photos: photoCounts, missing: missingFilter, buckets: bucketFilter,
+    query, sort: sortState, showDiscontinued,
+  });
+  // And keep the board's own address in step (replace, not push, so a filter
+  // tap adds no Back step): the browser's back, or a swipe on a phone, then
+  // returns to this view too.
+  useEffect(() => {
+    if (!urlRead || window.location.pathname + window.location.search === boardHref) return;
+    window.history.replaceState(null, "", boardHref);
+  }, [boardHref, urlRead]);
   const openRow = async (id: string) => {
     if (pendingWrites.current > 0) { flash("Saving buckets…"); await bucketWrites.current; }
     router.push(withFrom(`/admin/studio/${id}`, boardHref));
