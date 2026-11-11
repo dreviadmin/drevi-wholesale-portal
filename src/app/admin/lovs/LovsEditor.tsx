@@ -59,7 +59,7 @@ export function LovsEditor({ rows }: { rows: LovRow[] }) {
     <div className="px-4 md:px-8 py-6 max-w-2xl">
       <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>Lists of values</h1>
       <p className="font-body mt-1" style={{ fontSize: 12, lineHeight: 1.6, color: palette.softBlack }}>
-        The lists minting, goods-in and the master editor offer. Codes deactivate rather than delete —
+        The lists minting, goods-in and Product Master offer. Codes deactivate rather than delete —
         existing SKUs may reference them.
       </p>
 

@@ -145,11 +145,8 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus, designs }
                   {d.title && <div className="font-body truncate" style={{ fontSize: 11, color: palette.mutedGreige }}>{d.title}</div>}
                 </div>
                 <div className="flex gap-2">
-                  <Link href={withFrom(`/admin/studio/master/${d.id}`, here)} className="font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
-                    Product details
-                  </Link>
-                  <Link href={withFrom(`/admin/studio/master/${d.id}`, here)} className="font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
-                    Specs
+                  <Link href={withFrom(`/admin/studio/master/${d.id}`, here)} className="font-body uppercase inline-flex items-center" style={{ background: palette.black, color: palette.ivory, fontSize: 11, letterSpacing: "0.15em", padding: "7px 14px", minHeight: 44 }}>
+                    Product Master
                   </Link>
                 </div>
               </div>

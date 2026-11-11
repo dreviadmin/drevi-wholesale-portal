@@ -684,7 +684,7 @@ export function Workbench({ board, buckets: serverBuckets, angles, copy, pool, a
           {/* One page for everything about the product (12 Sep) — specs,
               supply, both prices, HSN, stock and the publish toggles. */}
           <Link href={specsHref} className="flex items-center gap-1 font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: palette.goldDeep }} title="Specs, supply, wholesale + retail price, HSN and stock">
-            <SlidersHorizontal size={14} /> Product details
+            <SlidersHorizontal size={14} /> Product Master
           </Link>
         </span>
       </div>

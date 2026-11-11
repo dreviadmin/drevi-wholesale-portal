@@ -103,7 +103,7 @@ export async function GET(request: Request) {
     if (design?.id) actions.push({ key: "open_studio", label: "Open in studio", href: `/admin/studio/${design.id}` });
     // Only where wholesale_products has a row — Manage Catalog cannot open a
     // registry-only mint or a vendor-info-only SKU.
-    if (product) actions.push({ key: "edit_master", label: "Edit product master", href: `/admin/manage-catalog?sku=${encodeURIComponent(sku)}` });
+    if (product) actions.push({ key: "edit_master", label: "Edit in Manage Catalog", href: `/admin/manage-catalog?sku=${encodeURIComponent(sku)}` });
   }
   actions.push({ key: "add_to_print", label: "Add to print sheet" }); // client handles
 

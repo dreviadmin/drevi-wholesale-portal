@@ -20,7 +20,7 @@ const STOCK_LABEL: Record<string, string> = {
 
 // A scan/search result: either a matched portal product, or a bare SKU that
 // isn't on the portal yet (the missing-price items — copy the SKU, then price
-// it in Studio → Specs, or per size in the Product Master).
+// it in Product Master, per design or per size).
 type Result = { sku: string; product: WholesaleProduct | null };
 
 async function copyText(text: string): Promise<boolean> {
@@ -90,7 +90,7 @@ export function PriceCheckClient({ products, withdrawnSkus, drivePhotos }: { pro
     setCopied(sku);
     setTimeout(() => setCopied((c) => (c === sku ? null : c)), 1500);
     return p
-      ? { ok: true, message: p.wholesale_price > 0 ? `${formatINR(p.wholesale_price)} — ${p.title ?? p.sku}` : `${p.title ?? sku} — price not set · SKU copied · set it in Studio → Specs` }
+      ? { ok: true, message: p.wholesale_price > 0 ? `${formatINR(p.wholesale_price)} — ${p.title ?? p.sku}` : `${p.title ?? sku} — price not set · SKU copied · set it in Product Master` }
       : { ok: true, message: withdrawn.has(sku) ? `${sku} — withdrawn from billing · copied` : `${sku} · copied` }; // not on portal, but SKU captured
   }
 
@@ -152,7 +152,7 @@ export function PriceCheckClient({ products, withdrawnSkus, drivePhotos }: { pro
     <div className="px-4 md:px-8 py-6 max-w-2xl">
       <h1 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: palette.black }}>Price Check</h1>
       <p className="font-body mt-1" style={{ fontSize: 12, color: palette.mutedGreige }}>
-        Scan a tag — see the price if it’s on the portal, or copy the SKU and set its price in Studio → Specs.
+        Scan a tag — see the price if it’s on the portal, or copy the SKU and set its price in Product Master.
       </p>
 
       <button
@@ -251,7 +251,7 @@ export function PriceCheckClient({ products, withdrawnSkus, drivePhotos }: { pro
                 </div>
               ) : (
                 <div className="font-body mt-3" style={{ fontSize: 13, color: palette.goldDeep, fontWeight: 600 }}>
-                  Price not set — copy the SKU, then set it in Studio → Specs (per size: Product Master)
+                  Price not set — copy the SKU, then set it in Product Master
                 </div>
               )}
               <div className="font-body mt-2 flex flex-wrap gap-x-4 gap-y-1" style={{ fontSize: 11, color: palette.softBlack }}>
@@ -278,7 +278,7 @@ export function PriceCheckClient({ products, withdrawnSkus, drivePhotos }: { pro
               <p className="font-body mt-3" style={{ fontSize: 11, color: palette.mutedGreige, lineHeight: 1.5 }}>
                 {withdrawn.has(current.sku)
                   ? "Withdrawn from billing: an admin can make it sellable again in Manage Catalog."
-                  : "Not on the portal yet — copy the SKU; once its delivery is logged, set the price in Studio → Specs."}
+                  : "Not on the portal yet — copy the SKU; once its delivery is logged, set the price in Product Master."}
               </p>
             </div>
           </div>

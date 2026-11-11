@@ -283,7 +283,7 @@ export function DeliveryIntake({
   );
 
   if (saved) {
-    const actionBtn = { fontSize: 9, letterSpacing: "0.14em", padding: "7px 11px" } as const;
+    const actionBtn = { fontSize: 11, letterSpacing: "0.14em", padding: "7px 14px", minHeight: 44, display: "inline-flex", alignItems: "center" } as const;
     return (
       <div className="pb-10">
         <div className="p-3.5" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.1)" }}>
@@ -329,8 +329,7 @@ export function DeliveryIntake({
                 </div>
                 <div className="flex gap-2 mt-2.5">
                   {/* Back from these lands on the saved receipt (same banner), not on the Studio. */}
-                  <Link href={withFrom(`/admin/studio/master/${d.id}`, `/admin/receipts/${saved.receiptId}`)} className="font-body uppercase" style={{ ...actionBtn, background: palette.black, color: palette.ivory }}>Product details</Link>
-                  <Link href={withFrom(`/admin/studio/master/${d.id}`, `/admin/receipts/${saved.receiptId}`)} className="font-body uppercase" style={{ ...actionBtn, border: `1px solid ${palette.black}`, color: palette.black }}>Specs</Link>
+                  <Link href={withFrom(`/admin/studio/master/${d.id}`, `/admin/receipts/${saved.receiptId}`)} className="font-body uppercase" style={{ ...actionBtn, background: palette.black, color: palette.ivory }}>Product Master</Link>
                 </div>
               </div>
             );
@@ -906,9 +905,8 @@ function GarmentSheet({
                 delivery draft stays open; it also autosaves regardless. */}
             {g.designId && (
               <div className="flex gap-3 mt-1.5">
-                <a href={`/admin/studio/master/${g.designId}`} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: "#1F6B45", textDecoration: "underline" }}>Product details</a>
-                <a href={`/admin/studio/master/${g.designId}`} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: "#1F6B45", textDecoration: "underline" }}>Specs</a>
-                <a href={`/admin/studio/${g.designId}`} target="_blank" rel="noreferrer" className="font-body uppercase" style={{ fontSize: 8.5, letterSpacing: "0.12em", color: "#1F6B45", textDecoration: "underline" }}>Studio</a>
+                <a href={`/admin/studio/master/${g.designId}`} target="_blank" rel="noreferrer" className="font-body uppercase inline-flex items-center" style={{ fontSize: 11, letterSpacing: "0.12em", color: "#1F6B45", textDecoration: "underline", minHeight: 44 }}>Product Master</a>
+                <a href={`/admin/studio/${g.designId}`} target="_blank" rel="noreferrer" className="font-body uppercase inline-flex items-center" style={{ fontSize: 11, letterSpacing: "0.12em", color: "#1F6B45", textDecoration: "underline", minHeight: 44 }}>Studio</a>
               </div>
             )}
           </div>
