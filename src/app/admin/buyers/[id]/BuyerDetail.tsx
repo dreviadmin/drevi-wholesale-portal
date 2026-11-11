@@ -283,10 +283,11 @@ export function BuyerDetail({ isAdmin, buyer, orders, activity, wallet, changeRe
   }
   function regenerate() {
     if (!window.confirm("Generate a new password and invalidate the current one? The one-tap login link keeps working — press New link to stop it too.")) return;
-    start(async () => { const r = await regeneratePassword(buyer.id); if (r.ok) { setRevealed(r.password!); flash("New password generated"); } else flash(r.error ?? "Failed"); });
+    // On failure the old password may already be dead — never leave it on screen.
+    start(async () => { const r = await regeneratePassword(buyer.id); if (r.ok) { setRevealed(r.password!); flash("New password generated"); } else { setRevealed(null); flash(r.error ?? "Failed"); } });
   }
   function submitChange() {
-    start(async () => { const r = await changePassword(buyer.id, newPw); if (r.ok) { setRevealed(r.password!); setChanging(false); setNewPw(""); flash("Password changed"); } else flash(r.error ?? "Failed"); });
+    start(async () => { const r = await changePassword(buyer.id, newPw); if (r.ok) { setRevealed(r.password!); setChanging(false); setNewPw(""); flash("Password changed"); } else { setRevealed(null); flash(r.error ?? "Failed"); } });
   }
   function saveVCard() {
     downloadVCard(buildVCard({ ownerName: buyer.owner_name, businessName: buyer.business_name, phone: buyer.phone, email: buyer.email, city: buyer.city, status: buyer.status, onboarded: buyer.approved_at ?? buyer.created_at }), `${(buyer.owner_name ?? buyer.business_name ?? "buyer").replace(/\s+/g, "-")}.vcf`);

@@ -386,8 +386,22 @@ describe("setOrderLineHsn writes through the line guard", () => {
     expect(r).toEqual({ ok: true });
     expect(orderRow().items[0].hsn).toBe("6204");
     expect(orderRow().items[1].billed_in).toBe("bill-9");
+    // The bill's own bump (4 → 5) stands; the HSN retry adds none.
+    expect(orderRow().lines_rev).toBe(5);
     const orderWrites = writes.filter((w) => w.table === "orders");
     expect(orderWrites.every((w) => w.filters.some((f) => f.startsWith("lines_rev=")))).toBe(true);
+  });
+
+  it("an HSN edit keeps lines_rev, so an agent's frozen commission is not marked revised", async () => {
+    seedOrder({ items: [line({ line_state: "confirmed" })] });
+    const r = await orders.setOrderLineHsn("o1", 0, "6204");
+    expect(r).toEqual({ ok: true });
+    expect(orderRow().items[0].hsn).toBe("6204");
+    expect(orderRow().lines_rev).toBe(4);
+    // Still guarded: the write only lands on the revision it read.
+    const orderWrites = writes.filter((w) => w.table === "orders");
+    expect(orderWrites).toHaveLength(1);
+    expect(orderWrites[0].filters).toContain("lines_rev=4");
   });
 
   it("refuses when another session moved a different line into that slot", async () => {

@@ -606,8 +606,11 @@ export async function setOrderLineHsn(
   // read above, with no lines_rev guard, could land on top of a bill being
   // generated or a line being confirmed and quietly undo its billed_in or
   // stock_moved — a line billable twice, or stock that moves twice.
+  // No lines_rev bump though: HSN is descriptive, and a bump would mark an
+  // agent's frozen commission as "revised" (same rule as refreshOrderFromCatalog).
   const w = await patchOrderLine(orderId, index, { hsn: value || null }, (fresh) =>
     fresh.sku !== items[index].sku ? "The order changed — reload the page." : null,
+    { bump: false },
   );
   if (!w.ok) return { ok: false, error: w.error };
 
@@ -640,6 +643,8 @@ async function patchOrderLine(
   index: number,
   patch: Partial<OrderItem>,
   expect?: (fresh: OrderItem) => string | null,
+  /** bump:false keeps lines_rev for a purely descriptive write (still CAS-guarded). */
+  opts?: { bump?: boolean },
 ): Promise<{ ok: boolean; error?: string; prev?: OrderItem }> {
   const admin = createAdminClient();
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -653,11 +658,12 @@ async function patchOrderLine(
       if (bad) return { ok: false, error: bad };
     }
     items[index] = { ...prev, ...patch };
+    const rev = Number(o.lines_rev) || 0;
     const { data: won, error } = await admin
       .from("orders")
-      .update({ items, lines_rev: (Number(o.lines_rev) || 0) + 1 })
+      .update({ items, lines_rev: opts?.bump === false ? rev : rev + 1 })
       .eq("id", orderId)
-      .eq("lines_rev", Number(o.lines_rev) || 0)
+      .eq("lines_rev", rev)
       .select("id")
       .maybeSingle();
     if (error) return { ok: false, error: error.message };

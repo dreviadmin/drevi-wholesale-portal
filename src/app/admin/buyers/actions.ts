@@ -190,9 +190,11 @@ export async function regeneratePassword(buyerId: string): Promise<CredResult> {
   // Golden rule 4: the hash just changed, so a failed ciphertext write would
   // leave Reveal / Share handing out the old, now-dead password.
   const { error: encErr } = await admin.from("buyers").update({ encrypted_password: encryptPassword(password) }).eq("id", buyerId);
-  if (encErr) return { ok: false, error: STORED_COPY_FAILED };
   const { ip, userAgent } = reqMeta();
-  await writeAuditEvent({ eventType: "credential_regenerated", buyerId, staffUserId: staff.id, ipAddress: ip, userAgent });
+  // The login password DID change, so the event is logged either way
+  // (golden rule 5); the note says the stored copy is stale.
+  await writeAuditEvent({ eventType: "credential_regenerated", buyerId, staffUserId: staff.id, ipAddress: ip, userAgent, notes: encErr ? "login password changed; stored copy failed to save" : null });
+  if (encErr) { revalidate(buyerId); return { ok: false, error: STORED_COPY_FAILED }; }
   revalidate(buyerId);
   return { ok: true, password };
 }
@@ -214,9 +216,12 @@ export async function changePassword(buyerId: string, newPassword: string): Prom
     return { ok: false, error: (e as Error).message };
   }
   const { error: encErr } = await admin.from("buyers").update({ encrypted_password: encryptPassword(newPassword) }).eq("id", buyerId);
-  if (encErr) return { ok: false, error: STORED_COPY_FAILED };
   const { ip, userAgent } = reqMeta();
-  await writeAuditEvent({ eventType: "credential_changed", buyerId, staffUserId: staff.id, ipAddress: ip, userAgent });
+  await writeAuditEvent({ eventType: "credential_changed", buyerId, staffUserId: staff.id, ipAddress: ip, userAgent, notes: encErr ? "login password changed; stored copy failed to save" : null });
+  if (encErr) {
+    revalidate(buyerId);
+    return { ok: false, error: "The login password changed, but the stored copy did not save — press Save again so Share sends the right one." };
+  }
   revalidate(buyerId);
   return { ok: true, password: newPassword };
 }

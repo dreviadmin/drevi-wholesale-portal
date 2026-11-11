@@ -221,13 +221,22 @@ describe("password changes report a stored copy that did not save", () => {
     authAdmin.listUsers.mockImplementationOnce(async () => ({ data: { users: [{ id: "auth-royal", email: "royal@buyers.drevifashion.com" }] }, error: null }));
   }
 
-  it("regeneratePassword fails and logs nothing when the stored copy fails", async () => {
+  // The login password has already changed by the time the stored copy is
+  // written, so the change is logged either way, with a note when the stored
+  // copy is stale.
+  const STALE_NOTE = "login password changed; stored copy failed to save";
+
+  it("regeneratePassword fails, hands back no password, and still logs the change when the stored copy fails", async () => {
     world(true);
     const r = await buyers.regeneratePassword("b1");
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/stored copy did not save/);
     expect(r.password).toBeUndefined();
-    expect(writeAuditEvent).not.toHaveBeenCalled();
+    expect(authAdmin.updateUserById).toHaveBeenCalledWith("auth-royal", { password: "Royal@4821", email_confirm: true });
+    expect(writeAuditEvent).toHaveBeenCalledTimes(1);
+    expect(writeAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "credential_regenerated", buyerId: "b1", staffUserId: STAFF.id, notes: STALE_NOTE }),
+    );
   });
 
   it("regeneratePassword returns the new password when both writes land", async () => {
@@ -235,15 +244,27 @@ describe("password changes report a stored copy that did not save", () => {
     const r = await buyers.regeneratePassword("b1");
     expect(r).toEqual({ ok: true, password: "Royal@4821" });
     expect(authAdmin.updateUserById).toHaveBeenCalledWith("auth-royal", { password: "Royal@4821", email_confirm: true });
-    expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "credential_regenerated" }));
+    expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "credential_regenerated", notes: null }));
   });
 
-  it("changePassword fails and logs nothing when the stored copy fails", async () => {
+  it("changePassword fails with its own 'press Save again' message and still logs the change when the stored copy fails", async () => {
     world(true);
     const r = await buyers.changePassword("b1", "newpass1");
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/stored copy did not save/);
-    expect(writeAuditEvent).not.toHaveBeenCalled();
+    expect(r.error).toMatch(/press Save again/);
+    expect(r.password).toBeUndefined();
+    expect(writeAuditEvent).toHaveBeenCalledTimes(1);
+    expect(writeAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "credential_changed", buyerId: "b1", staffUserId: STAFF.id, notes: STALE_NOTE }),
+    );
+  });
+
+  it("changePassword returns the new password and logs a plain change when both writes land", async () => {
+    world(false);
+    const r = await buyers.changePassword("b1", "newpass1");
+    expect(r).toEqual({ ok: true, password: "newpass1" });
+    expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "credential_changed", notes: null }));
   });
 });
 
