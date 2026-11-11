@@ -79,6 +79,24 @@ export interface BackupPayload {
   warnings?: string[];
 }
 
+// Secrets that never leave the database in a backup. Shopify's
+// client-credentials tokens are re-minted on demand (a 401 forces a fresh
+// one), so nothing is lost by blanking them; the row stays so a restore keeps
+// its shape.
+export const REDACTED_COLUMNS: Record<string, string[]> = {
+  shopify_tokens: ["access_token"],
+};
+
+function redact(table: string, rows: unknown[]): unknown[] {
+  const cols = REDACTED_COLUMNS[table];
+  if (!cols) return rows;
+  return rows.map((r) => {
+    const copy = { ...(r as Record<string, unknown>) };
+    for (const c of cols) if (c in copy) copy[c] = "[redacted]";
+    return copy;
+  });
+}
+
 export async function exportAllTables(): Promise<BackupPayload> {
   const admin = createAdminClient();
   const tables: Record<string, unknown[]> = {};
@@ -100,7 +118,7 @@ export async function exportAllTables(): Promise<BackupPayload> {
       if (!data || data.length < PAGE) break;
     }
     if (missing) { warnings.push(`${t}: table not found — skipped`); continue; }
-    tables[t] = rows;
+    tables[t] = redact(t, rows);
     row_count += rows.length;
   }
   return { exported_at: new Date().toISOString(), row_count, tables, warnings };

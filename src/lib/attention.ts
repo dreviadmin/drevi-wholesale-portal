@@ -38,8 +38,11 @@ export async function computeAttention(): Promise<AttentionItem[]> {
     //     would ever tell that person they are waiting.
     admin.from("buyer_change_requests").select("id", { count: "exact", head: true }).eq("status", "pending"),
     // 5. Sold-out BEST-SELLERS: sold out AND actually ordered at least once —
-    //    the whole catalog being qty-0 must not flood the inbox.
-    admin.from("wholesale_products").select("sku").lte("current_qty", 0).eq("buyer_visible", true),
+    //    the whole catalog being qty-0 must not flood the inbox. Sellable
+    //    (wholesale_visible), not buyer_visible: a best-seller sells at the
+    //    counter and at exhibitions too, and restocking it matters whether or
+    //    not it has been pushed to the buyer catalog yet (audit, 4 Oct).
+    admin.from("wholesale_products").select("sku").lte("current_qty", 0).eq("wholesale_visible", true),
     admin.from("orders").select("items").neq("status", "cancelled"),
   ]);
   const orderedSkus = new Set<string>();

@@ -73,3 +73,35 @@ describe("backup table coverage", () => {
     expect(new Set(BACKUP_TABLES).size).toBe(BACKUP_TABLES.length);
   });
 });
+
+/** The REDACTED_COLUMNS object literal in a source file, as table → columns. */
+function redactedColumns(path: string): Record<string, string[]> {
+  const src = readFileSync(path, "utf8");
+  const block = src.match(/REDACTED_COLUMNS(?:\s*:[^=]+)?\s*=\s*\{([\s\S]*?)\};/);
+  if (!block) throw new Error(`${path}: REDACTED_COLUMNS not found`);
+  const out: Record<string, string[]> = {};
+  for (const m of block[1].matchAll(/([a-z_][a-z0-9_]*)\s*:\s*\[([^\]]*)\]/g)) {
+    out[m[1]] = [...m[2].matchAll(/"([a-z_][a-z0-9_]*)"/g)].map((c) => c[1]).sort();
+  }
+  return out;
+}
+
+describe("backup redaction", () => {
+  it("blanks the Shopify access token in the backup endpoint", () => {
+    expect(redactedColumns(LIB_PATH).shopify_tokens).toContain("access_token");
+  });
+
+  it("redacts the same columns in scripts/backup.mjs as in src/lib/backup.ts", () => {
+    expect(redactedColumns(SCRIPT_PATH)).toEqual(redactedColumns(LIB_PATH));
+  });
+
+  it("only names tables that are backed up", () => {
+    const unknown = Object.keys(redactedColumns(LIB_PATH)).filter((t) => !BACKUP_TABLES.includes(t));
+    expect(unknown).toEqual([]);
+  });
+
+  it("runs every exported table through redact() in both exporters", () => {
+    expect(readFileSync(LIB_PATH, "utf8")).toMatch(/tables\[t\]\s*=\s*redact\(t, rows\)/);
+    expect(readFileSync(SCRIPT_PATH, "utf8")).toMatch(/out\[t\]\s*=\s*redact\(t, rows\)/);
+  });
+});

@@ -6,10 +6,16 @@
  *
  * Re-run `curl /api/dev/sync-now` afterwards to reset products to sheet truth.
  *
- *   node scripts/p2-fixtures.mjs
+ *   node scripts/p2-fixtures.mjs --prod
  */
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
+// Historical PRODUCTION-only script: it loads .env.local (prod) on purpose.
+// Refuse unless --prod is passed, so nobody runs it by accident (audit, 4 Oct 2026).
+if (!process.argv.includes("--prod")) {
+  console.error("This script targets PRODUCTION (.env.local). Re-run with --prod only if you really mean it.");
+  process.exit(1);
+}
 dotenv.config({ path: ".env.local" });
 
 const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });

@@ -1,6 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
 import dotenv from "dotenv";
+// Historical PRODUCTION-only script: it loads .env.local (prod) on purpose.
+// Refuse unless --prod is passed, so nobody runs it by accident (audit, 4 Oct 2026).
+if (!process.argv.includes("--prod")) {
+  console.error("This script targets PRODUCTION (.env.local). Re-run with --prod only if you really mean it.");
+  process.exit(1);
+}
 dotenv.config({ path: ".env.local" });
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL, anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -14,8 +20,10 @@ function decrypt(b64) {
   return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString("utf8");
 }
 
-const EMAIL = process.argv[2] || "anjali@bloomco.test";
-const EXPECT = process.argv[3] || "Amber-Cobalt-3453";
+// Positional args only: --prod (required above) must not be read as the email.
+const [argEmail, argExpect] = process.argv.slice(2).filter((a) => a !== "--prod");
+const EMAIL = argEmail || "anjali@bloomco.test";
+const EXPECT = argExpect || "Amber-Cobalt-3453";
 
 const { data: buyer } = await admin.from("buyers").select("id, status, encrypted_password, approved_by").eq("email", EMAIL).maybeSingle();
 console.log("=== STEP 1: AES round-trip (set -> stored -> decrypt) ===");

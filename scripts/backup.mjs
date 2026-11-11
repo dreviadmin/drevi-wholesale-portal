@@ -92,13 +92,26 @@ async function dumpTable(table) {
   return rows;
 }
 
+// Mirrors REDACTED_COLUMNS in src/lib/backup.ts: re-mintable secrets are
+// blanked so a backup file never carries a live Shopify token.
+const REDACTED_COLUMNS = { shopify_tokens: ["access_token"] };
+function redact(table, rows) {
+  const cols = REDACTED_COLUMNS[table];
+  if (!cols || !rows) return rows;
+  return rows.map((r) => {
+    const copy = { ...r };
+    for (const c of cols) if (c in copy) copy[c] = "[redacted]";
+    return copy;
+  });
+}
+
 const stamp = new Date().toISOString().slice(0, 10);
 const out = {};
 let total = 0;
 for (const t of TABLES) {
   const rows = await dumpTable(t);
   if (rows === null) { console.log(`  ${t.padEnd(22)} not found — skipped (migration pending)`); continue; }
-  out[t] = rows;
+  out[t] = redact(t, rows);
   total += rows.length;
   console.log(`  ${t.padEnd(22)} ${rows.length} rows`);
 }

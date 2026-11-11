@@ -20,6 +20,8 @@ import { createInterface } from "node:readline/promises";
 import crypto from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { generateMemorablePassword } from "./lib/password.mjs";
 
 const buyerOnly = process.argv.includes("--buyer-only");
 const target = process.argv.includes("--prod") || process.env.DB_TARGET === "prod" ? "prod" : "dev";
@@ -77,7 +79,8 @@ async function findUserByEmail(email) {
 async function ensureAuthUser(email, password) {
   const existing = await findUserByEmail(email);
   if (existing) {
-    await admin.auth.admin.updateUserById(existing.id, { password, email_confirm: true });
+    const { error } = await admin.auth.admin.updateUserById(existing.id, { password, email_confirm: true });
+    if (error) throw error;
     return { id: existing.id, created: false };
   }
   const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
@@ -85,41 +88,59 @@ async function ensureAuthUser(email, password) {
   return { id: data.user.id, created: true };
 }
 
-// Ansh (31 Aug): the whole team logs in with <name>/<name>123 on BOTH
-// environments for now. Ansh's own account is deliberately NOT in this list —
-// resetting the super-admin's real password from a script would lock him out.
+// Passwords are GENERATED on every run and written to a gitignored file (see
+// record() below) — never put a password in this file. Ansh's own account is
+// deliberately NOT in this list: resetting the super-admin's real password from
+// a script would lock him out. To rotate live staff passwords use
+// scripts/rotate-staff-passwords.mjs.
 const STAFF = [
-  { email: "arushi@drevifashion.com", password: "arushi123" },
-  { email: "rakesh@drevifashion.com", password: "rakesh123" },
-  { email: "grishma@drevifashion.com", password: "grishma123" },
-  { email: "jyoti@drevifashion.com", password: "jyoti123" },
-  { email: "riddhi@drevifashion.com", password: "riddhi123" },
-];
+  "arushi@drevifashion.com",
+  "rakesh@drevifashion.com",
+  "grishma@drevifashion.com",
+  "jyoti@drevifashion.com",
+  "riddhi@drevifashion.com",
+].map((email) => ({ email, password: generateMemorablePassword() }));
 
 const TEST_BUYER = {
   email: "buyer@example.com",
-  password: "Tulip-Lotus-7382",
+  password: generateMemorablePassword(),
   business_name: "Sharma Boutique",
   owner_name: "Meera Sharma",
   phone: "+919812345678",
   city: "Pune",
 };
 
+// Passwords go to a gitignored, owner-only file — never to the terminal log.
+// Each one is written the moment it is set, so a run that stops halfway, and
+// the prod run (which ends before the test buyer), still leave every changed
+// password on record.
+const pwFile = `.local/seeded-passwords-${target}-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
+let recorded = 0;
+function record(email, password) {
+  if (!existsSync(".local")) mkdirSync(".local");
+  appendFileSync(pwFile, `${email}  ${password}\n`, { mode: 0o600 });
+  recorded++;
+}
+
 async function main() {
   console.log("Seeding auth users…\n");
 
   for (const s of buyerOnly ? [] : STAFF) {
     const { created } = await ensureAuthUser(s.email, s.password);
-    console.log(`  staff   ${s.email}  →  ${s.password}  (${created ? "created" : "updated"})`);
+    record(s.email, s.password);
+    console.log(`  staff   ${s.email}  (${created ? "created" : "updated"})`);
   }
 
   // Test buyer: auth user + active buyers row — DEV ONLY. Production must
   // never grow an example.com buyer account.
   if (target === "prod") {
-    console.log("\nDone. Log in at /login with any of the above. (Test buyer skipped on prod.)");
+    console.log(recorded > 0
+      ? `\nDone. Passwords are in ${pwFile} (not printed). (Test buyer skipped on prod.)`
+      : "\nNothing changed. (Test buyer skipped on prod.)");
     return;
   }
   const { created } = await ensureAuthUser(TEST_BUYER.email, TEST_BUYER.password);
+  record(TEST_BUYER.email, TEST_BUYER.password);
 
   // encrypted_password is NOT optional. login/actions.ts, /home, /cart and
   // /account/orders all select buyers with .not("encrypted_password", "is", null),
@@ -147,12 +168,13 @@ async function main() {
     const { error } = await admin.from("buyers").insert(row);
     if (error) throw error;
   }
-  console.log(`\n  buyer   ${TEST_BUYER.email}  →  ${TEST_BUYER.password}  (${created ? "created" : "updated"}, status=active)`);
+  console.log(`\n  buyer   ${TEST_BUYER.email}  (${created ? "created" : "updated"}, status=active)`);
 
-  console.log("\nDone. Log in at /login with any of the above.");
+  console.log(`\nDone. Passwords are in ${pwFile} (not printed) — log in at /login with those.`);
 }
 
 main().catch((err) => {
   console.error("\nSeeding failed:", err.message);
+  if (recorded > 0) console.error(`Passwords already changed are in ${pwFile}.`);
   process.exit(1);
 });

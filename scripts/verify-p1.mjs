@@ -2,10 +2,16 @@
  * Phase 1 verification probe (read-only). Checks synced data, image cache,
  * the cached Shopify token, and performs a real buyer login + RLS-scoped reads.
  *
- *   node scripts/verify-p1.mjs
+ *   node scripts/verify-p1.mjs --prod
  */
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
+// Historical PRODUCTION-only script: it loads .env.local (prod) on purpose.
+// Refuse unless --prod is passed, so nobody runs it by accident (audit, 4 Oct 2026).
+if (!process.argv.includes("--prod")) {
+  console.error("This script targets PRODUCTION (.env.local). Re-run with --prod only if you really mean it.");
+  process.exit(1);
+}
 dotenv.config({ path: ".env.local" });
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

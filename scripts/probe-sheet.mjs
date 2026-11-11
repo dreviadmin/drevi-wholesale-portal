@@ -3,12 +3,18 @@
  * and report how many rows qualify. Does NOT touch Supabase. Mirrors the
  * column resolution in src/lib/sheets.ts + src/lib/sync.ts.
  *
- *   node scripts/probe-sheet.mjs
+ *   node scripts/probe-sheet.mjs --prod
  */
 import { readFileSync } from "node:fs";
 import { google } from "googleapis";
 import dotenv from "dotenv";
 
+// Historical PRODUCTION-only script: it loads .env.local (prod) on purpose.
+// Refuse unless --prod is passed, so nobody runs it by accident (audit, 4 Oct 2026).
+if (!process.argv.includes("--prod")) {
+  console.error("This script targets PRODUCTION (.env.local). Re-run with --prod only if you really mean it.");
+  process.exit(1);
+}
 dotenv.config({ path: ".env.local" });
 
 const COLS = {

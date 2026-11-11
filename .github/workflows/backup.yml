@@ -5,6 +5,10 @@
 # tiny, so 24 artifacts/day is negligible.
 #
 # Repo secrets required: PORTAL_URL, CRON_SECRET (same as sync-cron.yml).
+# Strongly recommended: BACKUP_PASSPHRASE. When it is set, the artifact is
+# encrypted (gpg, AES-256) before upload and can only be read with the
+# passphrase.
+# Decrypt: gpg --batch --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" -d backup.json.gz.gpg > backup.json.gz
 name: daily-backup
 
 on:
@@ -26,9 +30,23 @@ jobs:
           [ "$code" = "200" ]
           gunzip -t backup.json.gz
           ls -la backup.json.gz
+      - name: Encrypt
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -e
+          if [ -n "$BACKUP_PASSPHRASE" ]; then
+            gpg --batch --yes --pinentry-mode loopback --symmetric --cipher-algo AES256 \
+              --passphrase "$BACKUP_PASSPHRASE" -o backup.json.gz.gpg backup.json.gz
+            rm backup.json.gz
+            echo "ARTIFACT=backup.json.gz.gpg" >> "$GITHUB_ENV"
+          else
+            echo "::warning::BACKUP_PASSPHRASE is not set — the backup is uploaded unencrypted. Add the secret."
+            echo "ARTIFACT=backup.json.gz" >> "$GITHUB_ENV"
+          fi
       - name: Store artifact
         uses: actions/upload-artifact@v6
         with:
           name: drevi-backup-${{ github.run_number }}
-          path: backup.json.gz
+          path: ${{ env.ARTIFACT }}
           retention-days: 90
