@@ -56,8 +56,8 @@ export function DriftReport({ checked, rows }: { checked: number; rows: DriftRow
           : `${rows.length} of ${checked} SKUs disagree with the movement ledger.`}
       </p>
       <p className="font-body mt-2" style={{ fontSize: 11, lineHeight: 1.6, color: palette.mutedGreige }}>
-        Anything sold through Shopify POS is still invisible to this app (ANSH-18), so these numbers
-        can read <b>high</b>. Correct them with a count, not a guess.
+        These SKUs had their stored quantity changed outside the ledger, so the two disagree.
+        Correct them with a count, not a guess.
       </p>
 
       {rows.map((r) => (

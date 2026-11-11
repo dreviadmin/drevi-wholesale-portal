@@ -117,9 +117,10 @@ export async function computeAttention(): Promise<AttentionItem[]> {
   } catch { /* table not migrated yet */ }
 
   // Retrofit §10.3 — "N SKUs need a stock check": the ledger and the cached
-  // quantity disagree. Anything sold through Shopify POS is invisible here
-  // (ANSH-18), so this is expected to be non-zero and is the honest surface
-  // for it rather than a number nobody trusts.
+  // quantity disagree, which only happens when current_qty was written
+  // outside the ledger (a POS sale touches neither, so it cannot cause this).
+  // A count fixes it; this is the honest surface for it rather than a number
+  // nobody trusts.
   try {
     const { drift } = await reconcile();
     if (drift.length > 0) {
