@@ -187,7 +187,7 @@ export async function computeAttention(): Promise<AttentionItem[]> {
         const named = sizeless.slice(0, 4).map((d) => `${d.base_sku}·${d.color}`).join(", ");
         items.push({
           key: "designs_without_sizes",
-          title: `${sizeless.length} design${sizeless.length === 1 ? "" : "s"} have no sizes yet`,
+          title: `${sizeless.length} design${sizeless.length === 1 ? " has" : "s have"} no sizes yet`,
           sub: `${named}${sizeless.length > 4 ? `, +${sizeless.length - 4} more` : ""} — log the delivery to mint them`,
           count: sizeless.length,
           severity: "medium",
