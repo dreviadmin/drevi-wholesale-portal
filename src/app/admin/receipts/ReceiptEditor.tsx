@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
 import { Search, X, ScanLine, Minus, Plus, ImageOff } from "lucide-react";
 import { QrScanner, type ScanFeedback } from "@/components/QrScanner";
@@ -16,6 +16,7 @@ import { formatINR } from "@/lib/format";
 import { billMismatch } from "@/lib/receipt-gst";
 import { downscalePhoto } from "@/lib/downscale-photo";
 import { palette } from "@/lib/palette";
+import { exitAfterSave } from "@/lib/save-exit";
 
 export interface VendorOption { id: string; name: string; city: string | null }
 export interface EditorLine { key: string; sku: string; description: string; qty: number; unitCost: string }
@@ -63,14 +64,16 @@ const withSku = (lines: EditorLine[], sku: string | undefined): EditorLine[] => 
   return [...lines, { key: uuid(), sku: key, description: "", qty: 1, unitCost: "" }];
 };
 
-export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku, onCancel }: {
+export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku, onCancel, onSaved }: {
   vendors: VendorOption[];
   registrySkus: string[];
   initial?: ReceiptEditorInitial;
   prefillSku?: string;
   onCancel?: () => void; // edit mode: renders Cancel Edit, which also drops the draft
+  onSaved?: () => void; // edit mode: closes the editor on the receipt's own page once saved
 }) {
   const router = useRouter();
+  const [leaving, startLeaving] = useTransition();
   const editMode = !!initial?.id;
   const known = useMemo(() => new Set(registrySkus.map((s) => s.toUpperCase())), [registrySkus]);
 
@@ -212,10 +215,22 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku, onCa
           const up = await uploadReceiptBill(initial!.id!, fd).catch(() => undefined);
           if (!up?.ok) window.alert(`Saved, but the bill photo failed to upload: ${(up?.error ?? BILL_REFUSED).replace(/\.+$/, "")}. Add it again from the receipt page.`);
         }
-        // Keep the incoming ?from= so the back link still points where the
-        // user came from after saving.
-        router.push(`/admin/receipts/${initial!.id}${window.location.search}`);
-        router.refresh();
+        // Back to the receipt, keeping the incoming ?from= so the back link
+        // still points where the user came from. The editor sits on the
+        // receipt's own page, and a push to that address kept this form up
+        // with no sign of the save (click test, Nov; see save-exit.ts). It
+        // closes in place instead, in one transition with the refresh, so the
+        // receipt shows the saved figures rather than the old ones first.
+        const target = `/admin/receipts/${initial!.id}${window.location.search}`;
+        if (onSaved && exitAfterSave(target, window.location.pathname + window.location.search) === "close") {
+          startLeaving(() => {
+            router.refresh();
+            onSaved();
+          });
+        } else {
+          router.push(target);
+          router.refresh();
+        }
       } else {
         input.clientRef = clientRefRef.current ?? (clientRefRef.current = uuid());
         const res = await createReceipt(input);
@@ -426,8 +441,8 @@ export function ReceiptEditor({ vendors, registrySkus, initial, prefillSku, onCa
 
       {error && <p className="font-body mt-3" style={{ fontSize: 11.5, color: palette.crimsonText }}>{error}</p>}
 
-      <button type="button" onClick={save} disabled={busy} className="mt-4 w-full font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 11, letterSpacing: "0.2em", padding: "14px 0" }}>
-        {busy ? "Saving…" : editMode ? "Save Changes" : "Save Receipt"}
+      <button type="button" onClick={save} disabled={busy || leaving} className="mt-4 w-full font-body uppercase disabled:opacity-50" style={{ background: palette.black, color: palette.ivory, fontSize: 11, letterSpacing: "0.2em", padding: "14px 0" }}>
+        {busy || leaving ? "Saving…" : editMode ? "Save Changes" : "Save Receipt"}
       </button>
       {onCancel && (
         <button type="button" onClick={() => { draftMeta.clear(); onCancel(); }} className="mt-2 w-full font-body uppercase" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 10, letterSpacing: "0.16em", padding: "11px 0" }}>

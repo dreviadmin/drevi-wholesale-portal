@@ -43,6 +43,8 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus, designs }
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
+  // "Changes saved." under the header after an edit, until the next Edit.
+  const [justSaved, setJustSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const incomplete = designs.filter((d) => !d.specsVerified || !d.priceSet);
   const here = `/admin/receipts/${receipt.id}`;
@@ -93,6 +95,7 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus, designs }
             lines: initialLines,
           }}
           onCancel={() => setEditing(false)}
+          onSaved={() => { setEditing(false); setJustSaved(true); }}
         />
       </>
     );
@@ -115,7 +118,7 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus, designs }
           <button type="button" onClick={printTags} disabled={lines.length === 0} className="flex items-center gap-1.5 font-body uppercase disabled:opacity-50" style={{ border: `1px solid ${palette.black}`, color: palette.black, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
             <Printer size={12} /> Print tags
           </button>
-          <button type="button" onClick={() => setEditing(true)} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
+          <button type="button" onClick={() => { setJustSaved(false); setEditing(true); }} className="flex items-center gap-1.5 font-body uppercase" style={{ background: palette.black, color: palette.ivory, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
             <Pencil size={12} /> Edit
           </button>
           <button type="button" onClick={doDelete} disabled={busy} className="flex items-center gap-1.5 font-body uppercase disabled:opacity-50" style={{ border: `1px solid ${palette.crimsonText}`, color: palette.crimsonText, fontSize: 9, letterSpacing: "0.15em", padding: "7px 11px" }}>
@@ -123,6 +126,12 @@ export function ReceiptDetail({ receipt, lines, vendors, registrySkus, designs }
           </button>
         </div>
       </div>
+
+      {justSaved && (
+        <p role="status" className="font-body mt-2" style={{ fontSize: 12, color: palette.goldDeep }}>
+          Changes saved.
+        </p>
+      )}
 
       {incomplete.length > 0 && (
         <div className="mt-4" style={{ background: palette.amberSoft, border: `1px solid ${palette.gold}`, padding: "12px 14px" }}>
