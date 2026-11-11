@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -12,6 +12,7 @@ import { QtyField } from "@/components/QtyField";
 import { setQty, setSpecialQty, removeFromCart, submitOrder, type SubmitState } from "./actions";
 import { cartPieces } from "@/lib/cart-count";
 import { formatINR } from "@/lib/format";
+import { buyerVariantLabel } from "@/lib/variants";
 import { palette } from "@/lib/palette";
 import { uuid } from "@/lib/uuid";
 import type { StockState } from "@/lib/types";
@@ -51,9 +52,18 @@ function SubmitButton({ disabled }: { disabled: boolean }) {
 export function CartView({
   lines,
   subtotal,
+  changeNotice = null,
+  droppedSkus = [],
+  adjustedLines = [],
 }: {
   lines: CartLineDTO[];
   subtotal: number;
+  /** What changed since the buyer added it; never states a quantity. */
+  changeNotice?: string | null;
+  /** Stored rows the cart no longer shows, removed once the notice is up. */
+  droppedSkus?: string[];
+  /** Lines shown below their stored quantity, saved at what is shown. */
+  adjustedLines?: { sku: string; qty: number }[];
   /**
    * Both still accepted so page.tsx keeps compiling, but neither renders: the
    * cart no longer quotes a lead time or gates the submit on a minimum. Rakesh
@@ -88,6 +98,29 @@ export function CartView({
     });
   }
 
+  // Say once what changed, then make the stored cart match what is shown so
+  // the notice does not return on the next visit. Ordering already used the
+  // shown lines, so nothing about the order changes. One call at a time, and
+  // inside the transition so the steppers wait: each call rewrites the whole
+  // cart row, and two at once would lose one.
+  const [notice] = useState(changeNotice);
+  const settled = useRef(false);
+  useEffect(() => {
+    if (settled.current) return;
+    settled.current = true;
+    if (droppedSkus.length === 0 && adjustedLines.length === 0) return;
+    startTransition(async () => {
+      try {
+        for (const sku of droppedSkus) await removeFromCart(sku);
+        for (const a of adjustedLines) await setQty(a.sku, a.qty);
+      } catch {
+        // Nothing to undo: the notice simply shows again next visit.
+      }
+    });
+    // Once per visit, from the props the page was rendered with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="min-h-screen flex flex-col" style={{ background: palette.ivory }}>
       {/* The menu takes the slot the layout already held open opposite the
@@ -112,6 +145,14 @@ export function CartView({
           </button>
         </div>
       </BuyerNavDrawer>
+
+      {notice && (
+        <div className="px-4 pt-4">
+          <p role="status" className="font-body max-w-2xl mx-auto" style={{ background: palette.ivoryDeep, color: palette.softBlack, fontSize: 13, lineHeight: 1.6, padding: "12px 14px" }}>
+            {notice}
+          </p>
+        </div>
+      )}
 
       {lines.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
@@ -140,7 +181,14 @@ export function CartView({
                       <X size={16} strokeWidth={1.8} />
                     </button>
                   </div>
-                  <div className="font-body mt-0.5" style={{ color: palette.mutedGreige, fontSize: 9, letterSpacing: "0.1em" }}>
+                  {/* Size and colour by name ("XL · Cream"); the SKU stays
+                      under it for talking to Rakesh. */}
+                  {buyerVariantLabel(l.sku) && (
+                    <div className="font-body mt-0.5" style={{ color: palette.softBlack, fontSize: 12.5 }}>
+                      {buyerVariantLabel(l.sku)}
+                    </div>
+                  )}
+                  <div className="font-body mt-0.5 break-all" style={{ color: palette.mutedGreige, fontSize: 11, letterSpacing: "0.04em" }}>
                     {l.sku}
                   </div>
 

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getDetailedCart } from "@/lib/cart";
+import { cartChangeNotice } from "@/lib/cart-lines";
 import { CartView } from "./CartView";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +26,19 @@ export default async function CartPage() {
   const buyer = rows?.[0] ?? null;
   const cart = buyer ? await getDetailedCart(buyer.id) : null;
 
+  // What changed since the buyer added it (Oct review): named once, then
+  // settled by CartView so the notice does not come back on every visit.
+  const lineOf = new Map((cart?.lines ?? []).map((l) => [l.product.sku, l]));
+  const dropped = cart?.dropped ?? [];
+  const adjusted = (cart?.adjusted ?? []).flatMap((sku) => {
+    const l = lineOf.get(sku);
+    return l ? [{ sku, title: l.product.title ?? sku, qty: l.qty }] : [];
+  });
+  const changeNotice = cartChangeNotice(
+    dropped.map((d) => d.title ?? d.sku),
+    adjusted.map((a) => a.title),
+  );
+
   return (
     <CartView
       lines={(cart?.lines ?? []).map((l) => ({
@@ -43,6 +57,9 @@ export default async function CartPage() {
       }))}
       subtotal={cart?.subtotal ?? 0}
       maxLeadDays={cart?.maxLeadDays ?? 0}
+      changeNotice={changeNotice}
+      droppedSkus={dropped.map((d) => d.sku)}
+      adjustedLines={adjusted.map(({ sku, qty }) => ({ sku, qty }))}
     />
   );
 }

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getStockState, qtyCap } from "@/lib/stock";
+import { buildCartLines, type CartLineChanges } from "@/lib/cart-lines";
 import type { WholesaleProduct, StockState } from "@/lib/types";
 import { BUYER_PRODUCT_COLUMNS } from "@/lib/types";
 
@@ -23,7 +23,7 @@ export interface CartLine {
   lineTotal: number;
 }
 
-export interface DetailedCart {
+export interface DetailedCart extends CartLineChanges {
   lines: CartLine[];
   subtotal: number;
   count: number; // distinct lines (for the header badge)
@@ -44,7 +44,7 @@ export async function getRawCart(buyerId: string): Promise<RawCartItem[]> {
 export async function getDetailedCart(buyerId: string): Promise<DetailedCart> {
   const items = await getRawCart(buyerId);
   if (items.length === 0) {
-    return { lines: [], subtotal: 0, count: 0, totalQty: 0, maxLeadDays: 0 };
+    return { lines: [], dropped: [], adjusted: [], subtotal: 0, count: 0, totalQty: 0, maxLeadDays: 0 };
   }
 
   const supabase = createAdminClient();
@@ -54,20 +54,9 @@ export async function getDetailedCart(buyerId: string): Promise<DetailedCart> {
     .in("sku", items.map((i) => i.sku));
   const bySku = new Map<string, WholesaleProduct>((prods ?? []).map((p) => [p.sku, p as WholesaleProduct]));
 
-  const lines: CartLine[] = [];
-  for (const it of items) {
-    const product = bySku.get(it.sku);
-    if (!product || !product.buyer_visible) continue; // drop hidden/stale
-    const stockState = getStockState(product);
-    if (stockState === "sold_out") continue; // sold out can't be ordered
-    const cap = qtyCap(product);
-    const special = it.special === true;
-    // Special requests carry the exact asked-for qty (no clamp) — flagged for
-    // Rakesh rather than blocked.
-    const qty = !special && cap != null ? Math.min(it.qty, cap) : it.qty;
-    const belowMoq = product.min_order_qty != null && qty < product.min_order_qty;
-    lines.push({ product, qty, stockState, cap, belowMoq, special, lineTotal: qty * product.wholesale_price });
-  }
+  // Drops hidden, missing and sold-out rows and holds Limited lines to stock,
+  // reporting both so the cart page can tell the buyer (src/lib/cart-lines.ts).
+  const { lines, dropped, adjusted } = buildCartLines(items, bySku);
 
   const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0);
   const totalQty = lines.reduce((s, l) => s + l.qty, 0);
@@ -75,5 +64,5 @@ export async function getDetailedCart(buyerId: string): Promise<DetailedCart> {
     .filter((l) => l.stockState === "made_to_order")
     .reduce((m, l) => Math.max(m, l.product.restock_days ?? 0), 0);
 
-  return { lines, subtotal, count: lines.length, totalQty, maxLeadDays };
+  return { lines, dropped, adjusted, subtotal, count: lines.length, totalQty, maxLeadDays };
 }
