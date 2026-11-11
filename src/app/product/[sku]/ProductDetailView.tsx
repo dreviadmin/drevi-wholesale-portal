@@ -74,7 +74,10 @@ export function ProductDetailView({
           {count > 0 && (
             <span
               className="absolute -top-1.5 -right-1.5 flex items-center justify-center font-body"
-              style={{ background: palette.gold, color: palette.black, fontSize: 9, fontWeight: 700, width: 16, height: 16, borderRadius: 8 }}
+              style={{
+                // Pieces now, not lines, so 2–3 digits are common: grow, don't spill.
+                background: palette.gold, color: palette.black, fontSize: 9, fontWeight: 700, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8,
+              }}
             >
               {count}
             </span>

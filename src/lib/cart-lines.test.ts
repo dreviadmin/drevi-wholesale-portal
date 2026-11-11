@@ -5,8 +5,9 @@ import type { WholesaleProduct } from "./types";
 // loaded by relative path (as in buyer-home.test.ts).
 vi.mock("@/lib/stock", async () => await import("./stock"));
 vi.mock("@/lib/availability", async () => await import("./availability"));
+vi.mock("@/lib/variants", async () => await import("./variants"));
 
-const { buildCartLines, cartChangeNotice } = await import("./cart-lines");
+const { buildCartLines, cartChangeNotice, changedItemNames } = await import("./cart-lines");
 
 function product(sku: string, over: Partial<WholesaleProduct> = {}): WholesaleProduct {
   return {
@@ -90,5 +91,34 @@ describe("cartChangeNotice", () => {
   });
   it("words several adjusted items", () => {
     expect(cartChangeNotice([], ["D", "E"])).toBe("Some items changed since you added them: The quantities of D and E were adjusted.");
+  });
+});
+
+describe("changedItemNames", () => {
+  it("uses the title, or the SKU when the product row is gone", () => {
+    expect(changedItemNames([{ sku: "DD-ANK-STR-001-M-RED", title: "Rose Anarkali" }, { sku: "GONE-1", title: null }])).toEqual([
+      "Rose Anarkali",
+      "GONE-1",
+    ]);
+  });
+  it("adds size and colour when two changed items share a title", () => {
+    const names = changedItemNames([
+      { sku: "DD-ANK-STR-001-M-CRM", title: "Rose Anarkali" },
+      { sku: "DD-ANK-STR-001-L-CRM", title: "Rose Anarkali" },
+      { sku: "DD-GWN-FLR-002-S-RED", title: "Ruby Gown" },
+    ]);
+    expect(names).toEqual(["Rose Anarkali (M · Cream)", "Rose Anarkali (L · Cream)", "Ruby Gown"]);
+    expect(cartChangeNotice(names.slice(0, 2), names.slice(2))).toBe(
+      "Some items changed since you added them: Rose Anarkali (M · Cream) and Rose Anarkali (L · Cream) are no longer available and were removed. The quantity of Ruby Gown was adjusted.",
+    );
+  });
+  it("tells a shared title apart by SKU when the SKU carries no size", () => {
+    expect(changedItemNames([{ sku: "CUSTOM-1", title: "Sample" }, { sku: "CUSTOM-2", title: "Sample" }])).toEqual([
+      "Sample (CUSTOM-1)",
+      "Sample (CUSTOM-2)",
+    ]);
+  });
+  it("is empty for nothing changed", () => {
+    expect(changedItemNames([])).toEqual([]);
   });
 });

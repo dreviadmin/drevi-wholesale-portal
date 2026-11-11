@@ -77,7 +77,19 @@ export function CatalogView({
     if (href !== window.location.pathname + window.location.search) window.history.replaceState(null, "", href);
     return href;
   }
+  // Not on mount, only once the buyer moves a filter. On mount the address
+  // already says what is shown, and on a fresh load this effect runs before
+  // Next installs its history patch (a parent's effects run after a child's):
+  // an unpatched replaceState would wipe the router's state from this entry,
+  // and Back to it would then change the address but not the page. A URL
+  // that is not in catalogHref's form (%20 for a space, an extra param) is
+  // tidied on the first filter change or card tap instead.
+  const filtersMoved = useRef(false);
   useEffect(() => {
+    if (!filtersMoved.current) {
+      if (category === initial.category && sub === initial.sub && urlQuery === initial.query) return;
+      filtersMoved.current = true;
+    }
     writeUrl(urlQuery);
     // writeUrl reads category and sub, both listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps

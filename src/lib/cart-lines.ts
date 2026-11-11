@@ -1,4 +1,5 @@
 import { getStockState, qtyCap } from "@/lib/stock";
+import { buyerVariantLabel } from "@/lib/variants";
 import type { CartLine, RawCartItem } from "@/lib/cart";
 import type { WholesaleProduct } from "@/lib/types";
 
@@ -43,6 +44,23 @@ export function buildCartLines(
     lines.push({ product, qty, stockState, cap, belowMoq, special, lineTotal: qty * product.wholesale_price });
   }
   return { lines, dropped, adjusted };
+}
+
+/**
+ * How the notice names each changed item: its title, or the SKU when the
+ * product row is gone. Buyers order several sizes of one design, and hiding
+ * that design drops all of them, so a title shared by two changed items gets
+ * its size and colour ("Rose Anarkali (M · Cream)"), or its SKU when it has
+ * none, rather than reading "Rose Anarkali and Rose Anarkali".
+ */
+export function changedItemNames(items: { sku: string; title: string | null }[]): string[] {
+  const uses = new Map<string, number>();
+  for (const it of items) if (it.title) uses.set(it.title, (uses.get(it.title) ?? 0) + 1);
+  return items.map((it) => {
+    if (!it.title) return it.sku;
+    if ((uses.get(it.title) ?? 0) < 2) return it.title;
+    return `${it.title} (${buyerVariantLabel(it.sku) ?? it.sku})`;
+  });
 }
 
 function listOf(names: string[]): string {

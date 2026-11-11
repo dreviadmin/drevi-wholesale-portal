@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getDetailedCart } from "@/lib/cart";
-import { cartChangeNotice } from "@/lib/cart-lines";
+import { cartChangeNotice, changedItemNames } from "@/lib/cart-lines";
 import { CartView } from "./CartView";
 
 export const dynamic = "force-dynamic";
@@ -32,12 +32,11 @@ export default async function CartPage() {
   const dropped = cart?.dropped ?? [];
   const adjusted = (cart?.adjusted ?? []).flatMap((sku) => {
     const l = lineOf.get(sku);
-    return l ? [{ sku, title: l.product.title ?? sku, qty: l.qty }] : [];
+    return l ? [{ sku, title: l.product.title ?? null, qty: l.qty }] : [];
   });
-  const changeNotice = cartChangeNotice(
-    dropped.map((d) => d.title ?? d.sku),
-    adjusted.map((a) => a.title),
-  );
+  // Named across both lists, so two sizes of one design get their sizes.
+  const names = changedItemNames([...dropped, ...adjusted]);
+  const changeNotice = cartChangeNotice(names.slice(0, dropped.length), names.slice(dropped.length));
 
   return (
     <CartView
