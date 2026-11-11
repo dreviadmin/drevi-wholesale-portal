@@ -35,6 +35,9 @@ const ITEM_ICONS: Record<string, typeof Tag> = {
   "/admin/stock-take": Boxes,
   "/admin/vendors": Truck,
   "/admin/reorder": RefreshCw,
+  // Studio's own icon, as on its bottom tab; without an entry it fell back to
+  // Tag and looked like Retail Price.
+  "/admin/studio": Palette,
   "/admin/dashboard": BarChart3,
   "/admin/orders": ShoppingBag,
   "/admin/buyers": Users,
