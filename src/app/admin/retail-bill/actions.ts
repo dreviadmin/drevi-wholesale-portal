@@ -10,6 +10,7 @@ import { uploadOrderPdf } from "@/lib/storage";
 import { DEFAULT_HSN } from "@/lib/hsn-default";
 import { syncCustomToCatalog } from "@/lib/custom-catalog";
 import { loadRetailPrices } from "@/lib/retail-price";
+import { lineTakesStock } from "@/lib/retail-bill-void";
 import type { DiscountType, Order, OrderItem, TaxMode } from "@/lib/types";
 
 // Retail billing (Ansh, 31 Aug) — sell at the RETAIL price (Specs MRP, else the
@@ -284,7 +285,7 @@ export async function voidRetailBill(billId: string): Promise<Res & { warning?: 
     // Custom lines never took stock (create and update both skip them), so
     // they give none back — "returning" one wrote a junk CUSTOM ledger row, or
     // phantom pieces on a SKU that "Also add to catalog" created at 0.
-    if (it.custom || !it.sku) continue;
+    if (!lineTakesStock(it)) continue;
     const res = await applyMovement({
       sku: it.sku, delta: Math.trunc(Number(it.qty) || 0), reason: "correction", refType: "retail_bill", refId: billId,
       note: `Retail bill ${bill.bill_number} — voided, stock returned`, createdBy: staff.email,

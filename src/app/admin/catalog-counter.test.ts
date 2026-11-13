@@ -156,6 +156,7 @@ vi.mock("@/lib/supabase/fetch-all", async () => await import("../../lib/supabase
 vi.mock("@/lib/order-lines-core", async () => await import("../../lib/order-lines-core"));
 vi.mock("@/lib/custom-catalog", async () => await import("../../lib/custom-catalog"));
 vi.mock("@/lib/hsn-default", async () => await import("../../lib/hsn-default"));
+vi.mock("@/lib/retail-bill-void", async () => await import("../../lib/retail-bill-void"));
 vi.mock("@/lib/sku/lov-code", async () => await import("../../lib/sku/lov-code"));
 vi.mock("@/lib/retail-price-core", async () => await import("../../lib/retail-price-core"));
 vi.mock("@/lib/dashboard/lines", async () => await import("../../lib/dashboard/lines"));

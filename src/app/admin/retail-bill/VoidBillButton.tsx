@@ -5,17 +5,21 @@ import { useRouter } from "next/navigation";
 import { palette } from "@/lib/palette";
 import { ConfirmSheet } from "@/components/admin/ConfirmSheet";
 import { voidRetailBill } from "./actions";
+import { voidStockNote, type BillLineStock } from "@/lib/retail-bill-void";
 
 /**
  * Void through the confirm sheet (review fix: it was tiny grey text armed by a
  * single tap for 4 seconds) — stock returns, the row stays flagged.
+ *
+ * `items` are the bill's lines: only catalog lines took stock, so the sheet
+ * promises stock back only for those (voidStockNote, the rule the void uses).
  *
  * The page renders this for voided bills too (`voided`), in the same slot: the
  * void revalidates the page, and a warning ("stock did NOT return…") has to
  * stay on screen in the sheet until staff have read it, instead of vanishing
  * with the button.
  */
-export function VoidBillButton({ billId, billNumber, total, voided = false }: { billId: string; billNumber: string; total: string; voided?: boolean }) {
+export function VoidBillButton({ billId, billNumber, total, items, voided = false }: { billId: string; billNumber: string; total: string; items: readonly BillLineStock[] | null; voided?: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
@@ -40,6 +44,7 @@ export function VoidBillButton({ billId, billNumber, total, voided = false }: { 
   }
 
   if (voided && !open) return null;
+  const stockNote = voidStockNote(items);
 
   return (
     <>
@@ -49,7 +54,7 @@ export function VoidBillButton({ billId, billNumber, total, voided = false }: { 
           onClick={() => { setErr(null); setOpen(true); }}
           className="font-body uppercase"
           style={{ fontSize: 11, letterSpacing: "0.1em", color: palette.crimsonText, minHeight: 44, padding: "0 10px", marginLeft: 8 }}
-          title={`Void ${billNumber} — stock comes back, the bill stays on record as voided`}
+          title={`Void ${billNumber}. ${stockNote} The bill stays on record as voided.`}
         >
           Void
         </button>
@@ -68,7 +73,7 @@ export function VoidBillButton({ billId, billNumber, total, voided = false }: { 
           onConfirm={submit}
           onClose={close}
         >
-          Void {billNumber} ({total})? Stock comes back to the shelf; the bill stays on record as voided.
+          Void {billNumber} ({total})? {stockNote} The bill stays on record as voided.
         </ConfirmSheet>
       ))}
     </>

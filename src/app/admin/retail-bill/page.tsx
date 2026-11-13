@@ -82,7 +82,7 @@ export default async function RetailBillPage({ searchParams }: { searchParams?: 
                 )}
                 {/* Rendered for voided bills too, in the same slot — a void's
                     warning stays up in its sheet after the row turns VOIDED. */}
-                <VoidBillButton billId={b.id} billNumber={b.bill_number} total={formatINR(b.total)} voided={!!b.voided_at} />
+                <VoidBillButton billId={b.id} billNumber={b.bill_number} total={formatINR(b.total)} items={b.items} voided={!!b.voided_at} />
               </div>
             </div>
           ))}
