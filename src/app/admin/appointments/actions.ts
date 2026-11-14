@@ -106,7 +106,8 @@ export async function changeAppointment(input: ChangeInput): Promise<Res<{ rev: 
   const type = cfg.types.find((t) => t.id === a.type_id)!;
   const patch: Record<string, unknown> = {};
   const next: Appt = { ...a };
-  let text = "", eventKind: string = input.kind, ev: "moved" | "cancelled" | null = null;
+  const eventKind: string = input.kind;
+  let text = "", ev: "moved" | "cancelled" | null = null;
 
   switch (input.kind) {
     case "move": {
