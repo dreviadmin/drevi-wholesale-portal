@@ -7,7 +7,8 @@ import {
   House, Store, Boxes, Palette, Briefcase, ScanLine,
   Tag, QrCode, LayoutGrid, Tent, Truck, PackageCheck, Users,
   ShoppingBag, ScrollText, Shield, BarChart3, SlidersHorizontal, RefreshCw, Handshake,
-  Building2, ListChecks,} from "lucide-react";
+  Building2, ListChecks, CalendarDays,
+} from "lucide-react";
 import { SignOutButton } from "@/components/SignOutButton";
 import { palette } from "@/lib/palette";
 import { t } from "@/lib/strings";
@@ -47,6 +48,7 @@ const ITEM_ICONS: Record<string, typeof Tag> = {
   "/admin/audit": ScrollText,
   "/admin/staff": Shield,
   "/admin/home": House,
+  "/admin/appointments": CalendarDays,
 };
 
 const ROLE_LABEL: Record<StaffRole, string> = { super_admin: "Super Admin", admin: "Admin", staff: "Staff" };

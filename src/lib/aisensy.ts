@@ -186,3 +186,32 @@ export async function sendLaunchMessage(
   if (res.ok && /"success"\s*:\s*"?true"?/.test(text)) return { sent: true };
   return { sent: false, uncertain: res.status >= 500, error: `HTTP ${res.status} ${text.slice(0, 200)}` };
 }
+
+/**
+ * Any approved template through one Live API campaign (Appointments, 0110).
+ * Unlike the launch messages above this takes the API key explicitly: booking
+ * messages go from the customer number's AiSensy project
+ * (AISENSY_APPT_API_KEY), not the wholesale one. No buttons, no media: the
+ * Phase 1 booking templates are text only. Same success rule as above: the
+ * body decides, and a timeout or 5xx is `uncertain`, never retried here.
+ */
+export async function sendTemplateMessage(o: {
+  apiKey: string; campaignName: string; destination: string; userName: string; params: string[]; tags?: string[]; timeoutMs?: number;
+}): Promise<WaSend> {
+  const destination = e164(o.destination);
+  if (!destination) return { sent: false, error: "not a WhatsApp mobile number" };
+  let res: Response;
+  try {
+    res = await fetch(ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: o.apiKey, campaignName: o.campaignName, destination, userName: o.userName.slice(0, 60) || "Customer", source: "drevi-appointments", templateParams: o.params, tags: o.tags ?? ["appointments"] }),
+      signal: AbortSignal.timeout(o.timeoutMs ?? 8000),
+    });
+  } catch (e) {
+    return { sent: false, uncertain: true, error: (e as Error).message };
+  }
+  const text = await res.text().catch(() => "");
+  if (res.ok && /"success"\s*:\s*"?true"?/.test(text)) return { sent: true };
+  return { sent: false, uncertain: res.status >= 500, error: `HTTP ${res.status} ${text.slice(0, 200)}` };
+}

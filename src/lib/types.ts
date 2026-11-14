@@ -18,6 +18,7 @@ export type SessionType = "exhibition" | "in_store";
 // 0014's and 0015's values were never added here, which is why callers had
 // started casting their way past it.
 export type AuditEventType =
+  | "appointment_settings_changed"
   | "credential_created"
   | "credential_viewed"
   | "credential_regenerated"

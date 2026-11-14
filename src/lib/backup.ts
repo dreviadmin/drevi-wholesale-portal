@@ -67,6 +67,16 @@ export const BACKUP_TABLES = [
   "wallet_signups",
   "wallet_redemptions",
   "wallet_webhook_events",
+  // Appointments (0110)
+  "appointment_types",
+  "appointment_hours",
+  "appointment_closures",
+  "appointment_blocks",
+  "appointment_settings",
+  "appointment_people",
+  "appointments",
+  "appointment_events",
+  "appointment_messages",
 ] as const;
 
 const PAGE = 1000;

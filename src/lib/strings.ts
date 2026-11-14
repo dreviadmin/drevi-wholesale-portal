@@ -6,6 +6,7 @@ const STRINGS = {
   en: {
     // nav — spaces
     "nav.home": "Home",
+    "nav.appointments": "Appointments",
     "nav.sell": "Sell",
     "nav.stock": "Stock",
     "nav.studio": "Studio",

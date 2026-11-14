@@ -29,7 +29,10 @@ const ADMIN_PLUS: StaffRole[] = ["admin", "super_admin"];
 const SUPER_ONLY: StaffRole[] = ["super_admin"];
 
 export const SPACES: Space[] = [
-  { key: "home", label: "nav.home", icon: "House", roles: STAFF_PLUS, items: [{ label: "nav.home", href: "/admin/home" }] },
+  // Appointments (0110) sits in Home, not Sell: Sell already has six items and
+  // its sub-tab strip overflows at six, while Home had only itself. Every staff
+  // login reaches it, on phones as the second Home tab.
+  { key: "home", label: "nav.home", icon: "House", roles: STAFF_PLUS, items: [{ label: "nav.home", href: "/admin/home" }, { label: "nav.appointments", href: "/admin/appointments" }] },
   {
     key: "sell",
     label: "nav.sell",
