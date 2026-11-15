@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Copy } from "lucide-react";
-import { TEMPLATES, addDays, fromIst, renderParams, type Appt, type ApptType, type Tpl } from "@/lib/appointments/core";
+import { TEMPLATES, sampleParams } from "@/lib/appointments/core";
 import { palette } from "@/lib/palette";
 import { Pill, S, btn } from "../ui";
 import { saveSettings } from "../actions";
@@ -13,28 +13,13 @@ import { FOCUS, INPUT, InlineError, sbtn } from "./bits";
 // values are here so the owner can copy them into AiSensy for Meta approval.
 
 const VAR_LABEL: Record<string, string> = {
-  name: "customer's first name", customer: "customer's full name", type: "kind of appointment", date: "date", time: "time", number: "booking number",
-  where: "where (address or how we will call)", soon: "where, short", reason: "reason", phone: "customer's WhatsApp", functions: "functions",
-  fdate: "function date", looking: "what they are looking for", place: "place", source: "booked via", change: "what changed", by: "changed by",
+  name: "customer's first name", customer: "customer's name and WhatsApp", what: "kind of appointment, as the customer reads it", date: "date", time: "time", number: "booking number",
+  how: "how to join the call", reason: "reason", kind: "kind of appointment, for the team", when: "day and time", occasion: "occasion and its date",
+  looking: "what they are looking for", source: "booked via", change: "what changed", by: "changed by",
   count: "number of appointments", list: "the day's list",
 };
 
-/** A made-up booking, only to fill Meta's sample values. */
-function sampleParams(tpl: Tpl, types: ApptType[], today: string): string[] {
-  const day = addDays(today, 3), now = new Date().toISOString();
-  const a: Appt = {
-    id: "sample", number: "A-1042", type_id: "store", place: "store", party: "solo", starts_at: fromIst(day, 16 * 60).toISOString(), ends_at: fromIst(day, 17 * 60).toISOString(),
-    status: "confirmed", source: "phone", customer_name: "Ananya Mehta", phone_e164: "+919876543210", email: null, functions: ["Sangeet", "Reception or wedding day"],
-    function_date: "February 2027", looking_for: "A pastel lehenga for the sangeet", staff_notes: null, meet_link: null, host_staff_id: null, notify_wa: true,
-    notify_email: false, offers_ok: false, outcome: null, cancel_reason: null, manage_token: "", created_by: null, created_at: now, confirmed_at: now, cancelled_at: null, updated_at: now, rev: 1,
-  };
-  return renderParams(tpl.name, tpl.name === "drevi_staff_today" ? null : a, {
-    types, byName: "Priya", change: "moved to 4 pm on Saturday",
-    digest: { count: 3, list: "11:30 am Ananya Mehta (store visit), 2 pm Riya Shah (video shopping call), 5 pm Meera Joshi (custom design consultation)" },
-  });
-}
-
-export function CampaignNames({ campaigns, types, today, flash }: { campaigns: Record<string, string>; types: ApptType[]; today: string; flash: (m: string) => void }) {
+export function CampaignNames({ campaigns, flash }: { campaigns: Record<string, string>; flash: (m: string) => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +51,7 @@ export function CampaignNames({ campaigns, types, today, flash }: { campaigns: R
       <div>
         {tpls.map((t) => {
           const saved = campaigns[t.name] ?? "";
-          const samples = sampleParams(t, types, today);
+          const samples = sampleParams(t);
           return (
             <div key={t.name} style={{ borderTop: "1px solid rgba(26,26,26,0.08)", padding: "12px 0" }}>
               <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-start">

@@ -8,7 +8,7 @@ import Link from "next/link";
 import { MessageCircle, Phone, Send } from "lucide-react";
 import { palette } from "@/lib/palette";
 import {
-  TYPE_SPOKEN, dayLong, dayShort, firstName, handConfirmText, handReminderText, hm, isLive, istParts, renderParams, renderText, showPhone, waDigits, waLink,
+  TYPE_SPOKEN, dayLong, dayShort, firstName, handConfirmText, handReminderText, handText, hm, isLive, istParts, showPhone, waDigits, waLink,
   type Appt, type ApptStatus,
 } from "@/lib/appointments/core";
 import { S, StatusPill, btn } from "../ui";
@@ -81,10 +81,10 @@ export function HandWhatsAppCard({ moved }: { moved: boolean }) {
   if (live) {
     items.push({ key: "confirm", label: "Send the confirmation", text: handConfirmText(a, types), what: "confirmation", note: a.status === "requested" ? "It still needs confirming: tap Confirm above first." : undefined });
     items.push({ key: "remind", label: "Send a reminder", text: handReminderText(a, types, now), what: "reminder" });
-    if (moved) items.push({ key: "moved", label: "Send the new time", text: renderText("drevi_appt_moved", renderParams("drevi_appt_moved", a, { types })), what: "message" });
+    if (moved) items.push({ key: "moved", label: "Send the new time", text: handText("ev-moved", a, types), what: "message" });
     if (a.place === "meet") items.push({ key: "meet", label: "Send the Meet link", text: a.meet_link ? meetText(a) : null, what: "meet link", note: a.meet_link ? undefined : "Add the Meet link in the Appointment card first." });
   } else if (a.status === "cancelled") {
-    items.push({ key: "cancel", label: "Send the cancellation note", text: renderText("drevi_appt_cancelled", renderParams("drevi_appt_cancelled", a, { types })), what: "message" });
+    items.push({ key: "cancel", label: "Send the cancellation note", text: handText("ev-cancelled", a, types, { reason: a.cancel_reason === "Shop closed" ? "The shop is closed then. We are sorry for the trouble." : undefined }), what: "message" });
   }
 
   return (

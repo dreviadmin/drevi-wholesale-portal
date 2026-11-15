@@ -140,41 +140,84 @@ export function showPhone(e164: string): string { const m = /^\+91(\d{5})(\d{5})
 /** wa.me needs digits only. */
 export const waDigits = (e164: string) => e164.replace(/\D/g, "");
 
-/* ---------------- WhatsApp templates (Utility) ----------------
+/* ---------------- WhatsApp templates (Utility, English) ----------------
+   Submitted to Meta through AiSensy on the shop's number, +91 84336 59684.
+   Store visits and video calls have their own wording: a store visit carries
+   the address and a "Get directions" button; a video call says how to join.
+   (A custom design consultation uses whichever set fits its place.)
    Meta's rules, checked by lintTemplate(): the body never starts or ends with
-   a variable, no two variables touch, a value is one line. Phase 1 has no
-   buttons: customers reply in the chat, which reaches the shop phone. */
-export interface Tpl { name: string; title: string; audience: "client" | "staff"; vars: string[]; body: string }
-export const TEMPLATES: Record<string, Tpl> = {
-  drevi_appt_confirmed: { name: "drevi_appt_confirmed", title: "Booking confirmed", audience: "client", vars: ["name", "type", "date", "time", "number", "where"],
-    body: "Hi {{1}}, your {{2}} with Drevi is booked for {{3}} at {{4}}.\nBooking {{5}}.\n{{6}}\nTo change the time, just reply to this message." },
-  drevi_appt_reminder_day: { name: "drevi_appt_reminder_day", title: "Reminder a day before", audience: "client", vars: ["name", "type", "date", "time", "where"],
-    body: "Hi {{1}}, a reminder of your {{2}} with Drevi tomorrow, {{3}} at {{4}}.\n{{5}}\nTo change the time, just reply to this message." },
-  drevi_appt_reminder_soon: { name: "drevi_appt_reminder_soon", title: "Reminder 2 hours before", audience: "client", vars: ["name", "time", "type", "soon"],
-    body: "Hi {{1}}, see you at {{2}} today for your {{3}}.\n{{4}}\nRunning late? Just reply to this message." },
-  drevi_appt_moved: { name: "drevi_appt_moved", title: "Moved", audience: "client", vars: ["name", "type", "date", "time", "number"],
-    body: "Hi {{1}}, your {{2}} with Drevi has moved to {{3}} at {{4}}.\nBooking {{5}}. If that time does not suit you, just reply to this message." },
-  drevi_appt_cancelled: { name: "drevi_appt_cancelled", title: "Cancelled", audience: "client", vars: ["name", "type", "date", "time", "reason"],
-    body: "Hi {{1}}, your {{2}} with Drevi on {{3}} at {{4}} is cancelled.\n{{5}}\nIf you have any questions, just reply to this message." },
-  drevi_staff_new_booking: { name: "drevi_staff_new_booking", title: "New booking (staff)", audience: "staff", vars: ["number", "type", "date", "time", "customer", "phone", "functions", "fdate", "looking", "place", "source"],
-    body: "New appointment {{1}}: {{2}} on {{3}} at {{4}}.\nCustomer: {{5}}, {{6}}.\nFunction: {{7}}. Function date: {{8}}.\nLooking for: {{9}}.\nPlace: {{10}}. Booked via {{11}}.\nOpen the portal for details." },
-  drevi_staff_changed: { name: "drevi_staff_changed", title: "Moved or cancelled (staff)", audience: "staff", vars: ["number", "customer", "change", "by"],
-    body: "Booking {{1}} for {{2}}: {{3}}. Changed by {{4}}.\nOpen the portal for details." },
-  drevi_staff_today: { name: "drevi_staff_today", title: "Today's appointments (staff)", audience: "staff", vars: ["count", "list"],
-    body: "Good morning. Drevi has {{1}} appointments today: {{2}}.\nOpen the portal for details." },
-  drevi_staff_heads_up: { name: "drevi_staff_heads_up", title: "Heads-up 30 minutes before (staff)", audience: "staff", vars: ["customer", "type", "time", "place", "looking"],
-    body: "In 30 minutes: {{1}}, {{2}} at {{3}} ({{4}}).\nLooking for: {{5}}.\nOpen the portal for the notes." },
-  drevi_staff_needs_confirming: { name: "drevi_staff_needs_confirming", title: "Still needs confirming (staff)", audience: "staff", vars: ["number", "customer", "type", "date", "time"],
-    body: "Booking {{1}} still needs confirming: {{2}}, {{3}} on {{4}} at {{5}}.\nCall or WhatsApp them, then confirm it in the portal." },
+   a variable, no two variables touch, a value is one line, sequential {{n}}.
+   Customers reply in the chat, which reaches the shop phone. */
+export interface Tpl {
+  name: string; title: string; audience: "client" | "staff"; group: "visit" | "call" | "staff";
+  vars: string[]; body: string; button?: { text: string; url: string };
+}
+export const SHOP_DIRECTIONS_URL = "https://share.google/q8eWVHSpKXY0H4Z2t"; // the link /pages/visit uses
+const ADDRESS_LINE = `Address: ${SHOP_ADDRESS}`;
+const DIRECTIONS = { text: "Get directions", url: SHOP_DIRECTIONS_URL };
+const T = (t: Tpl): [string, Tpl] => [t.name, t];
+export const TEMPLATES: Record<string, Tpl> = Object.fromEntries([
+  // ---- store visits (and consultations at the store) ----
+  T({ name: "drevi_visit_confirmed", title: "Store visit confirmed", audience: "client", group: "visit", vars: ["name", "what", "date", "time", "number"], button: DIRECTIONS,
+    body: `Hi {{1}}, your {{2}} at Drevi is confirmed for {{3}} at {{4}}.\n\nBooking number: {{5}}\n${ADDRESS_LINE}\n\nWe look forward to seeing you. To change the time, just reply to this message.` }),
+  T({ name: "drevi_visit_reminder_day", title: "Store visit: reminder a day before", audience: "client", group: "visit", vars: ["name", "what", "date", "time"], button: DIRECTIONS,
+    body: `Hi {{1}}, this is a reminder of your {{2}} at Drevi tomorrow, {{3}} at {{4}}.\n\n${ADDRESS_LINE}\n\nTo change the time, just reply to this message.` }),
+  T({ name: "drevi_visit_reminder_soon", title: "Store visit: reminder 2 hours before", audience: "client", group: "visit", vars: ["name", "time"], button: DIRECTIONS,
+    body: `Hi {{1}}, we are expecting you at Drevi today at {{2}}.\n\n${ADDRESS_LINE}\n\nRunning late or can't make it? Just reply to this message.` }),
+  T({ name: "drevi_visit_moved", title: "Store visit moved", audience: "client", group: "visit", vars: ["name", "what", "date", "time", "number"], button: DIRECTIONS,
+    body: `Hi {{1}}, your {{2}} at Drevi has been moved to {{3}} at {{4}}.\n\nBooking number: {{5}}\n${ADDRESS_LINE}\n\nIf the new time doesn't suit you, just reply to this message.` }),
+  T({ name: "drevi_visit_cancelled", title: "Store visit cancelled", audience: "client", group: "visit", vars: ["name", "what", "date", "time", "reason"],
+    body: "Hi {{1}}, your {{2}} at Drevi on {{3}} at {{4}} has been cancelled. {{5}}\n\nTo book another time, just reply to this message." }),
+  // ---- video calls (WhatsApp video or Google Meet) ----
+  T({ name: "drevi_call_confirmed", title: "Video call confirmed", audience: "client", group: "call", vars: ["name", "what", "date", "time", "number", "how"],
+    body: "Hi {{1}}, your {{2}} with Drevi is confirmed for {{3}} at {{4}}.\n\nBooking number: {{5}}\nHow to join: {{6}}\n\nKeep any pictures or ideas you would like to show us handy. To change the time, just reply to this message." }),
+  T({ name: "drevi_call_reminder_day", title: "Video call: reminder a day before", audience: "client", group: "call", vars: ["name", "what", "date", "time", "how"],
+    body: "Hi {{1}}, this is a reminder of your {{2}} with Drevi tomorrow, {{3}} at {{4}}.\n\nHow to join: {{5}}\n\nTo change the time, just reply to this message." }),
+  T({ name: "drevi_call_reminder_soon", title: "Video call: reminder 2 hours before", audience: "client", group: "call", vars: ["name", "what", "time", "how"],
+    body: "Hi {{1}}, your {{2}} with Drevi starts today at {{3}}.\n\nHow to join: {{4}}\n\nPlease find a spot with good light and a steady connection. Running late? Just reply to this message." }),
+  T({ name: "drevi_call_moved", title: "Video call moved", audience: "client", group: "call", vars: ["name", "what", "date", "time", "number", "how"],
+    body: "Hi {{1}}, your {{2}} with Drevi has been moved to {{3}} at {{4}}.\n\nBooking number: {{5}}\nHow to join: {{6}}\n\nIf the new time doesn't suit you, just reply to this message." }),
+  T({ name: "drevi_call_cancelled", title: "Video call cancelled", audience: "client", group: "call", vars: ["name", "what", "date", "time", "reason"],
+    body: "Hi {{1}}, your {{2}} with Drevi on {{3}} at {{4}} has been cancelled. {{5}}\n\nTo book another time, just reply to this message." }),
+  // ---- the team ----
+  T({ name: "drevi_staff_new_booking", title: "New booking (team)", audience: "staff", group: "staff", vars: ["number", "kind", "source", "when", "customer", "occasion", "looking"],
+    body: "New appointment {{1}}: {{2}}, booked via {{3}}.\n\nWhen: {{4}}\nCustomer: {{5}}\nOccasion: {{6}}\nLooking for: {{7}}\n\nOpen Appointments in the Drevi portal for the details." }),
+  T({ name: "drevi_staff_changed", title: "Moved or cancelled (team)", audience: "staff", group: "staff", vars: ["number", "customer", "change", "by"],
+    body: "Booking {{1}} for {{2}} has been {{3}} by {{4}}.\n\nOpen Appointments in the Drevi portal for the details." }),
+  T({ name: "drevi_staff_today", title: "Today's appointments (team)", audience: "staff", group: "staff", vars: ["count", "list"],
+    body: "Good morning. Appointments at Drevi today: {{1}}.\n\n{{2}}\n\nOpen Appointments in the Drevi portal for the details." }),
+  T({ name: "drevi_staff_heads_up", title: "Heads-up 30 minutes before (team)", audience: "staff", group: "staff", vars: ["customer", "time", "kind", "looking"],
+    body: "Coming up in 30 minutes: {{1}} at {{2}}.\n\nWhat: {{3}}\nLooking for: {{4}}\n\nOpen Appointments in the Drevi portal for the notes." }),
+  T({ name: "drevi_staff_needs_confirming", title: "Still needs confirming (team)", audience: "staff", group: "staff", vars: ["number", "customer", "kind", "when"],
+    body: "Booking {{1}} for {{2}} is still waiting to be confirmed.\n\nWhat: {{3}}\nWhen: {{4}}\n\nPlease call or WhatsApp them, then confirm it in the Drevi portal." }),
+]);
+/** Example values Meta asks for when a template is submitted (made up; nothing is sent). */
+export const TEMPLATE_SAMPLES: Record<string, string> = {
+  name: "Ananya", what: "store visit", date: "Wednesday 18 November", time: "4 pm", number: "A-1043",
+  how: "We will video call you on WhatsApp from this number, so please keep WhatsApp open.", reason: "We are sorry for any trouble.",
+  kind: "Store visit (with family or friends)", source: "the website", when: "Wed 18 Nov at 4 pm", customer: "Ananya Mehta, +91 98765 43210",
+  occasion: "Sangeet (mid-December)", looking: "A pastel lehenga for the sangeet", change: "moved to Thu 19 Nov at 3 pm", by: "the owner",
+  count: "2", list: "1 pm store visit (Ananya), 4 pm video call (Kavya, not confirmed)",
 };
+export function sampleParams(t: Tpl): string[] {
+  return t.vars.map((k) => (t.group === "call" && k === "what" ? "video shopping call" : TEMPLATE_SAMPLES[k] ?? k));
+}
+/** Which customer template a rule uses for this booking, decided by where it happens (store, or a call). */
+const CLIENT_KIND: Record<string, string> = { "c-confirm": "confirmed", "c-24h": "reminder_day", "c-2h": "reminder_soon", "ev-moved": "moved", "ev-cancelled": "cancelled" };
+export function templateFor(rule: string, a: Pick<Appt, "place">): string | null {
+  const k = CLIENT_KIND[rule];
+  return k ? `drevi_${a.place === "store" ? "visit" : "call"}_${k}` : null;
+}
 export function lintTemplate(t: Tpl): string[] {
   const issues: string[] = [], nums = [...t.body.matchAll(/\{\{(\d+)\}\}/g)].map((m) => Number(m[1]));
-  const uniq = [...new Set(nums)].sort((a, b) => a - b);
-  if (uniq.length !== t.vars.length || uniq.some((n, i) => n !== i + 1)) issues.push(`variables ${uniq.join(",")} do not match ${t.vars.length} names`);
+  const uniq = [...new Set(nums)];
+  if (uniq.length !== t.vars.length || uniq.some((n, i) => n !== i + 1)) issues.push(`variables ${uniq.join(",")} are not 1..${t.vars.length} in order`);
   if (/^\s*\{\{/.test(t.body)) issues.push("starts with a variable");
   if (/\}\}\s*$/.test(t.body)) issues.push("ends with a variable");
   if (/\}\}\s*\{\{/.test(t.body)) issues.push("two variables touch");
   if (t.body.length > 1024) issues.push("longer than 1024");
+  if (!/^[a-z0-9_]{1,512}$/.test(t.name)) issues.push("name must be lowercase letters, digits and _");
+  if (t.button && (t.button.text.length > 25 || !/^https:\/\//.test(t.button.url))) issues.push("button text over 25 or url not https");
   return issues;
 }
 /** One-line value Meta accepts: no newlines or tabs, no 4+ spaces, not empty, capped. */
@@ -189,11 +232,15 @@ export function firstName(full: string): string {
   return parts[0] || full.trim() || "there";
 }
 function timeFor(a: Appt): string { const t = hm(istParts(a.starts_at).min); return a.phone_e164.startsWith("+91") ? t : `${t} India time`; }
-function whereFor(a: Appt): string {
-  return a.place === "store" ? `Our store: ${SHOP_ADDRESS}.` : a.place === "wa" ? "We will video call you on WhatsApp from this number." : a.meet_link ? `Join on Google Meet: ${a.meet_link}` + "." : "We will send the Google Meet link here before the call.";
+function howFor(a: Appt): string {
+  return a.place === "wa" ? "We will video call you on WhatsApp from this number, so please keep WhatsApp open."
+    : a.meet_link ? `Join on Google Meet at ${a.meet_link}`
+    : "We will send you the Google Meet link in this chat before the call.";
 }
-function soonFor(a: Appt): string {
-  return a.place === "store" ? `Our store: ${SHOP_ADDRESS}.` : a.place === "wa" ? "Keep WhatsApp open: we will video call you from this number." : a.meet_link ? `Join here: ${a.meet_link}` + "." : "Your Google Meet link will follow in this chat.";
+const SOURCE_SPOKEN: Record<ApptSource, string> = { website: "the website", phone: "a phone call", whatsapp: "WhatsApp", instagram: "Instagram", walkin: "the shop", other: "another way" };
+function kindFor(a: Appt, t: ApptType | null | undefined): string {
+  const where = a.place === "store" ? (a.type_id === "store" ? "" : " at the store") : a.place === "wa" ? " on WhatsApp video" : " on Google Meet";
+  return `${t?.name ?? "Appointment"}${where}${a.party === "group" ? " (with family or friends)" : ""}`;
 }
 export interface RenderCtx { types: ApptType[]; hostName?: string | null; byName?: string; change?: string; reason?: string; digest?: { count: number; list: string } }
 /** Template variables in order, ready for AiSensy's templateParams. */
@@ -201,17 +248,19 @@ export function renderParams(tplName: string, a: Appt | null, ctx: RenderCtx): s
   const tpl = TEMPLATES[tplName]; if (!tpl) throw new Error(`unknown template ${tplName}`);
   const t = a ? ctx.types.find((x) => x.id === a.type_id) : null, p = a ? istParts(a.starts_at) : null;
   const v: Record<string, string> = a && p ? {
-    name: firstName(a.customer_name), customer: a.customer_name, type: TYPE_SPOKEN[a.type_id] ?? (t?.name.toLowerCase() || "appointment"),
-    date: dayLong(p.day), time: timeFor(a), number: a.number, where: whereFor(a), soon: soonFor(a), phone: showPhone(a.phone_e164),
-    functions: a.functions.length ? a.functions.join(", ") : "not given", fdate: a.function_date || "not given", looking: a.looking_for || "not said",
-    place: PLACE_LABEL[a.place], source: SOURCE_LABEL[a.source], change: ctx.change || "changed", by: ctx.byName || "staff",
-    reason: ctx.reason || "We are sorry for any trouble.",
+    name: firstName(a.customer_name), customer: `${a.customer_name}, ${showPhone(a.phone_e164)}`,
+    what: TYPE_SPOKEN[a.type_id] ?? (t?.name.toLowerCase() || "appointment"), kind: kindFor(a, t),
+    date: dayLong(p.day), time: timeFor(a), when: `${dayShort(p.day)} at ${timeFor(a)}`, number: a.number, how: howFor(a),
+    occasion: a.functions.length ? a.functions.join(", ") + (a.function_date ? ` (${a.function_date})` : "") : a.function_date || "not given",
+    looking: a.looking_for || "not said", source: SOURCE_SPOKEN[a.source] ?? "another way",
+    change: ctx.change || "changed", by: ctx.byName || "the team", reason: ctx.reason || "We are sorry for any trouble.",
   } : {};
   if (ctx.digest) { v.count = String(ctx.digest.count); v.list = ctx.digest.list; }
   return tpl.vars.map((k) => cleanParam(v[k], k === "looking" ? 200 : k === "list" ? 600 : 160));
 }
 export function renderText(tplName: string, params: string[]): string {
-  return TEMPLATES[tplName].body.replace(/\{\{(\d+)\}\}/g, (_, n) => params[Number(n) - 1] ?? "");
+  const t = TEMPLATES[tplName];
+  return t.body.replace(/\{\{(\d+)\}\}/g, (_, n) => params[Number(n) - 1] ?? "") + (t.button ? `\n\n${t.button.text}: ${t.button.url}` : "");
 }
 
 /* ---------------- the message plan ----------------
@@ -243,9 +292,9 @@ export function planMessages(a: Appt, cfg: Config, opts: { actorStaffId?: string
   }
   const confirmedAt = new Date(a.confirmed_at || a.created_at).getTime();
   if (a.notify_wa) {
-    add({ rule: "c-confirm", template: "drevi_appt_confirmed", channel: "wa", audience: "client", recipient_name: a.customer_name, to_address: a.phone_e164, due_at: iso(confirmedAt), expires_at: iso(Math.min(start, confirmedAt + 6 * H)) });
-    if (start - 24 * H > confirmedAt) add({ rule: "c-24h", template: "drevi_appt_reminder_day", channel: "wa", audience: "client", recipient_name: a.customer_name, to_address: a.phone_e164, due_at: iso(start - 24 * H), expires_at: iso(Math.min(start - 3 * H, fromIst(istParts(a.starts_at).day, 0).getTime())) });
-    if (start - 2 * H > confirmedAt + 30 * M) add({ rule: "c-2h", template: "drevi_appt_reminder_soon", channel: "wa", audience: "client", recipient_name: a.customer_name, to_address: a.phone_e164, due_at: iso(start - 2 * H), expires_at: iso(start - 15 * M) });
+    add({ rule: "c-confirm", template: templateFor("c-confirm", a)!, channel: "wa", audience: "client", recipient_name: a.customer_name, to_address: a.phone_e164, due_at: iso(confirmedAt), expires_at: iso(Math.min(start, confirmedAt + 6 * H)) });
+    if (start - 24 * H > confirmedAt) add({ rule: "c-24h", template: templateFor("c-24h", a)!, channel: "wa", audience: "client", recipient_name: a.customer_name, to_address: a.phone_e164, due_at: iso(start - 24 * H), expires_at: iso(Math.min(start - 3 * H, fromIst(istParts(a.starts_at).day, 0).getTime())) });
+    if (start - 2 * H > confirmedAt + 30 * M) add({ rule: "c-2h", template: templateFor("c-2h", a)!, channel: "wa", audience: "client", recipient_name: a.customer_name, to_address: a.phone_e164, due_at: iso(start - 2 * H), expires_at: iso(start - 15 * M) });
   }
   // Staff: the 30-minute heads-up goes to the stylist on the booking if they have it on, else to everyone with it on.
   const host = a.host_staff_id ? people.find((p) => p.staff_id === a.host_staff_id && p.on_heads_up) : null;
@@ -259,7 +308,7 @@ export function planEvent(a: Appt, cfg: Config, ev: { kind: "moved" | "cancelled
   const people = cfg.people.filter((p) => p.active && p.wa_e164 && (p.on_change || (a.host_staff_id && p.staff_id === a.host_staff_id)) && (!ev.actorStaffId || p.staff_id !== ev.actorStaffId));
   const add = (m: Omit<PlannedMsg, "key">) => out.push({ ...m, key: `${m.rule}:${m.channel}:${m.to_address}:${m.due_at}` });
   if (ev.tellClient && a.notify_wa)
-    add({ rule: ev.kind === "moved" ? "ev-moved" : "ev-cancelled", template: ev.kind === "moved" ? "drevi_appt_moved" : "drevi_appt_cancelled", channel: "wa", audience: "client",
+    add({ rule: ev.kind === "moved" ? "ev-moved" : "ev-cancelled", template: templateFor(ev.kind === "moved" ? "ev-moved" : "ev-cancelled", a)!, channel: "wa", audience: "client",
       recipient_name: a.customer_name, to_address: a.phone_e164, due_at: stamp, expires_at: iso(at + 6 * 3600000) });
   for (const p of people)
     add({ rule: "ev-staff", template: "drevi_staff_changed", channel: "wa", audience: "staff", recipient_name: p.name, to_address: p.wa_e164!, due_at: stamp, expires_at: iso(at + 3 * 3600000), params: { kind: ev.kind, by: ev.byName ?? "staff" } });
@@ -268,8 +317,11 @@ export function planEvent(a: Appt, cfg: Config, ev: { kind: "moved" | "cancelled
 
 /* ---------------- WhatsApp by hand (works before AiSensy is ready) ---------------- */
 export function waLink(e164: string, text: string): string { return `https://wa.me/${waDigits(e164)}?text=${encodeURIComponent(text)}`; }
-export function handConfirmText(a: Appt, types: ApptType[]): string { return renderText("drevi_appt_confirmed", renderParams("drevi_appt_confirmed", a, { types })); }
+export function handText(rule: string, a: Appt, types: ApptType[], ctx: Partial<RenderCtx> = {}): string { const n = templateFor(rule, a)!; return renderText(n, renderParams(n, a, { types, ...ctx })); }
+export function handConfirmText(a: Appt, types: ApptType[]): string { return handText("c-confirm", a, types); }
 export function handReminderText(a: Appt, types: ApptType[], now: Date): string {
   const sameDay = istParts(a.starts_at).day === istParts(now).day;
-  return sameDay ? renderText("drevi_appt_reminder_soon", renderParams("drevi_appt_reminder_soon", a, { types })) : renderText("drevi_appt_reminder_day", renderParams("drevi_appt_reminder_day", a, { types })).replace(" tomorrow,", ",");
+  if (sameDay) return handText("c-2h", a, types);
+  const tomorrow = dayDiff(istParts(now).day, istParts(a.starts_at).day) === 1;
+  return tomorrow ? handText("c-24h", a, types) : handText("c-24h", a, types).replace(" tomorrow,", ",");
 }

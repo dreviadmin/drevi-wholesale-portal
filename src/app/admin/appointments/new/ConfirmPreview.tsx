@@ -4,13 +4,13 @@
 // sender uses, from a draft of the booking being typed.
 
 import { palette } from "@/lib/palette";
-import { renderParams, renderText, type Appt, type ApptType } from "@/lib/appointments/core";
+import { handText, type Appt, type ApptType } from "@/lib/appointments/core";
 import { S } from "../ui";
 
 export function ConfirmPreview({ draft, types, status, notify, automationOn, testMode }: {
   draft: Appt; types: ApptType[]; status: "confirmed" | "requested"; notify: boolean; automationOn: boolean; testMode: boolean;
 }) {
-  const text = renderText("drevi_appt_confirmed", renderParams("drevi_appt_confirmed", draft, { types }));
+  const text = handText("c-confirm", draft, types);
   const lead = !notify
     ? "WhatsApp messages are off for this booking, so this is not sent on its own. You can still send it by hand from the booking page."
     : status === "requested"

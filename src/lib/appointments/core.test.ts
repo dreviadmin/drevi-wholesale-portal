@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   TEMPLATES, lintTemplate, parsePhone, istParts, fromIst, slotsFor, conflictAt, planMessages, planEvent, renderParams, renderText,
-  cleanParam, firstName, hoursFor, addDays, weekday, type Appt, type Config,
+  cleanParam, firstName, hoursFor, addDays, weekday, templateFor, sampleParams, type Appt, type Config,
 } from "./core";
 
 const cfg: Config = {
@@ -114,15 +114,39 @@ describe("templates", () => {
     expect(cleanParam("x".repeat(300), 20)).toHaveLength(20);
   });
   it("first names skip titles", () => { expect(firstName("Mrs. Ananya Mehta")).toBe("Ananya"); expect(firstName("Dr Sana Qureshi")).toBe("Sana"); });
-  it("fills the confirmation", () => {
+  it("a store visit gets the store wording: address and a directions button", () => {
     const a = appt({ start: "16:30" });
-    const text = renderText("drevi_appt_confirmed", renderParams("drevi_appt_confirmed", a, { types: cfg.types }));
-    expect(text).toContain("Hi Ananya, your store visit with Drevi is booked for Tuesday 1 December at 4:30 pm.");
+    const text = renderText("drevi_visit_confirmed", renderParams("drevi_visit_confirmed", a, { types: cfg.types }));
+    expect(text).toContain("Hi Ananya, your store visit at Drevi is confirmed for Tuesday 1 December at 4:30 pm.");
     expect(text).toContain("Senapati Bapat Marg");
+    expect(text).toContain("Get directions: https://share.google/");
+  });
+  it("a video call gets the call wording: how to join, no address", () => {
+    const wa = appt({ start: "16:30", type_id: "video", place: "wa" });
+    expect(templateFor("c-confirm", wa)).toBe("drevi_call_confirmed");
+    const text = renderText("drevi_call_confirmed", renderParams("drevi_call_confirmed", wa, { types: cfg.types }));
+    expect(text).toContain("your video shopping call with Drevi is confirmed");
+    expect(text).toContain("How to join: We will video call you on WhatsApp from this number");
+    expect(text).not.toContain("Senapati");
+    const meet = appt({ start: "16:30", type_id: "video", place: "meet", meet_link: "https://meet.google.com/abc-defg-hij" });
+    expect(renderParams("drevi_call_reminder_soon", meet, { types: cfg.types })[3]).toBe("Join on Google Meet at https://meet.google.com/abc-defg-hij");
+  });
+  it("a design consultation follows its place", () => {
+    expect(templateFor("c-24h", appt({ start: "13:00", type_id: "design", place: "store" }))).toBe("drevi_visit_reminder_day");
+    expect(templateFor("ev-moved", appt({ start: "13:00", type_id: "design", place: "meet" }))).toBe("drevi_call_moved");
+    expect(templateFor("s-new", appt({ start: "13:00" }))).toBeNull();
+  });
+  it("the team's new-booking alert reads well", () => {
+    const a = appt({ start: "16:30", party: "group", source: "website" });
+    expect(renderText("drevi_staff_new_booking", renderParams("drevi_staff_new_booking", a, { types: cfg.types })))
+      .toContain("Store visit (with family or friends), booked via the website.\n\nWhen: Tue 1 Dec at 4:30 pm\nCustomer: Ananya Mehta, +91 98765 43210\nOccasion: Sangeet (28 Nov)");
   });
   it("says India time to a number abroad", () => {
     const a = appt({ start: "16:30", phone_e164: "+971501234567", type_id: "video", place: "wa" });
-    expect(renderParams("drevi_appt_confirmed", a, { types: cfg.types })[3]).toBe("4:30 pm India time");
+    expect(renderParams("drevi_call_confirmed", a, { types: cfg.types })[3]).toBe("4:30 pm India time");
+  });
+  it("every template has sample values for Meta", () => {
+    for (const t of Object.values(TEMPLATES)) expect(sampleParams(t).every((v) => v && !/\n/.test(v))).toBe(true);
   });
 });
 

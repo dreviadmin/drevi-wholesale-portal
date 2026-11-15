@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { showPhone, type ApptSettings, type ApptType } from "@/lib/appointments/core";
+import { showPhone, type ApptSettings } from "@/lib/appointments/core";
 import { palette } from "@/lib/palette";
 import { ConfirmSheet } from "@/components/admin/ConfirmSheet";
 import { Pill, S, btn } from "../ui";
@@ -13,7 +13,7 @@ import { CampaignNames } from "./CampaignNames";
 
 type Ask = "automation_on" | "test_off" | null;
 
-export function WhatsAppCard({ settings, types, today, isOwner, flash }: { settings: ApptSettings; types: ApptType[]; today: string; isOwner: boolean; flash: (m: string) => void }) {
+export function WhatsAppCard({ settings, isOwner, flash }: { settings: ApptSettings; isOwner: boolean; flash: (m: string) => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +74,7 @@ export function WhatsAppCard({ settings, types, today, isOwner, flash }: { setti
       <InlineError>{error}</InlineError>
 
       <TestNumbers numbers={settings.test_numbers} flash={flash} />
-      <CampaignNames campaigns={settings.campaigns} types={types} today={today} flash={flash} />
+      <CampaignNames campaigns={settings.campaigns} flash={flash} />
 
       {ask === "automation_on" && (
         <ConfirmSheet title="Turn automatic messages on?" confirmLabel="Turn on" pendingLabel="Turning on…" cancelLabel="Not now" tone="plain" pending={pending} error={askErr}

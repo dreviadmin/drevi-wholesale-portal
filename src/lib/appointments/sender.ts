@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { sendTemplateMessage } from "@/lib/aisensy";
 import { orderTagBlocker } from "@/lib/wallet-core";
 import { loadConfig, APPT_COLS } from "./server";
-import { TEMPLATES, dayShort, fromIst, hm, isLive, istParts, renderParams, type Appt, type Config } from "./core";
+import { TEMPLATES, dayShort, fromIst, hm, isLive, istParts, renderParams, templateFor, type Appt, type Config } from "./core";
 
 // The appointment message sender, run every 10 minutes by /api/cron/appointments.
 //
@@ -79,13 +79,16 @@ export async function runAppointmentSender(now = new Date()): Promise<SenderResu
     if (a && evKind === "moved" && !isLive(a.status)) return finish(r, "skipped", { reason: "The booking is no longer live" });
     if (a && r.audience === "client" && r.to_address !== a.phone_e164) return finish(r, "skipped", { reason: "The WhatsApp number on the booking changed" });
     if (!apiKey) return finish(r, "skipped", { reason: "The AiSensy key for the customer number is not set" });
-    const campaign = set.campaigns?.[r.template];
+    // The customer's wording follows where the booking happens now (store or a call), whatever was planned.
+    const tplName = (a && templateFor(r.rule, a)) || r.template;
+    if (!TEMPLATES[tplName]) return finish(r, "failed", { last_error: `unknown template ${tplName}` });
+    const campaign = set.campaigns?.[tplName];
     if (!campaign) return finish(r, "skipped", { reason: "No AiSensy campaign set for this message in Settings" });
     let to = r.to_address;
     if (set.test_mode) { if (!tests.length) return finish(r, "skipped", { reason: "Test mode is on and there is no test number" }); to = tests[0]; }
     if (!prod && !tests.includes(to)) return finish(r, "skipped", { reason: "Not production: only test numbers are messaged" });
     let params: string[];
-    try { params = renderParams(r.template, a, { types: cfg.types, ...contextFor(r, a, cfg) }); }
+    try { params = renderParams(tplName, a, { types: cfg.types, ...contextFor(r, a, cfg) }); }
     catch (e) { return finish(r, "failed", { last_error: (e as Error).message }); }
     const res = await sendTemplateMessage({ apiKey, campaignName: campaign, destination: to, userName: r.recipient_name || "Customer", params, tags: ["appointments", r.audience] });
     if (res.sent) return finish(r, "sent", { sent_at: new Date().toISOString(), last_error: null, reason: set.test_mode ? `Test mode: sent to ${to}` : null });
@@ -97,13 +100,13 @@ export async function runAppointmentSender(now = new Date()): Promise<SenderResu
 }
 
 function contextFor(r: Row, a: Appt | null, cfg: Config): { change?: string; byName?: string; reason?: string; digest?: { count: number; list: string } } {
-  if (r.template === "drevi_staff_today") return { digest: r.params?.digest as { count: number; list: string } };
+  if (r.rule === "s-digest") return { digest: r.params?.digest as { count: number; list: string } };
   if (!a) return {};
-  if (r.template === "drevi_staff_changed") {
+  if (r.rule === "ev-staff") {
     const p = istParts(a.starts_at);
     return { change: r.params?.kind === "cancelled" ? "cancelled" : `moved to ${dayShort(p.day)} at ${hm(p.min)}`, byName: String(r.params?.by ?? "staff") };
   }
-  if (r.template === "drevi_appt_cancelled") return { reason: a.cancel_reason === "Shop closed" ? "The shop is closed then. We are sorry for the trouble." : "We are sorry for any trouble." };
+  if (r.rule === "ev-cancelled") return { reason: a.cancel_reason === "Shop closed" ? "The shop is closed then. We are sorry for the trouble." : "We are sorry for any trouble." };
   void cfg;
   return {};
 }

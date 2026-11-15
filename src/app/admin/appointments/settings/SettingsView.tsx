@@ -36,7 +36,7 @@ export function SettingsView({ cfg, logins, today, isOwner }: { cfg: Config; log
         <HoursCard hours={cfg.hours} flash={flash} />
         <ClosuresCard closures={cfg.closures} today={today} flash={flash} />
         <PeopleCard people={cfg.people} logins={logins} digestHour={cfg.settings.digest_hour} flash={flash} />
-        <WhatsAppCard settings={cfg.settings} types={cfg.types} today={today} isOwner={isOwner} flash={flash} />
+        <WhatsAppCard settings={cfg.settings} isOwner={isOwner} flash={flash} />
       </div>
       <Toast text={toast} />
     </div>
