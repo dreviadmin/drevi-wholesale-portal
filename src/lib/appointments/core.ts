@@ -148,48 +148,67 @@ export const waDigits = (e164: string) => e164.replace(/\D/g, "");
    Meta's rules, checked by lintTemplate(): the body never starts or ends with
    a variable, no two variables touch, a value is one line, sequential {{n}}.
    Customers reply in the chat, which reaches the shop phone. */
+export type TplButton = { type: "url"; text: string; url: string } | { type: "reply"; text: string };
 export interface Tpl {
   name: string; title: string; audience: "client" | "staff"; group: "visit" | "call" | "staff";
-  vars: string[]; body: string; button?: { text: string; url: string };
+  vars: string[]; header: string; body: string; footer?: string; buttons?: TplButton[];
 }
 export const SHOP_DIRECTIONS_URL = "https://share.google/q8eWVHSpKXY0H4Z2t"; // the link /pages/visit uses
-const ADDRESS_LINE = `Address: ${SHOP_ADDRESS}`;
-const DIRECTIONS = { text: "Get directions", url: SHOP_DIRECTIONS_URL };
+const ADDRESS = `*Address:* ${SHOP_ADDRESS}`;
+const FOOTER = "Drevi · Mon–Sat 12–8 pm, Sun 1–7 pm";
+const DIRECTIONS: TplButton = { type: "url", text: "Get directions", url: SHOP_DIRECTIONS_URL };
+const reply = (text: string): TplButton => ({ type: "reply", text });
+const PORTAL = "Open Appointments in the Drevi portal for the details.";
 const T = (t: Tpl): [string, Tpl] => [t.name, t];
 export const TEMPLATES: Record<string, Tpl> = Object.fromEntries([
   // ---- store visits (and consultations at the store) ----
-  T({ name: "drevi_visit_confirmed", title: "Store visit confirmed", audience: "client", group: "visit", vars: ["name", "what", "date", "time", "number"], button: DIRECTIONS,
-    body: `Hi {{1}}, your {{2}} at Drevi is confirmed for {{3}} at {{4}}.\n\nBooking number: {{5}}\n${ADDRESS_LINE}\n\nWe look forward to seeing you. To change the time, just reply to this message.` }),
-  T({ name: "drevi_visit_reminder_day", title: "Store visit: reminder a day before", audience: "client", group: "visit", vars: ["name", "what", "date", "time"], button: DIRECTIONS,
-    body: `Hi {{1}}, this is a reminder of your {{2}} at Drevi tomorrow, {{3}} at {{4}}.\n\n${ADDRESS_LINE}\n\nTo change the time, just reply to this message.` }),
-  T({ name: "drevi_visit_reminder_soon", title: "Store visit: reminder 2 hours before", audience: "client", group: "visit", vars: ["name", "time"], button: DIRECTIONS,
-    body: `Hi {{1}}, we are expecting you at Drevi today at {{2}}.\n\n${ADDRESS_LINE}\n\nRunning late or can't make it? Just reply to this message.` }),
-  T({ name: "drevi_visit_moved", title: "Store visit moved", audience: "client", group: "visit", vars: ["name", "what", "date", "time", "number"], button: DIRECTIONS,
-    body: `Hi {{1}}, your {{2}} at Drevi has been moved to {{3}} at {{4}}.\n\nBooking number: {{5}}\n${ADDRESS_LINE}\n\nIf the new time doesn't suit you, just reply to this message.` }),
+  T({ name: "drevi_visit_confirmed", title: "Store visit confirmed", audience: "client", group: "visit", vars: ["name", "what", "date", "time", "number"],
+    header: "Your visit is booked", footer: FOOTER, buttons: [DIRECTIONS, reply("Need to reschedule")],
+    body: `Hi {{1}}, your {{2}} at Drevi is confirmed.\n\n*Date:* {{3}}\n*Time:* {{4}}\n*Booking no.:* {{5}}\n\n${ADDRESS}\n\nWe look forward to seeing you. To change the time, just reply to this message.` }),
+  T({ name: "drevi_visit_reminder_day", title: "Store visit: reminder a day before", audience: "client", group: "visit", vars: ["name", "what", "date", "time"],
+    header: "See you tomorrow", footer: FOOTER, buttons: [DIRECTIONS, reply("I'll be there"), reply("Need to reschedule")],
+    body: `Hi {{1}}, a reminder of your {{2}} at Drevi tomorrow.\n\n*Date:* {{3}}\n*Time:* {{4}}\n\n${ADDRESS}\n\nTo change the time, just reply to this message.` }),
+  T({ name: "drevi_visit_reminder_soon", title: "Store visit: reminder 2 hours before", audience: "client", group: "visit", vars: ["name", "time"],
+    header: "See you soon", footer: FOOTER, buttons: [DIRECTIONS, reply("On my way"), reply("Running late")],
+    body: `Hi {{1}}, we are expecting you at Drevi today at {{2}}.\n\n${ADDRESS}\n\nRunning late or can't make it? Just reply to this message.` }),
+  T({ name: "drevi_visit_moved", title: "Store visit moved", audience: "client", group: "visit", vars: ["name", "what", "date", "time", "number"],
+    header: "Your visit has moved", footer: FOOTER, buttons: [DIRECTIONS, reply("Need another time")],
+    body: `Hi {{1}}, your {{2}} at Drevi has been moved to a new time.\n\n*Date:* {{3}}\n*Time:* {{4}}\n*Booking no.:* {{5}}\n\n${ADDRESS}\n\nIf the new time doesn't suit you, just reply to this message.` }),
   T({ name: "drevi_visit_cancelled", title: "Store visit cancelled", audience: "client", group: "visit", vars: ["name", "what", "date", "time", "reason"],
+    header: "Visit cancelled", footer: FOOTER, buttons: [reply("Book another time")],
     body: "Hi {{1}}, your {{2}} at Drevi on {{3}} at {{4}} has been cancelled. {{5}}\n\nTo book another time, just reply to this message." }),
   // ---- video calls (WhatsApp video or Google Meet) ----
   T({ name: "drevi_call_confirmed", title: "Video call confirmed", audience: "client", group: "call", vars: ["name", "what", "date", "time", "number", "how"],
-    body: "Hi {{1}}, your {{2}} with Drevi is confirmed for {{3}} at {{4}}.\n\nBooking number: {{5}}\nHow to join: {{6}}\n\nKeep any pictures or ideas you would like to show us handy. To change the time, just reply to this message." }),
+    header: "Your video call is booked", footer: FOOTER, buttons: [reply("Need to reschedule")],
+    body: "Hi {{1}}, your {{2}} with Drevi is confirmed.\n\n*Date:* {{3}}\n*Time:* {{4}}\n*Booking no.:* {{5}}\n\n*How to join:* {{6}}\n\nKeep any pictures or ideas you would like to show us handy. To change the time, just reply to this message." }),
   T({ name: "drevi_call_reminder_day", title: "Video call: reminder a day before", audience: "client", group: "call", vars: ["name", "what", "date", "time", "how"],
-    body: "Hi {{1}}, this is a reminder of your {{2}} with Drevi tomorrow, {{3}} at {{4}}.\n\nHow to join: {{5}}\n\nTo change the time, just reply to this message." }),
+    header: "Your call is tomorrow", footer: FOOTER, buttons: [reply("I'll be there"), reply("Need to reschedule")],
+    body: "Hi {{1}}, a reminder of your {{2}} with Drevi tomorrow.\n\n*Date:* {{3}}\n*Time:* {{4}}\n\n*How to join:* {{5}}\n\nTo change the time, just reply to this message." }),
   T({ name: "drevi_call_reminder_soon", title: "Video call: reminder 2 hours before", audience: "client", group: "call", vars: ["name", "what", "time", "how"],
-    body: "Hi {{1}}, your {{2}} with Drevi starts today at {{3}}.\n\nHow to join: {{4}}\n\nPlease find a spot with good light and a steady connection. Running late? Just reply to this message." }),
+    header: "Your call is today", footer: FOOTER, buttons: [reply("I'm ready"), reply("Running late")],
+    body: "Hi {{1}}, your {{2}} with Drevi starts today at {{3}}.\n\n*How to join:* {{4}}\n\nPlease find a spot with good light and a steady connection. Running late? Just reply to this message." }),
   T({ name: "drevi_call_moved", title: "Video call moved", audience: "client", group: "call", vars: ["name", "what", "date", "time", "number", "how"],
-    body: "Hi {{1}}, your {{2}} with Drevi has been moved to {{3}} at {{4}}.\n\nBooking number: {{5}}\nHow to join: {{6}}\n\nIf the new time doesn't suit you, just reply to this message." }),
+    header: "Your call has moved", footer: FOOTER, buttons: [reply("Need another time")],
+    body: "Hi {{1}}, your {{2}} with Drevi has been moved to a new time.\n\n*Date:* {{3}}\n*Time:* {{4}}\n*Booking no.:* {{5}}\n\n*How to join:* {{6}}\n\nIf the new time doesn't suit you, just reply to this message." }),
   T({ name: "drevi_call_cancelled", title: "Video call cancelled", audience: "client", group: "call", vars: ["name", "what", "date", "time", "reason"],
+    header: "Video call cancelled", footer: FOOTER, buttons: [reply("Book another time")],
     body: "Hi {{1}}, your {{2}} with Drevi on {{3}} at {{4}} has been cancelled. {{5}}\n\nTo book another time, just reply to this message." }),
   // ---- the team ----
-  T({ name: "drevi_staff_new_booking", title: "New booking (team)", audience: "staff", group: "staff", vars: ["number", "kind", "source", "when", "customer", "occasion", "looking"],
-    body: "New appointment {{1}}: {{2}}, booked via {{3}}.\n\nWhen: {{4}}\nCustomer: {{5}}\nOccasion: {{6}}\nLooking for: {{7}}\n\nOpen Appointments in the Drevi portal for the details." }),
+  T({ name: "drevi_staff_new_booking", title: "New booking (team)", audience: "staff", group: "staff", vars: ["source", "number", "kind", "when", "customer", "occasion", "looking"],
+    header: "New appointment",
+    body: `A new appointment has been booked via {{1}}.\n\n*Booking no.:* {{2}}\n*What:* {{3}}\n*When:* {{4}}\n*Customer:* {{5}}\n*Occasion:* {{6}}\n*Looking for:* {{7}}\n\n${PORTAL}` }),
   T({ name: "drevi_staff_changed", title: "Moved or cancelled (team)", audience: "staff", group: "staff", vars: ["number", "customer", "change", "by"],
-    body: "Booking {{1}} for {{2}} has been {{3}} by {{4}}.\n\nOpen Appointments in the Drevi portal for the details." }),
+    header: "Booking changed",
+    body: `Booking {{1}} for {{2}} has been {{3}} by {{4}}.\n\n${PORTAL}` }),
   T({ name: "drevi_staff_today", title: "Today's appointments (team)", audience: "staff", group: "staff", vars: ["count", "list"],
-    body: "Good morning. Appointments at Drevi today: {{1}}.\n\n{{2}}\n\nOpen Appointments in the Drevi portal for the details." }),
+    header: "Today's appointments",
+    body: `Good morning. Appointments at Drevi today: {{1}}.\n\n{{2}}\n\n${PORTAL}` }),
   T({ name: "drevi_staff_heads_up", title: "Heads-up 30 minutes before (team)", audience: "staff", group: "staff", vars: ["customer", "time", "kind", "looking"],
-    body: "Coming up in 30 minutes: {{1}} at {{2}}.\n\nWhat: {{3}}\nLooking for: {{4}}\n\nOpen Appointments in the Drevi portal for the notes." }),
+    header: "Coming up in 30 minutes",
+    body: "Your next appointment: {{1}} at {{2}}.\n\n*What:* {{3}}\n*Looking for:* {{4}}\n\nOpen Appointments in the Drevi portal for the notes." }),
   T({ name: "drevi_staff_needs_confirming", title: "Still needs confirming (team)", audience: "staff", group: "staff", vars: ["number", "customer", "kind", "when"],
-    body: "Booking {{1}} for {{2}} is still waiting to be confirmed.\n\nWhat: {{3}}\nWhen: {{4}}\n\nPlease call or WhatsApp them, then confirm it in the Drevi portal." }),
+    header: "Needs confirming",
+    body: "Booking {{1}} for {{2}} is still waiting to be confirmed.\n\n*What:* {{3}}\n*When:* {{4}}\n\nPlease call or WhatsApp them, then confirm it in the Drevi portal." }),
 ]);
 /** Example values Meta asks for when a template is submitted (made up; nothing is sent). */
 export const TEMPLATE_SAMPLES: Record<string, string> = {
@@ -217,7 +236,11 @@ export function lintTemplate(t: Tpl): string[] {
   if (/\}\}\s*\{\{/.test(t.body)) issues.push("two variables touch");
   if (t.body.length > 1024) issues.push("longer than 1024");
   if (!/^[a-z0-9_]{1,512}$/.test(t.name)) issues.push("name must be lowercase letters, digits and _");
-  if (t.button && (t.button.text.length > 25 || !/^https:\/\//.test(t.button.url))) issues.push("button text over 25 or url not https");
+  if (!t.header || t.header.length > 60 || /\{\{|\n|\*/.test(t.header)) issues.push("header must be plain text up to 60");
+  if (t.footer && (t.footer.length > 60 || /\{\{/.test(t.footer))) issues.push("footer up to 60, no variables");
+  const b = t.buttons ?? [];
+  if (b.length > 10 || b.filter((x) => x.type === "url").length > 2) issues.push("too many buttons");
+  if (b.some((x) => x.text.length > 25 || (x.type === "url" && !/^https:\/\//.test(x.url)))) issues.push("button text over 25 or url not https");
   return issues;
 }
 /** One-line value Meta accepts: no newlines or tabs, no 4+ spaces, not empty, capped. */
@@ -258,9 +281,12 @@ export function renderParams(tplName: string, a: Appt | null, ctx: RenderCtx): s
   if (ctx.digest) { v.count = String(ctx.digest.count); v.list = ctx.digest.list; }
   return tpl.vars.map((k) => cleanParam(v[k], k === "looking" ? 200 : k === "list" ? 600 : 160));
 }
+/** The message as the customer reads it (header in bold, footer in italics, a link for the directions button). Also the text sent by hand. */
 export function renderText(tplName: string, params: string[]): string {
   const t = TEMPLATES[tplName];
-  return t.body.replace(/\{\{(\d+)\}\}/g, (_, n) => params[Number(n) - 1] ?? "") + (t.button ? `\n\n${t.button.text}: ${t.button.url}` : "");
+  const url = (t.buttons ?? []).find((b): b is Extract<TplButton, { type: "url" }> => b.type === "url");
+  return `*${t.header}*\n\n` + t.body.replace(/\{\{(\d+)\}\}/g, (_, n) => params[Number(n) - 1] ?? "")
+    + (url ? `\n\n${url.text}: ${url.url}` : "") + (t.footer ? `\n\n_${t.footer}_` : "");
 }
 
 /* ---------------- the message plan ----------------
@@ -323,5 +349,5 @@ export function handReminderText(a: Appt, types: ApptType[], now: Date): string 
   const sameDay = istParts(a.starts_at).day === istParts(now).day;
   if (sameDay) return handText("c-2h", a, types);
   const tomorrow = dayDiff(istParts(now).day, istParts(a.starts_at).day) === 1;
-  return tomorrow ? handText("c-24h", a, types) : handText("c-24h", a, types).replace(" tomorrow,", ",");
+  return tomorrow ? handText("c-24h", a, types) : handText("c-24h", a, types).replace(" tomorrow.", ".").replace("*See you tomorrow*", "*A reminder from Drevi*").replace("*Your call is tomorrow*", "*A reminder from Drevi*");
 }

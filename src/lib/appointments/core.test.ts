@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   TEMPLATES, lintTemplate, parsePhone, istParts, fromIst, slotsFor, conflictAt, planMessages, planEvent, renderParams, renderText,
-  cleanParam, firstName, hoursFor, addDays, weekday, templateFor, sampleParams, type Appt, type Config,
+  cleanParam, firstName, hoursFor, addDays, weekday, templateFor, sampleParams, handReminderText, type Appt, type Config,
 } from "./core";
 
 const cfg: Config = {
@@ -117,7 +117,8 @@ describe("templates", () => {
   it("a store visit gets the store wording: address and a directions button", () => {
     const a = appt({ start: "16:30" });
     const text = renderText("drevi_visit_confirmed", renderParams("drevi_visit_confirmed", a, { types: cfg.types }));
-    expect(text).toContain("Hi Ananya, your store visit at Drevi is confirmed for Tuesday 1 December at 4:30 pm.");
+    expect(text.startsWith("*Your visit is booked*\n\nHi Ananya, your store visit at Drevi is confirmed.\n\n*Date:* Tuesday 1 December\n*Time:* 4:30 pm\n*Booking no.:* A-")).toBe(true);
+    expect(text.endsWith("_Drevi · Mon–Sat 12–8 pm, Sun 1–7 pm_")).toBe(true);
     expect(text).toContain("Senapati Bapat Marg");
     expect(text).toContain("Get directions: https://share.google/");
   });
@@ -126,7 +127,7 @@ describe("templates", () => {
     expect(templateFor("c-confirm", wa)).toBe("drevi_call_confirmed");
     const text = renderText("drevi_call_confirmed", renderParams("drevi_call_confirmed", wa, { types: cfg.types }));
     expect(text).toContain("your video shopping call with Drevi is confirmed");
-    expect(text).toContain("How to join: We will video call you on WhatsApp from this number");
+    expect(text).toContain("*How to join:* We will video call you on WhatsApp from this number");
     expect(text).not.toContain("Senapati");
     const meet = appt({ start: "16:30", type_id: "video", place: "meet", meet_link: "https://meet.google.com/abc-defg-hij" });
     expect(renderParams("drevi_call_reminder_soon", meet, { types: cfg.types })[3]).toBe("Join on Google Meet at https://meet.google.com/abc-defg-hij");
@@ -139,11 +140,18 @@ describe("templates", () => {
   it("the team's new-booking alert reads well", () => {
     const a = appt({ start: "16:30", party: "group", source: "website" });
     expect(renderText("drevi_staff_new_booking", renderParams("drevi_staff_new_booking", a, { types: cfg.types })))
-      .toContain("Store visit (with family or friends), booked via the website.\n\nWhen: Tue 1 Dec at 4:30 pm\nCustomer: Ananya Mehta, +91 98765 43210\nOccasion: Sangeet (28 Nov)");
+      .toContain("A new appointment has been booked via the website.\n\n*Booking no.:* A-");
+    expect(renderText("drevi_staff_new_booking", renderParams("drevi_staff_new_booking", a, { types: cfg.types })))
+      .toContain("*What:* Store visit (with family or friends)\n*When:* Tue 1 Dec at 4:30 pm\n*Customer:* Ananya Mehta, +91 98765 43210\n*Occasion:* Sangeet (28 Nov)");
   });
   it("says India time to a number abroad", () => {
     const a = appt({ start: "16:30", phone_e164: "+971501234567", type_id: "video", place: "wa" });
     expect(renderParams("drevi_call_confirmed", a, { types: cfg.types })[3]).toBe("4:30 pm India time");
+  });
+  it("the day-before reminder sent by hand earlier than the day before drops 'tomorrow'", () => {
+    const a = appt({ start: "16:30" }); // Tue 1 Dec; NOW is Mon 30 Nov
+    expect(handReminderText(a, cfg.types, fromIst("2026-11-28", 12 * 60))).not.toMatch(/tomorrow/i);
+    expect(handReminderText(a, cfg.types, NOW)).toContain("at Drevi tomorrow.");
   });
   it("every template has sample values for Meta", () => {
     for (const t of Object.values(TEMPLATES)) expect(sampleParams(t).every((v) => v && !/\n/.test(v))).toBe(true);

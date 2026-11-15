@@ -26,7 +26,6 @@ export function CampaignNames({ campaigns, flash }: { campaigns: Record<string, 
   const tpls = useMemo(() => Object.values(TEMPLATES), []);
   const [draft, setDraft] = useState<Record<string, string>>(() => Object.fromEntries(tpls.map((t) => [t.name, campaigns[t.name] ?? ""])));
   const dirty = tpls.some((t) => (draft[t.name] ?? "").trim() !== (campaigns[t.name] ?? ""));
-  const filled = tpls.filter((t) => campaigns[t.name]).length;
 
   function save() {
     setError(null);
@@ -45,8 +44,8 @@ export function CampaignNames({ campaigns, flash }: { campaigns: Record<string, 
     <div style={{ borderTop: "1px solid rgba(26,26,26,0.12)", marginTop: 16, paddingTop: 14 }}>
       <h3 className="font-body" style={S.h3}>AiSensy campaign names</h3>
       <p className="font-body" style={{ ...S.muted, marginBottom: 6, lineHeight: 1.55, maxWidth: 680 }}>
-        Each message is a WhatsApp template that Meta approves before it can be sent. In AiSensy, create a Utility template with the template name and wording shown here,
-        then, once it is approved, an API campaign that uses it. Enter that campaign&apos;s name below. {filled} of {tpls.length} are filled in.
+        Each message is a WhatsApp template on the AiSensy project for +91 84336 59684, approved by Meta, with an API campaign of the same name.
+        The portal uses that name, so nothing needs typing here. Enter a different campaign name only if one was set up under another name.
       </p>
       <div>
         {tpls.map((t) => {
@@ -59,7 +58,7 @@ export function CampaignNames({ campaigns, flash }: { campaigns: Record<string, 
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-body" style={{ fontSize: 13.5, fontWeight: 600, color: palette.black }}>{t.title}</span>
                     <Pill bg={t.audience === "client" ? "#E2EAF5" : "#F1E6CC"} fg={t.audience === "client" ? "#274672" : "#6E5320"}>{t.audience === "client" ? "To customers" : "To staff"}</Pill>
-                    {!saved && <Pill bg="#FBEFD2" fg="#7A4E00">No campaign yet</Pill>}
+                    {saved && saved !== t.name && <Pill bg="#FBEFD2" fg="#7A4E00">Uses campaign {saved}</Pill>}
                   </div>
                   <div className="flex items-center gap-1 flex-wrap" style={{ marginTop: 4 }}>
                     <span className="font-body" style={S.muted}>Template name</span>
@@ -71,7 +70,7 @@ export function CampaignNames({ campaigns, flash }: { campaigns: Record<string, 
                 </div>
                 <label className="font-body block" style={{ minWidth: 0 }}>
                   <span className="block" style={{ ...S.label, marginBottom: 6 }}>Campaign name</span>
-                  <input value={draft[t.name] ?? ""} maxLength={120} onChange={(e) => setDraft((d) => ({ ...d, [t.name]: e.target.value }))} aria-label={`AiSensy campaign name for ${t.title}`}
+                  <input value={draft[t.name] ?? ""} placeholder={t.name} maxLength={120} onChange={(e) => setDraft((d) => ({ ...d, [t.name]: e.target.value }))} aria-label={`AiSensy campaign name for ${t.title}`}
                     className={`font-body ${FOCUS}`} style={INPUT} />
                 </label>
               </div>

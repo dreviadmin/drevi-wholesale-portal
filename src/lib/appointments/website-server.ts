@@ -3,7 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadConfig, APPT_COLS } from "./server";
-import { addDays, dayDiff, dayShort, durOf, fromIst, hm, isLive, istParts, planMessages, templateFor, type Appt, type ApptStatus, type Config, type Party, type Place } from "./core";
+import { addDays, dayDiff, dayShort, durOf, fromIst, hm, isLive, istParts, planMessages, type Appt, type ApptStatus, type Config, type Party, type Place } from "./core";
 import { MAX_DAYS, availabilityFor, bookedReply, campaignText, networkKey, parseWebBook, slotProblem, validDay, webParty, webType, type WebErr } from "./website";
 
 // The website booking box's server side: what /api/appointments/availability
@@ -66,9 +66,9 @@ const LIMIT_TEXT: Record<string, string> = {
 };
 
 /** Whether the customer gets an automatic WhatsApp confirmation now (else the page offers the WhatsApp button). */
-function autoWhatsApp(cfg: Config, notifyWa: boolean, status: string, place: Place): boolean {
-  const s = cfg.settings;
-  return s.automation_on && !s.test_mode && notifyWa && status === "confirmed" && !!process.env.AISENSY_APPT_API_KEY?.trim() && !!s.campaigns?.[templateFor("c-confirm", { place })!];
+function autoWhatsApp(cfg: Config, notifyWa: boolean, status: string): boolean {
+  const s = cfg.settings; // every template has an AiSensy API campaign of the same name
+  return s.automation_on && !s.test_mode && notifyWa && status === "confirmed" && !!(process.env.AISENSY_APPT_API_KEY?.trim() || process.env.AISENSY_API_KEY?.trim());
 }
 
 export async function websiteBook(body: unknown, ip: string | null, now = new Date()) {
@@ -133,7 +133,7 @@ export async function websiteBook(body: unknown, ip: string | null, now = new Da
     const type = st ? cfg.types.find((t) => t.id === st.type_id) : null;
     if (!st || !type || !isLive(st.status)) return { ok: false as const, status: 409, code: "key_reused", error: "Please tap Book again." };
     const sp = istParts(st.starts_at);
-    return bookedReply({ number: st.number, status: st.status, replayed: true, type, place: st.place, party: st.party, day: sp.day, min: sp.min, name: v.name, autoWhatsApp: autoWhatsApp(cfg, st.notify_wa, st.status, st.place) });
+    return bookedReply({ number: st.number, status: st.status, replayed: true, type, place: st.place, party: st.party, day: sp.day, min: sp.min, name: v.name, autoWhatsApp: autoWhatsApp(cfg, st.notify_wa, st.status) });
   }
-  return bookedReply({ number: r.number!, status, replayed: false, type: v.type, place: v.place, party: v.party, day: v.day, min: v.min, name: v.name, autoWhatsApp: autoWhatsApp(cfg, v.notifyWa, status, v.place) });
+  return bookedReply({ number: r.number!, status, replayed: false, type: v.type, place: v.place, party: v.party, day: v.day, min: v.min, name: v.name, autoWhatsApp: autoWhatsApp(cfg, v.notifyWa, status) });
 }

@@ -16,7 +16,8 @@ import { TEMPLATES, dayShort, fromIst, hm, isLive, istParts, renderParams, templ
 //   2. not production (a dev deploy, or production code pointed at the dev
 //      database): only numbers on the test list are ever messaged.
 //   3. test mode: every message goes to the test numbers instead of the person.
-//   4. no AiSensy key for the customer number, or no campaign for the template.
+//   4. no AiSensy key for the customer number. Each AiSensy API campaign is
+//      named after its template (Settings can name a different one).
 //   5. the booking is no longer live (for reminders), or the customer said no
 //      to WhatsApp.
 //   6. a moved or cancelled note that is no longer true (Undo, a later cancel),
@@ -59,7 +60,8 @@ export async function runAppointmentSender(now = new Date()): Promise<SenderResu
     }
     for (const a of (data ?? []) as Appt[]) appts.set(a.id, a);
   }
-  const apiKey = process.env.AISENSY_APPT_API_KEY?.trim() || "";
+  // The AiSensy project for +91 84336 59684. Its own key if set, else the portal's existing AiSensy key (same project).
+  const apiKey = process.env.AISENSY_APPT_API_KEY?.trim() || process.env.AISENSY_API_KEY?.trim() || "";
   const prod = orderTagBlocker({ VERCEL_ENV: process.env.VERCEL_ENV, NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL }) === null;
   const tests = set.test_numbers ?? [];
 
@@ -78,12 +80,11 @@ export async function runAppointmentSender(now = new Date()): Promise<SenderResu
     if (a && evKind === "cancelled" && a.status !== "cancelled") return finish(r, "skipped", { reason: "The booking was reopened" });
     if (a && evKind === "moved" && !isLive(a.status)) return finish(r, "skipped", { reason: "The booking is no longer live" });
     if (a && r.audience === "client" && r.to_address !== a.phone_e164) return finish(r, "skipped", { reason: "The WhatsApp number on the booking changed" });
-    if (!apiKey) return finish(r, "skipped", { reason: "The AiSensy key for the customer number is not set" });
+    if (!apiKey) return finish(r, "skipped", { reason: "No AiSensy key is set (AISENSY_APPT_API_KEY or AISENSY_API_KEY)" });
     // The customer's wording follows where the booking happens now (store or a call), whatever was planned.
     const tplName = (a && templateFor(r.rule, a)) || r.template;
     if (!TEMPLATES[tplName]) return finish(r, "failed", { last_error: `unknown template ${tplName}` });
-    const campaign = set.campaigns?.[tplName];
-    if (!campaign) return finish(r, "skipped", { reason: "No AiSensy campaign set for this message in Settings" });
+    const campaign = set.campaigns?.[tplName]?.trim() || tplName;
     let to = r.to_address;
     if (set.test_mode) { if (!tests.length) return finish(r, "skipped", { reason: "Test mode is on and there is no test number" }); to = tests[0]; }
     if (!prod && !tests.includes(to)) return finish(r, "skipped", { reason: "Not production: only test numbers are messaged" });
