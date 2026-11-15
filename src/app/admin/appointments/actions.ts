@@ -6,7 +6,7 @@ import { requireStaff, requireAdmin, isAdminRole, type StaffCtx } from "@/lib/st
 import { writeAuditEvent } from "@/lib/audit";
 import { loadConfig, APPT_COLS } from "@/lib/appointments/server";
 import {
-  CONFLICT_LABEL, FUNCTIONS, dayShort, durOf, fromIst, hm, hoursFor, istParts, isLive, parsePhone, planEvent, planMessages, slotsFor,
+  CONFLICT_LABEL, FUNCTIONS, dayShort, durOf, fromIst, hm, hoursFor, istParts, isLive, parseHm, parsePhone, planEvent, planMessages, slotsFor,
   type Appt, type ApptSource, type Party, type Place, type Config,
 } from "@/lib/appointments/core";
 
@@ -56,17 +56,20 @@ export async function bookAppointment(input: BookInput): Promise<Res<{ number: s
   const meet = clip(input.meetLink, 300);
   if (meet && !/^https:\/\/\S+$/.test(meet)) return { ok: false, error: "The Meet link must start with https://" };
   const override = !!input.override && isAdminRole(staff.role);
-  const start = fromIst(input.day, input.min), end = new Date(start.getTime() + durOf(type, input.party) * 60000);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(input.day)) || !Number.isInteger(input.min)) return { ok: false, error: "Pick the day and time." };
+  const start = fromIst(input.day, input.min), end = new Date(start.getTime() + durOf(type, input.party === "group" ? "group" : "solo") * 60000);
   if (!insideHours(cfg, start, end) && !override) return { ok: false, error: "That is outside opening hours. An owner or admin can book it anyway." };
   if (end.getTime() < Date.now() - 15 * 60000) return { ok: false, error: "That time has already passed." };
 
   const nowIso = new Date().toISOString();
+  const status = input.status === "requested" ? "requested" : "confirmed";
+  const party: Party = input.party === "group" ? "group" : "solo";
   const draft: Appt = {
-    id: "", number: "", type_id: type.id, place: input.place, party: input.party, starts_at: start.toISOString(), ends_at: end.toISOString(), status: input.status,
+    id: "", number: "", type_id: type.id, place: input.place, party, starts_at: start.toISOString(), ends_at: end.toISOString(), status,
     source: input.source, customer_name: name, phone_e164: phone, email: clip(input.email, 200) || null, functions: (input.functions ?? []).filter((f) => FUNCTIONS.includes(f)),
     function_date: clip(input.functionDate, 60) || null, looking_for: clip(input.lookingFor, 600) || null, staff_notes: clip(input.staffNotes, 2000) || null,
     meet_link: meet || null, host_staff_id: input.hostStaffId || null, notify_wa: !!input.notifyWa, notify_email: false, offers_ok: false, outcome: null, cancel_reason: null,
-    manage_token: "", created_by: staff.id, created_at: nowIso, confirmed_at: input.status === "confirmed" ? nowIso : null, cancelled_at: null, updated_at: nowIso, rev: 1,
+    manage_token: "", created_by: staff.id, created_at: nowIso, confirmed_at: status === "confirmed" ? nowIso : null, cancelled_at: null, updated_at: nowIso, rev: 1,
   };
   const messages = planMessages(draft, cfg, { actorStaffId: staff.id });
   const { data, error } = await createAdminClient().rpc("appt_book", { p: {
@@ -123,7 +126,7 @@ export async function changeAppointment(input: ChangeInput): Promise<Res<{ rev: 
     case "confirm":
       if (a.status !== "requested") return { ok: false, error: "It is not waiting to be confirmed." };
       patch.status = next.status = "confirmed"; next.confirmed_at = now.toISOString();
-      if (input.tellClient === false) { patch.notify_wa = next.notify_wa = false; }
+      if (input.tellClient !== undefined && !!input.tellClient !== a.notify_wa) { patch.notify_wa = next.notify_wa = !!input.tellClient; }
       text = `Confirmed by ${who(staff)}.` + (next.notify_wa ? " The customer gets the confirmation on WhatsApp." : " The customer was not messaged."); break;
     case "arrived":
       if (!isLive(a.status)) return { ok: false, error: "This booking is not live." };
@@ -154,6 +157,7 @@ export async function changeAppointment(input: ChangeInput): Promise<Res<{ rev: 
       text = input.hostStaffId ? `Stylist set by ${who(staff)}.` : `Stylist cleared by ${who(staff)}.`; break;
     case "note": {
       const n = clip(input.note, 500); if (!n) return { ok: false, error: "Write the note first." };
+      if ((a.staff_notes ? a.staff_notes.length + 1 : 0) + n.length > 2000) return { ok: false, error: "The notes are full (2000 characters). Shorten them in Edit details first." };
       patch.staff_notes = next.staff_notes = (a.staff_notes ? a.staff_notes + "\n" : "") + n;
       text = `Note from ${who(staff)}: ${n}`; break;
     }
@@ -184,6 +188,7 @@ export async function changeAppointment(input: ChangeInput): Promise<Res<{ rev: 
         const t2 = cfg.types.find((t) => t.id === next.type_id)!;
         if (!t2.places.includes(next.place)) patch.place = next.place = t2.places[0];
         const e2 = new Date(new Date(a.starts_at).getTime() + durOf(t2, next.party) * 60000);
+        if (isLive(a.status) && !insideHours(cfg, new Date(a.starts_at), e2) && !(input.override && isAdmin)) return { ok: false, error: "With that change it would run past closing time. Move it earlier first." };
         patch.ends_at = next.ends_at = e2.toISOString();
       }
       if (!changes.length) return { ok: false, error: "Nothing changed." };
@@ -199,7 +204,12 @@ export async function changeAppointment(input: ChangeInput): Promise<Res<{ rev: 
   const r = data as { ok: boolean; error?: string; rev?: number };
   if (!r.ok) {
     if (r.error === "stale") return { ok: false, error: "Someone else changed this booking a moment ago. Reload and try again." };
-    return { ok: false, error: CONFLICT_LABEL[r.error ?? ""] ? `${CONFLICT_LABEL[r.error!]}. Pick another time${isAdmin ? ", or book over the limit" : ""}.` : r.error ?? "Could not save." };
+    const why = CONFLICT_LABEL[r.error ?? ""];
+    if (!why) return { ok: false, error: r.error ?? "Could not save." };
+    if (input.kind === "reopen") return { ok: false, error: `That time has filled up since (${why.toLowerCase()}). Undo over the limit, or make a new booking.` };
+    if (input.kind === "host") return { ok: false, error: `${why}. Pick another stylist.` };
+    if (input.kind === "edit") return { ok: false, error: `With that change it no longer fits: ${why.toLowerCase()}. Move it to another time first.` };
+    return { ok: false, error: `${why}. Pick another time${isAdmin ? ", or book over the limit" : ""}.` };
   }
   revalidate(a.number);
   return { ok: true, rev: r.rev! };
@@ -212,6 +222,11 @@ export async function logHandSend(id: string, what: "confirmation" | "reminder" 
   const { data: a } = await createAdminClient().from("appointments").select("number").eq("id", id).maybeSingle();
   if (!a) return { ok: false, error: "That booking is gone." };
   await createAdminClient().from("appointment_events").insert({ appointment_id: id, by_name: who(staff), by_staff_id: staff.id, kind: "hand_whatsapp", text: `${who(staff)} opened WhatsApp to send the ${what} by hand.` });
+  if (what === "confirmation") {
+    // Marked sent (not skipped): a later re-plan revives skipped rows, never sent ones.
+    await createAdminClient().from("appointment_messages").update({ state: "sent", sent_at: new Date().toISOString(), reason: `Sent by hand by ${who(staff)}`, updated_at: new Date().toISOString() })
+      .eq("appointment_id", id).eq("rule", "c-confirm").in("state", ["scheduled", "skipped", "cancelled"]);
+  }
   revalidate((a as { number: string }).number);
   return { ok: true };
 }
@@ -256,7 +271,9 @@ export async function saveClosure(c: { day: string; opens?: string | null; close
   const admin = createAdminClient();
   const { error } = await admin.from("appointment_closures").upsert({ day: c.day, opens: c.opens || null, closes: c.closes || null, note: clip(c.note, 120) || null, created_by: staff.email });
   if (error) return { ok: false, error: error.message };
-  const { count } = await admin.from("appointments").select("id", { count: "exact", head: true }).gte("starts_at", fromIst(c.day, 0).toISOString()).lt("starts_at", fromIst(c.day, 1440).toISOString()).in("status", ["requested", "confirmed", "arrived"]);
+  let q = admin.from("appointments").select("id", { count: "exact", head: true }).gte("starts_at", fromIst(c.day, 0).toISOString()).lt("starts_at", fromIst(c.day, 1440).toISOString()).in("status", ["requested", "confirmed", "arrived"]);
+  if (c.opens && c.closes) q = q.or(`starts_at.lt.${fromIst(c.day, parseHm(c.opens)).toISOString()},ends_at.gt.${fromIst(c.day, parseHm(c.closes)).toISOString()}`);
+  const { count } = await q;
   await audit(staff, `Closure ${c.day} ${c.opens ?? "closed"}-${c.closes ?? ""}`); revalidate(); return { ok: true, onThatDay: count ?? 0 };
 }
 export async function removeClosure(day: string): Promise<Res> {
@@ -299,6 +316,7 @@ export async function removePerson(id: string): Promise<Res> {
 }
 export async function saveSettings(v: { stylists?: number; website_confirm?: "instant" | "staff"; automation_on?: boolean; test_mode?: boolean; test_numbers?: string[]; digest_hour?: number; campaigns?: Record<string, string> }): Promise<Res> {
   const staff = await adminOr(); if (!staff) return { ok: false, error: "Only an owner or admin can change settings." };
+  if ((v.test_mode !== undefined && typeof v.test_mode !== "boolean") || (v.automation_on !== undefined && typeof v.automation_on !== "boolean")) return { ok: false, error: "Bad value." };
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString(), updated_by: staff.email };
   if (v.stylists !== undefined) patch.stylists = Math.min(20, Math.max(1, Math.round(v.stylists)));
   if (v.website_confirm) patch.website_confirm = v.website_confirm === "staff" ? "staff" : "instant";
@@ -318,8 +336,11 @@ export async function saveSettings(v: { stylists?: number; website_confirm?: "in
 /** Put a failed or uncertain message back in the queue (owner or admin, after checking with the person). */
 export async function resendMessage(id: string): Promise<Res> {
   const staff = await adminOr(); if (!staff) return { ok: false, error: "Only an owner or admin can resend." };
-  const { error } = await createAdminClient().from("appointment_messages").update({ state: "scheduled", due_at: new Date().toISOString(), expires_at: null, reason: `Sent again by ${who(staff)}`, updated_at: new Date().toISOString() }).eq("id", id).in("state", ["failed", "uncertain", "skipped"]);
+  const nowIso = new Date().toISOString();
+  const { data, error } = await createAdminClient().from("appointment_messages").update({ state: "scheduled", due_at: nowIso, reason: `Sent again by ${who(staff)}`, updated_at: nowIso })
+    .eq("id", id).in("state", ["failed", "uncertain", "skipped"]).or(`expires_at.is.null,expires_at.gt.${nowIso}`).select("id");
   if (error) return { ok: false, error: error.message };
+  if (!data?.length) return { ok: false, error: "Too late to send this again, or it has already changed. Reload the page." };
   revalidate(); return { ok: true };
 }
 

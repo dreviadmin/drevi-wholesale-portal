@@ -15,20 +15,32 @@ function fail<T>(e: unknown): Loaded<T> { const m = (e as Error)?.message ?? Str
 
 export const APPT_COLS = "id, number, type_id, place, party, starts_at, ends_at, status, source, customer_name, phone_e164, email, functions, function_date, looking_for, staff_notes, meet_link, host_staff_id, notify_wa, notify_email, offers_ok, outcome, cancel_reason, manage_token, created_by, created_at, confirmed_at, cancelled_at, updated_at, rev";
 
-/** Types, hours, closures and blocks from yesterday on, settings, people. */
-export async function loadConfig(): Promise<Loaded<Config>> {
+/** Types, hours, closures and blocks from two days ago (or from sinceDay, for a past calendar week), settings, people. */
+export async function loadConfig(sinceDay?: string): Promise<Loaded<Config>> {
   const admin = createAdminClient();
-  const since = new Date(Date.now() - 2 * 86400000).toISOString();
+  const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString();
+  const sd = sinceDay && /^\d{4}-\d{2}-\d{2}$/.test(sinceDay) ? new Date(`${sinceDay}T00:00:00+05:30`) : null;
+  const early = !!sd && !Number.isNaN(sd.getTime()) && sd.getTime() < Date.now() - 2 * 86400000;
+  const since = early ? sd!.toISOString() : twoDaysAgo;
+  const sinceDayStr = early ? sinceDay! : twoDaysAgo.slice(0, 10);
   try {
     const [types, hours, closures, blocks, settings, people] = await Promise.all([
       admin.from("appointment_types").select("*").order("sort"),
       admin.from("appointment_hours").select("weekday, opens, closes").order("weekday"),
-      admin.from("appointment_closures").select("day, opens, closes, note").gte("day", since.slice(0, 10)).order("day"),
+      admin.from("appointment_closures").select("day, opens, closes, note").gte("day", sinceDayStr).order("day"),
       admin.from("appointment_blocks").select("id, starts_at, ends_at, takes, note").gte("ends_at", since).order("starts_at"),
       admin.from("appointment_settings").select("*").eq("id", 1).maybeSingle(),
       admin.from("appointment_people").select("*").order("created_at"),
     ]);
     for (const r of [types, hours, closures, blocks, settings, people]) if (r.error) throw new Error(r.error.message);
+    // Someone whose portal login has been switched off stops getting booking details on WhatsApp.
+    const linked = [...new Set(((people.data ?? []) as Person[]).map((p) => p.staff_id).filter(Boolean))] as string[];
+    const offLogins = new Set<string>();
+    if (linked.length) {
+      const { data: logins, error: lErr } = await admin.from("staff_users").select("id, active").in("id", linked);
+      if (lErr) throw new Error(lErr.message);
+      for (const l of (logins ?? []) as Array<{ id: string; active: boolean }>) if (!l.active) offLogins.add(l.id);
+    }
     const s = settings.data as (ApptSettings & { campaigns: Record<string, string> | null }) | null;
     return {
       ok: true,
@@ -38,10 +50,25 @@ export async function loadConfig(): Promise<Loaded<Config>> {
         closures: ((closures.data ?? []) as Closure[]).map((c) => ({ ...c, opens: c.opens?.slice(0, 5) ?? null, closes: c.closes?.slice(0, 5) ?? null })),
         blocks: (blocks.data ?? []) as Block[],
         settings: s ? { ...s, campaigns: s.campaigns ?? {} } : { stylists: 2, step_minutes: 30, website_confirm: "instant", automation_on: false, test_mode: true, test_numbers: [], digest_hour: 11, campaigns: {} },
-        people: (people.data ?? []) as Person[],
+        people: ((people.data ?? []) as Person[]).map((p) => (p.staff_id && offLogins.has(p.staff_id) ? { ...p, active: false } : p)),
       },
     };
   } catch (e) { return fail(e); }
+}
+
+/** Upcoming confirmed bookings whose WhatsApp confirmation has not gone yet: someone sends it by hand
+ *  (the booking page's button marks it sent). While automatic messages are on, only the ones that failed
+ *  or were skipped count, since the rest go out within 10 minutes. Empty on any error. */
+export async function unsentConfirmations(now = new Date()): Promise<Set<string>> {
+  try {
+    const admin = createAdminClient();
+    const { data: s } = await admin.from("appointment_settings").select("automation_on").eq("id", 1).maybeSingle();
+    const states = (s as { automation_on?: boolean } | null)?.automation_on ? ["skipped", "failed"] : ["scheduled", "skipped", "failed"];
+    const { data, error } = await admin.from("appointment_messages").select("appointment_id, appointments!inner(starts_at, status)")
+      .eq("rule", "c-confirm").in("state", states).gte("appointments.starts_at", now.toISOString()).eq("appointments.status", "confirmed");
+    if (error) return new Set();
+    return new Set(((data ?? []) as Array<{ appointment_id: string | null }>).map((r) => r.appointment_id).filter(Boolean) as string[]);
+  } catch { return new Set(); }
 }
 
 /** Bookings starting in [fromIso, toIso). */
@@ -58,6 +85,7 @@ export async function searchAppointments(q: string): Promise<Loaded<Appt[]>> {
   try {
     let query = admin.from("appointments").select(APPT_COLS).order("starts_at", { ascending: false }).limit(200);
     if (/^a-?\d+$/i.test(t)) query = query.eq("number", "A-" + t.replace(/\D/g, ""));
+    else if (/^\d{4,6}$/.test(t)) query = query.or(`number.eq.A-${t},phone_e164.like.*${t}*`); // a booking number typed without the A-
     else if (digits.length >= 4) query = query.like("phone_e164", `%${digits.slice(-10)}%`);
     else if (t) query = query.ilike("customer_name", `%${t.replace(/[%_]/g, "")}%`);
     const { data, error } = await query;

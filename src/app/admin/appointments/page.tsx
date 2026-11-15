@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { requireStaffOrRedirect, isAdminRole } from "@/lib/staff";
-import { loadConfig, listAppointments, listStaff } from "@/lib/appointments/server";
+import { loadConfig, listAppointments, listStaff, unsentConfirmations } from "@/lib/appointments/server";
 import { addDays, dayLong, fromIst, hm, hoursFor, isLive, istParts, showPhone, type Appt } from "@/lib/appointments/core";
 import { ApptHeader, ApptTabs, NotSetUp, TestModeNote, btn } from "./ui";
 import { FOCUS, LoadError, dayOf, isFinished, isVideo, minOf, staffMap, typeShort, hoursText, type RowCtx } from "./overview/parts";
@@ -29,7 +29,7 @@ export default async function AppointmentsOverviewPage() {
     </div>
   );
 
-  const [cfgRes, staff] = await Promise.all([loadConfig(), listStaff()]);
+  const [cfgRes, staff, unsent] = await Promise.all([loadConfig(), listStaff(), unsentConfirmations(now)]);
   if (!cfgRes.ok) return shell(cfgRes.missing ? <NotSetUp error={cfgRes.error} /> : <LoadError error={cfgRes.error} />);
   const cfg = cfgRes.data;
 
@@ -63,10 +63,12 @@ export default async function AppointmentsOverviewPage() {
 
   const dayHours = Object.fromEntries(week.map((d) => [d, hoursText(hoursFor(cfg, d))]));
 
-  // Blocked time that touches today or tomorrow (India time).
-  const winStart = fromIst(today, 0).getTime(), winEnd = fromIst(addDays(today, 2), 0).getTime();
+  // Every block that has not ended yet, soonest first, so time blocked for a
+  // later day can be seen and removed here too.
+  const nowMs = now.getTime();
   const blocks: BlockRow[] = cfg.blocks
-    .filter((b) => new Date(b.starts_at).getTime() < winEnd && new Date(b.ends_at).getTime() > winStart)
+    .filter((b) => new Date(b.ends_at).getTime() > nowMs)
+    .sort((x, y) => new Date(x.starts_at).getTime() - new Date(y.starts_at).getTime())
     .map((b) => {
       const s = istParts(b.starts_at), e = istParts(b.ends_at);
       return { id: b.id, day: s.day, fromMin: s.min, toMin: e.day === s.day ? e.min : 1440, takes: b.takes, note: b.note };
@@ -82,7 +84,7 @@ export default async function AppointmentsOverviewPage() {
         <OverviewLists today={today} appts={weekShown} types={cfg.types} staff={staffLite} meId={me.id} mineFirst={!isAdmin}
           dayHours={dayHours} copyText={copyText} copyCount={todayList.length} />
         <div className="flex flex-col gap-4" style={{ minWidth: 0 }}>
-          <NeedsYou items={needsYouItems(appts, ctx, now)} ctx={ctx} />
+          <NeedsYou items={needsYouItems(appts, ctx, now, unsent)} ctx={ctx} />
           <BlockedTime today={today} blocks={blocks} hours={cfg.hours} closures={cfg.closures} />
         </div>
       </div>

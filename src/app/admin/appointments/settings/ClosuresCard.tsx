@@ -22,7 +22,7 @@ export function ClosuresCard({ closures, today, flash }: { closures: Closure[]; 
   const [closes, setCloses] = useState("17:00");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [onDay, setOnDay] = useState<{ day: string; n: number } | null>(null);
+  const [onDay, setOnDay] = useState<{ day: string; n: number; special: boolean } | null>(null);
   const [pending, start] = useTransition();
   const [removing, setRemoving] = useState<Closure | null>(null);
   const [removeErr, setRemoveErr] = useState<string | null>(null);
@@ -37,7 +37,7 @@ export function ClosuresCard({ closures, today, flash }: { closures: Closure[]; 
     start(async () => {
       const r = await saveClosure({ day, opens: mode === "special" ? opens : null, closes: mode === "special" ? closes : null, note: note.trim() });
       if (!r.ok) { setError(r.error); return; }
-      setOnDay(r.onThatDay > 0 ? { day, n: r.onThatDay } : null);
+      setOnDay(r.onThatDay > 0 ? { day, n: r.onThatDay, special: mode === "special" } : null);
       flash(`${dayLabel(day, today)} saved`);
       setDay(""); setNote(""); setMode("closed");
       router.refresh();
@@ -80,8 +80,8 @@ export function ClosuresCard({ closures, today, flash }: { closures: Closure[]; 
 
       {onDay && (
         <div role="status" className="font-body" style={{ border: "1px solid #EBD39A", background: "#FFF8E6", color: "#5A4210", fontSize: 13, padding: "10px 12px", marginTop: 12 }}>
-          {onDay.n} booking{onDay.n === 1 ? " is" : "s are"} on {dayLabel(onDay.day, today)}: move {onDay.n === 1 ? "it" : "them"} from{" "}
-          <Link href="/admin/appointments/all" className={FOCUS} style={{ color: "#5A4210", fontWeight: 600, textDecoration: "underline" }}>All bookings</Link>.
+          {onDay.n} booking{onDay.n === 1 ? " is" : "s are"} on {dayLabel(onDay.day, today)}{onDay.special ? " outside the new hours" : ""}: move {onDay.n === 1 ? "it" : "them"} from the{" "}
+          <Link href={`/admin/appointments/calendar?start=${onDay.day}`} className={FOCUS} style={{ color: "#5A4210", fontWeight: 600, textDecoration: "underline" }}>Calendar</Link>.
         </div>
       )}
 

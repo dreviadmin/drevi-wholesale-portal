@@ -1,7 +1,11 @@
 "use client";
 
-// Edit details. Only the fields that actually changed are sent, so the
-// history reads "Edited: name" and not a list of everything on the form.
+// Edit details. Only the fields this person actually changed are sent, so the
+// history reads "Edited: name" and not a list of everything on the form. The
+// form is compared with the booking as it was when the sheet opened, not the
+// live one: after a "someone else changed it" refusal the page refreshes, and
+// comparing with the fresh copy would send this form's older values for the
+// fields the other person changed, quietly undoing their change on retry.
 
 import { useState } from "react";
 import { FUNCTIONS, PLACE_LABEL, SOURCE_LABEL, durOf, type ApptSource, type Party, type Place } from "@/lib/appointments/core";
@@ -16,6 +20,7 @@ const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((
 
 export function EditSheet({ onClose }: { onClose: () => void }) {
   const { appt: a, types, change, busy, errorFor } = useBooking();
+  const [base] = useState(a);
   const [name, setName] = useState(a.customer_name);
   const [phone, setPhone] = useState<PhoneVal>(() => splitPhone(a.phone_e164));
   const [email, setEmail] = useState(a.email ?? "");
@@ -32,22 +37,22 @@ export function EditSheet({ onClose }: { onClose: () => void }) {
 
   const type = types.find((t) => t.id === typeId) ?? null;
   const e164 = phoneE164(phone);
-  const lengthChanges = typeId !== a.type_id || party !== a.party;
+  const lengthChanges = typeId !== base.type_id || party !== base.party;
 
   function diff(): NonNullable<ChangeInput["edit"]> {
     const e: NonNullable<ChangeInput["edit"]> = {};
-    if (name.trim() && name.trim() !== a.customer_name) e.name = name.trim();
-    if (e164 && e164 !== a.phone_e164) { e.phone = e164; e.cc = "+91"; }
-    if ((email.trim() || null) !== a.email) e.email = email.trim();
-    if (typeId !== a.type_id) e.typeId = typeId;
-    if (party !== a.party) e.party = party;
-    if (place !== a.place) e.place = place;
-    if (!sameSet(functions, a.functions)) e.functions = functions;
-    if ((fdate.trim() || null) !== a.function_date) e.functionDate = fdate.trim();
-    if ((looking.trim() || null) !== a.looking_for) e.lookingFor = looking.trim();
-    if ((notes.trim() || null) !== a.staff_notes) e.staffNotes = notes.trim();
-    if (notify !== a.notify_wa) e.notifyWa = notify;
-    if (source !== a.source) e.source = source;
+    if (name.trim() && name.trim() !== base.customer_name) e.name = name.trim();
+    if (e164 && e164 !== base.phone_e164) { e.phone = e164; e.cc = "+91"; }
+    if ((email.trim() || null) !== base.email) e.email = email.trim();
+    if (typeId !== base.type_id) e.typeId = typeId;
+    if (party !== base.party) e.party = party;
+    if (place !== base.place) e.place = place;
+    if (!sameSet(functions, base.functions)) e.functions = functions;
+    if ((fdate.trim() || null) !== base.function_date) e.functionDate = fdate.trim();
+    if ((looking.trim() || null) !== base.looking_for) e.lookingFor = looking.trim();
+    if ((notes.trim() || null) !== base.staff_notes) e.staffNotes = notes.trim();
+    if (notify !== base.notify_wa) e.notifyWa = notify;
+    if (source !== base.source) e.source = source;
     return e;
   }
 
@@ -71,7 +76,7 @@ export function EditSheet({ onClose }: { onClose: () => void }) {
         <input type="email" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={200} className={`font-body ${FOCUS}`} style={inputStyle} />
       </Field>
       <Group label="Type">
-        {types.filter((t) => t.active || t.id === a.type_id).map((t) => (
+        {types.filter((t) => t.active || t.id === a.type_id || t.id === base.type_id).map((t) => (
           <Chip key={t.id} on={typeId === t.id} onClick={() => { setTypeId(t.id); if (!t.places.includes(place)) setPlace(t.places[0]); }}><TypeDot typeId={t.id} />{t.name}</Chip>
         ))}
       </Group>
@@ -100,7 +105,7 @@ export function EditSheet({ onClose }: { onClose: () => void }) {
       </Field>
       <div>
         <Checkbox checked={notify} onChange={setNotify}>Send them WhatsApp messages (confirmation and reminders)</Checkbox>
-        {!notify && a.notify_wa ? <p className="font-body" style={S.muted}>Reminders that have not gone yet are withdrawn.</p> : null}
+        {!notify && base.notify_wa ? <p className="font-body" style={S.muted}>Reminders that have not gone yet are withdrawn.</p> : null}
       </div>
       <Group label="Where they asked">
         {SOURCES.map((s) => <Chip key={s} on={source === s} onClick={() => setSource(s)}>{SOURCE_LABEL[s]}</Chip>)}

@@ -34,6 +34,12 @@ export function SlotPicker({
   const [load, setLoad] = useState<Load>({ loading: true, error: null, slots: [], closed: false, note: null });
   const [info, setInfo] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  // What is typed in "A later date". A laptop's date field reports half-typed
+  // years ("0002-12-20") as they are typed; the field keeps showing what was
+  // typed and only a whole date from today to the last day is chosen, so the
+  // field is never wiped mid-typing. Tapping a day chip sets it back to null:
+  // the field then follows the chosen day.
+  const [typed, setTyped] = useState<string | null>(null);
   const req = useRef(0);
   const dateId = useId();
   const pickRef = useRef(pick), onPickRef = useRef(onPick);
@@ -63,6 +69,7 @@ export function SlotPicker({
   }, [load, day, isAdmin]);
 
   function chooseDay(d: string) {
+    setTyped(null);
     if (!d || d === day) return;
     setDay(d); setInfo(null);
     if (pickRef.current) onPick(null);
@@ -112,8 +119,12 @@ export function SlotPicker({
             type="date"
             min={today}
             max={lastDay}
-            value={later ? day : ""}
-            onChange={(e) => chooseDay(e.target.value && e.target.value <= lastDay ? e.target.value : day)}
+            value={typed ?? (later ? day : "")}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (/^\d{4}-\d{2}-\d{2}$/.test(v) && v >= today && v <= lastDay) chooseDay(v);
+              setTyped(v);
+            }}
             className={`font-body ${FOCUS}`}
             style={{ ...inputStyle, width: 190 }}
           />

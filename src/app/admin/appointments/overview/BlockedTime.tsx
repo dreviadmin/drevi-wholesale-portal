@@ -31,9 +31,10 @@ function tosFor(from: number, close: number): number[] {
   out.push(close);
   return out;
 }
-const whenWord = (day: string, today: string) => { const d = dayDiff(today, day); return d === 0 ? "today" : d === 1 ? "tomorrow" : `on ${dayShort(day)}`; };
+// "today", "tomorrow", "yesterday" (a block still running from then), or "on Wed 18 Nov" (with the year when it is not this year).
+const whenWord = (day: string, today: string) => { const d = dayDiff(today, day); return d === 0 ? "today" : d === 1 ? "tomorrow" : d === -1 ? "yesterday" : `on ${dayTag(day, today)}`; };
 
-/** Blocked time today and tomorrow, with the form to block more and a remove button on each. */
+/** Blocked time that has not ended yet, any day, with the form to block more and a remove button on each. */
 export function BlockedTime({ today, blocks, hours, closures }: { today: string; blocks: BlockRow[]; hours: HoursRow[]; closures: Closure[] }) {
   const router = useRouter();
   const [toast, flash] = useToast();
@@ -99,7 +100,7 @@ export function BlockedTime({ today, blocks, hours, closures }: { today: string;
         Blocked time is taken off what can be booked: a walk-in who is with a stylist, or a stylist who is off.
       </p>
 
-      {blocks.length === 0 ? <Empty>No time blocked today or tomorrow.</Empty> : blocks.map((b) => (
+      {blocks.length === 0 ? <Empty>No time blocked from today on.</Empty> : blocks.map((b) => (
         <div key={b.id} className="font-body" style={{ ...S.row, padding: "8px 0" }}>
           <span style={{ flex: 1, minWidth: 0 }}>
             <span style={{ display: "block", fontSize: 13.5, fontWeight: 600 }}>{dayTag(b.day, today)} · {hm(b.fromMin)} to {hm(b.toMin)}</span>

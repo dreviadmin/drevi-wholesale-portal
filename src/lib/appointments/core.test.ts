@@ -163,3 +163,21 @@ describe("message plan", () => {
     expect(ev.every((m) => m.rule.startsWith("ev-"))).toBe(true);
   });
 });
+
+describe("message plan: never twice, never late", () => {
+  const plus = (iso: string, ms: number) => new Date(new Date(iso).getTime() + ms).toISOString();
+  it("one-off messages keep their key when re-planned from the stored row (a few ms later)", () => {
+    const a = appt({ start: "15:00" });
+    const stored = { ...a, created_at: plus(a.created_at, 7), confirmed_at: plus(a.confirmed_at ?? a.created_at, 7) };
+    const keys = (x: Appt) => planMessages(x, cfg).filter((m) => m.rule === "s-new" || m.rule === "c-confirm").map((m) => m.key).sort();
+    expect(keys(stored)).toEqual(keys(a));
+    expect(keys(a).length).toBeGreaterThan(0);
+  });
+  it("the confirmation lapses within 6 hours; the day-before reminder by midnight before the day", () => {
+    const a = appt({ start: "15:00" });
+    const m = planMessages(a, cfg);
+    const c = m.find((x) => x.rule === "c-confirm")!, d = m.find((x) => x.rule === "c-24h");
+    expect(new Date(c.expires_at!).getTime() - new Date(c.due_at).getTime()).toBeLessThanOrEqual(6 * 3600000);
+    if (d) expect(d.expires_at).toBe(fromIst(DAY, 0).toISOString());
+  });
+});

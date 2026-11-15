@@ -9,14 +9,15 @@ import { Empty, FOCUS, dayOf, minOf, typeShort, type RowCtx } from "./parts";
 
 type Reason = { label: string; warn: boolean };
 
-/** Requested bookings; live ones today or tomorrow with no stylist; Google Meet calls in the next 2 days with no link. */
-export function needsYouItems(appts: Appt[], ctx: RowCtx, now: Date): Array<{ a: Appt; reasons: Reason[] }> {
+/** Requested bookings; confirmed ones whose WhatsApp confirmation has not gone yet; live ones today or tomorrow with no stylist; Google Meet calls in the next 2 days with no link. */
+export function needsYouItems(appts: Appt[], ctx: RowCtx, now: Date, unsent: Set<string> = new Set()): Array<{ a: Appt; reasons: Reason[] }> {
   const tomorrow = addDays(ctx.today, 1), in48h = now.getTime() + 48 * 3600000;
   const out: Array<{ a: Appt; reasons: Reason[] }> = [];
   for (const a of appts) {
     if (!isLive(a.status)) continue;
     const reasons: Reason[] = [], day = dayOf(a);
     if (a.status === "requested") reasons.push({ label: "Needs confirming", warn: true });
+    if (a.status === "confirmed" && unsent.has(a.id)) reasons.push({ label: "Send the confirmation", warn: true });
     if (!a.host_staff_id && (day === ctx.today || day === tomorrow)) reasons.push({ label: "No stylist yet", warn: false });
     if (a.place === "meet" && !a.meet_link && new Date(a.ends_at).getTime() > now.getTime() && new Date(a.starts_at).getTime() < in48h) reasons.push({ label: "No Meet link", warn: false });
     if (reasons.length) out.push({ a, reasons });
@@ -29,9 +30,9 @@ export function NeedsYou({ items, ctx }: { items: Array<{ a: Appt; reasons: Reas
     <section aria-labelledby="needs-you" style={S.card}>
       <h2 id="needs-you" className="font-body" style={S.h3}>Needs you{items.length ? ` · ${items.length}` : ""}</h2>
       {items.length === 0 ? (
-        <Empty>Nothing waiting. Bookings that need confirming, a stylist or a Google Meet link show up here.</Empty>
+        <Empty>Nothing waiting. Bookings that need confirming, a WhatsApp confirmation sent, a stylist or a Google Meet link show up here.</Empty>
       ) : items.map(({ a, reasons }) => {
-        const sub = [`${dayLabel(dayOf(a), ctx.today)}, ${hm(minOf(a))}`, typeShort(ctx.types, a.type_id), a.status === "requested" ? `via ${SOURCE_LABEL[a.source]}` : null].filter(Boolean).join(" · ");
+        const sub = [`${dayLabel(dayOf(a), ctx.today)}, ${hm(minOf(a))}`, typeShort(ctx.types, a.type_id), a.status === "requested" || a.source === "website" ? `via ${SOURCE_LABEL[a.source]}` : null].filter(Boolean).join(" · ");
         return (
           <Link key={a.id} href={`/admin/appointments/${encodeURIComponent(a.number)}`} className={`font-body hover:bg-[rgba(196,163,90,0.08)] ${FOCUS}`}
             style={{ ...S.row, padding: "10px 6px", textDecoration: "none", color: palette.black, alignItems: "flex-start" }}>

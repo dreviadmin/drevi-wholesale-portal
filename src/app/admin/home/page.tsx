@@ -10,7 +10,7 @@ import { t } from "@/lib/strings";
 import { palette } from "@/lib/palette";
 import { formatINR } from "@/lib/format";
 import { HomeScanButton } from "./HomeScanButton";
-import { listAppointments } from "@/lib/appointments/server";
+import { listAppointments, unsentConfirmations } from "@/lib/appointments/server";
 import { fromIst, hm, istParts, PLACE_LABEL } from "@/lib/appointments/core";
 
 export const dynamic = "force-dynamic";
@@ -152,8 +152,11 @@ export default async function HomePage() {
 // Today's appointments: the next few, and how many still need confirming.
 async function TodayAppointments() {
   const day = istParts(new Date()).day;
-  const res = await listAppointments(fromIst(day, 0).toISOString(), fromIst(day, 1440).toISOString());
+  const [res, unsent] = await Promise.all([listAppointments(fromIst(day, 0).toISOString(), fromIst(day, 1440).toISOString()), unsentConfirmations()]);
   if (!res.ok) return null;
+  // The headline counts every booking today that was not cancelled, so it
+  // still reads "3 booked today" once the visits are marked Done or No-show.
+  const booked = res.data.filter((a) => a.status !== "cancelled").length;
   const live = res.data.filter((a) => a.status === "requested" || a.status === "confirmed" || a.status === "arrived");
   const pending = live.filter((a) => a.status === "requested").length;
   const nowMin = istParts(new Date()).min;
@@ -163,12 +166,17 @@ async function TodayAppointments() {
       <div className="font-body uppercase" style={{ fontSize: 9.5, letterSpacing: "0.2em", color: palette.softBlack }}>Appointments today</div>
       <Link href="/admin/appointments" className="mt-2 block p-3.5" style={{ background: palette.ivory, border: "1px solid rgba(26,26,26,0.08)" }}>
         <span className="flex items-center gap-3">
-          <span className="font-display" style={{ fontSize: 19, fontWeight: 600, color: palette.black }}>{live.length}</span>
+          <span className="font-display" style={{ fontSize: 19, fontWeight: 600, color: palette.black }}>{booked}</span>
           <span className="font-body flex-1" style={{ fontSize: 12, color: palette.softBlack }}>
-            {live.length === 0 ? "None booked today." : `booked today${pending ? ` · ${pending} need${pending === 1 ? "s" : ""} confirming` : ""}`}
+            {booked === 0 ? "None booked today." : `booked today${pending ? ` · ${pending} need${pending === 1 ? "s" : ""} confirming` : ""}`}
           </span>
           <ChevronRight size={15} color={palette.mutedGreige} />
         </span>
+        {unsent.size > 0 && (
+          <span className="font-body flex gap-2 mt-1.5" style={{ fontSize: 12, color: "#7A4E00", fontWeight: 600 }}>
+            {unsent.size} booking{unsent.size === 1 ? "" : "s"} waiting for the WhatsApp confirmation · open Needs you
+          </span>
+        )}
         {next.map((a) => (
           <span key={a.id} className="font-body flex gap-2 mt-1.5" style={{ fontSize: 12, color: palette.black }}>
             <b style={{ minWidth: 62, fontVariantNumeric: "tabular-nums" }}>{hm(istParts(a.starts_at).min)}</b>

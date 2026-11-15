@@ -5,7 +5,7 @@
 // now full) is shown as the action returned it, and the page is refreshed
 // either way so what is on screen is what is stored.
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { palette } from "@/lib/palette";
@@ -48,6 +48,16 @@ export function BookingProvider({ data, children }: { data: BookingData; childre
   // second change in that gap must not be refused as stale. Revs only grow.
   const [localRev, setLocalRev] = useState(data.appt.rev);
   const rev = Math.max(localRev, data.appt.rev);
+  // "Now" starts at the server's render time (so the first paint matches the
+  // server's) and then moves on every minute, so Arrived, Done and No-show
+  // appear on their own while the page stays open. A refresh after a change
+  // brings a newer server time; the later of the two wins.
+  const [tickMs, setTickMs] = useState(() => Date.parse(data.nowIso));
+  useEffect(() => {
+    const id = setInterval(() => setTickMs(Date.now()), 60000);
+    return () => clearInterval(id);
+  }, []);
+  const nowMs = Math.max(tickMs, Date.parse(data.nowIso));
 
   const run = useCallback(async (key: string, fn: () => Promise<Result>, okMsg?: string) => {
     setBusy(key); setErr(null);
@@ -72,9 +82,9 @@ export function BookingProvider({ data, children }: { data: BookingData; childre
   );
 
   const value = useMemo<Ctx>(() => ({
-    ...data, rev, now: new Date(data.nowIso), type: data.types.find((t) => t.id === data.appt.type_id) ?? null,
+    ...data, rev, now: new Date(nowMs), type: data.types.find((t) => t.id === data.appt.type_id) ?? null,
     busy, errorFor: (k: string) => (err && err.key === k ? err.text : null), clearError: () => setErr(null), run, change, flash,
-  }), [data, rev, busy, err, run, change, flash]);
+  }), [data, rev, nowMs, busy, err, run, change, flash]);
 
   return (
     <BookingCtx.Provider value={value}>

@@ -125,6 +125,14 @@ begin
   if v_end <= v_start then return jsonb_build_object('ok', false, 'error', 'bad_time'); end if;
 
   perform appt_lock_day(v_start);
+  -- Look again under the lock: two taps of the same form wait here one after the other,
+  -- and the second must get the first one's booking, not an error.
+  if p->>'idempotency_key' is not null then
+    select * into v_old from appointments where idempotency_key = p->>'idempotency_key';
+    if found then
+      return jsonb_build_object('ok', true, 'id', v_old.id, 'number', v_old.number, 'token', v_old.manage_token, 'rev', v_old.rev, 'replayed', true);
+    end if;
+  end if;
   v_conflict := appt_conflict(null, v_type.id, v_start, v_end, v_place, v_host);
   if v_conflict is not null and not coalesce((p->>'override')::boolean, false) then
     return jsonb_build_object('ok', false, 'error', v_conflict);
@@ -163,6 +171,7 @@ declare
   v_type text; v_place text; v_start timestamptz; v_end timestamptz; v_host uuid; v_status text;
   v_conflict text;
   v_live boolean;
+  v_capchg boolean;
   v_places text[];
 begin
   select * into a from appointments where id = (p->>'id')::uuid for update;
@@ -184,8 +193,17 @@ begin
   if not (v_place = any (v_places)) then return jsonb_build_object('ok', false, 'error', 'bad_place'); end if;
 
   -- Re-check capacity only when something that uses capacity changed, and only for a live booking.
-  if v_live and (v_start <> a.starts_at or v_end <> a.ends_at or v_place <> a.place or v_type <> a.type_id
-                 or v_host is distinct from a.host_staff_id or a.status not in ('requested', 'confirmed', 'arrived')) then
+  -- Setting, changing or clearing only the stylist uses no extra capacity: then only that stylist's diary is checked.
+  v_capchg := v_start <> a.starts_at or v_end <> a.ends_at or v_place <> a.place or v_type <> a.type_id
+              or a.status not in ('requested', 'confirmed', 'arrived');
+  if v_live and not v_capchg and v_host is not null and v_host is distinct from a.host_staff_id then
+    perform appt_lock_day(v_start);
+    if exists (select 1 from appointments o where o.id <> a.id and o.status in ('requested', 'confirmed', 'arrived')
+                 and o.host_staff_id = v_host and o.starts_at < v_end and v_start < o.ends_at) then
+      if not coalesce((p->>'override')::boolean, false) then return jsonb_build_object('ok', false, 'error', 'host_busy'); end if;
+      v_conflict := 'host_busy';
+    end if;
+  elsif v_live and v_capchg then
     perform appt_lock_day(least(v_start, a.starts_at));
     if (v_start at time zone 'Asia/Kolkata')::date <> (a.starts_at at time zone 'Asia/Kolkata')::date then perform appt_lock_day(greatest(v_start, a.starts_at)); end if;
     v_conflict := appt_conflict(a.id, v_type, v_start, v_end, v_place, v_host);

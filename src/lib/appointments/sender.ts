@@ -19,6 +19,8 @@ import { TEMPLATES, dayShort, fromIst, hm, isLive, istParts, renderParams, type 
 //   4. no AiSensy key for the customer number, or no campaign for the template.
 //   5. the booking is no longer live (for reminders), or the customer said no
 //      to WhatsApp.
+//   6. a moved or cancelled note that is no longer true (Undo, a later cancel),
+//      or a customer message whose number has since been corrected.
 // A send that times out is "uncertain" and is never retried automatically.
 
 type Row = { id: string; appointment_id: string | null; rule: string; template: string; audience: string; recipient_name: string | null; to_address: string; params: Record<string, unknown> | null; due_at: string };
@@ -49,7 +51,12 @@ export async function runAppointmentSender(now = new Date()): Promise<SenderResu
   const ids = [...new Set(rows.map((r) => r.appointment_id).filter(Boolean))] as string[];
   const appts = new Map<string, Appt>();
   if (ids.length) {
-    const { data } = await admin.from("appointments").select(APPT_COLS).in("id", ids);
+    const { data, error: readErr } = await admin.from("appointments").select(APPT_COLS).in("id", ids);
+    if (readErr) {
+      // Could not read the bookings: put the rows back as they were rather than judge them on nothing.
+      await admin.from("appointment_messages").update({ state: "scheduled", updated_at: new Date().toISOString() }).in("id", rows.map((r) => r.id));
+      out.note = readErr.message; out.claimed = 0; return out;
+    }
     for (const a of (data ?? []) as Appt[]) appts.set(a.id, a);
   }
   const apiKey = process.env.AISENSY_APPT_API_KEY?.trim() || "";
@@ -66,6 +73,11 @@ export async function runAppointmentSender(now = new Date()): Promise<SenderResu
     if (r.appointment_id && !a) return finish(r, "skipped", { reason: "The booking is gone" });
     if (a && REMINDER_RULES.has(r.rule) && !isLive(a.status)) return finish(r, "skipped", { reason: "The booking is no longer live" });
     if (a && r.audience === "client" && !a.notify_wa) return finish(r, "skipped", { reason: "The customer said no to WhatsApp" });
+    // A moved/cancelled note waiting in the queue must still be true when it goes.
+    const evKind = r.rule === "ev-cancelled" ? "cancelled" : r.rule === "ev-moved" ? "moved" : r.rule === "ev-staff" ? String(r.params?.kind ?? "") : "";
+    if (a && evKind === "cancelled" && a.status !== "cancelled") return finish(r, "skipped", { reason: "The booking was reopened" });
+    if (a && evKind === "moved" && !isLive(a.status)) return finish(r, "skipped", { reason: "The booking is no longer live" });
+    if (a && r.audience === "client" && r.to_address !== a.phone_e164) return finish(r, "skipped", { reason: "The WhatsApp number on the booking changed" });
     if (!apiKey) return finish(r, "skipped", { reason: "The AiSensy key for the customer number is not set" });
     const campaign = set.campaigns?.[r.template];
     if (!campaign) return finish(r, "skipped", { reason: "No AiSensy campaign set for this message in Settings" });

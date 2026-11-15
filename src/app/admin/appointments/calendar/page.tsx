@@ -31,7 +31,7 @@ export default async function AppointmentsCalendarPage({ searchParams }: { searc
   );
 
   const [cfgRes, res, staff] = await Promise.all([
-    loadConfig(),
+    loadConfig(start < today ? start : undefined), // a past week still shows its closed days and blocked time
     listAppointments(fromIst(start, 0).toISOString(), fromIst(end, 0).toISOString()),
     listStaff(),
   ]);

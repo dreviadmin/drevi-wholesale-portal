@@ -4,7 +4,7 @@
 // No-show, Move, Cancel, Edit details, and Undo for owners and admins. The
 // next likely step is the dark button.
 
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { CalendarClock, Check, CheckCheck, DoorOpen, Pencil, RotateCcw, UserX, X } from "lucide-react";
 import { ConfirmSheet } from "@/components/admin/ConfirmSheet";
 import { CANCEL_REASONS, OUTCOMES, STATUS_LABEL, dayShort, firstName, hm, isLive, istParts } from "@/lib/appointments/core";
@@ -65,15 +65,37 @@ export function ActionBar() {
         </ConfirmSheet>
       ) : null}
       {open === "cancel" ? <CancelFlow when={when} onClose={close} /> : null}
-      {open === "undo" ? (
-        <ConfirmSheet title="Undo" tone="plain" confirmLabel="Back to Confirmed" pendingLabel="Saving…" cancelLabel="Leave it" pending={busy === "reopen"} error={errorFor("reopen")} onClose={close}
-          onConfirm={async () => { if (await change("reopen", { kind: "reopen" }, "Back to Confirmed")) close(); }}>
-          This booking is {STATUS_LABEL[a.status].toLowerCase()}. Undo puts it back to Confirmed for {when}, and reminders are planned again if that time is still ahead.
-        </ConfirmSheet>
-      ) : null}
+      {open === "undo" ? <UndoFlow when={when} onClose={close} /> : null}
       {open === "move" ? <MoveSheet onClose={close} /> : null}
       {open === "edit" ? <EditSheet onClose={close} /> : null}
     </div>
+  );
+}
+
+// The refusal the server gives when the time has filled since (it names who
+// is busy and offers "book over the limit" to owners and admins).
+const TIME_FULL = /busy|full|filled|over the limit|video call is on/i;
+
+// Undo, for owners and admins. If the time has filled since the booking was
+// cancelled (or marked done or a no-show), the first try is refused; the
+// button then turns into "Undo over the limit", which books it anyway. The
+// sheet is mounted only while open, so closing it forgets that step.
+function UndoFlow({ when, onClose }: { when: string; onClose: () => void }) {
+  const { appt: a, change, busy, errorFor } = useBooking();
+  const [undoOver, setUndoOver] = useState(false);
+  const err = errorFor("reopen");
+  useEffect(() => { if (err && TIME_FULL.test(err)) setUndoOver(true); }, [err]);
+  return (
+    <ConfirmSheet title="Undo" tone={undoOver ? "danger" : "plain"} confirmLabel={undoOver ? "Undo over the limit" : "Back to Confirmed"} pendingLabel="Saving…" cancelLabel="Leave it"
+      pending={busy === "reopen"} error={err} onClose={onClose}
+      onConfirm={async () => { if (await change("reopen", undoOver ? { kind: "reopen", override: true } : { kind: "reopen" }, "Back to Confirmed")) onClose(); }}>
+      <span style={{ display: "block" }}>This booking is {STATUS_LABEL[a.status].toLowerCase()}. Undo puts it back to Confirmed for {when}, and reminders are planned again if that time is still ahead.</span>
+      {undoOver ? (
+        <span style={{ display: "block", marginTop: 8 }}>
+          <b>That time has filled up since.</b> Undo over the limit puts it back anyway, so the shop is double-booked then. Only do this if the team can cover it; otherwise leave it and make a new booking at another time.
+        </span>
+      ) : null}
+    </ConfirmSheet>
   );
 }
 

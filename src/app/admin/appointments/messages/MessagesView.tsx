@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -53,6 +53,26 @@ export function MessagesView({ rows, today, from, last, isDefault, isAdmin, auto
   const pickAud = (a: AudFilter) => { setAud(a); remember(href({ aud: a })); };
   const pickState = (s: StateFilter) => { setState(s); remember(href({ state: s })); };
 
+  // "Starting": what is typed stays in the field (a laptop reports half-typed
+  // years like "0002-11-14" on every key, and going there at once snapped the
+  // field back). It goes on leaving the field, on Enter, or once a whole date
+  // has sat for a moment, since a phone's date picker sets the whole date and
+  // leaves the field focused.
+  const [d, setD] = useState(from);
+  const sent = useRef<string | null>(null);
+  useEffect(() => { setD(from); sent.current = null; }, [from]);
+  const goRef = useRef<(v: string) => void>(() => {});
+  goRef.current = (v: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || Number(v.slice(0, 4)) < 2000 || v === from || sent.current === v) return;
+    sent.current = v;
+    router.push(href({ from: v === addDays(today, -1) ? null : v }));
+  };
+  useEffect(() => {
+    if (d === from) return;
+    const t = setTimeout(() => goRef.current(d), 1200);
+    return () => clearTimeout(t);
+  }, [d, from]);
+
   const byAud = useMemo(() => rows.filter((r) => aud === "all" || r.audience === aud), [rows, aud]);
   const counts = useMemo(() => Object.fromEntries(TILES.map((t) => [t.k, byAud.filter((r) => GROUP[t.k].includes(r.state)).length])) as Record<Exclude<StateFilter, "all">, number>, [byAud]);
   const shown = useMemo(() => (state === "all" ? byAud : byAud.filter((r) => GROUP[state].includes(r.state))), [byAud, state]);
@@ -68,7 +88,8 @@ export function MessagesView({ rows, today, from, last, isDefault, isAdmin, auto
         {!isDefault && <Link href={href({ from: null })} className={`font-body ${FOCUS}`} style={sbtn("ghost")}>Back to this week</Link>}
         <label className="flex items-center gap-2 font-body" style={{ marginLeft: "auto" }}>
           <span style={S.label}>Starting</span>
-          <input type="date" value={from} onChange={(e) => { if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) router.push(href({ from: e.target.value === addDays(today, -1) ? null : e.target.value })); }}
+          <input type="date" value={d} onChange={(e) => setD(e.target.value)} onBlur={() => goRef.current(d)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); goRef.current(d); } }}
             className={`font-body ${FOCUS}`} style={{ ...INPUT, width: "auto" }} />
         </label>
       </div>

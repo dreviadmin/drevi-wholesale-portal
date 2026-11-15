@@ -1,9 +1,11 @@
 "use client";
 
 // New appointment. One form, four parts: the customer, the appointment, what
-// they told us, and what happens when it is saved. The idempotency key is made
-// once per form, so a double tap (or a retry after a dropped connection) books
-// once.
+// they told us, and what happens when it is saved. The idempotency key is a
+// random part made once per form plus the day, time, number and type, so a
+// double tap (or a retry after a dropped connection) with the same details
+// books once, while a retry with a changed time, customer or type is a new
+// booking instead of quietly getting the earlier one back.
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -21,6 +23,13 @@ import { ConfirmPreview } from "./ConfirmPreview";
 
 const ASKED: ApptSource[] = ["whatsapp", "instagram", "phone", "walkin", "other"];
 
+/** The per-form random part plus the details that make it this booking, at most 80 characters of [A-Za-z0-9_-]. */
+function bookingKey(base: string, pick: Pick, e164: string, typeId: string): string {
+  const clean = (x: string) => x.replace(/[^A-Za-z0-9_-]/g, "-");
+  const details = clean(`${pick.day}-${pick.min}-${e164.replace(/\D/g, "").slice(-10)}-${typeId}`).slice(0, 56);
+  return `${clean(base).slice(0, 79 - details.length)}-${details}`;
+}
+
 export interface NewBookingProps {
   types: ApptType[]; hours: HoursRow[]; closures: Closure[]; staff: Array<{ id: string; name: string }>;
   isAdmin: boolean; today: string; automationOn: boolean; testMode: boolean; initialDay?: string; initialType?: string;
@@ -28,7 +37,7 @@ export interface NewBookingProps {
 
 export function NewBookingForm(p: NewBookingProps) {
   const router = useRouter();
-  const [key] = useState(newKey);
+  const [keyBase] = useState(newKey);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
@@ -102,6 +111,7 @@ export function NewBookingForm(p: NewBookingProps) {
   function save() {
     setError(null);
     if (missing.length || !pick || !type || !e164) { setError(`Still needed: ${missing.join(", ")}.`); return; }
+    const key = bookingKey(keyBase, pick, e164, type.id);
     start(async () => {
       try {
         const res = await bookAppointment({

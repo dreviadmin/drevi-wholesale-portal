@@ -224,24 +224,27 @@ export interface PlannedMsg {
   due_at: string; expires_at: string | null; state?: MsgState; reason?: string | null; params?: Record<string, unknown>;
 }
 const iso = (ms: number) => new Date(ms).toISOString();
+const ONCE = new Set(["s-new", "s-pending", "c-confirm"]);
 export function planMessages(a: Appt, cfg: Config, opts: { actorStaffId?: string | null } = {}): PlannedMsg[] {
   const out: PlannedMsg[] = [], start = new Date(a.starts_at).getTime(), made = new Date(a.created_at).getTime(), H = 3600000, M = 60000;
   const people = cfg.people.filter((p) => p.active && p.wa_e164);
   const notActor = (p: Person) => !opts.actorStaffId || p.staff_id !== opts.actorStaffId;
-  const add = (m: Omit<PlannedMsg, "key">) => out.push({ ...m, key: `${m.rule}:${m.channel}:${m.to_address}:${m.due_at}` });
+  // One-off messages are keyed without their time: the times are planned from the server's clock but re-planned
+  // from the row the database stored, a few milliseconds apart, and a new key would send them twice.
+  const add = (m: Omit<PlannedMsg, "key">) => out.push({ ...m, key: ONCE.has(m.rule) ? `${m.rule}:${m.channel}:${m.to_address}` : `${m.rule}:${m.channel}:${m.to_address}:${m.due_at}` });
   // Staff: a new booking (not to the person who made it).
   for (const p of people.filter((x) => x.on_new && notActor(x)))
     add({ rule: "s-new", template: "drevi_staff_new_booking", channel: "wa", audience: "staff", recipient_name: p.name, to_address: p.wa_e164!, due_at: iso(made), expires_at: iso(made + 2 * H) });
   if (!isLive(a.status)) return out;
   if (a.status === "requested") {
     for (const p of people.filter((x) => x.on_new))
-      add({ rule: "s-pending", template: "drevi_staff_needs_confirming", channel: "wa", audience: "staff", recipient_name: p.name, to_address: p.wa_e164!, due_at: iso(made + 2 * H), expires_at: iso(start) });
+      add({ rule: "s-pending", template: "drevi_staff_needs_confirming", channel: "wa", audience: "staff", recipient_name: p.name, to_address: p.wa_e164!, due_at: iso(made + 2 * H), expires_at: iso(Math.min(start, made + 24 * H)) });
     return out; // the customer hears nothing until someone confirms
   }
   const confirmedAt = new Date(a.confirmed_at || a.created_at).getTime();
   if (a.notify_wa) {
-    add({ rule: "c-confirm", template: "drevi_appt_confirmed", channel: "wa", audience: "client", recipient_name: a.customer_name, to_address: a.phone_e164, due_at: iso(confirmedAt), expires_at: iso(start) });
-    if (start - 24 * H > confirmedAt) add({ rule: "c-24h", template: "drevi_appt_reminder_day", channel: "wa", audience: "client", recipient_name: a.customer_name, to_address: a.phone_e164, due_at: iso(start - 24 * H), expires_at: iso(start - 3 * H) });
+    add({ rule: "c-confirm", template: "drevi_appt_confirmed", channel: "wa", audience: "client", recipient_name: a.customer_name, to_address: a.phone_e164, due_at: iso(confirmedAt), expires_at: iso(Math.min(start, confirmedAt + 6 * H)) });
+    if (start - 24 * H > confirmedAt) add({ rule: "c-24h", template: "drevi_appt_reminder_day", channel: "wa", audience: "client", recipient_name: a.customer_name, to_address: a.phone_e164, due_at: iso(start - 24 * H), expires_at: iso(Math.min(start - 3 * H, fromIst(istParts(a.starts_at).day, 0).getTime())) });
     if (start - 2 * H > confirmedAt + 30 * M) add({ rule: "c-2h", template: "drevi_appt_reminder_soon", channel: "wa", audience: "client", recipient_name: a.customer_name, to_address: a.phone_e164, due_at: iso(start - 2 * H), expires_at: iso(start - 15 * M) });
   }
   // Staff: the 30-minute heads-up goes to the stylist on the booking if they have it on, else to everyone with it on.
