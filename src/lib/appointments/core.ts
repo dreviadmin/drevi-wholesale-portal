@@ -341,6 +341,37 @@ export function planEvent(a: Appt, cfg: Config, ev: { kind: "moved" | "cancelled
   return out;
 }
 
+/* ---------------- Send, tapped on a booking ---------------- */
+export type ManualWhat = "confirmation" | "reminder" | "moved" | "cancelled";
+export const MANUAL_LABEL: Record<ManualWhat, string> = { confirmation: "confirmation", reminder: "reminder", moved: "new time", cancelled: "cancellation note" };
+/** Which approved template a Send button uses for this booking now (by its rule), or why it cannot go. */
+export function manualRule(what: ManualWhat, a: Pick<Appt, "status" | "starts_at" | "notify_wa">, now: Date): { rule: string } | { error: string } {
+  if (!a.notify_wa) return { error: "WhatsApp messages are off for this customer. Turn them on in the Customer card first." };
+  const ahead = new Date(a.starts_at).getTime() - now.getTime();
+  switch (what) {
+    case "confirmation":
+      if (a.status === "requested") return { error: "It still needs confirming: tap Confirm above first." };
+      if (a.status !== "confirmed") return { error: "Only a confirmed booking gets the confirmation." };
+      if (ahead <= 0) return { error: "The time has already passed." };
+      return { rule: "c-confirm" };
+    case "reminder": {
+      if (a.status !== "confirmed") return { error: a.status === "requested" ? "It still needs confirming: tap Confirm above first." : "Only a confirmed booking gets a reminder." };
+      if (ahead <= 0) return { error: "The time has already passed." };
+      const days = dayDiff(istParts(now).day, istParts(a.starts_at).day);
+      if (days === 0) return { rule: "c-2h" };
+      if (days === 1) return { rule: "c-24h" };
+      return { error: "A reminder can go the day before or on the day." };
+    }
+    case "moved":
+      if (!isLive(a.status)) return { error: "Only a live booking can be sent its new time." };
+      if (ahead <= 0) return { error: "The time has already passed." };
+      return { rule: "ev-moved" };
+    case "cancelled":
+      if (a.status !== "cancelled") return { error: "The booking is not cancelled." };
+      return { rule: "ev-cancelled" };
+  }
+}
+
 /* ---------------- WhatsApp by hand (works before AiSensy is ready) ---------------- */
 export function waLink(e164: string, text: string): string { return `https://wa.me/${waDigits(e164)}?text=${encodeURIComponent(text)}`; }
 export function handText(rule: string, a: Appt, types: ApptType[], ctx: Partial<RenderCtx> = {}): string { const n = templateFor(rule, a)!; return renderText(n, renderParams(n, a, { types, ...ctx })); }

@@ -77,6 +77,7 @@ export const BACKUP_TABLES = [
   "appointments",
   "appointment_events",
   "appointment_messages",
+  "appointment_sender",
 ] as const;
 
 const PAGE = 1000;

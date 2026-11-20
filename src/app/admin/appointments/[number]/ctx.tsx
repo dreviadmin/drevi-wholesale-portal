@@ -18,7 +18,7 @@ export interface StaffLite { id: string; name: string }
 
 export interface BookingData {
   appt: Appt; types: ApptType[]; staff: StaffLite[]; isAdmin: boolean; today: string; nowIso: string;
-  automationOn: boolean; testMode: boolean; hours: HoursRow[]; closures: Closure[];
+  automationOn: boolean; testMode: boolean; testNumbers: string[]; hours: HoursRow[]; closures: Closure[];
 }
 interface Ctx extends BookingData {
   rev: number; now: Date; type: ApptType | null;

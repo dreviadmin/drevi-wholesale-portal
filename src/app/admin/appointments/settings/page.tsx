@@ -1,5 +1,6 @@
 import { requireAdminOrRedirect } from "@/lib/staff";
 import { loadConfig, listStaff } from "@/lib/appointments/server";
+import { senderStatus } from "@/lib/appointments/sender";
 import { istParts } from "@/lib/appointments/core";
 import { palette } from "@/lib/palette";
 import { ApptHeader, ApptTabs, NotSetUp, S } from "../ui";
@@ -12,7 +13,7 @@ export const dynamic = "force-dynamic";
 // Every card saves on its own through the actions in ../actions.ts.
 export default async function AppointmentSettingsPage() {
   const staff = await requireAdminOrRedirect();
-  const [cfg, logins] = await Promise.all([loadConfig(), listStaff()]);
+  const [cfg, logins, sender] = await Promise.all([loadConfig(), listStaff(), senderStatus()]);
   const today = istParts(new Date()).day;
 
   return (
@@ -20,7 +21,7 @@ export default async function AppointmentSettingsPage() {
       <ApptHeader title="Settings" />
       <ApptTabs active="/admin/appointments/settings" isAdmin />
       {cfg.ok ? (
-        <SettingsView cfg={cfg.data} logins={logins} today={today} isOwner={staff.role === "super_admin"} />
+        <SettingsView cfg={cfg.data} logins={logins} today={today} nowIso={new Date().toISOString()} sender={sender} isOwner={staff.role === "super_admin"} />
       ) : cfg.missing ? (
         <NotSetUp />
       ) : (

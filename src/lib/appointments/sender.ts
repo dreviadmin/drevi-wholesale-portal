@@ -1,12 +1,18 @@
 import "server-only";
 
+import { timingSafeEqual } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendTemplateMessage } from "@/lib/aisensy";
 import { orderTagBlocker } from "@/lib/wallet-core";
 import { loadConfig, APPT_COLS } from "./server";
-import { TEMPLATES, dayShort, fromIst, hm, isLive, istParts, renderParams, templateFor, type Appt, type Config } from "./core";
+import { TEMPLATES, dayShort, fromIst, hm, isLive, istParts, renderParams, templateFor, type Appt, type Config, type RenderCtx } from "./core";
 
-// The appointment message sender, run every 10 minutes by /api/cron/appointments.
+// The appointment message sender. It runs:
+//   - every 5 minutes, called by the database (pg_cron, 0113) with the token
+//     in appointment_sender, and every few hours by GitHub (the backstop);
+//   - straight after a booking is made or changed, for that booking only
+//     (sendDueNow in ./kick.ts), so a confirmation never waits for the clock;
+//   - when staff tap Send on a booking (sendManual).
 //
 // Order of safety checks for every due row (each one ends the row as "skipped"
 // with its reason, never "sent"):
@@ -23,29 +29,66 @@ import { TEMPLATES, dayShort, fromIst, hm, isLive, istParts, renderParams, templ
 //   6. a moved or cancelled note that is no longer true (Undo, a later cancel),
 //      or a customer message whose number has since been corrected.
 // A send that times out is "uncertain" and is never retried automatically.
+// A tap on Send passes checks 2 to 4 (the switch is for automatic sending only).
 
 type Row = { id: string; appointment_id: string | null; rule: string; template: string; audience: string; recipient_name: string | null; to_address: string; params: Record<string, unknown> | null; due_at: string };
+type MsgRow = Row & { state: string; created_at: string; sent_at: string | null };
 const REMINDER_RULES = new Set(["c-confirm", "c-24h", "c-2h", "s-heads-up", "s-pending"]);
 
 export interface SenderResult { automation: boolean; testMode: boolean; claimed: number; sent: number; failed: number; uncertain: number; skipped: number; digests: number; note?: string }
 
-export async function runAppointmentSender(now = new Date()): Promise<SenderResult> {
+/** The AiSensy project for +91 84336 59684: its own key if set, else the portal's existing AiSensy key (same project). */
+const apiKey = () => process.env.AISENSY_APPT_API_KEY?.trim() || process.env.AISENSY_API_KEY?.trim() || "";
+const isProd = () => orderTagBlocker({ VERCEL_ENV: process.env.VERCEL_ENV, NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL }) === null;
+
+/** Where a message to `to` really goes, or why it cannot go (checks 2 to 4 above). */
+function routeFor(cfg: Config, tplName: string, to: string): { to: string; campaign: string; test: boolean } | { skip: string } | { fail: string } {
+  if (!apiKey()) return { skip: "No AiSensy key is set (AISENSY_APPT_API_KEY or AISENSY_API_KEY)" };
+  if (!TEMPLATES[tplName]) return { fail: `unknown template ${tplName}` };
+  const set = cfg.settings, tests = set.test_numbers ?? [];
+  let dest = to;
+  if (set.test_mode) { if (!tests.length) return { skip: "Test mode is on and there is no test number" }; dest = tests[0]; }
+  if (!isProd() && !tests.includes(dest)) return { skip: "Not production: only test numbers are messaged" };
+  return { to: dest, campaign: set.campaigns?.[tplName]?.trim() || tplName, test: set.test_mode };
+}
+
+type Outcome = { state: "sent" | "failed" | "uncertain" | "skipped"; to: string; test: boolean; reason?: string | null; error?: string };
+async function deliver(cfg: Config, tplName: string, to: string, recipientName: string, audience: string, a: Appt | null, ctx: Omit<RenderCtx, "types">): Promise<Outcome> {
+  const r = routeFor(cfg, tplName, to);
+  if ("skip" in r) return { state: "skipped", to, test: false, reason: r.skip };
+  if ("fail" in r) return { state: "failed", to, test: false, error: r.fail };
+  let params: string[];
+  try { params = renderParams(tplName, a, { types: cfg.types, ...ctx }); }
+  catch (e) { return { state: "failed", to: r.to, test: r.test, error: (e as Error).message }; }
+  const res = await sendTemplateMessage({ apiKey: apiKey(), campaignName: r.campaign, destination: r.to, userName: recipientName || "Customer", params, tags: ["appointments", audience] });
+  if (res.sent) return { state: "sent", to: r.to, test: r.test, reason: r.test ? `Test mode: sent to ${r.to}` : null };
+  return { state: res.uncertain ? "uncertain" : "failed", to: r.to, test: r.test, error: res.error ?? "unknown" };
+}
+
+export async function runAppointmentSender(now = new Date(), opts: { appointmentId?: string } = {}): Promise<SenderResult> {
   const admin = createAdminClient();
   const c = await loadConfig();
   if (!c.ok) return { automation: false, testMode: true, claimed: 0, sent: 0, failed: 0, uncertain: 0, skipped: 0, digests: 0, note: c.missing ? "not set up" : c.error };
   const cfg = c.data, set = cfg.settings;
   const out: SenderResult = { automation: set.automation_on, testMode: set.test_mode, claimed: 0, sent: 0, failed: 0, uncertain: 0, skipped: 0, digests: 0 };
+  await ensureSenderUrl();
 
   if (!set.automation_on) {
-    await admin.rpc("appt_claim_messages", { p_limit: 0 }); // only expires stale rows
+    if (!opts.appointmentId) await admin.rpc("appt_claim_messages", { p_limit: 0 }); // only expires stale rows
     out.note = "automatic messages are off";
     return out;
   }
-  out.digests = await queueDailyList(cfg, now);
+  if (!opts.appointmentId) out.digests = await queueDailyList(cfg, now);
 
-  const { data: claimed, error } = await admin.rpc("appt_claim_messages", { p_limit: 30 });
-  if (error) { out.note = error.message; return out; }
-  const rows = (claimed ?? []) as Row[];
+  // One booking's due rows (straight after it was made or changed), or everything that is due.
+  let claim = opts.appointmentId
+    ? await admin.rpc("appt_claim_messages_for", { p_appointment: opts.appointmentId, p_limit: 30 })
+    : await admin.rpc("appt_claim_messages", { p_limit: 30 });
+  if (claim.error && opts.appointmentId && (claim.error.code === "PGRST202" || /appt_claim_messages_for/.test(claim.error.message))) {
+    claim = await admin.rpc("appt_claim_messages", { p_limit: 30 }); // 0113 not applied yet
+  }
+  if (claim.error) { out.note = claim.error.message; return out; }
+  const rows = (claim.data ?? []) as Row[];
   out.claimed = rows.length;
   if (!rows.length) return out;
 
@@ -60,10 +103,6 @@ export async function runAppointmentSender(now = new Date()): Promise<SenderResu
     }
     for (const a of (data ?? []) as Appt[]) appts.set(a.id, a);
   }
-  // The AiSensy project for +91 84336 59684. Its own key if set, else the portal's existing AiSensy key (same project).
-  const apiKey = process.env.AISENSY_APPT_API_KEY?.trim() || process.env.AISENSY_API_KEY?.trim() || "";
-  const prod = orderTagBlocker({ VERCEL_ENV: process.env.VERCEL_ENV, NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL }) === null;
-  const tests = set.test_numbers ?? [];
 
   const finish = async (r: Row, state: string, patch: Record<string, unknown> = {}) => {
     await admin.from("appointment_messages").update({ state, updated_at: new Date().toISOString(), ...patch }).eq("id", r.id);
@@ -80,27 +119,19 @@ export async function runAppointmentSender(now = new Date()): Promise<SenderResu
     if (a && evKind === "cancelled" && a.status !== "cancelled") return finish(r, "skipped", { reason: "The booking was reopened" });
     if (a && evKind === "moved" && !isLive(a.status)) return finish(r, "skipped", { reason: "The booking is no longer live" });
     if (a && r.audience === "client" && r.to_address !== a.phone_e164) return finish(r, "skipped", { reason: "The WhatsApp number on the booking changed" });
-    if (!apiKey) return finish(r, "skipped", { reason: "No AiSensy key is set (AISENSY_APPT_API_KEY or AISENSY_API_KEY)" });
     // The customer's wording follows where the booking happens now (store or a call), whatever was planned.
     const tplName = (a && templateFor(r.rule, a)) || r.template;
-    if (!TEMPLATES[tplName]) return finish(r, "failed", { last_error: `unknown template ${tplName}` });
-    const campaign = set.campaigns?.[tplName]?.trim() || tplName;
-    let to = r.to_address;
-    if (set.test_mode) { if (!tests.length) return finish(r, "skipped", { reason: "Test mode is on and there is no test number" }); to = tests[0]; }
-    if (!prod && !tests.includes(to)) return finish(r, "skipped", { reason: "Not production: only test numbers are messaged" });
-    let params: string[];
-    try { params = renderParams(tplName, a, { types: cfg.types, ...contextFor(r, a, cfg) }); }
-    catch (e) { return finish(r, "failed", { last_error: (e as Error).message }); }
-    const res = await sendTemplateMessage({ apiKey, campaignName: campaign, destination: to, userName: r.recipient_name || "Customer", params, tags: ["appointments", r.audience] });
-    if (res.sent) return finish(r, "sent", { sent_at: new Date().toISOString(), last_error: null, reason: set.test_mode ? `Test mode: sent to ${to}` : null });
-    return finish(r, res.uncertain ? "uncertain" : "failed", { last_error: res.error ?? "unknown" });
+    const o = await deliver(cfg, tplName, r.to_address, r.recipient_name || "Customer", r.audience, a, contextFor(r, a));
+    if (o.state === "sent") return finish(r, "sent", { sent_at: new Date().toISOString(), last_error: null, reason: o.reason ?? null });
+    if (o.state === "skipped") return finish(r, "skipped", { reason: o.reason ?? null });
+    return finish(r, o.state, { last_error: o.error ?? "unknown" });
   });
   // Six at a time, so 30 rows at an 8 s timeout stay inside the 60 s function limit.
   for (let i = 0; i < work.length; i += 6) await Promise.all(work.slice(i, i + 6).map((f) => f().catch(() => undefined)));
   return out;
 }
 
-function contextFor(r: Row, a: Appt | null, cfg: Config): { change?: string; byName?: string; reason?: string; digest?: { count: number; list: string } } {
+function contextFor(r: Pick<Row, "rule" | "params">, a: Appt | null): Omit<RenderCtx, "types"> {
   if (r.rule === "s-digest") return { digest: r.params?.digest as { count: number; list: string } };
   if (!a) return {};
   if (r.rule === "ev-staff") {
@@ -108,7 +139,6 @@ function contextFor(r: Row, a: Appt | null, cfg: Config): { change?: string; byN
     return { change: r.params?.kind === "cancelled" ? "cancelled" : `moved to ${dayShort(p.day)} at ${hm(p.min)}`, byName: String(r.params?.by ?? "staff") };
   }
   if (r.rule === "ev-cancelled") return { reason: a.cancel_reason === "Shop closed" ? "The shop is closed then. We are sorry for the trouble." : "We are sorry for any trouble." };
-  void cfg;
   return {};
 }
 
@@ -127,6 +157,122 @@ async function queueDailyList(cfg: Config, now: Date): Promise<number> {
   const rows = people.map((p) => ({ appointment_id: null, dedupe_key: `digest:${day}:${p.wa_e164}`, rule: "s-digest", template: "drevi_staff_today", channel: "wa", audience: "staff", recipient_name: p.name, to_address: p.wa_e164!, params: { digest }, due_at: now.toISOString(), expires_at: new Date(now.getTime() + 3 * 3600000).toISOString(), state: "scheduled" }));
   const { data: ins } = await admin.from("appointment_messages").upsert(rows, { onConflict: "dedupe_key", ignoreDuplicates: true }).select("id");
   return (ins ?? []).length;
+}
+
+/* ---------------- Send, tapped on a booking ---------------- */
+
+export type ManualResult = { ok: true; to: string; test: boolean } | { ok: false; error: string; again?: boolean };
+const CLAIMABLE = ["scheduled", "skipped", "failed", "cancelled"];
+
+/**
+ * Sends one customer template now, through the message row it belongs to:
+ * the waiting one if there is one (so the automatic send does not repeat it),
+ * else a new row. Refuses while another send of it is in flight, and asks for
+ * `again` when the last one already went.
+ */
+export async function sendManual(o: { cfg: Config; appt: Appt; rule: string; byName: string; again: boolean }): Promise<ManualResult> {
+  const { cfg, appt: a, rule } = o;
+  const admin = createAdminClient();
+  const tplName = templateFor(rule, a);
+  if (!tplName) return { ok: false, error: "There is no WhatsApp message for that." };
+  const route = routeFor(cfg, tplName, a.phone_e164);
+  if ("skip" in route) return { ok: false, error: `Not sent: ${route.skip}.` };
+  if ("fail" in route) return { ok: false, error: `Not sent: ${route.fail}.` };
+
+  const { data: existing, error: readErr } = await admin.from("appointment_messages").select("id, rule, template, audience, recipient_name, to_address, params, due_at, state, created_at, sent_at, appointment_id")
+    .eq("appointment_id", a.id).eq("rule", rule).order("created_at", { ascending: false }).limit(20);
+  if (readErr) return { ok: false, error: readErr.message };
+  const rows = (existing ?? []) as MsgRow[];
+  if (rows.some((r) => r.state === "sending")) return { ok: false, error: "It is being sent right now. Reload the page in a minute to see whether it went." };
+  const target = rows.find((r) => r.state === "scheduled") ?? (rows[0] && CLAIMABLE.includes(rows[0].state) ? rows[0] : null);
+  if (!target && rows[0] && (rows[0].state === "sent" || rows[0].state === "uncertain") && !o.again) {
+    return { ok: false, again: true, error: rows[0].state === "sent" ? "It has already been sent. Reload the page, then send it again if you need to." : "The last try may or may not have gone. Reload the page and check the chat first." };
+  }
+
+  const nowIso = new Date().toISOString();
+  let rowId: string;
+  if (target) {
+    const { data: got, error } = await admin.from("appointment_messages").update({ state: "sending", updated_at: nowIso })
+      .eq("id", target.id).in("state", CLAIMABLE).select("id");
+    if (error) return { ok: false, error: error.message };
+    if (!got?.length) return { ok: false, error: "Someone else is sending it right now. Reload the page." };
+    rowId = target.id;
+  } else {
+    const { data: ins, error } = await admin.from("appointment_messages").insert({
+      appointment_id: a.id, dedupe_key: `${a.id}:manual:${rule}:${nowIso}`, rule, template: tplName, channel: "wa", audience: "client",
+      recipient_name: a.customer_name, to_address: a.phone_e164, params: {}, due_at: nowIso, expires_at: null, state: "sending", attempts: 1,
+    }).select("id").single();
+    if (error || !ins) return { ok: false, error: error?.message ?? "Could not note the message." };
+    rowId = (ins as { id: string }).id;
+  }
+
+  const out = await deliver(cfg, tplName, a.phone_e164, a.customer_name, "client", a, contextFor({ rule, params: null }, a));
+  const by = `Sent by ${o.byName}${out.test ? ` (test mode: to ${out.to})` : ""}`;
+  await admin.from("appointment_messages").update(
+    out.state === "sent" ? { state: "sent", sent_at: new Date().toISOString(), reason: by, last_error: null, to_address: a.phone_e164, updated_at: new Date().toISOString() }
+      : out.state === "skipped" ? { state: "skipped", reason: out.reason ?? null, updated_at: new Date().toISOString() }
+      : { state: out.state, last_error: out.error ?? "unknown", reason: `Tapped by ${o.byName}`, updated_at: new Date().toISOString() },
+  ).eq("id", rowId);
+  if (out.state === "sent") return { ok: true, to: out.to, test: out.test };
+  if (out.state === "uncertain") return { ok: false, error: "AiSensy did not answer, so it may or may not have gone. Check the chat on the shop phone before sending it again." };
+  if (out.state === "skipped") return { ok: false, error: `Not sent: ${out.reason}.` };
+  return { ok: false, error: `WhatsApp did not send it: ${out.error}. Try again in a minute; if it keeps failing, check the AiSensy campaign ${route.campaign}.` };
+}
+
+/* ---------------- the 5-minute schedule (0113) ---------------- */
+
+/** The production address of this deployment, for the database's 5-minute call. Null on previews and locally. */
+function ownOrigin(): string | null {
+  if (process.env.VERCEL_ENV !== "production") return null;
+  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  return host && /^[A-Za-z0-9.-]+$/.test(host) ? `https://${host}` : null;
+}
+let registered: string | null = null;
+/** Tells the database where to call (once per server instance; nothing if 0113 is not applied). */
+export async function ensureSenderUrl(): Promise<void> {
+  const url = ownOrigin();
+  if (!url || registered === url) return;
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin.from("appointment_sender").select("url").eq("id", 1).maybeSingle();
+    if (error || !data) return;
+    if ((data as { url: string | null }).url !== url) {
+      const { error: upErr } = await admin.from("appointment_sender").update({ url, updated_at: new Date().toISOString() }).eq("id", 1);
+      if (upErr) return;
+    }
+    registered = url;
+  } catch { /* the next run tries again */ }
+}
+
+/** Whether a call to the cron route carries the database's token. False when 0113 is not applied. */
+export async function isDatabaseCall(header: string | null): Promise<boolean> {
+  if (!header) return false;
+  try {
+    const { data } = await createAdminClient().from("appointment_sender").select("token").eq("id", 1).maybeSingle();
+    const token = (data as { token?: string } | null)?.token;
+    if (!token) return false;
+    const want = Buffer.from(token), got = Buffer.from(header);
+    return want.length === got.length && timingSafeEqual(want, got);
+  } catch { return false; }
+}
+
+/** Notes a scheduled check (from the database or GitHub), for the health line in Settings. */
+export async function noteScheduledRun(via: "database" | "github", res: SenderResult | { error: string }): Promise<void> {
+  try {
+    await createAdminClient().from("appointment_sender").update({ last_run_at: new Date().toISOString(), last_via: via, last_result: res }).eq("id", 1);
+  } catch { /* not set up yet */ }
+}
+
+export interface SenderStatus { ready: boolean; registered: boolean; lastRunAt: string | null; lastVia: string | null; note: string | null }
+/** For Settings: is the 5-minute check set up, and when did a scheduled check last run. */
+export async function senderStatus(): Promise<SenderStatus> {
+  await ensureSenderUrl();
+  try {
+    const { data, error } = await createAdminClient().from("appointment_sender").select("url, last_run_at, last_via, last_result").eq("id", 1).maybeSingle();
+    if (error || !data) return { ready: false, registered: false, lastRunAt: null, lastVia: null, note: null };
+    const d = data as { url: string | null; last_run_at: string | null; last_via: string | null; last_result: { note?: string; error?: string } | null };
+    return { ready: true, registered: !!d.url, lastRunAt: d.last_run_at, lastVia: d.last_via, note: d.last_result?.error ?? null };
+  } catch { return { ready: false, registered: false, lastRunAt: null, lastVia: null, note: null }; }
 }
 
 /** Every template the sender can send, for the Settings campaign list. */

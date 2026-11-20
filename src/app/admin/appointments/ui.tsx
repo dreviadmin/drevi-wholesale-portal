@@ -80,7 +80,7 @@ export function NotSetUp({ error }: { error?: string }) {
   );
 }
 export function TestModeNote({ automationOn, testMode }: { automationOn: boolean; testMode: boolean }) {
-  const text = !automationOn ? "Automatic WhatsApp messages are off. Bookings, reminders and alerts are planned and shown here; send them by hand with the WhatsApp buttons until the owner turns automatic messages on." :
+  const text = !automationOn ? "Automatic WhatsApp messages are off. Bookings, reminders and alerts are planned and shown here; send them with the Send buttons on the booking until the owner turns automatic messages on." :
     testMode ? "Test mode: automatic WhatsApp messages go only to the test numbers in Settings." : "";
   if (!text) return null;
   return <div className="font-body" style={{ border: "1px solid #EBD39A", background: "#FFF8E6", color: "#5A4210", fontSize: 12.5, padding: "9px 12px", marginBottom: 14 }}>{text}</div>;

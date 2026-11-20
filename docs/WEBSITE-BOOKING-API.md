@@ -201,13 +201,15 @@ How the theme should fill the rest:
   Every field then describes the stored booking. Show it as a normal
   success.
 - **`auto_whatsapp`:**
-  - `true` only when the shop's automatic WhatsApp confirmations are
-    really on, and so the customer is about to get one.
-  - **Today it is `false`.** The page must then ask the customer to tap
-    **"Send us your booking on WhatsApp"**, which opens `shop_whatsapp.link`.
-  - That message reaches the team's phone at once and gives the customer a
-    chat with the shop. Do not promise "you'll get a WhatsApp" while
-    `auto_whatsapp` is `false`.
+  - `true` when the shop's automatic WhatsApp confirmations are on (and test
+    mode is off): the confirmation is sent within seconds of the booking,
+    from +91 84336 59684. The page can say so ("We're sending your
+    confirmation on WhatsApp").
+  - `false` when they are off, or the customer said no to WhatsApp. The page
+    must then ask the customer to tap **"Send us your booking on WhatsApp"**,
+    which opens `shop_whatsapp.link`. That message reaches the team's phone at
+    once and gives the customer a chat with the shop. Do not promise "you'll
+    get a WhatsApp" while `auto_whatsapp` is `false`.
 - **Calendar file:** build "Add to calendar" (an .ics file) from
   `starts_at`, `ends_at` and `address`. Use the title "Drevi: store visit"
   and put the booking number in the description.
@@ -258,6 +260,9 @@ These happen in the portal, not on the website:
   All bookings lists.
 - WhatsApp alerts are planned for the team's alert list, along with the
   customer's confirmation and reminders.
-- Nothing is sent until the owner connects AiSensy and turns automatic
-  messages on. Until then the team sends confirmations from the booking
-  page with one tap.
+- With automatic messages on, the customer's confirmation and the team
+  alerts go within seconds of the booking. Reminders (the day before and
+  2 hours before) go at their time: the database checks for due messages
+  every 5 minutes (migration 0113).
+- With automatic messages off, nothing goes on its own; the team sends the
+  confirmation from the booking page with Send the confirmation.

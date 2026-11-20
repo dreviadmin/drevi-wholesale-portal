@@ -12,11 +12,11 @@ export function ConfirmPreview({ draft, types, status, notify, automationOn, tes
 }) {
   const text = handText("c-confirm", draft, types);
   const lead = !notify
-    ? "WhatsApp messages are off for this booking, so this is not sent on its own. You can still send it by hand from the booking page."
+    ? "WhatsApp messages are off for this booking, so this is not sent."
     : status === "requested"
       ? "Nothing goes to them yet. Once someone confirms the booking, they get:"
       : !automationOn
-        ? "Automatic messages are off right now, so after saving, send this by hand with the WhatsApp buttons on the booking page:"
+        ? "Automatic messages are off right now, so after saving, send this with Send the confirmation on the booking page:"
         : testMode
           ? "Test mode is on: this goes only to the test numbers in Settings, not to the customer."
           : "They get this on WhatsApp as soon as you save:";

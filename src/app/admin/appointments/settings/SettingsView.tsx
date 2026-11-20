@@ -1,6 +1,7 @@
 "use client";
 
 import type { Config } from "@/lib/appointments/core";
+import type { SenderStatus } from "@/lib/appointments/sender";
 import { palette } from "@/lib/palette";
 import { useToast } from "@/lib/use-toast";
 import { FOCUS, Toast } from "./bits";
@@ -18,7 +19,7 @@ const JUMPS: Array<[string, string]> = [
 ];
 
 /** Settings: stacked cards, one per area, each saving on its own. */
-export function SettingsView({ cfg, logins, today, isOwner }: { cfg: Config; logins: Login[]; today: string; isOwner: boolean }) {
+export function SettingsView({ cfg, logins, today, nowIso, sender, isOwner }: { cfg: Config; logins: Login[]; today: string; nowIso: string; sender: SenderStatus; isOwner: boolean }) {
   const [toast, flash] = useToast();
   return (
     <div style={{ maxWidth: 1040 }}>
@@ -36,7 +37,7 @@ export function SettingsView({ cfg, logins, today, isOwner }: { cfg: Config; log
         <HoursCard hours={cfg.hours} flash={flash} />
         <ClosuresCard closures={cfg.closures} today={today} flash={flash} />
         <PeopleCard people={cfg.people} logins={logins} digestHour={cfg.settings.digest_hour} flash={flash} />
-        <WhatsAppCard settings={cfg.settings} isOwner={isOwner} flash={flash} />
+        <WhatsAppCard settings={cfg.settings} sender={sender} today={today} nowIso={nowIso} isOwner={isOwner} flash={flash} />
       </div>
       <Toast text={toast} />
     </div>

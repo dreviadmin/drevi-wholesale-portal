@@ -76,6 +76,7 @@ const TABLES = [
   "appointments",
   "appointment_events",
   "appointment_messages",
+  "appointment_sender",
 ];
 const KEEP = 14;
 const PAGE = 1000;

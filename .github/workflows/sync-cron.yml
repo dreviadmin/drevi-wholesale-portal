@@ -33,6 +33,8 @@ jobs:
           echo "HTTP $code"
           cat /tmp/sku.json
           [ "$code" = "200" ]
+      # The database calls this every 5 minutes (migration 0113). This call is a
+      # backstop: GitHub runs this schedule only every few hours in practice.
       - name: Appointment messages (sends only when switched on in the portal)
         if: always()
         run: |

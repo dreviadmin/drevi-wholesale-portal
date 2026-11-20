@@ -1,19 +1,23 @@
 "use client";
 
-// The Customer card, and WhatsApp by hand: while automatic sending is off,
-// these buttons are how the customer hears from us. Each opens WhatsApp with
-// the message typed in and is noted in the history.
+// The Customer card, and Send on WhatsApp: each button sends the approved
+// WhatsApp template from the shop's number through AiSensy straight away (test
+// mode sends it to the test number). A sheet asks first, since it cannot be
+// taken back. Sent and failed sends show in Messages and in the history.
 
+import { useState } from "react";
 import Link from "next/link";
 import { MessageCircle, Phone, Send } from "lucide-react";
 import { palette } from "@/lib/palette";
+import { ConfirmSheet } from "@/components/admin/ConfirmSheet";
 import {
-  TYPE_SPOKEN, dayLong, dayShort, firstName, handConfirmText, handReminderText, handText, hm, isLive, istParts, showPhone, waDigits, waLink,
-  type Appt, type ApptStatus,
+  MANUAL_LABEL, TYPE_SPOKEN, dayDiff, dayLong, dayShort, firstName, handText, hm, isLive, istParts, manualRule, showPhone, waDigits, waLink,
+  type Appt, type ApptStatus, type ManualWhat,
 } from "@/lib/appointments/core";
-import { S, StatusPill, btn } from "../ui";
+import type { ApptMessage } from "@/lib/appointments/server";
+import { MsgStatePill, S, StatusPill, btn } from "../ui";
 import { ErrorNote, FOCUS } from "../new/fields";
-import { logHandSend } from "../actions";
+import { logHandSend, sendWhatsAppNow } from "../actions";
 import { Card, Row } from "./DetailCards";
 import { useBooking } from "./ctx";
 
@@ -70,59 +74,148 @@ function meetText(a: Appt): string {
   return `Hi ${firstName(a.customer_name)}, here is the Google Meet link for your ${TYPE_SPOKEN[a.type_id] ?? "appointment"} with Drevi on ${dayLong(p.day)} at ${time}:\n${a.meet_link}\nSee you then.`;
 }
 
-type What = "confirmation" | "reminder" | "meet link" | "message";
+const LABEL: Record<ManualWhat, string> = { confirmation: "Send the confirmation", reminder: "Send a reminder", moved: "Send the new time", cancelled: "Send the cancellation note" };
+const SHOP_WA = "+91 84336 59684";
+const cancelReason = (a: Appt) => (a.cancel_reason === "Shop closed" ? "The shop is closed then. We are sorry for the trouble." : undefined);
 
-export function HandWhatsAppCard({ moved }: { moved: boolean }) {
-  const { appt: a, types, now, run, errorFor, automationOn, testMode } = useBooking();
+interface Item { what: ManualWhat; rule: string | null; why: string | null; text: string | null; last: ApptMessage | null }
+
+/** The newest message row of a rule: the waiting one first, as the sender would use it. */
+function lastOf(messages: ApptMessage[], rule: string | null): ApptMessage | null {
+  if (!rule) return null;
+  const rows = messages.filter((m) => m.rule === rule && m.audience === "client").sort((x, y) => (x.created_at < y.created_at ? 1 : -1));
+  return rows.find((m) => m.state === "scheduled" || m.state === "sending") ?? rows[0] ?? null;
+}
+
+export function SendWhatsAppCard({ moved, messages }: { moved: boolean; messages: ApptMessage[] }) {
+  const { appt: a, types, now, today, run, busy, errorFor, clearError, flash, automationOn, testMode, testNumbers } = useBooking();
+  const [ask, setAsk] = useState<Item | null>(null);
   const live = isLive(a.status);
-  const log = (what: What) => { void run("hand", () => logHandSend(a.id, what), "Opened WhatsApp. Noted in the history."); };
 
-  const items: Array<{ key: string; label: string; text: string | null; what: What; note?: string }> = [];
-  if (live) {
-    items.push({ key: "confirm", label: "Send the confirmation", text: handConfirmText(a, types), what: "confirmation", note: a.status === "requested" ? "It still needs confirming: tap Confirm above first." : undefined });
-    items.push({ key: "remind", label: "Send a reminder", text: handReminderText(a, types, now), what: "reminder" });
-    if (moved) items.push({ key: "moved", label: "Send the new time", text: handText("ev-moved", a, types), what: "message" });
-    if (a.place === "meet") items.push({ key: "meet", label: "Send the Meet link", text: a.meet_link ? meetText(a) : null, what: "meet link", note: a.meet_link ? undefined : "Add the Meet link in the Appointment card first." });
-  } else if (a.status === "cancelled") {
-    items.push({ key: "cancel", label: "Send the cancellation note", text: handText("ev-cancelled", a, types, { reason: a.cancel_reason === "Shop closed" ? "The shop is closed then. We are sorry for the trouble." : undefined }), what: "message" });
+  const whats: ManualWhat[] = live ? ["confirmation", "reminder", ...(moved ? (["moved"] as ManualWhat[]) : [])] : a.status === "cancelled" ? ["cancelled"] : [];
+  const items: Item[] = whats.map((what) => {
+    const pick = manualRule(what, a, now);
+    const rule = "rule" in pick ? pick.rule : null;
+    let text: string | null = null;
+    try { text = rule ? handText(rule, a, types, what === "cancelled" ? { reason: cancelReason(a) } : {}) : null; } catch { text = null; }
+    return { what, rule, why: "error" in pick ? pick.error : null, text, last: lastOf(messages, rule) };
+  });
+  const testTo = testNumbers[0] ? showPhone(testNumbers[0]) : null;
+  const keyFor = (it: Item) => `send:${it.what}`;
+  const already = (it: Item) => !!it.last && (it.last.state === "sent" || it.last.state === "uncertain");
+  const at = (iso: string) => {
+    const p = istParts(iso), d = dayDiff(today, p.day);
+    return `${d === 0 ? "today" : d === -1 ? "yesterday" : d === 1 ? "tomorrow" : dayShort(p.day)} at ${hm(p.min)}`;
+  };
+
+  async function send(it: Item) {
+    let msg = "Sent";
+    const ok = await run(keyFor(it), async () => {
+      const r = await sendWhatsAppNow(a.id, it.what, already(it));
+      if (r.ok) msg = r.message;
+      return r;
+    });
+    if (ok) { flash(msg); setAsk(null); }
   }
 
   return (
-    <Card title="WhatsApp by hand">
-      {automationOn && !testMode ? <p style={{ ...S.body, marginBottom: 8 }}>Automatic messages are on, so these usually go by themselves. Use the buttons only when the Messages card shows one did not go.</p> : null}
-      <p style={{ ...S.muted, marginBottom: 12 }}>
-        Each button opens WhatsApp on this phone, or WhatsApp Web on a laptop, with the message to {showPhone(a.phone_e164)} typed in. Check it, then tap send. The tap is noted in the history.
+    <Card title="Send on WhatsApp">
+      <p style={{ ...S.body, marginBottom: 8 }}>
+        Each button sends the approved WhatsApp message from the shop&apos;s number ({SHOP_WA}) to {showPhone(a.phone_e164)} straight away. It shows under Messages.
       </p>
-      {items.length ? (
-        <div className="flex flex-col gap-3">
-          {items.map((it) => (
-            <div key={it.key} className="flex flex-col gap-1">
-              {it.text ? (
-                <a href={waLink(a.phone_e164, it.text)} target="_blank" rel="noopener noreferrer" onClick={() => log(it.what)} className={FOCUS} style={{ ...btn(it.key === "confirm" && a.status !== "requested" ? "dark" : "outline"), justifyContent: "flex-start", minHeight: 48 }}>
-                  <Send size={14} aria-hidden /> {it.label}
-                </a>
-              ) : (
-                <span aria-disabled="true" style={{ ...btn("outline"), justifyContent: "flex-start", minHeight: 48, opacity: 0.4, cursor: "default" }}><Send size={14} aria-hidden /> {it.label}</span>
-              )}
-              {it.note ? <span style={S.muted}>{it.note}</span> : null}
-            </div>
-          ))}
-          <details style={{ marginTop: 4 }}>
-            <summary className={FOCUS} style={{ ...S.label, cursor: "pointer", minHeight: 44, display: "flex", alignItems: "center" }}>What the messages say</summary>
-            <div className="flex flex-col gap-3" style={{ marginTop: 6 }}>
-              {items.filter((it) => it.text).map((it) => (
-                <div key={it.key}>
-                  <span style={S.label}>{it.label.replace(/^Send /, "")}</span>
-                  <div style={{ marginTop: 4, background: "#E9F5E1", border: "1px solid #CFE3C2", padding: "9px 11px", fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: palette.black }}>{it.text}</div>
-                </div>
-              ))}
-            </div>
-          </details>
+      {testMode ? (
+        <p style={{ ...S.body, marginBottom: 8, color: "#5A4210" }}>Test mode is on, so it goes to the test number {testTo ?? "(none added yet, so nothing can go)"}, not to the customer.</p>
+      ) : automationOn ? (
+        <p style={{ ...S.muted, marginBottom: 8 }}>Automatic messages are on, so the confirmation and reminders go by themselves. Use these when one did not go, or to send one again.</p>
+      ) : (
+        <p style={{ ...S.muted, marginBottom: 8 }}>Automatic messages are off, so nothing goes on its own. These buttons still send.</p>
+      )}
+      {!a.notify_wa && live ? <p style={{ ...S.muted, marginBottom: 8 }}>WhatsApp messages are off for this customer. Turn them on in the Customer card to send these.</p> : null}
+      {items.length || (live && a.place === "meet") ? (
+        <div className="flex flex-col gap-3" style={{ marginTop: 4 }}>
+          {items.map((it) => {
+            const st = it.last;
+            const status = !st ? null
+              : st.state === "sent" ? `Sent ${at(st.sent_at || st.due_at)}`
+              : st.state === "scheduled" ? (new Date(st.due_at).getTime() > now.getTime() ? `Goes by itself ${at(st.due_at)}` : "Waiting to go")
+              : st.state === "sending" ? "Sending now"
+              : st.state === "uncertain" ? "May not have gone"
+              : st.state === "failed" ? "Did not go" : null;
+            const disabled = !!it.why || !it.rule;
+            return (
+              <div key={it.what} className="flex flex-col gap-1">
+                <button type="button" disabled={disabled || busy === keyFor(it)} onClick={() => { clearError(); setAsk(it); }}
+                  className={`disabled:opacity-40 ${FOCUS}`} style={{ ...btn(it.what === "confirmation" && !already(it) ? "dark" : "outline"), justifyContent: "flex-start", minHeight: 48, width: "100%", maxWidth: 420 }}>
+                  <Send size={14} aria-hidden /> {already(it) ? `${LABEL[it.what]} again` : LABEL[it.what]}
+                </button>
+                {status && !disabled ? <span className="flex items-center gap-2 flex-wrap" style={S.muted}>{st ? <MsgStatePill state={st.state} /> : null}{status}</span> : null}
+                {it.why ? <span style={S.muted}>{it.why}</span> : null}
+                {!ask && errorFor(keyFor(it)) ? <ErrorNote>{errorFor(keyFor(it))}</ErrorNote> : null}
+              </div>
+            );
+          })}
+          {live && a.place === "meet" ? <MeetLinkButton /> : null}
+          {items.some((it) => it.text) ? (
+            <details style={{ marginTop: 4 }}>
+              <summary className={FOCUS} style={{ ...S.label, cursor: "pointer", minHeight: 44, display: "flex", alignItems: "center" }}>What the messages say</summary>
+              <div className="flex flex-col gap-3" style={{ marginTop: 6 }}>
+                {items.filter((it) => it.text).map((it) => (
+                  <div key={it.what}>
+                    <span style={S.label}>{MANUAL_LABEL[it.what]}</span>
+                    <Bubble text={it.text!} />
+                  </div>
+                ))}
+              </div>
+            </details>
+          ) : null}
         </div>
       ) : (
         <p style={S.body}>This booking is closed, so there is nothing to send. Use Open chat in the Customer card to message them.</p>
       )}
-      <div style={{ marginTop: 8 }}><ErrorNote>{errorFor("hand")}</ErrorNote></div>
+      {ask ? (
+        <ConfirmSheet
+          title={already(ask) ? `${LABEL[ask.what]} again?` : `${LABEL[ask.what]} now?`}
+          confirmLabel={already(ask) ? "Send again" : "Send"}
+          pendingLabel="Sending…"
+          cancelLabel="Not now"
+          tone="plain"
+          pending={busy === keyFor(ask)}
+          error={errorFor(keyFor(ask))}
+          onConfirm={() => { void send(ask); }}
+          onClose={() => { if (busy !== keyFor(ask)) { setAsk(null); clearError(); } }}
+        >
+          <span style={{ display: "block", marginBottom: 8 }}>
+            {testMode
+              ? `Test mode is on: it goes to the test number ${testTo ?? "(none added)"}, not to ${a.customer_name}.`
+              : `It goes on WhatsApp from the shop's number to ${a.customer_name}, ${showPhone(a.phone_e164)}.`}
+            {already(ask) && ask.last ? ` It already went ${at(ask.last.sent_at || ask.last.due_at)}, so they get it a second time.` : ""}
+          </span>
+          {ask.text ? <Bubble text={ask.text} /> : null}
+        </ConfirmSheet>
+      ) : null}
     </Card>
+  );
+}
+
+function Bubble({ text }: { text: string }) {
+  return <div style={{ marginTop: 4, background: "#E9F5E1", border: "1px solid #CFE3C2", padding: "9px 11px", fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: palette.black, maxHeight: "40vh", overflowY: "auto" }}>{text}</div>;
+}
+
+/** No WhatsApp template carries a bare Meet link, so this one opens WhatsApp on the phone with it typed in. */
+function MeetLinkButton() {
+  const { appt: a, run, errorFor } = useBooking();
+  const log = () => { void run("hand", () => logHandSend(a.id, "meet link"), "Opened WhatsApp. Noted in the history."); };
+  return (
+    <div className="flex flex-col gap-1">
+      {a.meet_link ? (
+        <a href={waLink(a.phone_e164, meetText(a))} target="_blank" rel="noopener noreferrer" onClick={log} className={FOCUS} style={{ ...btn("outline"), justifyContent: "flex-start", minHeight: 48, width: "100%", maxWidth: 420 }}>
+          <MessageCircle size={14} aria-hidden /> Send the Meet link from this phone
+        </a>
+      ) : (
+        <span aria-disabled="true" style={{ ...btn("outline"), justifyContent: "flex-start", minHeight: 48, width: "100%", maxWidth: 420, opacity: 0.4, cursor: "default" }}><MessageCircle size={14} aria-hidden /> Send the Meet link from this phone</span>
+      )}
+      <span style={S.muted}>{a.meet_link ? "Opens WhatsApp with the link typed in; tap send there. The confirmation and reminders already carry the link." : "Add the Meet link in the Appointment card first."}</span>
+      <ErrorNote>{errorFor("hand")}</ErrorNote>
+    </div>
   );
 }

@@ -3,6 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadConfig, APPT_COLS } from "./server";
+import { sendDueNow } from "./kick";
 import { addDays, dayDiff, dayShort, durOf, fromIst, hm, isLive, istParts, planMessages, type Appt, type ApptStatus, type Config, type Party, type Place } from "./core";
 import { MAX_DAYS, availabilityFor, bookedReply, campaignText, networkKey, parseWebBook, slotProblem, validDay, webParty, webType, type WebErr } from "./website";
 
@@ -135,5 +136,6 @@ export async function websiteBook(body: unknown, ip: string | null, now = new Da
     const sp = istParts(st.starts_at);
     return bookedReply({ number: st.number, status: st.status, replayed: true, type, place: st.place, party: st.party, day: sp.day, min: sp.min, name: v.name, autoWhatsApp: autoWhatsApp(cfg, st.notify_wa, st.status) });
   }
+  await sendDueNow(r.id); // the customer's confirmation and the team alerts go now (after the answer, on Vercel)
   return bookedReply({ number: r.number!, status, replayed: false, type: v.type, place: v.place, party: v.party, day: v.day, min: v.min, name: v.name, autoWhatsApp: autoWhatsApp(cfg, v.notifyWa, status) });
 }

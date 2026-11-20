@@ -3,7 +3,8 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { showPhone, type ApptSettings } from "@/lib/appointments/core";
+import { dayDiff, dayShort, hm, istParts, showPhone, type ApptSettings } from "@/lib/appointments/core";
+import type { SenderStatus } from "@/lib/appointments/sender";
 import { palette } from "@/lib/palette";
 import { ConfirmSheet } from "@/components/admin/ConfirmSheet";
 import { Pill, S, btn } from "../ui";
@@ -13,7 +14,7 @@ import { CampaignNames } from "./CampaignNames";
 
 type Ask = "automation_on" | "test_off" | null;
 
-export function WhatsAppCard({ settings, isOwner, flash }: { settings: ApptSettings; isOwner: boolean; flash: (m: string) => void }) {
+export function WhatsAppCard({ settings, sender, today, nowIso, isOwner, flash }: { settings: ApptSettings; sender: SenderStatus; today: string; nowIso: string; isOwner: boolean; flash: (m: string) => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +42,7 @@ export function WhatsAppCard({ settings, isOwner, flash }: { settings: ApptSetti
         <div style={{ border: "1px solid rgba(26,26,26,0.12)", background: "#fff", padding: 14 }}>
           <div className="flex items-center gap-2 flex-wrap"><span className="font-body" style={S.label}>Automatic messages</span>{on ? <Pill bg="#E1EFE4" fg="#245437">On</Pill> : <Pill bg="#ECE9E4" fg="#7A746B">Off</Pill>}</div>
           <p className="font-body" style={{ ...S.body, marginTop: 6, lineHeight: 1.5 }}>
-            {on ? "The portal sends the WhatsApps itself at the right time." : "Nothing is sent automatically. Staff send confirmations and reminders by hand with the WhatsApp buttons on each booking."}
+            {on ? "The portal sends the WhatsApps itself: the confirmation and team alerts as soon as a booking is made, reminders at their time." : "Nothing is sent automatically. Staff send confirmations and reminders with the Send buttons on each booking."}
           </p>
           <div style={{ marginTop: 10 }}>
             {on ? (
@@ -72,6 +73,7 @@ export function WhatsAppCard({ settings, isOwner, flash }: { settings: ApptSetti
         </div>
       </div>
       <InlineError>{error}</InlineError>
+      <SenderHealth sender={sender} today={today} nowIso={nowIso} on={on} />
 
       <TestNumbers numbers={settings.test_numbers} flash={flash} />
       <CampaignNames campaigns={settings.campaigns} flash={flash} />
@@ -142,6 +144,31 @@ function TestNumbers({ numbers, flash }: { numbers: string[]; flash: (m: string)
         <button type="button" disabled={pending || !local.trim()} onClick={add} className={`font-body disabled:opacity-40 ${FOCUS}`} style={{ ...btn("dark"), marginTop: 22 }}>{pending ? "Saving…" : "Add"}</button>
       </div>
       <InlineError>{error}</InlineError>
+    </div>
+  );
+}
+
+/** Whether the 5-minute check (0113) is running: reminders depend on it. */
+function SenderHealth({ sender, today, nowIso, on }: { sender: SenderStatus; today: string; nowIso: string; on: boolean }) {
+  const last = sender.lastRunAt ? istParts(sender.lastRunAt) : null;
+  const when = last ? `${dayDiff(today, last.day) === 0 ? "today" : dayDiff(today, last.day) === -1 ? "yesterday" : dayShort(last.day)} at ${hm(last.min)}` : null;
+  const minsAgo = sender.lastRunAt ? (Date.parse(nowIso) - Date.parse(sender.lastRunAt)) / 60000 : Infinity;
+  const ok = sender.ready && sender.registered && minsAgo <= 15;
+  const text = !sender.ready
+    ? "The 5-minute check is not set up on this database yet (migration 0113). Until it is, due messages go only when GitHub calls in, a few times a day, so reminders can be hours late."
+    : !sender.registered
+      ? "The 5-minute check starts once the portal has noted its own address. That happens when this page or the sender runs on the live portal."
+      : ok
+        ? `Due messages are checked every 5 minutes. Last check ${when}${sender.lastVia === "github" ? " (by GitHub)" : ""}.`
+        : `No check since ${when ?? "it was set up"}. Reminders are late until the check runs again${on ? "" : " (automatic messages are off, so nothing is waiting to go)"}.`;
+  return (
+    <div className="font-body" role={ok ? undefined : "status"} style={{ marginTop: 12, border: `1px solid ${ok ? "rgba(26,26,26,0.12)" : "#EBD39A"}`, background: ok ? "#fff" : "#FFF8E6", padding: "10px 14px", maxWidth: 680 }}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span style={S.label}>Sending schedule</span>
+        {ok ? <Pill bg="#E1EFE4" fg="#245437">Running</Pill> : <Pill bg="#FBEFD2" fg="#7A4E00">Check</Pill>}
+      </div>
+      <p style={{ ...S.body, marginTop: 6, lineHeight: 1.5, color: ok ? palette.black : "#5A4210" }}>{text}</p>
+      {sender.note ? <p style={{ ...S.muted, marginTop: 4, overflowWrap: "anywhere" }}>Last error: {sender.note}</p> : null}
     </div>
   );
 }

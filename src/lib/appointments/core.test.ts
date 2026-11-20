@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   TEMPLATES, lintTemplate, parsePhone, istParts, fromIst, slotsFor, conflictAt, planMessages, planEvent, renderParams, renderText,
-  cleanParam, firstName, hoursFor, addDays, weekday, templateFor, sampleParams, handReminderText, type Appt, type Config,
+  cleanParam, firstName, hoursFor, addDays, weekday, templateFor, sampleParams, handReminderText, manualRule, type Appt, type Config,
 } from "./core";
 
 const cfg: Config = {
@@ -211,5 +211,34 @@ describe("message plan: never twice, never late", () => {
     const c = m.find((x) => x.rule === "c-confirm")!, d = m.find((x) => x.rule === "c-24h");
     expect(new Date(c.expires_at!).getTime() - new Date(c.due_at).getTime()).toBeLessThanOrEqual(6 * 3600000);
     if (d) expect(d.expires_at).toBe(fromIst(DAY, 0).toISOString());
+  });
+});
+
+describe("Send on a booking: which approved template, or why not", () => {
+  const rule = (r: ReturnType<typeof manualRule>) => ("rule" in r ? r.rule : null);
+  it("the confirmation goes for a confirmed booking ahead, never one still to confirm or past", () => {
+    expect(rule(manualRule("confirmation", appt({ start: "15:00" }), NOW))).toBe("c-confirm");
+    expect(rule(manualRule("confirmation", appt({ start: "15:00", status: "requested" }), NOW))).toBeNull();
+    expect(rule(manualRule("confirmation", appt({ start: "15:00", day: "2026-11-29" }), NOW))).toBeNull();
+    expect(rule(manualRule("confirmation", appt({ start: "15:00", notify_wa: false }), NOW))).toBeNull();
+  });
+  it("a reminder is the same-day wording on the day, the day-before wording the day before, and nothing earlier", () => {
+    expect(rule(manualRule("reminder", appt({ start: "15:00", day: "2026-11-30" }), NOW))).toBe("c-2h");
+    expect(rule(manualRule("reminder", appt({ start: "15:00", day: "2026-12-01" }), NOW))).toBe("c-24h");
+    const early = manualRule("reminder", appt({ start: "15:00", day: "2026-12-03" }), NOW);
+    expect("error" in early && early.error).toMatch(/day before or on the day/);
+    expect(rule(manualRule("reminder", appt({ start: "10:00", day: "2026-11-30" }), NOW))).toBeNull(); // 10 am today has passed at 11 am
+  });
+  it("the cancellation note only for a cancelled booking, the new time only for a live one", () => {
+    expect(rule(manualRule("cancelled", appt({ start: "15:00", status: "cancelled" }), NOW))).toBe("ev-cancelled");
+    expect(rule(manualRule("cancelled", appt({ start: "15:00" }), NOW))).toBeNull();
+    expect(rule(manualRule("moved", appt({ start: "15:00" }), NOW))).toBe("ev-moved");
+    expect(rule(manualRule("moved", appt({ start: "15:00", status: "done" }), NOW))).toBeNull();
+  });
+  it("every rule it picks has a template for store visits and calls", () => {
+    for (const r of ["c-confirm", "c-2h", "c-24h", "ev-moved", "ev-cancelled"]) {
+      expect(TEMPLATES[templateFor(r, { place: "store" })!]).toBeTruthy();
+      expect(TEMPLATES[templateFor(r, { place: "wa" })!]).toBeTruthy();
+    }
   });
 });

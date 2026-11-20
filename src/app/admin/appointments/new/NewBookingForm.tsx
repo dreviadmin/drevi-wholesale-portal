@@ -219,7 +219,7 @@ export function NewBookingForm(p: NewBookingProps) {
           <Checkbox checked={notify} onChange={setNotify}>Send them WhatsApp messages (confirmation and reminders)</Checkbox>
           <p className="font-body" style={{ ...S.muted, marginTop: -2 }}>
             {!p.automationOn
-              ? "Automatic messages are off right now, so nothing goes out on its own. Send the confirmation and reminders by hand from the booking page."
+              ? "Automatic messages are off right now, so nothing goes out on its own. Send the confirmation from the booking page with Send the confirmation."
               : p.testMode ? "Test mode is on: automatic messages go only to the test numbers in Settings." : "The confirmation goes out on save, then a reminder the day before and 2 hours before."}
           </p>
         </div>

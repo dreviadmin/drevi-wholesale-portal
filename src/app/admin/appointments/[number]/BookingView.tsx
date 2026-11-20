@@ -10,7 +10,7 @@ import { ApptHeader, StatusPill, TestModeNote } from "../ui";
 import { BookingProvider, useBooking, type BookingData } from "./ctx";
 import { ActionBar } from "./ActionBar";
 import { AppointmentCard, StylistCard, ToldUsCard } from "./DetailCards";
-import { CustomerCard, HandWhatsAppCard } from "./CustomerCards";
+import { CustomerCard, SendWhatsAppCard } from "./CustomerCards";
 import { HistoryCard, MessagesCard } from "./LogCards";
 
 export interface BookingViewProps extends BookingData {
@@ -39,7 +39,7 @@ function Body({ events, messages, others }: Pick<BookingViewProps, "events" | "m
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 items-start">
         <div className="flex flex-col gap-4" style={{ minWidth: 0 }}>
           <AppointmentCard staffName={staffName} />
-          <HandWhatsAppCard moved={moved} />
+          <SendWhatsAppCard moved={moved} messages={messages} />
           <CustomerCard others={others} />
         </div>
         <div className="flex flex-col gap-4" style={{ minWidth: 0 }}>

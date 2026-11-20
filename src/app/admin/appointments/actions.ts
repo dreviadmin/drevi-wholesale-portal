@@ -5,9 +5,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireStaff, requireAdmin, isAdminRole, type StaffCtx } from "@/lib/staff";
 import { writeAuditEvent } from "@/lib/audit";
 import { loadConfig, APPT_COLS } from "@/lib/appointments/server";
+import { sendManual } from "@/lib/appointments/sender";
+import { sendDueNow } from "@/lib/appointments/kick";
 import {
-  CONFLICT_LABEL, FUNCTIONS, dayShort, durOf, fromIst, hm, hoursFor, istParts, isLive, parseHm, parsePhone, planEvent, planMessages, slotsFor,
-  type Appt, type ApptSource, type Party, type Place, type Config,
+  CONFLICT_LABEL, FUNCTIONS, MANUAL_LABEL, dayShort, durOf, fromIst, hm, hoursFor, istParts, isLive, manualRule, parseHm, parsePhone, planEvent, planMessages, showPhone, slotsFor,
+  type Appt, type ApptSource, type ManualWhat, type Party, type Place, type Config,
 } from "@/lib/appointments/core";
 
 type Res<T = object> = ({ ok: true } & T) | { ok: false; error: string };
@@ -81,8 +83,9 @@ export async function bookAppointment(input: BookInput): Promise<Res<{ number: s
     messages,
   } });
   if (error) return { ok: false, error: error.message };
-  const r = data as { ok: boolean; error?: string; number?: string };
+  const r = data as { ok: boolean; error?: string; id?: string; number?: string };
   if (!r.ok) return { ok: false, error: CONFLICT_LABEL[r.error ?? ""] ? `${CONFLICT_LABEL[r.error!]}. Pick another time${isAdminRole(staff.role) ? ", or book over the limit" : ""}.` : r.error ?? "Could not book." };
+  await sendDueNow(r.id); // the confirmation and team alerts go now, not at the next 5-minute check
   revalidate(r.number);
   return { ok: true, number: r.number! };
 }
@@ -211,22 +214,48 @@ export async function changeAppointment(input: ChangeInput): Promise<Res<{ rev: 
     if (input.kind === "edit") return { ok: false, error: `With that change it no longer fits: ${why.toLowerCase()}. Move it to another time first.` };
     return { ok: false, error: `${why}. Pick another time${isAdmin ? ", or book over the limit" : ""}.` };
   }
+  await sendDueNow(a.id); // a confirmation, moved or cancelled note goes now
   revalidate(a.number);
   return { ok: true, rev: r.rev! };
 }
 
-/** Staff tapped "Send on WhatsApp" (the shop phone sends it by hand). Kept in the history. */
-export async function logHandSend(id: string, what: "confirmation" | "reminder" | "meet link" | "message"): Promise<Res> {
+/**
+ * Staff tapped Send on a booking: the approved WhatsApp template goes now,
+ * through AiSensy from the shop's number (test mode sends it to the test
+ * number instead). `again` is set when the screen showed it had already gone.
+ */
+export async function sendWhatsAppNow(id: string, what: ManualWhat, again = false): Promise<Res<{ message: string }>> {
+  let staff: StaffCtx;
+  try { staff = await requireStaff(); } catch { return { ok: false, error: "Not authorized" }; }
+  if (!(what in MANUAL_LABEL)) return { ok: false, error: "Unknown message." };
+  const cfg = await cfgOrError(); if (typeof cfg === "string") return { ok: false, error: cfg };
+  const admin = createAdminClient();
+  const { data: cur, error: readErr } = await admin.from("appointments").select(APPT_COLS).eq("id", id).maybeSingle();
+  if (readErr) return { ok: false, error: readErr.message };
+  if (!cur) return { ok: false, error: "That booking is gone." };
+  const a = cur as Appt;
+  const pick = manualRule(what, a, new Date());
+  if ("error" in pick) return { ok: false, error: pick.error };
+  const r = await sendManual({ cfg, appt: a, rule: pick.rule, byName: who(staff), again: !!again });
+  const label = MANUAL_LABEL[what];
+  if (!r.ok) {
+    if (!r.again) await admin.from("appointment_events").insert({ appointment_id: a.id, by_name: who(staff), by_staff_id: staff.id, kind: "whatsapp_failed", text: `${who(staff)} tried to send the ${label} on WhatsApp. ${r.error}` });
+    revalidate(a.number);
+    return { ok: false, error: r.error };
+  }
+  await admin.from("appointment_events").insert({ appointment_id: a.id, by_name: who(staff), by_staff_id: staff.id, kind: "whatsapp_sent",
+    text: `${who(staff)} sent the ${label} on WhatsApp${r.test ? ` (test mode: to ${showPhone(r.to)}, not the customer)` : ""}.` });
+  revalidate(a.number);
+  return { ok: true, message: r.test ? `Test mode: sent to ${showPhone(r.to)}` : `Sent to ${showPhone(r.to)}` };
+}
+
+/** Staff tapped "Send the Meet link" (no WhatsApp template for it, so the shop phone sends it). Kept in the history. */
+export async function logHandSend(id: string, what: "meet link"): Promise<Res> {
   let staff: StaffCtx;
   try { staff = await requireStaff(); } catch { return { ok: false, error: "Not authorized" }; }
   const { data: a } = await createAdminClient().from("appointments").select("number").eq("id", id).maybeSingle();
   if (!a) return { ok: false, error: "That booking is gone." };
   await createAdminClient().from("appointment_events").insert({ appointment_id: id, by_name: who(staff), by_staff_id: staff.id, kind: "hand_whatsapp", text: `${who(staff)} opened WhatsApp to send the ${what} by hand.` });
-  if (what === "confirmation") {
-    // Marked sent (not skipped): a later re-plan revives skipped rows, never sent ones.
-    await createAdminClient().from("appointment_messages").update({ state: "sent", sent_at: new Date().toISOString(), reason: `Sent by hand by ${who(staff)}`, updated_at: new Date().toISOString() })
-      .eq("appointment_id", id).eq("rule", "c-confirm").in("state", ["scheduled", "skipped", "cancelled"]);
-  }
   revalidate((a as { number: string }).number);
   return { ok: true };
 }
@@ -338,9 +367,10 @@ export async function resendMessage(id: string): Promise<Res> {
   const staff = await adminOr(); if (!staff) return { ok: false, error: "Only an owner or admin can resend." };
   const nowIso = new Date().toISOString();
   const { data, error } = await createAdminClient().from("appointment_messages").update({ state: "scheduled", due_at: nowIso, reason: `Sent again by ${who(staff)}`, updated_at: nowIso })
-    .eq("id", id).in("state", ["failed", "uncertain", "skipped"]).or(`expires_at.is.null,expires_at.gt.${nowIso}`).select("id");
+    .eq("id", id).in("state", ["failed", "uncertain", "skipped"]).or(`expires_at.is.null,expires_at.gt.${nowIso}`).select("id, appointment_id");
   if (error) return { ok: false, error: error.message };
   if (!data?.length) return { ok: false, error: "Too late to send this again, or it has already changed. Reload the page." };
+  await sendDueNow((data[0] as { appointment_id: string | null }).appointment_id);
   revalidate(); return { ok: true };
 }
 

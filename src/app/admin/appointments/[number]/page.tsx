@@ -69,6 +69,7 @@ export default async function BookingPage({ params }: { params: { number: string
         nowIso={new Date().toISOString()}
         automationOn={cfg.data.settings.automation_on}
         testMode={cfg.data.settings.test_mode}
+        testNumbers={cfg.data.settings.test_numbers ?? []}
         hours={cfg.data.hours}
         closures={cfg.data.closures}
       />
