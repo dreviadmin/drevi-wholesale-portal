@@ -34,6 +34,21 @@ export interface Appt {
   notify_wa: boolean; notify_email: boolean; offers_ok: boolean; outcome: string | null; cancel_reason: string | null;
   manage_token: string; created_by: string | null; created_at: string; confirmed_at: string | null; cancelled_at: string | null;
   updated_at: string; rev: number;
+  /** Website bookings: the ad tags the visitor arrived with (0112), and whether the booking reached Meta's Conversions API. */
+  campaign?: ApptCampaign | null;
+}
+export interface ApptCampaign {
+  utm_source?: string; utm_medium?: string; utm_campaign?: string; utm_content?: string; utm_term?: string;
+  /** The click ids themselves (older bookings only say true: there was one). */
+  fbclid?: string | boolean; gclid?: string | boolean; landing?: string; referrer?: string;
+  meta?: { at: string; ok: boolean; note?: string };
+}
+/** "instagram / visit-nov", "Meta ad", "Google ad" or the referring site, for lists. Null when the visitor came with no tags. */
+export function campaignShort(c: ApptCampaign | null | undefined): string | null {
+  if (!c) return null;
+  const src = c.utm_source || (c.fbclid ? "Meta ad" : c.gclid ? "Google ad" : c.referrer || "");
+  const s = [src, c.utm_campaign].filter(Boolean).join(" / ");
+  return s ? (s.length > 48 ? s.slice(0, 47) + "…" : s) : null;
 }
 export interface Config { types: ApptType[]; hours: HoursRow[]; closures: Closure[]; blocks: Block[]; settings: ApptSettings; people: Person[] }
 
@@ -42,7 +57,9 @@ export const isLive = (s: ApptStatus) => LIVE.includes(s);
 export const PLACE_LABEL: Record<Place, string> = { store: "At the store", wa: "WhatsApp video", meet: "Google Meet" };
 export const STATUS_LABEL: Record<ApptStatus, string> = { requested: "Needs confirming", confirmed: "Confirmed", arrived: "Arrived", done: "Done", no_show: "No-show", cancelled: "Cancelled" };
 export const SOURCE_LABEL: Record<ApptSource, string> = { website: "Website", phone: "Phone call", whatsapp: "WhatsApp", instagram: "Instagram", walkin: "At the shop", other: "Other" };
-export const FUNCTIONS = ["Haldi", "Mehendi", "Carnival", "Sangeet", "Cocktail", "Reception or wedding day", "Other"];
+export const FUNCTIONS = ["Engagement", "Mayra", "Haldi", "Mehendi", "Sangeet", "Garba", "Carnival", "Cocktail", "Wedding day", "Reception", "Other"];
+/** Also accepted, so bookings and website versions from before 20 Nov 2026 keep what they said. Never offered. */
+export const FUNCTIONS_ACCEPTED = [...FUNCTIONS, "Reception or wedding day"];
 export const OUTCOMES = ["Bought", "Will come back", "Asked for photos", "Custom order", "Not interested"];
 export const CANCEL_REASONS = ["Customer's plans changed", "Customer found something else", "Booked by mistake", "Shop closed", "Other"];
 export const SHOP_ADDRESS = "Shop No. 11, Sai Ganesh Sadan, Ground floor, Senapati Bapat Marg, Dadar West, Mumbai 400028";

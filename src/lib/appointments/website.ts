@@ -10,8 +10,8 @@
 // anything from the portal.
 
 import {
-  FUNCTIONS, SHOP_ADDRESS, TYPE_SPOKEN, addDays, dayDiff, dayLong, dayShort, durOf, firstName, fromIst, hm, hoursFor, istParts, parsePhone, slotsFor, waLink,
-  type Appt, type ApptType, type Config, type Party, type Place,
+  FUNCTIONS_ACCEPTED, SHOP_ADDRESS, TYPE_SPOKEN, addDays, dayDiff, dayLong, dayShort, durOf, firstName, fromIst, hm, hoursFor, istParts, parsePhone, slotsFor, waLink,
+  type Appt, type ApptCampaign, type ApptType, type Config, type Party, type Place,
 } from "./core";
 
 /** The shop's customer WhatsApp (the number on /pages/visit). */
@@ -89,11 +89,13 @@ export function slotProblem(cfg: Config, appts: Appt[], o: { type: ApptType; pla
 }
 
 /* ---------------- the booking form ---------------- */
-export interface WebCampaign { utm_source?: string; utm_medium?: string; utm_campaign?: string; utm_content?: string; utm_term?: string; fbclid?: boolean; gclid?: boolean; landing?: string; referrer?: string }
+export type WebCampaign = ApptCampaign;
 export interface WebBook {
   type: ApptType; place: Place; party: Party; day: string; min: number;
   name: string; phone: string; email: string | null; functions: string[]; functionDate: string | null; lookingFor: string | null;
   notifyWa: boolean; offersOk: boolean; idempotencyKey: string | null; campaign: WebCampaign | null;
+  /** Meta's browser cookies (_fbp, _fbc), passed on to the Conversions API only; never stored. */
+  fbp: string | null; fbc: string | null;
 }
 
 /** Only these tags, short and plain. Anything else the page sends is dropped. */
@@ -101,8 +103,11 @@ export function cleanCampaign(v: unknown): WebCampaign | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
   const o = v as Record<string, unknown>, c: WebCampaign = {};
   for (const k of ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"] as const) { const t = cleanText(o[k], 100); if (t) c[k] = t; }
-  if (o.fbclid) c.fbclid = true;
-  if (o.gclid) c.gclid = true;
+  // Click ids as they came (letters, digits, _ and -), or just "there was one" if they look odd.
+  for (const k of ["fbclid", "gclid"] as const) {
+    const t = typeof o[k] === "string" ? String(o[k]).trim().slice(0, 300) : "";
+    if (/^[A-Za-z0-9_-]{6,300}$/.test(t)) c[k] = t; else if (o[k]) c[k] = true;
+  }
   const landing = cleanText(o.landing, 200); if (landing.startsWith("/")) c.landing = landing;
   const ref = cleanText(o.referrer, 300);
   if (ref) { try { c.referrer = new URL(ref).hostname.slice(0, 100); } catch { /* not a URL: dropped */ } }
@@ -115,6 +120,10 @@ export function campaignText(c: WebCampaign | null): string {
   const bits = [src, c.utm_campaign, c.utm_content].filter(Boolean);
   return bits.length ? ` From ${bits.join(" / ")}.` : "";
 }
+
+/** Meta's cookie formats: _fbp is fb.1.<ms>.<random>, _fbc is fb.1.<ms>.<fbclid>. */
+export const FBP_RE = /^fb\.[0-9]\.[0-9]{10,13}\.[0-9]{1,20}$/;
+export const FBC_RE = /^fb\.[0-9]\.[0-9]{10,13}\.[A-Za-z0-9_-]{6,500}$/;
 
 // A name: letters (any script), spaces and . ' - only, and nothing that looks like a web address.
 const NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M} .'-]{1,79}$/u;
@@ -144,12 +153,14 @@ export function parseWebBook(body: unknown, cfg: Config): { ok: true; value: Web
   if (!phone || !/^\+[1-9]\d{7,14}$/.test(phone)) return err(400, "invalid_phone", country === "+91" ? "Please enter a 10-digit mobile number for WhatsApp." : "Please check your WhatsApp number and country code.");
   const email = cleanText(b.email, 200);
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return err(400, "invalid_email", "That email does not look right. You can leave it empty.");
-  const functions = Array.isArray(b.functions) ? [...new Set(b.functions.filter((f): f is string => typeof f === "string" && FUNCTIONS.includes(f)))] : [];
+  const functions = Array.isArray(b.functions) ? [...new Set(b.functions.filter((f): f is string => typeof f === "string" && FUNCTIONS_ACCEPTED.includes(f)))] : [];
+  const fbp = typeof b.fbp === "string" && FBP_RE.test(b.fbp.trim()) ? b.fbp.trim() : null;
+  const fbc = typeof b.fbc === "string" && FBC_RE.test(b.fbc.trim()) ? b.fbc.trim() : null;
   const key = typeof b.idempotency_key === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(b.idempotency_key) ? b.idempotency_key : null;
   return { ok: true, value: {
     type: t.type, place: t.place, party, day: b.day, min, name, phone, email: email || null, functions,
     functionDate: noLinks(cleanText(b.function_date, 60)) || null, lookingFor: noLinks(cleanText(b.looking_for, 600)) || null,
-    notifyWa: b.whatsapp_ok !== false, offersOk: b.offers_ok === true, idempotencyKey: key, campaign: cleanCampaign(b.campaign),
+    notifyWa: b.whatsapp_ok !== false, offersOk: b.offers_ok === true, idempotencyKey: key, campaign: cleanCampaign(b.campaign), fbp, fbc,
   } };
 }
 

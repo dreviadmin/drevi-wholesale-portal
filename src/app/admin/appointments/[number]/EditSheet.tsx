@@ -92,7 +92,7 @@ export function EditSheet({ onClose }: { onClose: () => void }) {
         </Group>
       ) : null}
       <Group label="Functions">
-        {FUNCTIONS.map((f) => <Chip key={f} on={functions.includes(f)} onClick={() => setFunctions((xs) => (xs.includes(f) ? xs.filter((x) => x !== f) : [...xs, f]))}>{f}</Chip>)}
+        {[...FUNCTIONS, ...a.functions.filter((f) => !FUNCTIONS.includes(f))].map((f) => <Chip key={f} on={functions.includes(f)} onClick={() => setFunctions((xs) => (xs.includes(f) ? xs.filter((x) => x !== f) : [...xs, f]))}>{f}</Chip>)}
       </Group>
       <Field label="Function date" optional>
         <input value={fdate} onChange={(e) => setFdate(e.target.value)} maxLength={60} className={`font-body ${FOCUS}`} style={inputStyle} />

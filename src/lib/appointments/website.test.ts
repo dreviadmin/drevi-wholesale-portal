@@ -92,7 +92,8 @@ describe("website booking: reading the form", () => {
   });
   it("cleans ad tags and drops anything else", () => {
     const c = cleanCampaign({ utm_source: "instagram", utm_campaign: "visit-nov", fbclid: "IwAR123", landing: "/pages/visit?x=1", referrer: "https://l.instagram.com/?u=abc", evil: "x", utm_term: "" });
-    expect(c).toEqual({ utm_source: "instagram", utm_campaign: "visit-nov", fbclid: true, landing: "/pages/visit?x=1", referrer: "l.instagram.com" });
+    expect(c).toEqual({ utm_source: "instagram", utm_campaign: "visit-nov", fbclid: "IwAR123", landing: "/pages/visit?x=1", referrer: "l.instagram.com" });
+    expect(cleanCampaign({ gclid: "Cj0KCQiA_x-y", fbclid: "<script>" })).toEqual({ gclid: "Cj0KCQiA_x-y", fbclid: true });
     expect(cleanCampaign({ landing: "https://evil.example" })).toBeNull();
     expect(campaignText(c)).toBe(" From instagram / visit-nov.");
     expect(campaignText({ fbclid: true })).toBe(" From a Meta ad.");
@@ -151,5 +152,18 @@ describe("website booking: the reply", () => {
     expect(r.starts_at).toBe("2026-12-01T10:30:00.000Z");
     expect(shopWhatsAppText({ number: "A-1", typeId: "store", day: "2026-12-01", min: 16 * 60, name: "Ananya Mehta", status: "requested" }))
       .toBe("Hi Drevi, I have booked a store visit for Tuesday 1 December at 4 pm (booking A-1). My name is Ananya. Please confirm.");
+  });
+});
+
+describe("website booking: functions and Meta cookies", () => {
+  it("takes the new function names and still the old one, and nothing else", () => {
+    const r = parseWebBook({ ...good, functions: ["Engagement", "Mayra", "Garba", "Wedding day", "Reception", "Reception or wedding day", "Birthday"] }, cfg);
+    expect(r.ok && r.value.functions).toEqual(["Engagement", "Mayra", "Garba", "Wedding day", "Reception", "Reception or wedding day"]);
+  });
+  it("passes on Meta's _fbp and _fbc cookies only in their own format", () => {
+    const ok = parseWebBook({ ...good, fbp: "fb.1.1732100000000.1234567890", fbc: "fb.1.1732100000000.IwAR0abc_DEF-9" }, cfg);
+    expect(ok.ok && [ok.value.fbp, ok.value.fbc]).toEqual(["fb.1.1732100000000.1234567890", "fb.1.1732100000000.IwAR0abc_DEF-9"]);
+    const bad = parseWebBook({ ...good, fbp: "x", fbc: "fb.1.123.<b>" }, cfg);
+    expect(bad.ok && [bad.value.fbp, bad.value.fbc]).toEqual([null, null]);
   });
 });

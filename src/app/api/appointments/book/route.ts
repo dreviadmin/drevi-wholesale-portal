@@ -21,7 +21,7 @@ export const POST = guarded(async (req: Request) => {
   if (raw.length > 16000) return fail(req, "Too long.", 413, "bad_request");
   let body: unknown = null;
   try { body = JSON.parse(raw); } catch { return fail(req, "Please try again.", 400, "bad_request"); }
-  const r = await websiteBook(body, clientIp(req));
+  const r = await websiteBook(body, clientIp(req), new Date(), req.headers.get("user-agent"));
   if (!r.ok) {
     const { status, code, error, day } = r as { status: number; code: string; error: string; day?: unknown };
     return fail(req, error, status, code, day !== undefined ? { day } : {});

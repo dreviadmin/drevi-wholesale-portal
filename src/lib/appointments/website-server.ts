@@ -4,9 +4,10 @@ import { createHash } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { orderTagBlocker } from "@/lib/wallet-core";
 import { loadConfig, APPT_COLS } from "./server";
-import { sendDueNow } from "./kick";
+import { afterResponse, sendDueNow } from "./kick";
+import { sendMetaSchedule } from "./meta-capi";
 import { addDays, dayDiff, dayShort, durOf, fromIst, hm, isLive, istParts, planMessages, type Appt, type ApptStatus, type Config, type Party, type Place } from "./core";
-import { MAX_DAYS, availabilityFor, bookedReply, campaignText, networkKey, parseWebBook, slotProblem, validDay, webParty, webType, type WebErr } from "./website";
+import { MAX_DAYS, availabilityFor, bookedReply, campaignText, networkKey, parseWebBook, slotProblem, validDay, webParty, webType, type WebBook, type WebErr } from "./website";
 
 // The website booking box's server side: what /api/appointments/availability
 // and /api/appointments/book run. A booking is one call to appt_book_web()
@@ -74,7 +75,17 @@ function autoWhatsApp(cfg: Config, notifyWa: boolean, status: string): boolean {
   return prod && s.automation_on && !s.test_mode && notifyWa && status === "confirmed" && !!(process.env.AISENSY_APPT_API_KEY?.trim() || process.env.AISENSY_API_KEY?.trim());
 }
 
-export async function websiteBook(body: unknown, ip: string | null, now = new Date()) {
+/** The new booking as a Schedule event to Meta's Conversions API; the outcome is kept on the booking (campaign.meta). */
+async function reportToMeta(id: string, number: string, v: WebBook, ip: string | null, userAgent: string | null): Promise<void> {
+  const res = await sendMetaSchedule({
+    number, typeId: v.type.id, party: v.party, phoneE164: v.phone, createdAt: new Date().toISOString(),
+    fbp: v.fbp, fbc: v.fbc, fbclid: typeof v.campaign?.fbclid === "string" ? v.campaign.fbclid : null, ip, userAgent,
+  });
+  if (!res.ok) console.warn("[appointments-web] Meta:", res.note);
+  await createAdminClient().from("appointments").update({ campaign: { ...(v.campaign ?? {}), meta: { at: new Date().toISOString(), ok: res.ok, note: res.note } } }).eq("id", id);
+}
+
+export async function websiteBook(body: unknown, ip: string | null, now = new Date(), userAgent: string | null = null) {
   const cfg = await config(); if ("ok" in cfg) return cfg;
   const p = parseWebBook(body, cfg); if (!p.ok) return p;
   const v = p.value;
@@ -140,5 +151,6 @@ export async function websiteBook(body: unknown, ip: string | null, now = new Da
     return bookedReply({ number: st.number, status: st.status, replayed: true, type, place: st.place, party: st.party, day: sp.day, min: sp.min, name: v.name, autoWhatsApp: autoWhatsApp(cfg, st.notify_wa, st.status) });
   }
   await sendDueNow(r.id); // the customer's confirmation and the team alerts go now (after the answer, on Vercel)
+  await afterResponse("reporting the booking to Meta", reportToMeta(r.id!, r.number!, v, ip, userAgent));
   return bookedReply({ number: r.number!, status, replayed: false, type: v.type, place: v.place, party: v.party, day: v.day, min: v.min, name: v.name, autoWhatsApp: autoWhatsApp(cfg, v.notifyWa, status) });
 }

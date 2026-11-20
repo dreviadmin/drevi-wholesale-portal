@@ -12,15 +12,17 @@ import { runAppointmentSender } from "./sender";
 const REQUEST_CONTEXT = Symbol.for("@vercel/request-context");
 type RequestContext = { get?: () => { waitUntil?: (p: Promise<unknown>) => void } | undefined };
 
-export async function sendDueNow(appointmentId: string | null | undefined): Promise<void> {
-  if (!appointmentId) return;
-  const job = runAppointmentSender(new Date(), { appointmentId }).then(
-    () => undefined,
-    (e) => { console.error("[appointments] sending after a booking change:", (e as Error).message); },
-  );
+/** Runs `job` after the answer has gone back where the platform allows it, else waits for it here. Never throws. */
+export async function afterResponse(label: string, job: Promise<unknown>): Promise<void> {
+  const safe = job.then(() => undefined, (e) => { console.error(`[appointments] ${label}:`, (e as Error).message); });
   const ctx = (globalThis as unknown as Record<symbol, RequestContext | undefined>)[REQUEST_CONTEXT]?.get?.();
   if (typeof ctx?.waitUntil === "function") {
-    try { ctx.waitUntil(job); return; } catch { /* fall through and wait for it here */ }
+    try { ctx.waitUntil(safe); return; } catch { /* fall through and wait for it here */ }
   }
-  await job;
+  await safe;
+}
+
+export async function sendDueNow(appointmentId: string | null | undefined): Promise<void> {
+  if (!appointmentId) return;
+  await afterResponse("sending after a booking change", runAppointmentSender(new Date(), { appointmentId }));
 }

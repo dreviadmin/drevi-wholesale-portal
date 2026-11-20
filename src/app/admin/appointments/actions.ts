@@ -8,7 +8,7 @@ import { loadConfig, APPT_COLS } from "@/lib/appointments/server";
 import { sendManual } from "@/lib/appointments/sender";
 import { sendDueNow } from "@/lib/appointments/kick";
 import {
-  CONFLICT_LABEL, FUNCTIONS, MANUAL_LABEL, dayShort, durOf, fromIst, hm, hoursFor, istParts, isLive, manualRule, parseHm, parsePhone, planEvent, planMessages, showPhone, slotsFor,
+  CONFLICT_LABEL, FUNCTIONS_ACCEPTED, MANUAL_LABEL, dayShort, durOf, fromIst, hm, hoursFor, istParts, isLive, manualRule, parseHm, parsePhone, planEvent, planMessages, showPhone, slotsFor,
   type Appt, type ApptSource, type ManualWhat, type Party, type Place, type Config,
 } from "@/lib/appointments/core";
 
@@ -68,7 +68,7 @@ export async function bookAppointment(input: BookInput): Promise<Res<{ number: s
   const party: Party = input.party === "group" ? "group" : "solo";
   const draft: Appt = {
     id: "", number: "", type_id: type.id, place: input.place, party, starts_at: start.toISOString(), ends_at: end.toISOString(), status,
-    source: input.source, customer_name: name, phone_e164: phone, email: clip(input.email, 200) || null, functions: (input.functions ?? []).filter((f) => FUNCTIONS.includes(f)),
+    source: input.source, customer_name: name, phone_e164: phone, email: clip(input.email, 200) || null, functions: (input.functions ?? []).filter((f) => FUNCTIONS_ACCEPTED.includes(f)),
     function_date: clip(input.functionDate, 60) || null, looking_for: clip(input.lookingFor, 600) || null, staff_notes: clip(input.staffNotes, 2000) || null,
     meet_link: meet || null, host_staff_id: input.hostStaffId || null, notify_wa: !!input.notifyWa, notify_email: false, offers_ok: false, outcome: null, cancel_reason: null,
     manage_token: "", created_by: staff.id, created_at: nowIso, confirmed_at: status === "confirmed" ? nowIso : null, cancelled_at: null, updated_at: nowIso, rev: 1,
@@ -177,7 +177,7 @@ export async function changeAppointment(input: ChangeInput): Promise<Res<{ rev: 
         if (p !== a.phone_e164) { patch.phone_e164 = next.phone_e164 = p; changes.push("WhatsApp number"); }
       }
       if (e.email !== undefined && (clip(e.email, 200) || null) !== a.email) { patch.email = next.email = clip(e.email, 200) || null; changes.push("email"); }
-      if (e.functions !== undefined) { patch.functions = next.functions = e.functions.filter((f) => FUNCTIONS.includes(f)); changes.push("functions"); }
+      if (e.functions !== undefined) { patch.functions = next.functions = e.functions.filter((f) => FUNCTIONS_ACCEPTED.includes(f)); changes.push("functions"); }
       if (e.functionDate !== undefined) { patch.function_date = next.function_date = clip(e.functionDate, 60) || null; changes.push("function date"); }
       if (e.lookingFor !== undefined) { patch.looking_for = next.looking_for = clip(e.lookingFor, 600) || null; changes.push("what they are looking for"); }
       if (e.staffNotes !== undefined) { patch.staff_notes = next.staff_notes = clip(e.staffNotes, 2000) || null; changes.push("notes"); }

@@ -13,7 +13,7 @@ export type Loaded<T> = { ok: true; data: T } | { ok: false; missing: boolean; e
 const isMissing = (msg: string) => /relation .* does not exist|Could not find the table|schema cache/i.test(msg);
 function fail<T>(e: unknown): Loaded<T> { const m = (e as Error)?.message ?? String(e); return { ok: false, missing: isMissing(m), error: m }; }
 
-export const APPT_COLS = "id, number, type_id, place, party, starts_at, ends_at, status, source, customer_name, phone_e164, email, functions, function_date, looking_for, staff_notes, meet_link, host_staff_id, notify_wa, notify_email, offers_ok, outcome, cancel_reason, manage_token, created_by, created_at, confirmed_at, cancelled_at, updated_at, rev";
+export const APPT_COLS = "id, number, type_id, place, party, starts_at, ends_at, status, source, customer_name, phone_e164, email, functions, function_date, looking_for, staff_notes, meet_link, host_staff_id, notify_wa, notify_email, offers_ok, outcome, cancel_reason, manage_token, created_by, created_at, confirmed_at, cancelled_at, updated_at, rev, campaign";
 
 /** Types, hours, closures and blocks from two days ago (or from sinceDay, for a past calendar week), settings, people. */
 export async function loadConfig(sinceDay?: string): Promise<Loaded<Config>> {

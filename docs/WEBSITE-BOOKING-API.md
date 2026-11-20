@@ -104,7 +104,7 @@ Request body (JSON):
   "phone": "98765 43210",
   "country": "+91",
   "email": "",
-  "functions": ["Sangeet", "Reception or wedding day"],
+  "functions": ["Sangeet", "Wedding day"],
   "function_date": "mid-December",
   "looking_for": "Pastel lehenga for my sangeet",
   "whatsapp_ok": true,
@@ -112,7 +112,9 @@ Request body (JSON):
   "idempotency_key": "f3b2c9e0a1d84c7e9b6a",
   "hp": "",
   "elapsed_ms": 41250,
-  "campaign": { "utm_source": "instagram", "utm_medium": "paid", "utm_campaign": "visit-nov", "utm_content": "reel-3", "fbclid": "IwAR…", "landing": "/pages/visit?utm_source=instagram", "referrer": "https://l.instagram.com/" }
+  "campaign": { "utm_source": "instagram", "utm_medium": "paid", "utm_campaign": "visit-nov", "utm_content": "reel-3", "fbclid": "IwAR…", "landing": "/pages/visit?utm_source=instagram", "referrer": "https://l.instagram.com/" },
+  "fbp": "fb.1.1732100000000.1234567890",
+  "fbc": "fb.1.1732100000000.IwAR…"
 }
 ```
 
@@ -127,14 +129,18 @@ Optional fields:
 
 - `party`, `place`
 - `email`
-- `functions`: only these values count: `Haldi`, `Mehendi`, `Carnival`,
-  `Sangeet`, `Cocktail`, `Reception or wedding day`, `Other`.
+- `functions`: only these values count: `Engagement`, `Mayra`, `Haldi`,
+  `Mehendi`, `Sangeet`, `Garba`, `Carnival`, `Cocktail`, `Wedding day`,
+  `Reception`, `Other` (and, from older pages, `Reception or wedding day`).
 - `function_date`: free text, up to 60 characters.
 - `looking_for`: up to 600 characters.
 - `whatsapp_ok`: default `true`. The customer agrees to WhatsApp messages
   about this booking. It must be a JSON boolean; a string such as
   `"false"` is refused.
 - `offers_ok`: default `false`, and also a JSON boolean.
+- `fbp`, `fbc`: the values of Meta's `_fbp` and `_fbc` cookies, when the page
+  has them. They are passed to Meta's Conversions API with this booking (see
+  below) and never stored. Leave them out when the cookies are missing.
 
 About `name`: any script is fine, but only letters, spaces and `. ' -`.
 Digits, links and anything that looks like a web address are refused with
@@ -168,8 +174,10 @@ How the theme should fill the rest:
   - On landing, copy any `utm_*`, `fbclid` and `gclid` from the URL, plus
     `location.pathname + location.search` and `document.referrer`, into
     `sessionStorage`. Send them with the booking.
-  - The team then sees which ad brought the visit. It is shown in the
-    booking's history and stored on the booking.
+  - The team then sees which ad brought the visit. It is stored on the
+    booking (the `fbclid` and `gclid` values too), shown in the booking
+    lists ("From instagram / visit-nov") and in full on the booking page
+    under "Came from".
 
 **200** example:
 
@@ -251,6 +259,17 @@ database lock, so parallel requests cannot slip past them:
 
 The website books only free times. Two people tapping the same last place
 at the same moment get one booking and one `slot_taken`.
+
+## Meta Conversions API
+
+Every new website booking is also sent to Meta from the portal, as a
+`Schedule` event on the shop's pixel with `event_id` = the booking number,
+the same as the page's `fbq('track', 'Schedule', …, { eventID: <booking number> })`,
+so Meta counts it once. It carries the WhatsApp number hashed (SHA-256 of the
+digits with the country code), `fbp` and `fbc` (or an `fbc` made from the
+campaign's `fbclid`), and the visitor's IP address and browser. It needs the
+`META_CAPI_TOKEN` env var on the portal; without it nothing is sent. The
+outcome shows on the booking page under "Came from".
 
 ## What happens after a booking
 

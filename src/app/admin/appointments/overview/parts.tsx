@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { Check } from "lucide-react";
 import { palette } from "@/lib/palette";
 import {
-  PLACE_LABEL, SOURCE_LABEL, dayDiff, dayShort, hm, hoursFor, istParts,
+  PLACE_LABEL, SOURCE_LABEL, campaignShort, dayDiff, dayShort, hm, hoursFor, istParts,
   type Appt, type ApptStatus, type ApptType,
 } from "@/lib/appointments/core";
 import { S, StatusPill, Pill, TypeDot } from "../ui";
@@ -72,6 +72,7 @@ export function ApptRow({ a, ctx, showDay = false }: { a: Appt; ctx: RowCtx; sho
         <span className="flex flex-wrap gap-1.5 md:justify-end" style={{ flex: "none" }}>
           <StatusPill status={a.status} />
           {a.source !== "website" && <Pill>{SOURCE_LABEL[a.source]}</Pill>}
+          {a.source === "website" && campaignShort(a.campaign) ? <Pill bg="#E8E2F2" fg="#4B3A6E">From {campaignShort(a.campaign)}</Pill> : null}
         </span>
       </span>
     </Link>

@@ -6,7 +6,7 @@
 import { useState, type ReactNode } from "react";
 import { Copy, Link2 } from "lucide-react";
 import { palette } from "@/lib/palette";
-import { PLACE_LABEL, dayLabel, hm, istParts, showPhone, type ApptSource } from "@/lib/appointments/core";
+import { PLACE_LABEL, dayLabel, hm, istParts, showPhone, type ApptCampaign, type ApptSource } from "@/lib/appointments/core";
 import { Pill, S, TypeDot, btn } from "../ui";
 import { ErrorNote, FOCUS, inputStyle } from "../new/fields";
 import { useBooking } from "./ctx";
@@ -50,6 +50,7 @@ export function AppointmentCard({ staffName }: { staffName: (id: string | null) 
           {ASKED_ON[a.source]}{by ? `, by ${by}` : a.source === "website" ? ", by the customer" : ""}
           <span style={{ display: "block", ...S.muted }}>{dayLabel(made.day, today)}, {hm(made.min)}</span>
         </Row>
+        {a.source === "website" ? <Row label="Came from"><CameFrom c={a.campaign ?? null} /></Row> : null}
         {a.outcome ? <Row label="Outcome">{a.outcome}</Row> : null}
         {a.cancel_reason ? <Row label="Why cancelled">{a.cancel_reason}</Row> : null}
       </dl>
@@ -150,5 +151,30 @@ export function ToldUsCard() {
         <ErrorNote>{errorFor("note")}</ErrorNote>
       </form>
     </Card>
+  );
+}
+
+/** The ad tags a website booking arrived with (0112), and whether it reached Meta's Conversions API. */
+function CameFrom({ c }: { c: ApptCampaign | null }) {
+  const id = (v: string | boolean | undefined) => (typeof v === "string" ? `yes (…${v.slice(-6)})` : v ? "yes" : null);
+  const rows: Array<[string, string | null | undefined]> = c ? [
+    ["Source", c.utm_source], ["Medium", c.utm_medium], ["Campaign", c.utm_campaign], ["Ad", c.utm_content], ["Keyword", c.utm_term],
+    ["Meta click id", id(c.fbclid)], ["Google click id", id(c.gclid)], ["Landed on", c.landing], ["Came via", c.referrer],
+  ] : [];
+  const shown = rows.filter(([, v]) => v);
+  return (
+    <span style={{ display: "block" }}>
+      {shown.length ? (
+        <span style={{ display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 10, rowGap: 2 }}>
+          {shown.map(([k, v]) => (
+            <span key={k} style={{ display: "contents" }}>
+              <span style={S.muted}>{k}</span>
+              <span style={{ overflowWrap: "anywhere", fontSize: 13 }}>{v}</span>
+            </span>
+          ))}
+        </span>
+      ) : <span style={S.muted}>No ad tags: they came straight to the page.</span>}
+      {c?.meta ? <span style={{ display: "block", marginTop: 6, ...S.muted, overflowWrap: "anywhere" }}>Meta Conversions API: {c.meta.note}</span> : null}
+    </span>
   );
 }
