@@ -43,12 +43,13 @@ export interface ApptCampaign {
   fbclid?: string | boolean; gclid?: string | boolean; landing?: string; referrer?: string;
   meta?: { at: string; ok: boolean; note?: string };
 }
-/** "instagram / visit-nov", "Meta ad", "Google ad" or the referring site, for lists. Null when the visitor came with no tags. */
+/** "instagram / visit-nov / reel-3 · Meta ad", for the booking lists. Null when the visitor came with no tags. */
 export function campaignShort(c: ApptCampaign | null | undefined): string | null {
   if (!c) return null;
-  const src = c.utm_source || (c.fbclid ? "Meta ad" : c.gclid ? "Google ad" : c.referrer || "");
-  const s = [src, c.utm_campaign].filter(Boolean).join(" / ");
-  return s ? (s.length > 48 ? s.slice(0, 47) + "…" : s) : null;
+  const ad = c.fbclid ? "Meta ad" : c.gclid ? "Google ad" : "";
+  const src = c.utm_source || c.referrer || "";
+  const s = [src, c.utm_campaign, c.utm_content].filter(Boolean).join(" / ");
+  return [s, ad].filter(Boolean).join(" · ") || null;
 }
 export interface Config { types: ApptType[]; hours: HoursRow[]; closures: Closure[]; blocks: Block[]; settings: ApptSettings; people: Person[] }
 
@@ -147,11 +148,23 @@ export function slotsFor(cfg: Config, appts: Appt[], o: { typeId: string; day: s
 /** +E.164 or null. Accepts "98765 43210", "098765 43210", "+91 98765 43210", "919876543210" with India, and any "+code …" number. */
 export function parsePhone(raw: string, cc = "+91"): string | null {
   const t = String(raw ?? "").trim(); let d = t.replace(/\D/g, ""); const c = cc.replace(/\D/g, "") || "91";
-  if (/^(\+|00)/.test(t)) { d = d.replace(/^00/, ""); if (d.startsWith("91")) return /^91[6-9]\d{9}$/.test(d) ? `+${d}` : null; return /^[1-9]\d{7,14}$/.test(d) ? `+${d}` : null; }
+  if (/^(\+|00)/.test(t)) {
+    d = d.replace(/^00/, "");
+    // "+44 07700 900123": the 0 people dial at home is not part of the international number (Italy keeps it).
+    const n = callingCodeLength(d), code = d.slice(0, n);
+    if (code !== "39") d = code + d.slice(n).replace(/^0+/, "");
+    if (d.startsWith("91")) return /^91[6-9]\d{9}$/.test(d) ? `+${d}` : null;
+    return /^[1-9]\d{7,14}$/.test(d) ? `+${d}` : null;
+  }
   if (c === "91") { if (d.length === 12 && d.startsWith("91")) d = d.slice(2); if (d.length === 11 && d.startsWith("0")) d = d.slice(1); return /^[6-9]\d{9}$/.test(d) ? `+91${d}` : null; }
   if (d.startsWith(c) && d.length > c.length + 6) d = d.slice(c.length);
   d = d.replace(/^0+/, "");
   return d.length >= 6 && (c + d).length <= 15 ? `+${c}${d}` : null;
+}
+/** How many digits the country code at the start of an international number has (ITU codes are prefix-free). */
+export function callingCodeLength(d: string): number {
+  if (/^[17]/.test(d)) return 1;
+  return /^(2[07]|3[0-469]|4[013-9]|5[1-8]|6[0-6]|8[1246]|9[0-58])/.test(d) ? 2 : 3;
 }
 export function showPhone(e164: string): string { const m = /^\+91(\d{5})(\d{5})$/.exec(e164); return m ? `+91 ${m[1]} ${m[2]}` : e164; }
 /** wa.me needs digits only. */

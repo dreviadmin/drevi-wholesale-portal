@@ -10,16 +10,18 @@ import { orderTagBlocker } from "@/lib/wallet-core";
 //
 // Sent: the booking's WhatsApp number hashed (SHA-256 of the digits with the
 // country code, as Meta asks), the _fbp and _fbc cookies the page passes (or an
-// fbc made from the ad's fbclid), and the visitor's IP address and browser,
-// which Meta needs for website events. Nothing else about the customer.
+// fbc made from the ad's fbclid), the visitor's IP address and browser (Meta
+// needs them for website events), and what was booked ("Store visit"). Nothing
+// else about the customer.
 //
 // Needs META_CAPI_TOKEN (Events Manager › the pixel › Settings › Conversions API
 // › Generate access token), set in Vercel by the owner. Without it nothing is
-// sent. META_PIXEL_ID overrides the shop's pixel. Off production nothing is sent
-// unless META_CAPI_TEST_CODE is set, and then only as a test event (Events
-// Manager › Test events).
+// sent. Off production it sends only to a separate test pixel (META_PIXEL_ID,
+// never the shop's), with META_CAPI_TEST_CODE: Meta keeps test events too, so
+// they must not land on the shop's pixel. Meta's error text is never kept or
+// logged (it can repeat what was sent), only its codes.
 
-const GRAPH = "https://graph.facebook.com/v23.0";
+const GRAPH = "https://graph.facebook.com/v25.0"; // the Marketing API version Meta supports (Nov 2026)
 const SHOP_PIXEL = "1139607661846580";
 const SITE = "https://drevifashion.com";
 const PAGE: Record<string, string> = { store: "/pages/visit", video: "/pages/video-shopping", design: "/pages/custom-design" };
@@ -48,18 +50,19 @@ export function metaEvent(b: MetaBooking) {
     action_source: "website",
     event_source_url: SITE + (PAGE[b.typeId] ?? "/pages/visit"),
     user_data: user,
-    custom_data: { content_name: b.typeId === "store" ? "Store visit" : b.typeId === "video" ? "Video call" : "Custom design consultation", visit_party: b.party },
+    custom_data: { content_name: b.typeId === "store" ? "Store visit" : b.typeId === "video" ? "Video call" : "Custom design consultation" },
   };
 }
 
 export async function sendMetaSchedule(b: MetaBooking): Promise<MetaResult> {
   const token = process.env.META_CAPI_TOKEN?.trim();
   if (!token) return { ok: false, note: "Not sent: META_CAPI_TOKEN is not set" };
-  const test = process.env.META_CAPI_TEST_CODE?.trim() || null;
   const prod = orderTagBlocker({ VERCEL_ENV: process.env.VERCEL_ENV, NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL }) === null;
-  if (!prod && !test) return { ok: false, note: "Not sent: not production (set META_CAPI_TEST_CODE to send test events)" };
+  const ownPixel = process.env.META_PIXEL_ID?.trim() || null;
+  const test = prod ? null : process.env.META_CAPI_TEST_CODE?.trim() || null;
+  if (!prod && (!test || !ownPixel || ownPixel === SHOP_PIXEL)) return { ok: false, note: "Not sent: not production (needs a separate test pixel in META_PIXEL_ID and META_CAPI_TEST_CODE)" };
   if (!b.userAgent) return { ok: false, note: "Not sent: the request had no browser user agent" };
-  const pixel = process.env.META_PIXEL_ID?.trim() || SHOP_PIXEL;
+  const pixel = ownPixel || SHOP_PIXEL;
   let res: Response;
   try {
     res = await fetch(`${GRAPH}/${encodeURIComponent(pixel)}/events`, {
@@ -73,7 +76,12 @@ export async function sendMetaSchedule(b: MetaBooking): Promise<MetaResult> {
   }
   const text = await res.text().catch(() => "");
   if (res.ok && /"events_received"\s*:\s*1/.test(text)) return { ok: true, note: test ? "Sent to Meta as a test event" : "Sent to Meta" };
-  let why = text.slice(0, 200);
-  try { why = (JSON.parse(text) as { error?: { message?: string } }).error?.message?.slice(0, 200) ?? why; } catch { /* keep the raw text */ }
-  return { ok: false, note: `Meta refused it (HTTP ${res.status}): ${why}` };
+  // Only Meta's codes: its message can quote the request back, token included.
+  let codes = "";
+  try {
+    const e = (JSON.parse(text) as { error?: { code?: unknown; error_subcode?: unknown; type?: unknown; fbtrace_id?: unknown } }).error ?? {};
+    const safe = (v: unknown) => (typeof v === "number" || (typeof v === "string" && /^[A-Za-z0-9_.-]{1,40}$/.test(v)) ? String(v) : null);
+    codes = [["code", safe(e.code)], ["subcode", safe(e.error_subcode)], ["type", safe(e.type)], ["trace", safe(e.fbtrace_id)]].filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(", ");
+  } catch { /* not JSON: nothing kept */ }
+  return { ok: false, note: `Meta refused it (HTTP ${res.status}${codes ? ", " + codes : ""})` };
 }

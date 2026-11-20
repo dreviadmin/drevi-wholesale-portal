@@ -94,6 +94,7 @@ describe("website booking: reading the form", () => {
     const c = cleanCampaign({ utm_source: "instagram", utm_campaign: "visit-nov", fbclid: "IwAR123", landing: "/pages/visit?x=1", referrer: "https://l.instagram.com/?u=abc", evil: "x", utm_term: "" });
     expect(c).toEqual({ utm_source: "instagram", utm_campaign: "visit-nov", fbclid: "IwAR123", landing: "/pages/visit?x=1", referrer: "l.instagram.com" });
     expect(cleanCampaign({ gclid: "Cj0KCQiA_x-y", fbclid: "<script>" })).toEqual({ gclid: "Cj0KCQiA_x-y", fbclid: true });
+    expect(cleanCampaign({ fbclid: "a".repeat(501) })).toEqual({ fbclid: true }); // never a cut id
     expect(cleanCampaign({ landing: "https://evil.example" })).toBeNull();
     expect(campaignText(c)).toBe(" From instagram / visit-nov.");
     expect(campaignText({ fbclid: true })).toBe(" From a Meta ad.");
@@ -163,6 +164,8 @@ describe("website booking: functions and Meta cookies", () => {
   it("passes on Meta's _fbp and _fbc cookies only in their own format", () => {
     const ok = parseWebBook({ ...good, fbp: "fb.1.1732100000000.1234567890", fbc: "fb.1.1732100000000.IwAR0abc_DEF-9" }, cfg);
     expect(ok.ok && [ok.value.fbp, ok.value.fbc]).toEqual(["fb.1.1732100000000.1234567890", "fb.1.1732100000000.IwAR0abc_DEF-9"]);
+    const tail = parseWebBook({ ...good, fbp: "fb.1.1732100000000.1234567890.AQ", fbc: "fb.1.1732100000000.IwAR0abc.Bg1a2B3c" }, cfg);
+    expect(tail.ok && [tail.value.fbp, tail.value.fbc]).toEqual(["fb.1.1732100000000.1234567890.AQ", "fb.1.1732100000000.IwAR0abc.Bg1a2B3c"]);
     const bad = parseWebBook({ ...good, fbp: "x", fbc: "fb.1.123.<b>" }, cfg);
     expect(bad.ok && [bad.value.fbp, bad.value.fbc]).toEqual([null, null]);
   });

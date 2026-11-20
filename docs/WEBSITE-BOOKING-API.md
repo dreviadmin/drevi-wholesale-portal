@@ -267,9 +267,14 @@ Every new website booking is also sent to Meta from the portal, as a
 the same as the page's `fbq('track', 'Schedule', …, { eventID: <booking number> })`,
 so Meta counts it once. It carries the WhatsApp number hashed (SHA-256 of the
 digits with the country code), `fbp` and `fbc` (or an `fbc` made from the
-campaign's `fbclid`), and the visitor's IP address and browser. It needs the
-`META_CAPI_TOKEN` env var on the portal; without it nothing is sent. The
-outcome shows on the booking page under "Came from".
+campaign's `fbclid`), the visitor's IP address and browser, and what was
+booked (`content_name`, as on the page). It needs the `META_CAPI_TOKEN` env
+var on the portal; without it nothing is sent. Off production it sends only
+to a separate test pixel. The booking page says under "Came from" whether
+Meta was told.
+
+Click ids are kept only whole: send `fbclid` and `gclid` uncut (up to 500
+characters). A cut one is stored as "there was one" and never passed on.
 
 ## What happens after a booking
 

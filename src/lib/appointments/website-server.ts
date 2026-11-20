@@ -82,7 +82,8 @@ async function reportToMeta(id: string, number: string, v: WebBook, ip: string |
     fbp: v.fbp, fbc: v.fbc, fbclid: typeof v.campaign?.fbclid === "string" ? v.campaign.fbclid : null, ip, userAgent,
   });
   if (!res.ok) console.warn("[appointments-web] Meta:", res.note);
-  await createAdminClient().from("appointments").update({ campaign: { ...(v.campaign ?? {}), meta: { at: new Date().toISOString(), ok: res.ok, note: res.note } } }).eq("id", id);
+  const { error } = await createAdminClient().from("appointments").update({ campaign: { ...(v.campaign ?? {}), meta: { at: new Date().toISOString(), ok: res.ok, note: res.note } } }).eq("id", id);
+  if (error) console.error("[appointments-web] saving the Meta outcome:", error.message);
 }
 
 export async function websiteBook(body: unknown, ip: string | null, now = new Date(), userAgent: string | null = null) {

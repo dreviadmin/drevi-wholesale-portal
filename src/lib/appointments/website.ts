@@ -105,8 +105,8 @@ export function cleanCampaign(v: unknown): WebCampaign | null {
   for (const k of ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"] as const) { const t = cleanText(o[k], 100); if (t) c[k] = t; }
   // Click ids as they came (letters, digits, _ and -), or just "there was one" if they look odd.
   for (const k of ["fbclid", "gclid"] as const) {
-    const t = typeof o[k] === "string" ? String(o[k]).trim().slice(0, 300) : "";
-    if (/^[A-Za-z0-9_-]{6,300}$/.test(t)) c[k] = t; else if (o[k]) c[k] = true;
+    const t = typeof o[k] === "string" ? String(o[k]).trim() : "";
+    if (/^[A-Za-z0-9_-]{6,500}$/.test(t)) c[k] = t; else if (o[k]) c[k] = true; // a cut or odd id is never passed on
   }
   const landing = cleanText(o.landing, 200); if (landing.startsWith("/")) c.landing = landing;
   const ref = cleanText(o.referrer, 300);
@@ -121,9 +121,9 @@ export function campaignText(c: WebCampaign | null): string {
   return bits.length ? ` From ${bits.join(" / ")}.` : "";
 }
 
-/** Meta's cookie formats: _fbp is fb.1.<ms>.<random>, _fbc is fb.1.<ms>.<fbclid>. */
-export const FBP_RE = /^fb\.[0-9]\.[0-9]{10,13}\.[0-9]{1,20}$/;
-export const FBC_RE = /^fb\.[0-9]\.[0-9]{10,13}\.[A-Za-z0-9_-]{6,500}$/;
+/** Meta's cookie formats: _fbp is fb.1.<ms>.<random>, _fbc is fb.1.<ms>.<fbclid>, either with an optional 2 or 8 character appendix. */
+export const FBP_RE = /^fb\.[0-9]\.[0-9]{10,13}\.[0-9]{1,20}(\.[A-Za-z0-9_-]{2}|\.[A-Za-z0-9_-]{8})?$/;
+export const FBC_RE = /^fb\.[0-9]\.[0-9]{10,13}\.[A-Za-z0-9_-]{6,500}(\.[A-Za-z0-9_-]{2}|\.[A-Za-z0-9_-]{8})?$/;
 
 // A name: letters (any script), spaces and . ' - only, and nothing that looks like a web address.
 const NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M} .'-]{1,79}$/u;

@@ -242,3 +242,15 @@ describe("Send on a booking: which approved template, or why not", () => {
     }
   });
 });
+
+describe("phone numbers typed with + and the home 0", () => {
+  it("drops the trunk 0 after the country code, except Italy's", () => {
+    expect(parsePhone("+44 07700 900123")).toBe("+447700900123");
+    expect(parsePhone("+971 050 123 4567")).toBe("+971501234567");
+    expect(parsePhone("0044 7700 900123")).toBe("+447700900123");
+    expect(parsePhone("+91 098765 43210")).toBe("+919876543210");
+    expect(parsePhone("+1 415 555 0100")).toBe("+14155550100");
+    expect(parsePhone("+39 06 1234 5678")).toBe("+390612345678");
+    expect(parsePhone("+91 98765 43210")).toBe("+919876543210");
+  });
+});

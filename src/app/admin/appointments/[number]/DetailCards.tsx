@@ -154,12 +154,14 @@ export function ToldUsCard() {
   );
 }
 
-/** The ad tags a website booking arrived with (0112), and whether it reached Meta's Conversions API. */
+/** The ad tags a website booking arrived with (0112), and whether Meta was told about it (Conversions API). */
 function CameFrom({ c }: { c: ApptCampaign | null }) {
+  const { isAdmin } = useBooking();
   const id = (v: string | boolean | undefined) => (typeof v === "string" ? `yes (…${v.slice(-6)})` : v ? "yes" : null);
+  const page = (l: string | undefined) => (l ? l.split("?")[0] : null); // the tags are listed on their own
   const rows: Array<[string, string | null | undefined]> = c ? [
     ["Source", c.utm_source], ["Medium", c.utm_medium], ["Campaign", c.utm_campaign], ["Ad", c.utm_content], ["Keyword", c.utm_term],
-    ["Meta click id", id(c.fbclid)], ["Google click id", id(c.gclid)], ["Landed on", c.landing], ["Came via", c.referrer],
+    ["Meta ad click", id(c.fbclid)], ["Google ad click", id(c.gclid)], ["Landed on", page(c.landing)], ["Came via", c.referrer],
   ] : [];
   const shown = rows.filter(([, v]) => v);
   return (
@@ -173,8 +175,13 @@ function CameFrom({ c }: { c: ApptCampaign | null }) {
             </span>
           ))}
         </span>
-      ) : <span style={S.muted}>No ad tags: they came straight to the page.</span>}
-      {c?.meta ? <span style={{ display: "block", marginTop: 6, ...S.muted, overflowWrap: "anywhere" }}>Meta Conversions API: {c.meta.note}</span> : null}
+      ) : <span style={S.muted}>Not from a tagged ad link, so the website could not tell where they came from.</span>}
+      {c?.meta ? (
+        <span style={{ display: "block", marginTop: 6, ...S.muted, overflowWrap: "anywhere" }}>
+          {c.meta.ok ? "Meta was told about this booking, for the ads." : "Meta was not told about this booking."}
+          {!c.meta.ok && isAdmin && c.meta.note ? ` ${c.meta.note}.` : ""}
+        </span>
+      ) : null}
     </span>
   );
 }

@@ -68,11 +68,11 @@ export function ApptRow({ a, ctx, showDay = false }: { a: Appt; ctx: RowCtx; sho
             {a.party === "group" && <span style={{ fontWeight: 500, color: palette.mutedGreige }}>with family</span>}
           </span>
           <span style={{ display: "block", fontSize: 12.5, color: palette.softBlack, marginTop: 2, lineHeight: 1.45, overflowWrap: "anywhere" }}>{details}</span>
+          {a.source === "website" && campaignShort(a.campaign) ? <span style={{ display: "block", fontSize: 12, color: "#4B3A6E", marginTop: 2, lineHeight: 1.45, overflowWrap: "anywhere" }}>From {campaignShort(a.campaign)}</span> : null}
         </span>
         <span className="flex flex-wrap gap-1.5 md:justify-end" style={{ flex: "none" }}>
           <StatusPill status={a.status} />
           {a.source !== "website" && <Pill>{SOURCE_LABEL[a.source]}</Pill>}
-          {a.source === "website" && campaignShort(a.campaign) ? <Pill bg="#E8E2F2" fg="#4B3A6E">From {campaignShort(a.campaign)}</Pill> : null}
         </span>
       </span>
     </Link>
