@@ -6,7 +6,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// Vercel cron (*/10 * * * *) hits this with `Authorization: Bearer ${CRON_SECRET}`.
+// Vercel Cron (vercel.json, */10 * * * *) hits this with
+// `Authorization: Bearer ${CRON_SECRET}`; a run takes about 12-15 s.
+// .github/workflows/sync-cron.yml calls it too, as a backstop (GitHub runs its
+// "every 10 minutes" schedule only every 5-8 hours in practice). Two runs at
+// once are harmless: every write upserts or updates the same values.
 export async function GET(request: Request) {
   const auth = request.headers.get("authorization");
   const expected = `Bearer ${getEnv("CRON_SECRET")}`;

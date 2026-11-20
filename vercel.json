@@ -5,7 +5,11 @@
   "crons": [
     {
       "path": "/api/cron/sync-products",
-      "schedule": "0 3 * * *"
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/sync-sku-registry",
+      "schedule": "5,15,25,35,45,55 * * * *"
     },
     {
       "path": "/api/cron/wallet-expire",

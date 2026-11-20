@@ -1,5 +1,9 @@
-# Product sync every 10 minutes. The 10-minute cadence runs here on GitHub
-# Actions; vercel.json keeps a once-daily Vercel cron as a backstop.
+# BACKSTOP for the product sync and the SKU registry sync. The 10-minute
+# cadence runs on Vercel Cron (vercel.json; the Vercel team is on Pro, which
+# runs crons on the minute). GitHub runs this "*/10" schedule only every 5-8
+# hours in practice (19-20 Nov 2026: 00:36, 07:52, 16:56, 23:22, 04:06,
+# 12:45 UTC), so it cannot be the main clock. It stays as a second caller in
+# case a Vercel cron run is missed; an extra run is harmless.
 #
 # Repo secrets required (Settings → Secrets and variables → Actions):
 #   PORTAL_URL   e.g. https://wholesale.drevifashion.com

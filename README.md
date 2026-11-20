@@ -595,8 +595,9 @@ catalog fields until the portal fully takes over as master.
 - **Auto order-refresh** — after each sync, open orders pull catalog
   title/photo/HSN changes (never money) through the same
   `refreshOrderFromCatalog` used by the button on the order page.
-- **Triggers** — GitHub Actions cron every 10 minutes (`sync-cron.yml` →
-  `/api/cron/sync-products`, gated by `CRON_SECRET`), the Catalog page's
+- **Triggers** — Vercel Cron every 10 minutes (`vercel.json` →
+  `/api/cron/sync-products`, gated by `CRON_SECRET`; GitHub Actions
+  `sync-cron.yml` calls it too, as a backstop), the Catalog page's
   **Sync from Sheet** button, Retail Price Check's fast **Sync Prices**.
   `SHEET_SYNC_ENABLED` is the master switch for retirement.
 
@@ -651,7 +652,7 @@ Supabase (Postgres + Auth + RLS + Storage) · `googleapis` (Sheets + Drive) ·
 `@react-pdf/renderer` · Interakt (WhatsApp) · **Anthropic API** (product copy,
 Opus 5 default) · **fal.ai** (Seedream v4) · **FASHN** (model swap) ·
 **OpenAI images** (background edit) · `sharp` (HEIC/JPEG→PNG transcode) ·
-Vercel (Hobby) · GitHub Actions (cron/backup/watchdog/mirror).
+Vercel (Pro; crons in `vercel.json`) · GitHub Actions (backstop cron/backup/watchdog/mirror).
 
 ## Environment
 
@@ -767,8 +768,12 @@ curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron/sync-produc
 
 1. Import the repo; set every variable from `CLAUDE.md → Environment
    variables` as Vercel project env vars.
-2. Scheduling runs on **GitHub Actions** hitting the `CRON_SECRET`-gated
-   endpoints — no Vercel cron quota needed.
+2. Scheduling: **Vercel Cron** (`vercel.json`) calls the `CRON_SECRET`-gated
+   endpoints — the product sync every 10 minutes, the SKU registry sync 5
+   minutes after it. That needs the Vercel Pro plan (Hobby allows one run a
+   day, and a deploy with a more frequent cron fails). GitHub Actions
+   (`sync-cron.yml`) calls the same endpoints as a backstop only: GitHub runs
+   its "every 10 minutes" schedule every 5-8 hours in practice.
 3. Push to `main` → the production project auto-deploys. The dev project is
    CLI-only (see above).
 4. Dev → prod promotion of the productionization wave follows

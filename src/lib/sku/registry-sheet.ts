@@ -5,6 +5,7 @@ import { google, type sheets_v4 } from "googleapis";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { combineFloors } from "@/lib/sku/number-floor-core";
+import { planMirror } from "@/lib/sku/registry-mirror-core";
 
 // Legacy SKU registry sheet interop (transition safety, spec §4).
 // - importer: sheet -> Supabase (rows minted via the old Apps Script tool)
@@ -149,19 +150,32 @@ export async function importRegistry(): Promise<{ imported: number; qrBackfilled
   return { imported, qrBackfilled, warnings };
 }
 
-// §4.2 Mirror — append portal rows the old tool hasn't seen yet.
-export async function mirrorRegistry(): Promise<{ mirrored: number; warnings: string[] }> {
-  if (mirrorDisabled()) return { mirrored: 0, warnings: ["mirror disabled (SKU_MIRROR_DISABLED) — dev environment"] };
+// §4.2 Mirror — append portal rows the old tool hasn't seen yet. Safe to run
+// twice at once or straight after a mint: see planMirror for the rules.
+export async function mirrorRegistry(): Promise<{ mirrored: number; alreadyOnSheet: number; waiting: number; warnings: string[] }> {
+  if (mirrorDisabled()) return { mirrored: 0, alreadyOnSheet: 0, waiting: 0, warnings: ["mirror disabled (SKU_MIRROR_DISABLED) — dev environment"] };
   const warnings: string[] = [];
   const admin = createAdminClient();
-  const { data: pending, error } = await admin
+  const { data: rows, error } = await admin
     .from("sku_registry")
     .select("id, base_sku, variant_sku, category, sub_category, color, size, description, created_by, created_at")
     .eq("source", "portal")
     .eq("sheet_synced", false)
     .order("created_at", { ascending: true });
   if (error) throw new Error(`mirror read failed: ${error.message}`);
-  if (!pending || pending.length === 0) return { mirrored: 0, warnings };
+  if (!rows || rows.length === 0) return { mirrored: 0, alreadyOnSheet: 0, waiting: 0, warnings };
+  const now = Date.now();
+  // Read the sheet only when some row is old enough to be the mirror's job.
+  if (planMirror(rows, [], now).append.length === 0) return { mirrored: 0, alreadyOnSheet: 0, waiting: rows.length, warnings };
+  const plan = planMirror(rows, (await readAllRows()).map((r) => r.variant || r.base), now);
+
+  if (plan.alreadyOnSheet.length > 0) {
+    const { error: flagErr } = await admin.from("sku_registry").update({ sheet_synced: true }).in("id", plan.alreadyOnSheet.map((r) => r.id));
+    if (flagErr) warnings.push(`mirror flag update (already on sheet) failed: ${flagErr.message}`);
+  }
+  const pending = plan.append;
+  const done = { alreadyOnSheet: plan.alreadyOnSheet.length, waiting: plan.tooNew.length };
+  if (pending.length === 0) return { mirrored: 0, ...done, warnings };
 
   const fmt = (iso: string) => {
     const d = new Date(iso);
@@ -187,7 +201,7 @@ export async function mirrorRegistry(): Promise<{ mirrored: number; warnings: st
   const ids = pending.map((r) => r.id);
   const { error: upErr } = await admin.from("sku_registry").update({ sheet_synced: true }).in("id", ids);
   if (upErr) warnings.push(`mirror flag update failed: ${upErr.message}`);
-  return { mirrored: pending.length, warnings };
+  return { mirrored: pending.length, ...done, warnings };
 }
 
 // Mirror a single just-minted row inline (best-effort — the cron retries).

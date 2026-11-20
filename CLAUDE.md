@@ -20,7 +20,7 @@ The authoritative product spec is `drevi-wholesale-portal-spec-v2.2.md` (in this
 
 ## Golden rules (architecture invariants — never violate)
 
-1. **Wholesale data lives in the Product Master Sheet, never in Shopify.** The fields `Final Wholesale` (price), `Wholesale Visible`, `Min Order Qty - Wholesale`, `Restockable`, and `Restock Days` live only in the Google Sheet. They are NEVER written to Shopify metafields. A Vercel cron syncs them into the Supabase `wholesale_products` table every 10 minutes. The portal reads from Supabase, never from the sheet at request time.
+1. **Wholesale data lives in the Product Master Sheet, never in Shopify.** The fields `Final Wholesale` (price), `Wholesale Visible`, `Min Order Qty - Wholesale`, `Restockable`, and `Restock Days` live only in the Google Sheet. They are NEVER written to Shopify metafields. A Vercel cron syncs them into the Supabase `wholesale_products` table every 10 minutes (`vercel.json`; GitHub Actions `sync-cron.yml` is only a backstop, since GitHub runs it every few hours). The portal reads from Supabase, never from the sheet at request time.
 
 2. **Shopify is used ONLY to fetch product images during the sync.** Authenticate via the OAuth **Client Credentials Grant** — Shopify deprecated static admin (`shpat_`) tokens on Jan 1 2026. Never expect or ask for a static token. See "Shopify authentication" below.
 

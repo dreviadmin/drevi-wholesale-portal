@@ -104,6 +104,10 @@ exist as the fallback on a new phone.
     at the dead wholesale.drevifashion.com. Either fix the domain (item 14) or
     point the secret at drevi-wholesale-portal-swart.vercel.app; say which and
     I check the Actions log.
+    **20 Nov 2026:** the secret works (every run returns 200). The real cause
+    is GitHub: it ran the "every 10 minutes" schedule only every 5-8 hours.
+    Fixed by moving the 10-minute clock to Vercel Cron (`vercel.json`, the
+    team is on Vercel Pro); GitHub stays as a backstop.
 
 ---
 

@@ -96,8 +96,8 @@ wholesale-portal/
 ├── src/middleware.ts            auth gate on every request
 ├── supabase/migrations/         0001–0006 = the entire schema (idempotent)
 ├── scripts/                     apply-migration, seed-auth, backup, portal.sh
-├── .github/workflows/sync-cron.yml   10-min sync trigger (GitHub Actions)
-├── vercel.json                  daily backstop cron
+├── .github/workflows/sync-cron.yml   backstop sync trigger (GitHub Actions; runs every few hours)
+├── vercel.json                  the 10-min sync crons (Vercel Pro)
 └── .env.local                   ALL secrets (never committed)
 ```
 
@@ -179,7 +179,8 @@ qty 0+restockable → Made to Order (Nd) · qty 0+not → Sold Out.
 
    Three workflows then run themselves (verify each once via Actions → "Run
    workflow"):
-   - `sync-cron.yml` — product sync every 10 min (also Supabase keepalive #1)
+   - `sync-cron.yml` — backstop for the product sync (the 10-min clock is
+     Vercel Cron in `vercel.json`; GitHub runs this one every few hours)
    - `watchdog.yml` — health check every 10 min; **auto-restores Supabase if it
      ever pauses** and fails loudly (GitHub emails you) if the portal stays
      unhealthy

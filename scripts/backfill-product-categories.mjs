@@ -60,7 +60,7 @@ for (const [k, n] of Object.entries(byCat).sort((a, b) => b[1] - a[1])) console.
 console.log(`after the rule: no category=${noCat.length}` + (noCat.length ? ` (${noCat.map((x) => x.sku).join(" ")})` : "") + ` · category but no sub=${noSub.length}` + (noSub.length ? ` (${noSub.map((x) => x.sku).join(" ")})` : ""));
 
 if (!WRITE) { console.log("\n--write not given — nothing written."); process.exit(0); }
-console.log("\nWRITING. Reminder: the sheet sync (GitHub Actions, every 10 min) must already be running the SKU-fallback build on this target, or it reverts these rows. Re-run without --write after the next sync: 'to fill' must read 0.");
+console.log("\nWRITING. Reminder: the sheet sync (Vercel Cron, every 10 min) must already be running the SKU-fallback build on this target, or it reverts these rows. Re-run without --write after the next sync: 'to fill' must read 0.");
 let done = 0; const failed = [];
 for (const c of changes) {
   const { error: uErr } = await admin.from("wholesale_products").update({ category: c.after.category, sub_category: c.after.subCategory }).eq("sku", c.sku);
