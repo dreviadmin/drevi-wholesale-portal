@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { sendTemplateMessage } from "@/lib/aisensy";
 import { orderTagBlocker } from "@/lib/wallet-core";
 import { loadConfig, APPT_COLS } from "./server";
-import { TEMPLATES, dayShort, fromIst, hm, isLive, istParts, renderParams, templateFor, type Appt, type Config, type RenderCtx } from "./core";
+import { TEMPLATES, dayShort, fromIst, hm, isLive, istParts, renderParams, templateFor, wentToTest, type Appt, type Config, type RenderCtx } from "./core";
 
 // The appointment message sender. It runs:
 //   - every 5 minutes, called by the database (pg_cron, 0113) with the token
@@ -81,12 +81,10 @@ export async function runAppointmentSender(now = new Date(), opts: { appointment
   if (!opts.appointmentId) out.digests = await queueDailyList(cfg, now);
 
   // One booking's due rows (straight after it was made or changed), or everything that is due.
-  let claim = opts.appointmentId
+  // (Before 0113 there is no per-booking claim: then the scheduled run sends them instead.)
+  const claim = opts.appointmentId
     ? await admin.rpc("appt_claim_messages_for", { p_appointment: opts.appointmentId, p_limit: 30 })
     : await admin.rpc("appt_claim_messages", { p_limit: 30 });
-  if (claim.error && opts.appointmentId && (claim.error.code === "PGRST202" || /appt_claim_messages_for/.test(claim.error.message))) {
-    claim = await admin.rpc("appt_claim_messages", { p_limit: 30 }); // 0113 not applied yet
-  }
   if (claim.error) { out.note = claim.error.message; return out; }
   const rows = (claim.data ?? []) as Row[];
   out.claimed = rows.length;
@@ -163,12 +161,16 @@ async function queueDailyList(cfg: Config, now: Date): Promise<number> {
 
 export type ManualResult = { ok: true; to: string; test: boolean } | { ok: false; error: string; again?: boolean };
 const CLAIMABLE = ["scheduled", "skipped", "failed", "cancelled"];
+const H6 = 6 * 3600000;
 
 /**
- * Sends one customer template now, through the message row it belongs to:
- * the waiting one if there is one (so the automatic send does not repeat it),
- * else a new row. Refuses while another send of it is in flight, and asks for
- * `again` when the last one already went.
+ * Sends one customer template now. Outside test mode it goes through the
+ * message row it belongs to: the waiting one if there is one (so the automatic
+ * send does not repeat it), else a new row; if the send does not go, the row is
+ * put back as it was, so the automatic send still happens. It refuses while
+ * another send of it is in flight, and asks for `again` when the last one
+ * already reached the customer. In test mode it always makes its own row and
+ * leaves the customer's messages alone.
  */
 export async function sendManual(o: { cfg: Config; appt: Appt; rule: string; byName: string; again: boolean }): Promise<ManualResult> {
   const { cfg, appt: a, rule } = o;
@@ -179,42 +181,56 @@ export async function sendManual(o: { cfg: Config; appt: Appt; rule: string; byN
   if ("skip" in route) return { ok: false, error: `Not sent: ${route.skip}.` };
   if ("fail" in route) return { ok: false, error: `Not sent: ${route.fail}.` };
 
-  const { data: existing, error: readErr } = await admin.from("appointment_messages").select("id, rule, template, audience, recipient_name, to_address, params, due_at, state, created_at, sent_at, appointment_id")
+  const { data: existing, error: readErr } = await admin.from("appointment_messages").select("id, rule, template, audience, recipient_name, to_address, params, due_at, state, reason, created_at, sent_at, appointment_id")
     .eq("appointment_id", a.id).eq("rule", rule).order("created_at", { ascending: false }).limit(20);
   if (readErr) return { ok: false, error: readErr.message };
-  const rows = (existing ?? []) as MsgRow[];
+  const rows = ((existing ?? []) as Array<MsgRow & { reason: string | null }>).filter((r) => r.audience === "client");
   if (rows.some((r) => r.state === "sending")) return { ok: false, error: "It is being sent right now. Reload the page in a minute to see whether it went." };
-  const target = rows.find((r) => r.state === "scheduled") ?? (rows[0] && CLAIMABLE.includes(rows[0].state) ? rows[0] : null);
-  if (!target && rows[0] && (rows[0].state === "sent" || rows[0].state === "uncertain") && !o.again) {
-    return { ok: false, again: true, error: rows[0].state === "sent" ? "It has already been sent. Reload the page, then send it again if you need to." : "The last try may or may not have gone. Reload the page and check the chat first." };
+  const test = route.test;
+  const target = test ? null : rows.find((r) => r.state === "scheduled") ?? (rows[0] && CLAIMABLE.includes(rows[0].state) ? rows[0] : null);
+  const reached = rows.find((r) => (r.state === "sent" && !wentToTest(r)) || r.state === "uncertain");
+  if (!test && reached && !o.again && target?.state !== "scheduled") {
+    return { ok: false, again: true, error: reached.state === "sent" ? "It has already been sent. Reload the page, then send it again if you need to." : "The last try may or may not have gone. Reload the page and check the chat first." };
   }
 
-  const nowIso = new Date().toISOString();
-  let rowId: string;
+  const now = new Date(), nowIso = now.toISOString();
+  let rowId: string, before: string | null = null;
   if (target) {
     const { data: got, error } = await admin.from("appointment_messages").update({ state: "sending", updated_at: nowIso })
-      .eq("id", target.id).in("state", CLAIMABLE).select("id");
+      .eq("id", target.id).eq("state", target.state).select("id"); // any change since the read (a move, another tap) stops it
     if (error) return { ok: false, error: error.message };
     if (!got?.length) return { ok: false, error: "Someone else is sending it right now. Reload the page." };
-    rowId = target.id;
+    rowId = target.id; before = target.state;
   } else {
+    // Keyed to the minute: two taps on two phones at once make one row, not two sends.
+    // The same expiry the planner gives it, so a failed one cannot be sent again days late from Messages.
+    const expires = rule === "ev-cancelled" ? new Date(now.getTime() + H6).toISOString() : rule === "c-2h" ? new Date(new Date(a.starts_at).getTime() - 15 * 60000).toISOString() : a.starts_at;
     const { data: ins, error } = await admin.from("appointment_messages").insert({
-      appointment_id: a.id, dedupe_key: `${a.id}:manual:${rule}:${nowIso}`, rule, template: tplName, channel: "wa", audience: "client",
-      recipient_name: a.customer_name, to_address: a.phone_e164, params: {}, due_at: nowIso, expires_at: null, state: "sending", attempts: 1,
+      appointment_id: a.id, dedupe_key: `${a.id}:manual:${rule}:${nowIso.slice(0, 16)}`, rule, template: tplName, channel: "wa", audience: "client",
+      recipient_name: a.customer_name, to_address: a.phone_e164, params: {}, due_at: nowIso, expires_at: expires, state: "sending", attempts: 1,
     }).select("id").single();
+    if (error && (error as { code?: string }).code === "23505") return { ok: false, error: "It was sent a moment ago. Reload the page; to send it again, wait a minute." };
     if (error || !ins) return { ok: false, error: error?.message ?? "Could not note the message." };
     rowId = (ins as { id: string }).id;
   }
 
   const out = await deliver(cfg, tplName, a.phone_e164, a.customer_name, "client", a, contextFor({ rule, params: null }, a));
-  const by = `Sent by ${o.byName}${out.test ? ` (test mode: to ${out.to})` : ""}`;
-  await admin.from("appointment_messages").update(
-    out.state === "sent" ? { state: "sent", sent_at: new Date().toISOString(), reason: by, last_error: null, to_address: a.phone_e164, updated_at: new Date().toISOString() }
-      : out.state === "skipped" ? { state: "skipped", reason: out.reason ?? null, updated_at: new Date().toISOString() }
-      : { state: out.state, last_error: out.error ?? "unknown", reason: `Tapped by ${o.byName}`, updated_at: new Date().toISOString() },
-  ).eq("id", rowId);
-  if (out.state === "sent") return { ok: true, to: out.to, test: out.test };
-  if (out.state === "uncertain") return { ok: false, error: "AiSensy did not answer, so it may or may not have gone. Check the chat on the shop phone before sending it again." };
+  const at = new Date().toISOString();
+  if (out.state === "sent") {
+    await admin.from("appointment_messages").update({ state: "sent", sent_at: at, reason: `Sent by ${o.byName}${out.test ? ` (test mode: to ${out.to})` : ""}`, last_error: null, to_address: a.phone_e164, updated_at: at }).eq("id", rowId);
+    // Anything else of this kind still waiting would say the same thing again.
+    if (!out.test) await admin.from("appointment_messages").update({ state: "cancelled", reason: `Sent by ${o.byName} instead`, updated_at: at })
+      .eq("appointment_id", a.id).eq("rule", rule).eq("audience", "client").eq("state", "scheduled");
+    return { ok: true, to: out.to, test: out.test };
+  }
+  if (out.state === "uncertain") {
+    await admin.from("appointment_messages").update({ state: "uncertain", last_error: out.error ?? "unknown", reason: `Tapped by ${o.byName}`, updated_at: at }).eq("id", rowId);
+    return { ok: false, error: "AiSensy did not answer, so it may or may not have gone. Check the chat on the shop phone before sending it again." };
+  }
+  // It did not go: a waiting row goes back to waiting (the automatic send still happens), a new row is kept as failed.
+  await admin.from("appointment_messages").update(before
+    ? { state: before, last_error: out.error ?? out.reason ?? "unknown", updated_at: at }
+    : { state: out.state, last_error: out.error ?? null, reason: out.state === "skipped" ? out.reason ?? null : `Tapped by ${o.byName}`, updated_at: at }).eq("id", rowId);
   if (out.state === "skipped") return { ok: false, error: `Not sent: ${out.reason}.` };
   return { ok: false, error: `WhatsApp did not send it: ${out.error}. Try again in a minute; if it keeps failing, check the AiSensy campaign ${route.campaign}.` };
 }
@@ -227,11 +243,11 @@ function ownOrigin(): string | null {
   const host = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
   return host && /^[A-Za-z0-9.-]+$/.test(host) ? `https://${host}` : null;
 }
-let registered: string | null = null;
-/** Tells the database where to call (once per server instance; nothing if 0113 is not applied). */
+let checkedAt = 0;
+/** Tells the database where to call (looked at every 10 minutes per server instance; nothing if 0113 is not applied). */
 export async function ensureSenderUrl(): Promise<void> {
   const url = ownOrigin();
-  if (!url || registered === url) return;
+  if (!url || Date.now() - checkedAt < 10 * 60000) return;
   try {
     const admin = createAdminClient();
     const { data, error } = await admin.from("appointment_sender").select("url").eq("id", 1).maybeSingle();
@@ -240,7 +256,7 @@ export async function ensureSenderUrl(): Promise<void> {
       const { error: upErr } = await admin.from("appointment_sender").update({ url, updated_at: new Date().toISOString() }).eq("id", 1);
       if (upErr) return;
     }
-    registered = url;
+    checkedAt = Date.now();
   } catch { /* the next run tries again */ }
 }
 
@@ -250,7 +266,7 @@ export async function isDatabaseCall(header: string | null): Promise<boolean> {
   try {
     const { data } = await createAdminClient().from("appointment_sender").select("token").eq("id", 1).maybeSingle();
     const token = (data as { token?: string } | null)?.token;
-    if (!token) return false;
+    if (!token || !/^[0-9a-f]{48}$/.test(token)) return false; // as 0113 makes it (a restored backup has it blanked)
     const want = Buffer.from(token), got = Buffer.from(header);
     return want.length === got.length && timingSafeEqual(want, got);
   } catch { return false; }
@@ -271,7 +287,8 @@ export async function senderStatus(): Promise<SenderStatus> {
     const { data, error } = await createAdminClient().from("appointment_sender").select("url, last_run_at, last_via, last_result").eq("id", 1).maybeSingle();
     if (error || !data) return { ready: false, registered: false, lastRunAt: null, lastVia: null, note: null };
     const d = data as { url: string | null; last_run_at: string | null; last_via: string | null; last_result: { note?: string; error?: string } | null };
-    return { ready: true, registered: !!d.url, lastRunAt: d.last_run_at, lastVia: d.last_via, note: d.last_result?.error ?? null };
+    const note = d.last_result?.error ?? (d.last_result?.note && d.last_result.note !== "automatic messages are off" ? d.last_result.note : null);
+    return { ready: true, registered: !!d.url, lastRunAt: d.last_run_at, lastVia: d.last_via, note };
   } catch { return { ready: false, registered: false, lastRunAt: null, lastVia: null, note: null }; }
 }
 

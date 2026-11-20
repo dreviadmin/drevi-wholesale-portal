@@ -342,11 +342,13 @@ export function planEvent(a: Appt, cfg: Config, ev: { kind: "moved" | "cancelled
 }
 
 /* ---------------- Send, tapped on a booking ---------------- */
+/** A message that went to the test number in test mode: the customer never got it. */
+export const wentToTest = (m: { state: string; reason: string | null }) => m.state === "sent" && /test mode/i.test(m.reason ?? "");
 export type ManualWhat = "confirmation" | "reminder" | "moved" | "cancelled";
 export const MANUAL_LABEL: Record<ManualWhat, string> = { confirmation: "confirmation", reminder: "reminder", moved: "new time", cancelled: "cancellation note" };
 /** Which approved template a Send button uses for this booking now (by its rule), or why it cannot go. */
 export function manualRule(what: ManualWhat, a: Pick<Appt, "status" | "starts_at" | "notify_wa">, now: Date): { rule: string } | { error: string } {
-  if (!a.notify_wa) return { error: "WhatsApp messages are off for this customer. Turn them on in the Customer card first." };
+  if (!a.notify_wa) return { error: "WhatsApp messages are off for this customer." };
   const ahead = new Date(a.starts_at).getTime() - now.getTime();
   switch (what) {
     case "confirmation":
@@ -372,7 +374,7 @@ export function manualRule(what: ManualWhat, a: Pick<Appt, "status" | "starts_at
   }
 }
 
-/* ---------------- WhatsApp by hand (works before AiSensy is ready) ---------------- */
+/* ---------------- message text for previews (and the Meet link sent from the phone) ---------------- */
 export function waLink(e164: string, text: string): string { return `https://wa.me/${waDigits(e164)}?text=${encodeURIComponent(text)}`; }
 export function handText(rule: string, a: Appt, types: ApptType[], ctx: Partial<RenderCtx> = {}): string { const n = templateFor(rule, a)!; return renderText(n, renderParams(n, a, { types, ...ctx })); }
 export function handConfirmText(a: Appt, types: ApptType[]): string { return handText("c-confirm", a, types); }

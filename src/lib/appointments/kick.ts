@@ -18,7 +18,9 @@ export async function sendDueNow(appointmentId: string | null | undefined): Prom
     () => undefined,
     (e) => { console.error("[appointments] sending after a booking change:", (e as Error).message); },
   );
-  const waitUntil = (globalThis as unknown as Record<symbol, RequestContext | undefined>)[REQUEST_CONTEXT]?.get?.()?.waitUntil;
-  if (typeof waitUntil === "function") { waitUntil(job); return; }
+  const ctx = (globalThis as unknown as Record<symbol, RequestContext | undefined>)[REQUEST_CONTEXT]?.get?.();
+  if (typeof ctx?.waitUntil === "function") {
+    try { ctx.waitUntil(job); return; } catch { /* fall through and wait for it here */ }
+  }
   await job;
 }

@@ -93,9 +93,11 @@ export interface BackupPayload {
 // Secrets that never leave the database in a backup. Shopify's
 // client-credentials tokens are re-minted on demand (a 401 forces a fresh
 // one), so nothing is lost by blanking them; the row stays so a restore keeps
-// its shape.
+// its shape. The appointment sender's token (0113) is blanked too; after a
+// restore, set a new one: update appointment_sender set token = encode(extensions.gen_random_bytes(24), 'hex').
 export const REDACTED_COLUMNS: Record<string, string[]> = {
   shopify_tokens: ["access_token"],
+  appointment_sender: ["token"],
 };
 
 function redact(table: string, rows: unknown[]): unknown[] {

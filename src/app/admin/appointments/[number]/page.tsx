@@ -7,6 +7,7 @@ import { ApptHeader, NotSetUp, S, btn } from "../ui";
 import { BookingView } from "./BookingView";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // booking changes and Send taps send WhatsApps from here
 
 // One booking: /admin/appointments/A-123 (a-123 and A123 are read as A-123).
 export default async function BookingPage({ params }: { params: { number: string } }) {

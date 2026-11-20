@@ -105,7 +105,7 @@ async function dumpTable(table) {
 
 // Mirrors REDACTED_COLUMNS in src/lib/backup.ts: re-mintable secrets are
 // blanked so a backup file never carries a live Shopify token.
-const REDACTED_COLUMNS = { shopify_tokens: ["access_token"] };
+const REDACTED_COLUMNS = { shopify_tokens: ["access_token"], appointment_sender: ["token"] };
 function redact(table, rows) {
   const cols = REDACTED_COLUMNS[table];
   if (!cols || !rows) return rows;

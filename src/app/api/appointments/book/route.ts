@@ -3,6 +3,7 @@ import { websiteBook } from "@/lib/appointments/website-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // the confirmation and team alerts are sent just after the answer
 
 // The website booking box: book one time. POST JSON from drevifashion.com
 // (see docs/WEBSITE-BOOKING-API.md). Every limit and the booking itself run in

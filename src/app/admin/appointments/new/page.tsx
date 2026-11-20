@@ -6,6 +6,7 @@ import { ApptHeader, NotSetUp, S } from "../ui";
 import { NewBookingForm } from "./NewBookingForm";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // booking changes and Send taps send WhatsApps from here
 
 // New appointment. Optional ?day=YYYY-MM-DD and ?type=<type id> open the form
 // on that day and type (for links from the calendar).

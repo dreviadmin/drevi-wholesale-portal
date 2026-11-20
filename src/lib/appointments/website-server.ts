@@ -2,6 +2,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { orderTagBlocker } from "@/lib/wallet-core";
 import { loadConfig, APPT_COLS } from "./server";
 import { sendDueNow } from "./kick";
 import { addDays, dayDiff, dayShort, durOf, fromIst, hm, isLive, istParts, planMessages, type Appt, type ApptStatus, type Config, type Party, type Place } from "./core";
@@ -69,7 +70,8 @@ const LIMIT_TEXT: Record<string, string> = {
 /** Whether the customer gets an automatic WhatsApp confirmation now (else the page offers the WhatsApp button). */
 function autoWhatsApp(cfg: Config, notifyWa: boolean, status: string): boolean {
   const s = cfg.settings; // every template has an AiSensy API campaign of the same name
-  return s.automation_on && !s.test_mode && notifyWa && status === "confirmed" && !!(process.env.AISENSY_APPT_API_KEY?.trim() || process.env.AISENSY_API_KEY?.trim());
+  const prod = orderTagBlocker({ VERCEL_ENV: process.env.VERCEL_ENV, NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL }) === null; // off production only test numbers are messaged
+  return prod && s.automation_on && !s.test_mode && notifyWa && status === "confirmed" && !!(process.env.AISENSY_APPT_API_KEY?.trim() || process.env.AISENSY_API_KEY?.trim());
 }
 
 export async function websiteBook(body: unknown, ip: string | null, now = new Date()) {
@@ -134,6 +136,7 @@ export async function websiteBook(body: unknown, ip: string | null, now = new Da
     const type = st ? cfg.types.find((t) => t.id === st.type_id) : null;
     if (!st || !type || !isLive(st.status)) return { ok: false as const, status: 409, code: "key_reused", error: "Please tap Book again." };
     const sp = istParts(st.starts_at);
+    await sendDueNow(r.id); // in case the first answer never got back: anything still due goes now
     return bookedReply({ number: st.number, status: st.status, replayed: true, type, place: st.place, party: st.party, day: sp.day, min: sp.min, name: v.name, autoWhatsApp: autoWhatsApp(cfg, st.notify_wa, st.status) });
   }
   await sendDueNow(r.id); // the customer's confirmation and the team alerts go now (after the answer, on Vercel)

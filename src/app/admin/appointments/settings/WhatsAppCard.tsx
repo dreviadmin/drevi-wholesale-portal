@@ -153,19 +153,26 @@ function SenderHealth({ sender, today, nowIso, on }: { sender: SenderStatus; tod
   const last = sender.lastRunAt ? istParts(sender.lastRunAt) : null;
   const when = last ? `${dayDiff(today, last.day) === 0 ? "today" : dayDiff(today, last.day) === -1 ? "yesterday" : dayShort(last.day)} at ${hm(last.min)}` : null;
   const minsAgo = sender.lastRunAt ? (Date.parse(nowIso) - Date.parse(sender.lastRunAt)) / 60000 : Infinity;
-  const ok = sender.ready && sender.registered && minsAgo <= 15;
+  const ok = sender.ready && sender.registered && minsAgo <= 15 && sender.lastVia === "database" && !sender.note;
+  const waiting = sender.ready && sender.registered && !sender.lastRunAt;
   const text = !sender.ready
     ? "The 5-minute check is not set up on this database yet (migration 0113). Until it is, due messages go only when GitHub calls in, a few times a day, so reminders can be hours late."
     : !sender.registered
       ? "The 5-minute check starts once the portal has noted its own address. That happens when this page or the sender runs on the live portal."
       : ok
-        ? `Due messages are checked every 5 minutes. Last check ${when}${sender.lastVia === "github" ? " (by GitHub)" : ""}.`
-        : `No check since ${when ?? "it was set up"}. Reminders are late until the check runs again${on ? "" : " (automatic messages are off, so nothing is waiting to go)"}.`;
+        ? `Due messages are checked every 5 minutes. Last check ${when}.`
+        : !when
+          ? "Due messages are checked every 5 minutes. The first check runs within 5 minutes; reload this page to see it."
+          : sender.note && minsAgo <= 15
+            ? `The last check, ${when}, could not finish, so messages may be late.`
+            : sender.lastVia === "github" && minsAgo <= 15
+              ? `The last check was GitHub's, ${when}. The 5-minute check from the database has not run since, so reminders may be late.`
+              : `No check since ${when}. Reminders are late until the check runs again${on ? "" : " (automatic messages are off, so nothing is waiting to go)"}.`;
   return (
     <div className="font-body" role={ok ? undefined : "status"} style={{ marginTop: 12, border: `1px solid ${ok ? "rgba(26,26,26,0.12)" : "#EBD39A"}`, background: ok ? "#fff" : "#FFF8E6", padding: "10px 14px", maxWidth: 680 }}>
       <div className="flex items-center gap-2 flex-wrap">
         <span style={S.label}>Sending schedule</span>
-        {ok ? <Pill bg="#E1EFE4" fg="#245437">Running</Pill> : <Pill bg="#FBEFD2" fg="#7A4E00">Check</Pill>}
+        {ok ? <Pill bg="#E1EFE4" fg="#245437">Running</Pill> : waiting ? <Pill bg="#ECE9E4" fg="#7A746B">Starting</Pill> : <Pill bg="#FBEFD2" fg="#7A4E00">Check</Pill>}
       </div>
       <p style={{ ...S.body, marginTop: 6, lineHeight: 1.5, color: ok ? palette.black : "#5A4210" }}>{text}</p>
       {sender.note ? <p style={{ ...S.muted, marginTop: 4, overflowWrap: "anywhere" }}>Last error: {sender.note}</p> : null}

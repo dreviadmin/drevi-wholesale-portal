@@ -43,7 +43,7 @@ export function MoveSheet({ onClose }: { onClose: () => void }) {
       />
       <p className="font-body" style={S.muted}>
         {appt.notify_wa
-          ? `${firstName(appt.customer_name)} is told the new time on WhatsApp.${automationOn ? "" : " Automatic messages are off right now, so after moving, send it by hand from the WhatsApp card (Send the new time)."}`
+          ? `${firstName(appt.customer_name)} is told the new time on WhatsApp.${automationOn ? "" : " Automatic messages are off right now, so after moving, send it from the Send on WhatsApp card (Send the new time)."}`
           : "WhatsApp messages are off for this booking, so the customer is not told. Let them know yourself."}
       </p>
     </FormSheet>

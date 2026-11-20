@@ -11,7 +11,7 @@ import { MessageCircle, Phone, Send } from "lucide-react";
 import { palette } from "@/lib/palette";
 import { ConfirmSheet } from "@/components/admin/ConfirmSheet";
 import {
-  MANUAL_LABEL, TYPE_SPOKEN, dayDiff, dayLong, dayShort, firstName, handText, hm, isLive, istParts, manualRule, showPhone, waDigits, waLink,
+  MANUAL_LABEL, TYPE_SPOKEN, dayDiff, dayLong, dayShort, firstName, handText, hm, isLive, istParts, manualRule, showPhone, waDigits, waLink, wentToTest,
   type Appt, type ApptStatus, type ManualWhat,
 } from "@/lib/appointments/core";
 import type { ApptMessage } from "@/lib/appointments/server";
@@ -78,35 +78,50 @@ const LABEL: Record<ManualWhat, string> = { confirmation: "Send the confirmation
 const SHOP_WA = "+91 84336 59684";
 const cancelReason = (a: Appt) => (a.cancel_reason === "Shop closed" ? "The shop is closed then. We are sorry for the trouble." : undefined);
 
-interface Item { what: ManualWhat; rule: string | null; why: string | null; text: string | null; last: ApptMessage | null }
+interface Item { what: ManualWhat; rule: string | null; why: string | null; text: string | null; last: ApptMessage | null; reached: ApptMessage | null }
 
-/** The newest message row of a rule: the waiting one first, as the sender would use it. */
+const newestFirst = (messages: ApptMessage[], rule: string) => messages.filter((m) => m.rule === rule && m.audience === "client").sort((x, y) => (x.created_at < y.created_at ? 1 : -1));
+/** The message row a Send would go through: the waiting one first, as the sender uses it. */
 function lastOf(messages: ApptMessage[], rule: string | null): ApptMessage | null {
   if (!rule) return null;
-  const rows = messages.filter((m) => m.rule === rule && m.audience === "client").sort((x, y) => (x.created_at < y.created_at ? 1 : -1));
+  const rows = newestFirst(messages, rule);
   return rows.find((m) => m.state === "scheduled" || m.state === "sending") ?? rows[0] ?? null;
+}
+/** The last one that reached the customer (or may have): a test-mode send never did. */
+function reachedOf(messages: ApptMessage[], rule: string | null): ApptMessage | null {
+  return rule ? newestFirst(messages, rule).find((m) => (m.state === "sent" && !wentToTest(m)) || m.state === "uncertain") ?? null : null;
 }
 
 export function SendWhatsAppCard({ moved, messages }: { moved: boolean; messages: ApptMessage[] }) {
   const { appt: a, types, now, today, run, busy, errorFor, clearError, flash, automationOn, testMode, testNumbers } = useBooking();
-  const [ask, setAsk] = useState<Item | null>(null);
-  const live = isLive(a.status);
+  const [askWhat, setAskWhat] = useState<ManualWhat | null>(null);
+  const live = isLive(a.status), arrived = a.status === "arrived";
 
-  const whats: ManualWhat[] = live ? ["confirmation", "reminder", ...(moved ? (["moved"] as ManualWhat[]) : [])] : a.status === "cancelled" ? ["cancelled"] : [];
+  const whats: ManualWhat[] = live && !arrived ? ["confirmation", "reminder", ...(moved ? (["moved"] as ManualWhat[]) : [])] : a.status === "cancelled" ? ["cancelled"] : [];
   const items: Item[] = whats.map((what) => {
     const pick = manualRule(what, a, now);
     const rule = "rule" in pick ? pick.rule : null;
     let text: string | null = null;
     try { text = rule ? handText(rule, a, types, what === "cancelled" ? { reason: cancelReason(a) } : {}) : null; } catch { text = null; }
-    return { what, rule, why: "error" in pick ? pick.error : null, text, last: lastOf(messages, rule) };
+    return { what, rule, why: "error" in pick ? pick.error : null, text, last: lastOf(messages, rule), reached: reachedOf(messages, rule) };
   });
+  const ask = items.find((it) => it.what === askWhat) ?? null; // always from the latest page data, so a retry sees what changed
   const testTo = testNumbers[0] ? showPhone(testNumbers[0]) : null;
   const keyFor = (it: Item) => `send:${it.what}`;
-  const already = (it: Item) => !!it.last && (it.last.state === "sent" || it.last.state === "uncertain");
+  // Mirrors the server: outside test mode, a second send of one that reached them is asked about, unless one is still waiting.
+  const already = (it: Item) => !testMode && !!it.reached && it.last?.state !== "scheduled";
   const at = (iso: string) => {
     const p = istParts(iso), d = dayDiff(today, p.day);
     return `${d === 0 ? "today" : d === -1 ? "yesterday" : d === 1 ? "tomorrow" : dayShort(p.day)} at ${hm(p.min)}`;
   };
+  const statusOf = (st: ApptMessage | null): string | null => !st ? null
+    : st.state === "sending" ? "Sending now"
+    : st.state === "scheduled" ? (!automationOn ? "Waiting: automatic messages are off, so it will not go by itself"
+      : new Date(st.due_at).getTime() > now.getTime() ? `Goes by itself ${at(st.due_at)}` : "Goes within 5 minutes")
+    : st.state === "sent" ? (wentToTest(st) ? `Went to the test number ${at(st.sent_at || st.due_at)}, not to the customer` : `Sent ${at(st.sent_at || st.due_at)}`)
+    : st.state === "uncertain" ? "May not have gone: check the chat before sending again"
+    : st.state === "failed" ? "Did not go"
+    : st.state === "skipped" ? `Not sent: ${(st.reason || "skipped").replace(/\.$/, "")}` : null;
 
   async function send(it: Item) {
     let msg = "Sent";
@@ -115,7 +130,7 @@ export function SendWhatsAppCard({ moved, messages }: { moved: boolean; messages
       if (r.ok) msg = r.message;
       return r;
     });
-    if (ok) { flash(msg); setAsk(null); }
+    if (ok) { flash(msg); setAskWhat(null); }
   }
 
   return (
@@ -134,21 +149,15 @@ export function SendWhatsAppCard({ moved, messages }: { moved: boolean; messages
       {items.length || (live && a.place === "meet") ? (
         <div className="flex flex-col gap-3" style={{ marginTop: 4 }}>
           {items.map((it) => {
-            const st = it.last;
-            const status = !st ? null
-              : st.state === "sent" ? `Sent ${at(st.sent_at || st.due_at)}`
-              : st.state === "scheduled" ? (new Date(st.due_at).getTime() > now.getTime() ? `Goes by itself ${at(st.due_at)}` : "Waiting to go")
-              : st.state === "sending" ? "Sending now"
-              : st.state === "uncertain" ? "May not have gone"
-              : st.state === "failed" ? "Did not go" : null;
-            const disabled = !!it.why || !it.rule;
+            const st = it.last, status = statusOf(st);
+            const disabled = !!it.why || !it.rule || st?.state === "sending";
             return (
               <div key={it.what} className="flex flex-col gap-1">
-                <button type="button" disabled={disabled || busy === keyFor(it)} onClick={() => { clearError(); setAsk(it); }}
+                <button type="button" disabled={disabled || busy === keyFor(it)} onClick={() => { clearError(); setAskWhat(it.what); }}
                   className={`disabled:opacity-40 ${FOCUS}`} style={{ ...btn(it.what === "confirmation" && !already(it) ? "dark" : "outline"), justifyContent: "flex-start", minHeight: 48, width: "100%", maxWidth: 420 }}>
                   <Send size={14} aria-hidden /> {already(it) ? `${LABEL[it.what]} again` : LABEL[it.what]}
                 </button>
-                {status && !disabled ? <span className="flex items-center gap-2 flex-wrap" style={S.muted}>{st ? <MsgStatePill state={st.state} /> : null}{status}</span> : null}
+                {status && !it.why ? <span className="flex items-center gap-2 flex-wrap" style={S.muted}>{st ? <MsgStatePill state={st.state} /> : null}{status}</span> : null}
                 {it.why ? <span style={S.muted}>{it.why}</span> : null}
                 {!ask && errorFor(keyFor(it)) ? <ErrorNote>{errorFor(keyFor(it))}</ErrorNote> : null}
               </div>
@@ -170,7 +179,7 @@ export function SendWhatsAppCard({ moved, messages }: { moved: boolean; messages
           ) : null}
         </div>
       ) : (
-        <p style={S.body}>This booking is closed, so there is nothing to send. Use Open chat in the Customer card to message them.</p>
+        <p style={S.body}>{arrived ? "They are at the shop, so there is nothing to send." : "This booking is closed, so there is nothing to send. Use Open chat in the Customer card to message them."}</p>
       )}
       {ask ? (
         <ConfirmSheet
@@ -182,13 +191,19 @@ export function SendWhatsAppCard({ moved, messages }: { moved: boolean; messages
           pending={busy === keyFor(ask)}
           error={errorFor(keyFor(ask))}
           onConfirm={() => { void send(ask); }}
-          onClose={() => { if (busy !== keyFor(ask)) { setAsk(null); clearError(); } }}
+          onClose={() => { if (busy !== keyFor(ask)) { setAskWhat(null); clearError(); } }}
         >
           <span style={{ display: "block", marginBottom: 8 }}>
             {testMode
               ? `Test mode is on: it goes to the test number ${testTo ?? "(none added)"}, not to ${a.customer_name}.`
               : `It goes on WhatsApp from the shop's number to ${a.customer_name}, ${showPhone(a.phone_e164)}.`}
-            {already(ask) && ask.last ? ` It already went ${at(ask.last.sent_at || ask.last.due_at)}, so they get it a second time.` : ""}
+            {already(ask) && ask.reached
+              ? ask.reached.state === "uncertain"
+                ? " The last try may or may not have gone. Check the chat on the shop phone first, or they may get it twice."
+                : ` It already went ${at(ask.reached.sent_at || ask.reached.due_at)}, so they get it a second time.`
+              : !testMode && ask.last?.state === "scheduled" && automationOn && new Date(ask.last.due_at).getTime() > now.getTime() + 5 * 60000
+                ? ` It takes the place of the one due to go by itself ${at(ask.last.due_at)}.`
+                : ""}
           </span>
           {ask.text ? <Bubble text={ask.text} /> : null}
         </ConfirmSheet>

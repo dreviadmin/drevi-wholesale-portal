@@ -56,9 +56,9 @@ export async function loadConfig(sinceDay?: string): Promise<Loaded<Config>> {
   } catch (e) { return fail(e); }
 }
 
-/** Upcoming confirmed bookings whose WhatsApp confirmation has not gone yet: someone sends it by hand
- *  (the booking page's button marks it sent). While automatic messages are on, only the ones that failed
- *  or were skipped count, since the rest go out within 10 minutes. Empty on any error. */
+/** Upcoming confirmed bookings whose WhatsApp confirmation has not gone yet: someone sends it with the
+ *  booking page's Send the confirmation button. While automatic messages are on, only the ones that failed
+ *  or were skipped count, since the rest go out within seconds. Empty on any error. */
 export async function unsentConfirmations(now = new Date()): Promise<Set<string>> {
   try {
     const admin = createAdminClient();

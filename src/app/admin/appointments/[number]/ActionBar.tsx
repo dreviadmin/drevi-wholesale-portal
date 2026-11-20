@@ -108,7 +108,7 @@ function ConfirmFlow({ when, typeName, automationOn, onClose }: { when: string; 
       <span style={{ display: "block" }}>{a.customer_name}, {typeName.toLowerCase()} on {when}.</span>
       <Checkbox checked={tell} onChange={setTell}>Send the confirmation on WhatsApp</Checkbox>
       <span style={{ display: "block", ...S.muted }}>
-        {!tell ? "Unticked: WhatsApp messages are turned off for this booking, so no confirmation and no reminders." : automationOn ? "It goes out straight away, then the reminders." : "Automatic messages are off right now, so after confirming, send it by hand with the WhatsApp buttons below."}
+        {!tell ? "Unticked: WhatsApp messages are turned off for this booking, so no confirmation and no reminders." : automationOn ? "It goes out straight away, then the reminders." : "Automatic messages are off right now, so after confirming, send it with Send the confirmation below."}
       </span>
     </ConfirmSheet>
   );
@@ -146,7 +146,7 @@ function CancelFlow({ when, onClose }: { when: string; onClose: () => void }) {
       ) : null}
       <Checkbox checked={tell && a.notify_wa} disabled={!a.notify_wa} onChange={setTell}>Tell the customer on WhatsApp</Checkbox>
       <span style={{ display: "block", ...S.muted }}>
-        {!a.notify_wa ? "WhatsApp messages are off for this booking, so nothing is sent. Let them know yourself." : tell && !automationOn ? "Automatic messages are off right now, so after cancelling, send the note by hand from the WhatsApp card." : "The reason stays with the team; the customer gets a short, polite note."}
+        {!a.notify_wa ? "WhatsApp messages are off for this booking, so nothing is sent. Let them know yourself." : tell && !automationOn ? "Automatic messages are off right now, so after cancelling, send the note from the Send on WhatsApp card." : "The reason stays with the team; the customer gets a short, polite note."}
       </span>
     </ConfirmSheet>
   );
